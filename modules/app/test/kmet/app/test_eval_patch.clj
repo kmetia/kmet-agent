@@ -83,7 +83,7 @@
         path (str (fs/path (:agent-dir env) "eval" "user" "pair.clj"))]
     (fs/create-dirs (fs/parent path))
     (spit path ";; kmet eval: written by the eval tool\n(ns user)\n(def a 1)\n(def b 2)\n")
-    (t/is (= "1" (:content (support/eval! env "a"))))
+    (t/is (= "1" (support/script-content (support/eval! env "a"))))
     (let [before (slurp path)
           result (support/eval! env "(eval/patch 'user/a 2 3)")]
       (t/is (:is-error result))

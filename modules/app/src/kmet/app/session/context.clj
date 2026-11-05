@@ -1,8 +1,10 @@
 (ns kmet.app.session.context
-  "Context projection: the session's linear message context, append-only
-   context edits (K), and cache-miss detection. Reads and appends through
+  "Context projection: the session's linear message context, the hidden prompt
+   listings (deferred tool sources and the eval library), append-only context
+   edits (K), and cache-miss detection. Reads and appends through
    kmet.app.session.store."
   (:require [clojure.string :as str]
+            [kmet.app.eval.format :as eval-format]
             [kmet.app.session.store :as store]
             [kmet.ai.usage :as usage]))
 
@@ -18,10 +20,11 @@
   250)
 
 (def ^:private max-listing-chars
-  "Characters of the whole listing (pi: MAX_SERVERS_SECTION_CHARS). The text
-   stays under it by eliding descriptions first and dropping whole sources
-   second, so a project with many deferred sources cannot push an unbounded
-   message into the conversation."
+  "Characters of one hidden prompt listing (deferred tool sources or the eval
+   library). The text stays under it by eliding descriptions/docs first and
+   dropping whole entries second, so a large set cannot push an unbounded
+   message into the conversation (pi: MAX_SERVERS_SECTION_CHARS for the source
+   half)."
   4096)
 
 (defn- truncate
@@ -146,6 +149,68 @@
              (when (not= 1 (count sources)) "s")
              ". " discovery "\n\n")
         sources opts)))))
+
+(def eval-library-custom-type
+  "The custom-message type that tells the model which eval-library definitions
+   this session has: its built environment's loaded records when one exists,
+   else the files saved for its first eval. One type, so the branch's last
+   manifest can be found and compared."
+  :eval-library)
+
+(def ^:private max-eval-doc-chars
+  "Characters of one definition's first doc line in the manifest."
+  160)
+
+(defn- eval-listing-line
+  "One manifest line: `- name [arglists] (scope[, shadowed]) — first doc
+   line`."
+  [entry]
+  (str "- " (:name entry)
+       (eval-format/arglists-text (:arglists entry))
+       " (" (name (or (:scope entry) :global))
+       (when (false? (:active entry)) ", shadowed") ")"
+       (when-let [line (eval-format/doc-line (:doc entry))]
+         (str " — " (truncate line max-eval-doc-chars)))))
+
+(defn- eval-listing-text
+  "INTRO plus definition LINES, dropping whole lines from the end until the
+   text fits `max-listing-chars`; the dropped count and the discovery pointers
+   are always stated. Deterministic: the same entries render the same bytes."
+  [intro lines]
+  (let [total (count lines)]
+    (loop [kept total]
+      (let [omitted (- total kept)
+            text (str intro
+                      (str/join "\n" (take kept lines))
+                      "\n"
+                      (when (pos? omitted)
+                        (str "… " omitted " more; "))
+                      "(eval/library) lists them; (eval/help) lists the source verbs.")]
+        (if (or (<= (count text) max-listing-chars) (zero? kept))
+          text
+          (recur (dec kept)))))))
+
+(defn eval-library-listing
+  "The `:eval-library` manifest text for MANIFEST (`{:loaded? :entries}`):
+   one line per definition with its arglists, scope and first doc line, or an
+   empty-library correction. LOADED? distinguishes this session's built
+   environment from the files a first eval will load; the text says which.
+   Bounded and deterministic, so `sync-eval-library-listing!` can compare it
+   with the branch's previous manifest byte for byte."
+  [{:keys [loaded? entries]}]
+  (let [entries (vec entries)
+        n (count entries)]
+    (if (empty? entries)
+      "The eval library is empty."
+      (eval-listing-text
+       (if loaded?
+         (str "Eval library loaded in this session: " n
+              " definition" (when (not= 1 n) "s") ".\n")
+         (str "Eval library: " n " definition"
+              (when (not= 1 n) "s")
+              " saved; " (if (= 1 n) "it loads" "they load")
+              " on this session's first eval.\n"))
+       (mapv eval-listing-line entries)))))
 
 (defn derive-context-settings
   "Derive {:thinking-level :model :provider} from the branch root→leaf (pi:

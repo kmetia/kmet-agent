@@ -255,7 +255,7 @@ schema-validated at load).
 | `:permissions` | `{:policy :remember!}` — the tool-call decision | `kmet.app.permissions/permissions`, per agent |
 | `:approvals` | `{:ask!}` — the one `:ask` delivery seam | `kmet.app.permissions/approvals` at the root; the TUI and server rows supply their own |
 | `:shell` `:sandbox` | the agent's shell options; the realm names a script's tool calls are blocked from | provided per agent by the agents factory; a preset row that mounts first wins |
-| `:eval` | `{:eval! :drop! :move! :library :index :sources :source-commands :failures :dispose!}` — the agent's persistent script environment over the global and cwd eval libraries, one per session | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
+| `:eval` | `{:eval! :drop! :move! :library :index :manifest :sources :source-commands :failures :dispose!}` — the agent's persistent script environment over the global and cwd eval libraries, one per session; `:manifest` is the prompt listing that never builds an environment | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
 | `:ui` | the capability service (`kmet.app.ui`) | `kmet.ui.headless/plugin`, `kmet.ui.tui/provider-plugin` |
 | `:extensions` | no service: the row binds the host's services (registry handle, ctx, resource ops, owner sweep) and publishes `process-handle` | `kmet.app.extensions/plugin` |
 
@@ -663,6 +663,24 @@ doc and arglists. A docstring is the save contract: an undocumented definition
 still saves, but its result line and listings say `(no docstring)` (or
 `(no docstring; see <file>)` when there is neither a docstring nor an
 arglist), and `(eval/describe 'name :doc)` is nil.
+
+Prompt discovery. Prompt start appends one hidden `:eval-library` custom
+message (`kmet.app.session.context/eval-library-listing`,
+`kmet.app.loop.state/sync-eval-library-listing!`) only when its text changed
+since the branch's last one and only while the `eval` tool is selected. The
+message is a bounded, deterministic preview — `name [arglists] (scope[,
+shadowed]) — first doc line`, with whole definitions dropped behind `… N more;
+(eval/library) lists them` — never a source dump and never a system-prompt
+rebuild, so listing a definition costs no prefix miss. Loaded is not saved: a
+session with a built environment lists its loaded records with scope and
+active state, while one without lists the disk index as saved and says it
+loads on the first eval. The sync never builds an environment and never
+invokes an eval source; source verbs stay out of the manifest, which points at
+`(eval/help)`. The first call that builds an environment reports a non-empty
+loaded set and every load failure in its result (`:details :loaded` and
+`:failures`; the result lines bound long lists), correcting any drift. A
+library that has always been empty is silent; when a previously listed set
+empties, the next prompt gets one correction.
 
 Limits: a definition file is the defining form only — its `(ns …)` requires are
 not stored, so the standard aliases are replayed and anything else must be

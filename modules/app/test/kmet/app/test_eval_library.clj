@@ -48,8 +48,9 @@
     (t/is (not (str/includes? content ":one")))
     (let [restarted (support/restart-service env)]
       (t/is (= ":two"
-               (:content (support/eval-in! restarted (:session env)
-                                           (:cwd env) "(f)")))
+               (support/script-content
+                (support/eval-in! restarted (:session env)
+                                  (:cwd env) "(f)")))
             "a restart loads the latest source"))))
 
 (t/deftest test-a-pure-expression-writes-nothing
@@ -74,7 +75,8 @@
         other (session/create-session (test-tmp/temp-dir! "eval-load-")
                                       {:cwd cwd})]
     (t/is (= ":yes"
-             (:content (support/eval-in! service other cwd "(shared)")))
+             (support/script-content
+              (support/eval-in! service other cwd "(shared)")))
           "a session built after the write loads the library")))
 
 (t/deftest test-an-already-built-session-does-not-refresh
@@ -91,8 +93,9 @@
           "an environment is a runtime cache, not a live view of the library")
     (let [restarted (support/restart-service env)]
       (t/is (= "true"
-               (:content (support/eval-in! restarted other cwd
-                                           "(emit (some? (resolve 'later)))")))
+               (support/script-content
+                (support/eval-in! restarted other cwd
+                                  "(emit (some? (resolve 'later)))")))
             "a new process builds a new environment from the library"))))
 
 (t/deftest test-a-restart-loads-the-library
@@ -100,8 +103,9 @@
         _ (support/eval! env "(def x 41)")
         restarted (support/restart-service env)]
     (t/is (= "42"
-             (:content (support/eval-in! restarted (:session env)
-                                         (:cwd env) "(+ x 1)"))))))
+             (support/script-content
+              (support/eval-in! restarted (:session env)
+                                (:cwd env) "(+ x 1)"))))))
 
 (t/deftest test-drop-removes-the-file-and-unbinds-the-live-name
   (let [env (support/eval-ctx)
@@ -188,8 +192,9 @@
           "the dropped method is gone")
     (let [restarted (support/restart-service env)]
       (t/is (= ":circle"
-               (:content (support/eval-in! restarted (:session env) (:cwd env)
-                                           "(area {:shape :circle})")))
+               (support/script-content
+                (support/eval-in! restarted (:session env) (:cwd env)
+                                  "(area {:shape :circle})")))
             "the other method survives a reload"))))
 
 (t/deftest test-a-broken-library-file-is-reported-and-skipped
@@ -199,7 +204,7 @@
     (spit path "(ns user)\n(throw (ex-info \"boom\" {}))\n")
     (let [result (support/eval! env "(emit 1)")]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (= "1" (:content result)))
+      (t/is (= "1" (support/script-content result)))
       (t/is (seq (get-in result [:details :failures])))
       (t/is (str/includes? (pr-str (get-in result [:details :failures])) path)))
     (let [next-result (support/eval! env "(emit 2)")]
@@ -236,12 +241,16 @@
                             "{:command \"echo hi\"}))))"))
     (let [restarted (support/restart-service env)]
       (t/is (= "1"
-               (:content (support/eval-in! restarted (:session env) cwd
-                                           "(get (parse-json \"{\\\"a\\\":1}\") \"a\")")))
+               (support/script-content
+                (support/eval-in! restarted (:session env) cwd
+                                  "(get (parse-json \"{\\\"a\\\":1}\") \"a\")")))
             "the standard alias prelude is replayed")
-      (t/is (= ":hi" (:content (support/eval-in! restarted (:session env) cwd "(say)"))))
+      (t/is (= ":hi"
+               (support/script-content
+                (support/eval-in! restarted (:session env) cwd "(say)"))))
       (t/is (= "library"
-               (:content (support/eval-in! restarted (:session env) cwd "(read-note)")))
+               (support/script-content
+                (support/eval-in! restarted (:session env) cwd "(read-note)")))
             "slurp resolves against the current call's cwd")
       (t/is (str/includes?
              (:content (support/eval-in! restarted (:session env) cwd "(echo-hi)"))
@@ -255,14 +264,16 @@
     (support/eval! env "(defn join [xs] (str/join \",\" xs))")
     (let [restarted (support/restart-service env)]
       (t/is (= "a,b"
-               (:content (support/eval-in! restarted (:session env) cwd
-                                           "(demo/join [\"a\" \"b\"])")))
+               (support/script-content
+                (support/eval-in! restarted (:session env) cwd
+                                  "(demo/join [\"a\" \"b\"])")))
             "the alias prelude is replayed in the definition's namespace")
       (let [other (support/eval-ctx {:cwd cwd
                                      :agent-dir (:agent-dir env)})]
         (t/is (= "c,d"
-                 (:content (support/eval-in! (:service other) (:session other)
-                                             cwd "(demo/join [\"c\" \"d\"])")))
+                 (support/script-content
+                  (support/eval-in! (:service other) (:session other)
+                                    cwd "(demo/join [\"c\" \"d\"])")))
               "another home reader loads the ns form before the aliases")))))
 
 (t/deftest test-a-written-definition-compiles-with-a-disabled-tool
@@ -321,8 +332,9 @@
             "the live definition remains"))
     (let [restarted (support/restart-service env)]
       (t/is (= "1"
-               (:content (support/eval-in! restarted (:session env)
-                                           (:cwd env) "x")))
+               (support/script-content
+                (support/eval-in! restarted (:session env)
+                                  (:cwd env) "x")))
             "the old file is authoritative after the failed write"))))
 
 (t/deftest test-a-failed-write-can-still-be-forgotten

@@ -3,6 +3,7 @@
    agent dir, a session, the service provisioned on a test ctx, and the two
    call paths (service and tool)."
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [kmet.app.eval :as eval-service]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.session.core :as session]
@@ -93,3 +94,12 @@
   "The service's `(eval/library)` value with the run's session binding."
   [env]
   (library-for (:service env) (:session env)))
+
+(defn script-content
+  "RESULT's content without the first-eval library report lines — the script's
+   own output, for a test comparing exact output after an environment build."
+  [result]
+  (->> (str/split-lines (str (:content result)))
+       (remove #(str/starts-with? % "[eval: loaded "))
+       (remove #(str/starts-with? % "[eval: load failed "))
+       (str/join "\n")))

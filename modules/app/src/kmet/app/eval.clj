@@ -366,6 +366,75 @@
        (sort-by (juxt :name #(if (= :cwd (:scope %)) 0 1)))
        vec))
 
+(def ^:private build-report-name-limit
+  "Definitions named in the first eval's loaded-set line before `… N more`."
+  12)
+
+(def ^:private build-report-error-chars
+  "Characters of one load failure's error in the first eval's report."
+  300)
+
+(def ^:private build-report-failure-limit
+  "Load failures named in the first eval's report before a summary line."
+  10)
+
+(defn- report-entry-label
+  "One definition in the first eval's loaded-set line."
+  [{:keys [name scope active]}]
+  (str name " (" (scope-label scope) (when (false? active) ", shadowed") ")"))
+
+(defn- truncate-report-error
+  [error]
+  (let [error (-> error str (str/replace #"\s+" " ") str/trim)]
+    (if (> (count error) build-report-error-chars)
+      (str (str/trimr (subs error 0 (dec build-report-error-chars))) "…")
+      error)))
+
+(defn- loaded-set-line
+  "The first eval's one-line loaded-set report, naming at most
+   `build-report-name-limit` definitions."
+  [entries]
+  (let [n (count entries)
+        more (max 0 (- n build-report-name-limit))]
+    (str "[eval: loaded " n " library definition"
+         (when (not= 1 n) "s") ": "
+         (str/join ", " (map report-entry-label
+                             (take build-report-name-limit entries)))
+         (when (pos? more)
+           (str "; … " more " more; (eval/library) lists them"))
+         "]")))
+
+(defn- failure-line
+  "One load failure's result line."
+  [{:keys [file error scope]}]
+  (str "[eval: load failed " (if scope (name scope) "library") " "
+       (or file "<library>") ": " (truncate-report-error error) "]"))
+
+(defn- build-report-lines
+  "The first eval after an environment build reports the loaded set and load
+   failures in its result: one bounded loaded-set line, then one line per
+   failure (bounded the same way)."
+  [entries failures]
+  (let [shown (take build-report-failure-limit failures)
+        more (max 0 (- (count failures) build-report-failure-limit))]
+    (concat
+     (when (seq entries) [(loaded-set-line entries)])
+     (map failure-line shown)
+     (when (pos? more)
+       [(str "[eval: … " more " more load failure"
+             (when (not= 1 more) "s") "]")]))))
+
+(defn- take-build-report!
+  "The first call after an environment build consumes the pending report — the
+   loaded records and their result lines. Nil when the build loaded nothing and
+   had no failures, and for every later call."
+  [env]
+  (when-let [{:keys [entries failures]} @(:build-report env)]
+    (reset! (:build-report env) nil)
+    (when (or (seq entries) (seq failures))
+      {:entries entries
+       :lines (vec (build-report-lines entries failures))})))
+
 (defn- source-line [source]
   (if-let [error (:error source)]
     (str "- " (:id source) ": " error)
@@ -414,7 +483,9 @@
          "\nPersistence: top-level definitions are written to the library; "
          "let/fn bindings are not. New sessions and restarts load the library; "
          "this session's environment is a cache. A call that ends in a normal "
-         "error writes nothing; its definitions stay live and can be forgotten."
+         "error writes nothing; its definitions stay live and can be forgotten. "
+         "The prompt previews the saved or loaded definitions; the first eval "
+         "reports any loaded definitions and files that failed."
          "\nDiscover: (all-ns) lists namespaces, (ns-publics 'ns) lists a "
          "namespace's vars, and (eval/library) lists loaded definitions. "
          "(eval/sources) lists the registered sources and their verbs; "
@@ -827,6 +898,7 @@
              :parsed-names (atom #{})
              :unwritten (atom #{})
              :unwritten-records (atom {})
+             :build-report (atom nil)
              :forgotten (atom #{})
              :call-scope (atom nil)
              :sticky-ns (atom nil)
@@ -874,7 +946,10 @@
           (swap! (:model-shadows env)
                  into
                  (filter #(contains? @(:source-keys env) %)
-                         (keys @(:library env)))))))
+                         (keys @(:library env))))
+          (reset! (:build-report env)
+                  {:entries (library-entries env)
+                   :failures (vec @(:failures env))}))))
     env))
 
 (defn- ensure-environment!
@@ -1203,18 +1278,29 @@
     (:truncation base) (assoc :truncation (:truncation base))
     (:images base) (assoc :images (:images base))))
 
+(defn- content-with-lines
+  "BASE-CONTENT followed by LINES, separated by newlines; blank parts are
+   omitted."
+  [base-content lines]
+  (str/join "\n" (remove str/blank? [base-content (str/join "\n" lines)])))
+
 (defn- error-result
   "A failed call reports its error, never applies definitions or drops, and
-   reports the build failures collected for this attempt."
+   reports the build failures collected for this attempt. The first call after
+   an environment build also carries the loaded-set report."
   [service env base started]
   (let [base (base-result base started)
-        failures (take-failures! service env)]
+        report (take-build-report! env)
+        failures (take-failures! service env)
+        content (content-with-lines (:content base) (:lines report))]
     (result-parts
      base
      (assoc base
+            :content (if (str/blank? content) (:content base) content)
             :is-error true
             :details (cond-> (merge (:details base)
                                     {:defined [] :forgotten []})
+                       report (assoc :loaded (:entries report))
                        (seq failures) (assoc :failures failures))))))
 
 (defn- scoped-records
@@ -1230,11 +1316,11 @@
    the emitted output, and the defined/forgotten vocabulary in :details."
   [service env cwd records drop forgotten scope base started]
   (let [base (base-result base started)
+        report (take-build-report! env)
         changes (apply-changes! env cwd records drop forgotten scope)
         _ (when (:error changes) (mark-transient! env records))
-        lines (:lines changes)
-        content (str/join "\n" (remove str/blank?
-                                       [(:content base) (str/join "\n" lines)]))
+        lines (concat (:lines report) (:lines changes))
+        content (content-with-lines (:content base) lines)
         failures (take-failures! service env)
         write-errors (pos? (:write-errors changes 0))
         unbind-errors (pos? (:unbind-errors changes 0))
@@ -1245,7 +1331,8 @@
             :content (if (str/blank? content) "(no output)" content)
             :is-error (boolean failed?)
             :details (cond-> (merge (:details base)
-                                    (select-keys changes [:defined :forgotten]))
+                                    (select-keys changes [:defined :forgotten])
+                                    (when report {:loaded (:entries report)}))
                        (seq failures) (assoc :failures failures)
                        failed? (assoc :error
                                       (cond
@@ -1421,6 +1508,20 @@
       (or (:roots env)
           (roots-for service (or (:cwd opts) (tool-util/cwd))))))))
 
+(defn- service-manifest
+  "The prompt manifest for SESSION: the built environment's loaded records when
+   it has one, else the disk index described as saved. Never builds an
+   environment and never invokes a source."
+  [service {:keys [session cwd]}]
+  (let [session (or session (extensions/get-session))
+        env (when session (get @(:envs service) (:id session)))]
+    (if env
+      {:loaded? true
+       :entries (library-entries env)}
+      (let [{:keys [entries]}
+            (eval-files/index (roots-for service (or cwd (tool-util/cwd))))]
+        {:loaded? false :entries entries}))))
+
 (defn- move-request*
   [service {:keys [name scope cwd]} session]
   (let [cwd (or cwd (tool-util/cwd))
@@ -1536,6 +1637,7 @@
       :index (fn
                ([] (service-index service))
                ([opts] (service-index service opts)))
+      :manifest #(service-manifest service %)
       :sources (fn
                  ([] (if @disposed? [] (service-sources service (tool-util/cwd))))
                  ([opts] (if @disposed? [] (service-sources service (:cwd opts)))))

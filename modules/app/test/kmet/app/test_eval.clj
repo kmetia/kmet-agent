@@ -38,11 +38,12 @@
     (t/is (str/starts-with? (:content (support/eval! env "(def session-only 1) session-only"))
                             "1"))
     (t/is (= "2"
-             (:content ((:eval! (:service env))
-                        {:code "(+ session-only 1)"
-                         :session other
-                         :cwd (:cwd env)
-                         :limits (script/resolve-limits nil)})))
+             (support/script-content
+              ((:eval! (:service env))
+               {:code "(+ session-only 1)"
+                :session other
+                :cwd (:cwd env)
+                :limits (script/resolve-limits nil)})))
           "a new session builds its environment from the library roots")))
 
 (t/deftest test-a-definition-is-not-visible-to-run-code

@@ -62,6 +62,8 @@
 (def context-entries context/context-entries)
 (def context-messages context/context-messages)
 (def deferred-sources-listing context/deferred-sources-listing)
+(def eval-library-custom-type context/eval-library-custom-type)
+(def eval-library-listing context/eval-library-listing)
 (def session-tool-state context/session-tool-state)
 (def tool-sources-custom-type context/tool-sources-custom-type)
 (def tool-state context/tool-state)

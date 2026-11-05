@@ -343,11 +343,11 @@ Sandbox: Clojure/SCI — aliases fs, str, set, edn, walk, json and p; bare sh; c
 
 **Label:** Eval
 
-**Parameters:** `code`, `timeout`, `drop`, `max-output-bytes`
+**Parameters:** `code`, `timeout`, `drop`, `scope`, `max-output-bytes`
 
 **Description:**
 
-Evaluate Clojure in this session's persistent SCI script sandbox: aliases fs, str, set, edn, walk, json and p; bare sh; cwd-resolving slurp, spit and file-seq; (cwd), (env k), (now), (sleep ms), (spawn f), (emit v) and (emit-image x); the tools and sandbox namespaces; clojure.*, babashka.* and the bundled libs (rewrite-clj, cljfmt, edamame, parinferish) are require-able. Top-level definitions persist across calls and are written to the agent's eval library, so new sessions and a restart load them; local let/fn bindings are scratch, so a top-level definition is a library write. An already-running session is a cache and does not pick up another session's new files. A redefinition overwrites its file; drop deletes the file and unbinds this session's live name. A call that ends in a normal error writes nothing; its definitions stay live and can be forgotten. A successful call's namespace is re-entered by the next. Output is the emitted text (or the final value of a silent success); stdout and stderr are discarded. This is the sandbox, not the project's nREPL.
+Evaluate Clojure in this session's persistent SCI script sandbox: aliases fs, str, set, edn, walk, json and p; bare sh; cwd-resolving slurp, spit and file-seq; (cwd), (env k), (now), (sleep ms), (spawn f), (emit v) and (emit-image x); the tools and sandbox namespaces; clojure.*, babashka.* and the bundled libs (rewrite-clj, cljfmt, edamame, parinferish) are require-able. Top-level definitions persist across calls and are written to the agent's eval library, so new sessions and a restart load them; local let/fn bindings are scratch, so a top-level definition is a library write. An already-running session is a cache and does not pick up another session's new files. New definitions are saved in the cwd scope unless scope is global; a redefinition stays in the active definition's scope. Drop deletes the file and unbinds this session's live name; (eval/move 'name :global|:cwd) moves a definition between scopes. A call that ends in a normal error writes nothing; its definitions stay live and can be forgotten. A successful call's namespace is re-entered by the next. Output is the emitted text (or the final value of a silent success); stdout and stderr are discarded. This is the sandbox, not the project's nREPL.
 
 ---
 

@@ -432,6 +432,9 @@
   ;; branch's last listing (a promotion appends nothing, pi: the mcp_servers
   ;; section is appended rather than the declarations rewritten)
   (state/sync-tool-sources-listing! agent)
+  ;; and which eval-library definitions this session loaded, or will load on
+  ;; its first eval, if that changed since the branch's last manifest
+  (state/sync-eval-library-listing! agent)
   (let [bas (extensions/apply-before-agent-start-hooks
              message @(:system agent))]
     (when (:system-prompt bas)

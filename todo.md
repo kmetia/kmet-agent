@@ -5,7 +5,8 @@
 Status: done (2026-11-05). This was the interface half of persistent-eval
 step 10, pulled out and moved ahead of the cwd-scope task: it is independent
 of scopes and avoids a second update of the exact `(eval/library)` maps the
-scope work rewrites. The prompt-start manifest half (10b) is next.
+scope work rewrites. The prompt-start manifest half (10b) landed in its own
+task after the cwd-scope work.
 
 The model must see the interface, not just a name: a saved definition exposes
 its docstring and arglists, `(eval/describe 'name)` reads the interface and
@@ -302,18 +303,18 @@ are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; 10a done; cwd-scope task done; **10b (manifest) next** |
+| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9, 10a and 10b done; cwd-scope task done |
 | Eval library interface discovery (10a) | saved definitions and source-provided verbs expose an interface and implementation through `(eval/describe)`, not just names | **done** (2026-11-05) |
 | Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **done** (2026-11-05) — cwd default, explicit global, shadow/drop, move, pinned scope |
-| Clojure extension surface review | the extension's tools now overlap E17's core editing engine and its eval `clj/*` verbs; decide the remaining surface from usage | **measuring** — description and skill trimmed 2026-11-05; decision gate after the eval cwd-scope work |
+| Clojure extension surface review | the extension's tools now overlap E17's core editing engine and its eval `clj/*` verbs; decide the remaining surface from usage | **measuring** — description and skill trimmed 2026-11-05; eval cwd-scope and 10b done, so the decision gate is open |
 
 ## Persistent eval and eval sources
 
 Status: steps 1–9 done (the shared script layer, the file ops, the one-home
 library, the source registry and ABI, `eval/patch`, the shared Clojure editing
-engine with its core verbs, and the docs/catalog pass); step 10 is split: 10a
-(the interface and source-verb docs) and the cwd-scope task are done; 10b (the
-discovery manifest and first-eval report) is next. The scope
+engine with its core verbs, and the docs/catalog pass); step 10 (the interface
+and source-verb docs, the discovery manifest and first-eval report) and the
+cwd-scope task are done. The scope
 material below is step-4R history; the cwd-scoped task above supersedes it,
 while the sandbox, source and editing material still applies. The tool is opt-in
 by default under S4.5; step 4R's tests exercise it directly rather than through
@@ -560,8 +561,8 @@ a skill, the existing seam.
 A name alone is not discoverability: it says something exists but not how to
 call it or what it does, so the model still has to open the file. Step 10
 turns the listing into an interface listing. **10a** (records, source metadata,
-`(eval/describe)`, docs) and the cwd-scope task are done; **10b** (the prompt
-manifest and first-eval report) is next.
+`(eval/describe)`, docs), **10b** (the prompt manifest and first-eval report)
+and the cwd-scope task are done.
 
 - **Record the interface.** `kmet.app.eval.definitions` extracts `:doc` (the
   docstring, else attr-map or symbol metadata) and `:arglists` (for `defn`,
@@ -618,7 +619,7 @@ manifest and first-eval report) is next.
 
 Nine implemented steps plus the cleanup step 4R. Step 10 is split: 10a is the
 interface task at the top of this file (before the cwd-scope task); 10b is the
-manifest follow-up below (after it). Steps 1–2 are behaviour-preserving and
+manifest follow-up below (after it). Both are done. Steps 1–2 are behaviour-preserving and
 every later step is additive. Estimated ~2,000 new lines, ~1,000 moved (step 1)
 plus ~150 moved (step 2).
 
@@ -721,28 +722,33 @@ plus ~150 moved (step 2).
    line: a persistent context makes Jolt's `eval-in` more attractive later;
    the decision is unchanged); the tier table and the clojure extension's
    remaining surface (E17 and the post-track task).
-10. **Step 10b (planned, next): the discovery manifest
-    and first-eval report.** Step 10a (done) supplies `:doc`/`:arglists`/
-    `:source` through `(eval/describe)` for library definitions and source
-    verbs. Implement the manifest half of the Discovery design:
+10. **Step 10b (done 2026-11-05): the discovery manifest
+    and first-eval report.** Step 10a supplies `:doc`/`:arglists`/`:source`
+    through `(eval/describe)` for library definitions and source verbs; 10b
+    landed the manifest half of the Discovery design:
     - `kmet.app.session.context`: the `:eval-library` custom type and the
-      bounded, deterministic formatter.
+      bounded, deterministic formatter (doc lines elided, whole definitions
+      dropped behind `… N more; (eval/library) lists them`, with an
+      `(eval/help)` pointer).
     - `kmet.app.loop.state`/`loop`: `sync-eval-library-listing!` beside
       `sync-tool-sources-listing!`, with the loaded/saved split, change
       comparison and selection gate.
-    - Loaded is not saved: with an environment list its records with
-      `:scope`/active state; without one list the disk index as
-      "saved; loads on first eval". Never advertise a disk-only name as live
-      in an already-built session and never build an environment just for the
-      message. The first environment build reports the loaded set and load
-      failures in its result.
+    - Loaded is not saved: with an environment the message lists its records
+      with `:scope`/active state; without one it lists the disk index as
+      "saved; loads on first eval". It never advertises a disk-only name as
+      live in an already-built session and never builds an environment for
+      the message. The first environment build reports the loaded set and
+      load failures in the call's result (`:details :loaded`/`:failures` plus
+      report lines).
     - Source verbs stay out of the manifest (sources are resolved per eval
       call and may have side effects); the message points at `(eval/help)`.
     - Tests: manifest determinism, bounding, no duplicate, update and empty
       correction; loaded vs saved before and after the first eval; a
       cross-session save not advertised as live; selection gate; the manifest
-      never invokes a source fn.
-    - Docs: `docs/architecture.md` eval section and the eval tool prompt/help.
+      never builds an environment or invokes a source; first-eval loaded-set
+      and failure reporting.
+    - Docs: `docs/architecture.md` eval section, the eval tool prompt/help,
+      and the generated composition catalog.
 
 ### Test plan
 

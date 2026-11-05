@@ -72,9 +72,9 @@
   (let [env (support/eval-ctx)]
     (write-scoped! env :global "user/f" "(defn f [] :global)")
     (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
-    (t/is (= ":cwd" (:content (support/eval! env "(f)"))))
+    (t/is (= ":cwd" (support/script-content (support/eval! env "(f)"))))
     (support/eval! env "(defn f [] :cwd-two)")
-    (t/is (= ":cwd-two" (:content (support/eval! env "(f)"))))
+    (t/is (= ":cwd-two" (support/script-content (support/eval! env "(f)"))))
     (let [entries (entries-for env "user/f")
           by-scope (into {} (map (juxt :scope identity)) entries)]
       (t/is (= 2 (count entries)))
@@ -91,14 +91,16 @@
       (t/is (str/includes? help "user/f defn ([]) (global, shadowed)")))
     (let [restarted (support/restart-service env)]
       (t/is (= ":cwd-two"
-               (:content (support/eval-in! restarted (:session env)
-                                           (:cwd env) "(f)")))))))
+               (support/script-content
+                (support/eval-in! restarted (:session env)
+                                  (:cwd env) "(f)")))))))
 
 (t/deftest dropping-the-active-layer-restores-the-global-record
   (let [env (support/eval-ctx)]
     (write-scoped! env :global "user/f" "(defn f [] :global)")
     (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
-    (t/is (= ":cwd" (:content (support/eval! env "(emit (f))"))))
+    (t/is (= ":cwd" (support/script-content
+                     (support/eval! env "(emit (f))"))))
     (let [result (support/eval! env nil :drop ["user/f"])]
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result) "[eval: forgot user/f (cwd)]")))
@@ -114,7 +116,8 @@
   (let [env (support/eval-ctx)]
     (write-scoped! env :global "user/f" "(defn f [] :global)")
     (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
-    (t/is (= ":cwd" (:content (support/eval! env "(emit (f))"))))
+    (t/is (= ":cwd" (support/script-content
+                     (support/eval! env "(emit (f))"))))
     (let [result (support/eval! env nil :drop ["user/f"] :scope :cwd)]
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result) "[eval: forgot user/f (cwd)]")))
@@ -125,7 +128,8 @@
   (let [env (support/eval-ctx)]
     (write-scoped! env :global "user/f" "(defn f [] :global)")
     (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
-    (t/is (= ":cwd" (:content (support/eval! env "(emit (f))"))))
+    (t/is (= ":cwd" (support/script-content
+                     (support/eval! env "(emit (f))"))))
     (let [result (support/eval! env "(eval/forget 'user/f)" :scope :global)]
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result) "[eval: forgot user/f (global)]")))
@@ -137,7 +141,8 @@
   (let [env (support/eval-ctx)]
     (write-scoped! env :global "user/f" "(defn f [] :global)")
     (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
-    (t/is (= ":cwd" (:content (support/eval! env "(emit (f))"))))
+    (t/is (= ":cwd" (support/script-content
+                     (support/eval! env "(emit (f))"))))
     (let [result (support/eval! env nil :drop ["user/f"] :scope :global)]
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result) "[eval: forgot user/f (global)]")))
@@ -226,7 +231,7 @@
     (spit cwd "(ns user)\n(throw (ex-info \"boom\" {}))\n")
     (let [result (support/eval! env "(emit (f))")]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (= ":global" (:content result)))
+      (t/is (= ":global" (support/script-content result)))
       (t/is (= :cwd (get-in result [:details :failures 0 :scope])))
       (t/is (= 1 (count (entries-for env "user/f")))))
     (t/is (= ":global"
@@ -241,7 +246,7 @@
     (let [result (support/eval! env "(emit (f))")
           failures (get-in result [:details :failures])]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (= ":cwd" (:content result)))
+      (t/is (= ":cwd" (support/script-content result)))
       (t/is (= :global (:scope (first failures))))
       (t/is (= [:cwd] (mapv :scope (entries-for env "user/f")))))))
 
@@ -252,7 +257,8 @@
                    "(defmethod area :rect [m] :global)" :defmethod)
     (write-scoped! env :cwd "user/area :rect"
                    "(defmethod area :rect [m] :cwd)" :defmethod)
-    (t/is (= ":cwd" (:content (support/eval! env "(area {:shape :rect})"))))
+    (t/is (= ":cwd" (support/script-content
+                     (support/eval! env "(area {:shape :rect})"))))
     (let [result (support/eval! env nil :drop ["user/area :rect"])]
       (t/is (not (:is-error result)) (:content result)))
     (t/is (= ":global" (:content (support/eval! env "(area {:shape :rect})"))))
@@ -264,7 +270,8 @@
   (let [env (support/eval-ctx)]
     (write-scoped! env :global "user/f" "(defn f [] :global)")
     (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
-    (t/is (= ":cwd" (:content (support/eval! env "(emit (f))"))))
+    (t/is (= ":cwd" (support/script-content
+                     (support/eval! env "(emit (f))"))))
     (let [patch (support/eval! env "(eval/patch 'user/f :cwd :other)" :scope :global)]
       (t/is (:is-error patch))
       (t/is (str/includes? (:content patch) "active in the cwd scope"))
@@ -287,13 +294,14 @@
       (t/is (str/includes? (:content result) "[eval: moved user/f (cwd → global)]")))
     (t/is (not (fs/exists? (support/library-file env :cwd "user" "f.clj"))))
     (t/is (fs/exists? (support/library-file env :global "user" "f.clj")))
-    (t/is (= ":one" (:content (support/eval! env "(f)"))))
+    (t/is (= ":one" (support/script-content (support/eval! env "(f)"))))
     (t/is (= ":global"
              (:content (support/eval! env "(eval/describe 'f :scope)"))))
     (let [restarted (support/restart-service env)]
       (t/is (= ":one"
-               (:content (support/eval-in! restarted (:session env) (:cwd env)
-                                           "(f)")))))
+               (support/script-content
+                (support/eval-in! restarted (:session env) (:cwd env)
+                                  "(f)")))))
     (let [result (support/eval! env "(eval/move 'user/f :cwd)")]
       (t/is (not (:is-error result)) (:content result)))
     (t/is (fs/exists? (support/library-file env :cwd "user" "f.clj")))
@@ -324,7 +332,8 @@
   (let [env (support/eval-ctx)]
     (write-scoped! env :global "user/c" "(defn c [] :global)")
     (write-scoped! env :cwd "user/c" "(defn c [] :cwd)")
-    (t/is (= ":cwd" (:content (support/eval! env "(emit (c))"))))
+    (t/is (= ":cwd" (support/script-content
+                     (support/eval! env "(emit (c))"))))
     (let [result (support/eval! env "(eval/move 'user/c :global)")]
       (t/is (:is-error result))
       (t/is (str/includes? (:content result) "already has user/c")))
@@ -363,7 +372,7 @@
     (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
     (fs/create-dirs (fs/parent global))
     (spit global "(ns user)\n(throw (ex-info \"boom\" {}))\n")
-    (t/is (= ":cwd" (:content (support/eval! env "(f)"))))
+    (t/is (= ":cwd" (support/script-content (support/eval! env "(f)"))))
     (let [result (support/eval! env nil :drop ["user/f"] :scope :global)]
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result) "[eval: forgot user/f (global)]")))
@@ -400,7 +409,8 @@
         cwd (support/library-file env :cwd "user" "pair.clj")]
     (fs/create-dirs (fs/parent cwd))
     (spit cwd ";; kmet eval: written by the eval tool\n(ns user)\n(def a 1)\n(def b 2)\n")
-    (t/is (= "3" (:content (support/eval! env "(emit (+ a b))"))))
+    (t/is (= "3" (support/script-content
+                  (support/eval! env "(emit (+ a b))"))))
     (let [result (support/eval! env "(eval/move 'user/a :global)")]
       (t/is (:is-error result))
       (t/is (str/includes? (:content result) "also defines user/b")))
@@ -460,8 +470,9 @@
           session-c (session/create-session (test-tmp/temp-dir! "eval-worktree-session-")
                                             {:cwd cwd-b})]
       (t/is (= "true"
-               (:content (support/eval-in! restarted session-c cwd-b
-                                           "(emit (some? (resolve 'only-b)))"))))
+               (support/script-content
+                (support/eval-in! restarted session-c cwd-b
+                                  "(emit (some? (resolve 'only-b)))"))))
       (t/is (= "false"
                (:content (support/eval-in! restarted session-c cwd-b
                                            "(emit (some? (resolve 'only-a)))")))))))

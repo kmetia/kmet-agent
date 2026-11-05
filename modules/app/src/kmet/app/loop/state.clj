@@ -34,6 +34,7 @@
             [kmet.app.tools.registry :as tools]
             [kmet.app.tools.search :as search]
             [kmet.app.tools.tool :as tool]
+            [kmet.app.tools.util :as tool-util]
             [kmet.ai.models :as models]
             [kmet.srce.core :as srce]))
 
@@ -443,14 +444,24 @@ Be precise and concise in your responses."}}]
     (emit agent {:type :message-start :message msg})
     msg))
 
-(defn- last-tool-sources-listing
-  "The text of the branch's last deferred-source listing, or nil when the
-   branch has none — what `sync-tool-sources-listing!` compares against, so the
-   message is appended once per change rather than once per prompt."
-  [sess]
+(defn- last-custom-listing
+  "The content of the branch's last hidden listing of CUSTOM-TYPE, or nil.
+   Both prompt manifests compare against it, so a message is appended once per
+   change rather than once per prompt."
+  [sess custom-type]
   (:content (last (filter #(and (= :custom-message (:role %))
-                                (= session/tool-sources-custom-type (:custom-type %)))
+                                (= custom-type (:custom-type %)))
                           (session/get-branch sess)))))
+
+(defn- append-listing!
+  "Append TEXT as the hidden prompt listing of CUSTOM-TYPE, with
+   machine-readable DETAILS. Returns the message."
+  [agent custom-type text details]
+  (append-custom-message! agent {:role :custom
+                                 :custom-type custom-type
+                                 :content text
+                                 :display false
+                                 :details details}))
 
 (defn sync-tool-sources-listing!
   "Tell the model which deferred tool sources exist, when the set or one of its
@@ -468,21 +479,44 @@ Be precise and concise in your responses."}}]
                 :eval? (contains? selected "eval")
                 :tool-search? (contains? selected search/tool-search-name)}
           sources (tools/get-deferred-sources handle {:selected (set (keys selected))})
-          previous (last-tool-sources-listing sess)
-          text (or (session/deferred-sources-listing sources opts)
-                   (when (and previous (seq sources))
-                     (str "Deferred tool sources are registered but not reachable: "
-                          "no script tool or tool_search is selected.")))]
-      ;; an empty set is only worth a message when something was listed before:
-      ;; a session that never had a deferred source stays silent
-      (when (and (some? text)
-                 (not= text previous)
-                 (or (seq sources) previous))
-        (append-custom-message! agent {:role :custom
-                                       :custom-type session/tool-sources-custom-type
-                                       :content text
-                                       :display false
-                                       :details {:sources (mapv :id sources)}})))))
+          previous (last-custom-listing sess session/tool-sources-custom-type)]
+      (when-let [text (or (session/deferred-sources-listing sources opts)
+                          (when (and previous (seq sources))
+                            (str "Deferred tool sources are registered but not reachable: "
+                                 "no script tool or tool_search is selected.")))]
+        ;; an empty set is only worth a message when something was listed
+        ;; before: a session that never had a deferred source stays silent
+        (when (and (not= text previous)
+                   (or (seq sources) previous))
+          (append-listing! agent session/tool-sources-custom-type text
+                           {:sources (mapv :id sources)}))))))
+
+(defn sync-eval-library-listing!
+  "Tell the model which eval-library definitions this session has, when the set
+   or its loaded/saved state changed since the branch's last manifest. With a
+   built environment the text lists its loaded records with scope and active
+   state; without one it lists the disk index as saved, loaded on the first
+   eval. Never builds an environment and never invokes a source. Selection-aware:
+   appended only while the eval tool is selected. Returns the message, or nil
+   when there was nothing new to say."
+  [agent]
+  (when-let [sess (:session agent)]
+    (let [selected (tools/select-tools (tool-table agent) (tool-selection agent))
+          manifest-fn (:manifest (srce/get (:ctx agent) :eval))
+          previous (last-custom-listing sess session/eval-library-custom-type)
+          manifest (when (and (contains? selected "eval") manifest-fn)
+                     (manifest-fn
+                      {:session sess
+                       :cwd (or (session/session-cwd sess) (tool-util/cwd))}))
+          entries (:entries manifest)]
+      ;; an empty library is only worth a message when something was listed
+      ;; before: a session that never had a definition stays silent
+      (when-let [text (when manifest (session/eval-library-listing manifest))]
+        (when (and (not= text previous)
+                   (or (seq entries) previous))
+          (append-listing! agent session/eval-library-custom-type text
+                           {:loaded? (:loaded? manifest)
+                            :count (count entries)}))))))
 
 (defn append-persisted-message!
   "Append MSG to both the live context and the session (pi: append + append-entry).

@@ -18,7 +18,8 @@
      deferred-sources-listing
      create-session delete-session! delete-session-file
      derive-context-settings detect-cache-miss
-     decode-cwd encode-cwd find-most-recent-session fork-from fork-session
+     decode-cwd encode-cwd eval-library-custom-type eval-library-listing
+     find-most-recent-session fork-from fork-session
      get-all-custom-entries get-branch get-custom-entries get-entry
      get-first-message get-label get-labels get-last-activity-ms
      get-last-assistant-text get-message-count get-prompt-history get-session-name
