@@ -119,6 +119,24 @@
                        (into defs (form-records node form current)))))
             {:ns current :defs defs}))))))
 
+(defn split-ns
+  "Split CONTENT into its first top-level `(ns …)` form string and the rest
+   of the file. A generated kept file has one ns form; the evaluation replays
+   the form, installs the standard aliases after it, then evaluates BODY, so
+   aliases survive the ns form."
+  [content]
+  (let [nodes (n/children (p/parse-string-all content))]
+    (loop [nodes nodes
+           ns-form nil
+           body []]
+      (if-let [node (first nodes)]
+        (let [form (try (n/sexpr node) (catch Throwable _ nil))]
+          (if (and (nil? ns-form) (sequential? form) (ns-form? form))
+            (recur (rest nodes) (n/string node) body)
+            (recur (rest nodes) ns-form (conj body (n/string node)))))
+        {:ns-form ns-form
+         :body (apply str body)}))))
+
 (defn collapse
   "One record per name, the last occurrence winning and keeping that
    occurrence's position — a call that defines a name twice records its final

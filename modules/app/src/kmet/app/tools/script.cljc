@@ -86,7 +86,7 @@
    callable from inside a script."
   #{"run_code" "eval"})
 
-(def ^:private alias-prelude
+(def alias-prelude
   "The aliases every script gets without a require — the standard Clojure and
    babashka vocabulary. Evaluated once per fork, before the user code, as a
    separate eval so the script's own line numbers stay intact; `require`

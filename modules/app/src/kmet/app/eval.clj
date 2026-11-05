@@ -123,7 +123,9 @@
   (swap! failures conj failure))
 
 (defn- load-shared-file!
-  "Read, parse and evaluate one shared file into ENV. A read, parse or eval
+  "Read, parse and evaluate one shared file into ENV. The original ns form runs
+   first (preserving its requires), then the standard aliases, then the rest of
+   the file, so aliases are not reset by the ns form. A read, parse or eval
    failure is recorded and skipped."
   [env ns-atom {:keys [file scope content error]}]
   (if error
@@ -136,13 +138,17 @@
                                       {:file file :scope scope :error (ex-message t)})
                      nil))]
       (when parsed
-        (let [result (script/eval-source! (:sci-ctx env) content ns-atom)]
-          (if (:error result)
-            (record-failure! (:failures env)
-                             {:file file :scope scope :error (:error result)})
-            (doseq [record (:defs parsed)]
-              (swap! (:shared env) assoc (:name record)
-                     (assoc record :scope scope :file file)))))))))
+        (let [{:keys [ns-form body]} (defs/split-ns content)
+              source (str (or ns-form (str "(ns " (:ns parsed) ")"))
+                          "\n" script/alias-prelude "\n" body)]
+          (rearm-build! env)
+          (let [result (script/eval-source! (:sci-ctx env) source ns-atom)]
+            (if (:error result)
+              (record-failure! (:failures env)
+                               {:file file :scope scope :error (:error result)})
+              (doseq [record (:defs parsed)]
+                (swap! (:shared env) assoc (:name record)
+                       (assoc record :scope scope :file file))))))))))
 
 (defn- read-shared!
   "Read and evaluate the shared definition files into ENV."
@@ -350,11 +356,16 @@
         deletes (atom [])
         old-deletes (atom [])
         rollbacks (atom [])
+        committed? (atom false)
         kept (atom [])
         dropped (atom [])
         shadowed (atom [])
         lines (atom [])]
-    (letfn [(add-line! [line] (swap! lines conj line))
+    (letfn [(rollback! []
+              (doseq [{:keys [path old-content]} @rollbacks]
+                (try (eval-files/restore-definition! path old-content)
+                     (catch Throwable _ nil))))
+            (add-line! [line] (swap! lines conj line))
             (add-remove! [name] (swap! removes conj name))
             (add-session! [record]
               (swap! adds add-record (select-keys record [:name :ns :kind :source])))
@@ -405,13 +416,9 @@
                     target-path (eval-files/definition-path target-root record)
                     moved? (and old (not= old-scope scope))
                     old-target (when (fs/exists? target-path) (slurp target-path))
-                    path (if (and moved? (not session-record))
-                           (eval-files/move-definition!
-                            (root-for roots old-scope) target-root record)
-                           (eval-files/write-definition! target-root record))]
-                (when session-record
-                  (swap! rollbacks conj {:path path :old-content old-target}))
-                (when (and moved? session-record)
+                    path (eval-files/write-definition! target-root record)]
+                (swap! rollbacks conj {:path path :old-content old-target})
+                (when moved?
                   (swap! old-deletes conj {:root (root-for roots old-scope)
                                            :name name
                                            :path path}))
@@ -439,23 +446,20 @@
             (commit! []
               (let [new-defs (defs/collapse @adds)
                     removed (vec (sort @removes))]
-                (try
-                  (when (or (seq new-defs) (seq removed))
+                (if (or (seq new-defs) (seq removed))
+                  (do
                     (session/append-custom-entry!
                      session defs/eval-definitions-type
                      {:version 1
                       :defs (mapv #(select-keys % [:name :ns :kind :source]) new-defs)
                       :removed removed})
+                    (reset! committed? true)
                     (swap! session-defs
                            (fn [m]
                              (apply dissoc
                                     (reduce (fn [m r] (assoc m (:name r) r)) m new-defs)
                                     removed))))
-                  (catch Throwable t
-                    (doseq [{:keys [path old-content]} @rollbacks]
-                      (try (eval-files/restore-definition! path old-content)
-                           (catch Throwable _ nil)))
-                    (throw t)))
+                  (reset! committed? true))
                 (doseq [name @deletes]
                   (delete-shared! roots name))
                 (doseq [{:keys [root name path]} @old-deletes]
@@ -473,10 +477,15 @@
                  :kept @kept
                  :dropped @dropped
                  :shadowed @shadowed}))]
-      (doseq [name drop] (drop! name))
-      (doseq [record (:defs parsed)] (ordinary! record))
-      (doseq [{:keys [name scope]} keep] (keep! name scope))
-      (commit!))))
+      (try
+        (doseq [name drop] (drop! name))
+        (doseq [record (:defs parsed)] (ordinary! record))
+        (doseq [{:keys [name scope]} keep] (keep! name scope))
+        (commit!)
+        (catch Throwable t
+          (when-not @committed?
+            (rollback!))
+          (throw t))))))
 
 ;; ─── The call ─────────────────────────────────────────────────────────────
 

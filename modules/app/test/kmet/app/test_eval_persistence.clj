@@ -7,6 +7,7 @@
             [kmet.app.compaction.stage :as compaction]
             [kmet.app.eval :as eval-service]
             [kmet.app.eval.definitions :as defs]
+            [kmet.app.eval.files :as eval-files]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.loop :as loop]
             [kmet.app.session.core :as session]
@@ -430,7 +431,15 @@
       (t/is (= "a,b"
                (:content (support/eval-in! restarted session cwd
                                            "(demo/join [\"a\" \"b\"])")))
-            "the alias prelude is replayed in the definition's namespace"))))
+            "the alias prelude is replayed in the definition's namespace")
+      (support/eval-in! restarted session cwd nil
+                        :keep [["demo/join" "project"]])
+      (let [other (support/eval-ctx {:cwd cwd
+                                     :agent-dir (:agent-dir env)})]
+        (t/is (= "c,d"
+                 (:content (support/eval-in! (:service other) (:session other)
+                                             cwd "(demo/join [\"c\" \"d\"])")))
+              "a shared file's ns form runs before the aliases are installed")))))
 
 (t/deftest test-a-stored-definition-compiles-with-a-disabled-tool
   (let [env (support/eval-ctx)]
@@ -592,3 +601,20 @@
         (t/is (:is-error result))
         (t/is (fs/exists? global) "the old shared file is authoritative")
         (t/is (not (fs/exists? project)))))))
+
+(t/deftest test-a-failed-keep-write-rolls-back-earlier-writes
+  (let [env (support/eval-ctx)
+        x-path (project-file env "user" "x.clj")
+        y-path (project-file env "user" "y.clj")
+        write eval-files/write-definition!]
+    (support/eval! env "(def x 1) (def y 2)")
+    (with-redefs [eval-files/write-definition!
+                  (fn [root record]
+                    (if (= "user/y" (:name record))
+                      (throw (ex-info "disk full" {:type :test}))
+                      (write root record)))]
+      (let [result (support/eval! env nil :keep [["user/x" "project"]
+                                                 ["user/y" "project"]])]
+        (t/is (:is-error result))
+        (t/is (not (fs/exists? x-path)) "the earlier write is rolled back")
+        (t/is (not (fs/exists? y-path)))))))

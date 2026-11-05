@@ -86,23 +86,6 @@
     (kfs/publish! path old-content)
     (fs/delete-if-exists path)))
 
-(defn move-definition!
-  "Write RECORD under TO-ROOT and remove its FROM-ROOT file, holding both
-   locks. A failed removal rolls the new file back and rethrows, leaving the
-   old file authoritative."
-  [from-root to-root record]
-  (with-root-locks [from-root to-root]
-    (let [from (definition-path from-root record)
-          to (definition-path to-root record)]
-      (kfs/publish! to (file-content record))
-      (when-not (= from to)
-        (try
-          (fs/delete-if-exists from)
-          (catch Throwable t
-            (try (fs/delete-if-exists to) (catch Throwable _ nil))
-            (throw t))))
-      to)))
-
 (defn delete-name!
   "Remove NAME's file under every ROOT, holding all locks. The delete path is
    derived from the address, so a losing copy in the other scope is removed

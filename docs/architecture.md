@@ -595,20 +595,25 @@ it is taken, and `:dispose!` clears every environment. A broken shared file or
 stored entry is reported under `:failures` and skipped. The pure parse/fold
 lives in `kmet.app.eval.definitions`, the shared files in `kmet.app.eval.files`.
 
-Limits: a kept definition is the defining form only — its `(ns …)` requires
+Limits: a session definition is the defining form only — its `(ns …)` requires
 are not stored, so the standard aliases are replayed and anything else must be
-self-contained. Shared files load global→project, sorted by path; a kept
-`defmethod` needs its `defmulti` kept too, and interdependent files can load out
-of order. A multi-name `declare` keeps its whole source under each name, so
-dropping one leaves the others declared. `:drop` removes the stored copies and
-the live var disappears on the next eval's rebuild. A session environment and
-its lock are retained until the agent is disposed; deleting a session does not
-release them. `(eval/kept)` lists stored definitions from the first eval in the
-session onward, and build failures are reported on each result until the
-environment rebuilds. Interpreted rebuild code is bounded by a rebuild deadline;
-host-blocked top-level code still has the sandbox's interrupt-grace limitation.
-Definition report lines are appended after the script's output budget, not
-counted inside it.
+self-contained. A shared file may carry its own ns form and requires; the
+standard aliases are installed after it. Shared files load global→project,
+sorted by path; a kept `defmethod` needs its `defmulti` kept too, and
+interdependent files can load out of order. A multi-name `declare` keeps its
+whole source under each name, so dropping one leaves the others declared. Two
+addresses that sanitize to the same file name share a file; the last write
+wins. `:drop` removes the stored copies and the live var disappears on the next
+eval's rebuild. A session environment and its lock are retained until the agent
+is disposed; deleting a session does not release them. `(eval/kept)` lists
+stored definitions from the first eval in the session onward, and build
+failures are reported on each result until the environment rebuilds.
+Interpreted rebuild code is bounded by a rebuild deadline; host-blocked
+top-level code still has the sandbox's interrupt-grace limitation. A move
+writes the new file, appends the session entry, then deletes the old file, so a
+concurrent rebuild can briefly see both scopes; a failed post-commit delete is
+reported and can leave both copies until a retry. Definition report lines are
+appended after the script's output budget, not counted inside it.
 
 The bridge pool is process-wide **by decision**: it is a bound, not a setting,
 and everything per-run travels in the submission's `:bindings`, so two agents
