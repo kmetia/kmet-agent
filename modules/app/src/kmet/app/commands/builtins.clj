@@ -7,6 +7,7 @@
   (:require [clojure.string :as str]
             [kmet.app.debug :as debug]
             [kmet.app.commands :as commands]
+            [kmet.app.commands.eval :as eval-command]
             [kmet.app.loop.state :as loop-state]
             [kmet.app.session.core :as session]
             [kmet.app.session.export :as session-export]
@@ -167,4 +168,5 @@
    {:name "compact"
     :description "Manually compact the session context"
     :argument-hint "<instructions>"
-    :handler handle-compact}))
+    :handler handle-compact})
+  (commands/register-builtin! eval-command/command))

@@ -6,7 +6,6 @@
    and loaded by every session; a new session or a restart sees it. The
    fresh-context, output-economy tool stays `run_code`."
   (:require [clojure.string :as str]
-            [kmet.app.commands.eval :as eval-command]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
             [kmet.app.tools.tool :as tool]
@@ -86,6 +85,4 @@
   {:name :tool/eval
    :inject [:tools]
    :apply (fn [ctx config]
-            (registry/mount-tool! ctx definition config)
-            (srce/effect ctx eval-command/register! :eval-command)
-            nil)})
+            (registry/mount-tool! ctx definition config))})

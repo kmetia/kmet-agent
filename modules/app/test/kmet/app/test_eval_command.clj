@@ -5,12 +5,11 @@
             [clojure.string :as str]
             [clojure.test :as t]
             [kmet.app.commands :as commands]
+            [kmet.app.commands.builtins :as builtins]
             [kmet.app.commands.eval :as eval-command]
             [kmet.app.eval :as eval-service]
             [kmet.app.eval.files :as eval-files]
-            [kmet.app.registries :as registries]
             [kmet.app.session.core :as session]
-            [kmet.app.tools.eval :as eval-tool]
             [kmet.srce.core :as srce]
             [kmet.test-tmp :as test-tmp]
             [kmet.test-utils :as tu]))
@@ -168,17 +167,6 @@
     (let [[_ _ help] (first (run env "help"))]
       (t/is (str/includes? help "/eval license/lint  Lint a definition")))))
 
-(t/deftest the-tool-row-registers-and-unregisters-the-command
-  (let [ctx (srce/root)
-        _ (srce/plugin! ctx registries/tools)
-        row (srce/plugin! ctx eval-tool/plugin)]
-    (t/is (some? (commands/find-command "eval")))
-    (srce/dispose! row)
-    (t/is (nil? (commands/find-command "eval")))))
-
-(t/deftest registration-is-reversible
-  (let [deregister (eval-command/register!)]
-    (t/is (some? (commands/find-command "eval")))
-    (t/is (fn? deregister))
-    (deregister)
-    (t/is (nil? (commands/find-command "eval")))))
+(t/deftest runtime-builtins-register-eval
+  (builtins/register-runtime-commands! (constantly nil))
+  (t/is (some? (commands/find-command "eval"))))

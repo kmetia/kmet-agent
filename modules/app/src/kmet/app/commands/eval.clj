@@ -4,11 +4,10 @@
    Verbs: `list [pattern]`, `search <text>`, `drop <name>…`, `sources` and
    `help`. An eval source may contribute a verb through the service's
    `:source-commands` map; built-in names are reserved. The command is
-   registered by the `:tool/eval` row with `register!`, so removing the row
-   removes the command."
+   registered with the engine-portable builtins, independent of the
+   `:tool/eval` row."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
-            [kmet.app.commands :as commands]
             [kmet.app.eval.files :as eval-files]
             [kmet.app.session.runtime :as runtime]
             [kmet.srce.core :as srce]))
@@ -204,14 +203,8 @@
         (out ui :warning "Eval" (str "Unknown verb: " verb ". Try /eval help."))))))
 
 (def command
-  "The `/eval` command record, registered by the `:tool/eval` row."
+  "The `/eval` command record, registered with the engine-portable builtins."
   {:name "eval"
    :description "List, search or drop eval library definitions"
    :argument-hint "<list|search|drop|sources|help> [args]"
    :handler handle})
-
-(defn register!
-  "Register `/eval` unless an extension already owns the name. Returns the
-   registry's deregister fn (or nil when the name was taken)."
-  []
-  (commands/register-builtin! command))

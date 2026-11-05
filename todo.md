@@ -337,9 +337,10 @@ plus ~150 moved (step 2).
    entries and project files are ignored. `(eval/library)` replaces
    `(eval/kept)`. Result lines and `:details` report `:defined` and
    `:forgotten`; a failed write is reported without rolling back the live
-   definition or other writes. The `:tool/eval` row also registers the
-   `/eval` command (`list`, `search`, `drop`, `sources`, `help`) and removes
-   it on dispose; source-contributed command verbs arrive in step 5.
+   definition or other writes. The engine-portable builtins register the
+   `/eval` command (`list`, `search`, `drop`, `sources`, `help`), independent
+   of the `:tool/eval` row; source-contributed command verbs arrive in step
+   5.
 5. **`:kmet/eval-source` and `:core`.** Registry fns
    (`register-eval-source!` / `unregister-` / `get-eval-sources`) in
    `kmet.app.tools.registry`; `registry-tags` + `host-tags`; the service
@@ -608,8 +609,9 @@ context is already lazy, its replaceability the row already gives) and would
 cost a new provisioning seam, a second dependency tree, and — since bundled
 extensions are never loaded by default — every profile naming the row anyway.
 The service is provided unconditionally by the factory (lazy, zero cost until
-the first call), so removing `:tool/eval` leaves a service with no reader, the
-same accepted shape as `:sandbox` without `:tool/run_code`.
+the first call), so removing `:tool/eval` leaves the `/eval` library command
+and its service in place — the command is a reader, unlike `:sandbox` without
+`:tool/run_code`.
 
 **E17 — the Clojure editing engine and the edit verbs are core; the tools stay
 an extension.** `eval` is a Clojure environment, and the engine's deps
