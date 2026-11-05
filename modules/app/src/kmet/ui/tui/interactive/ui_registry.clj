@@ -691,8 +691,11 @@
     ;; Install the front end's extension surface: the capability map, the
     ;; front-end kind extensions branch on (ctx.mode / ctx.has-ui), the live
     ;; session, and the context/entry sinks (pi: ctx.sessionManager / custom
-    ;; messages flowing through the agent loop). The same surface is published
-    ;; on the agent (its :front-end slot) so a run's handlers read this front
+    ;; messages flowing through the agent loop). The agent's runtime
+    ;; capabilities ride the surface, so an extension command or fiber outside
+    ;; a run acts on this agent instead of a headless default. The same
+    ;; surface is published on the agent (its :front-end slot) so a run's
+    ;; handlers read this front
     ;; end even after another front end installed the process binding — the
     ;; run's binding is the agent's, not the process's. The process install
     ;; stays for command handlers and extension fibers, which run outside a
@@ -702,7 +705,11 @@
     ;; (agent, session atom), so the wiring stays valid across reloads. The
     ;; session is re-installed after every move it makes
     ;; (`session-admin/install-live-session!`).
-    (let [surface {:mode :interactive :has-ui true :ui registry}
+    (let [surface {:mode :interactive :has-ui true :ui registry
+                   ;; the runtime capabilities of the agent this TUI serves:
+                   ;; commands and extension fibers run outside a run, so they
+                   ;; read this process install (the run binds its own over it)
+                   :runtime (runtime/extension-runtime (:engine cs))}
           context-sink (fn [msg] (runtime/add-context-message! (:engine cs) msg))
           entry-sink (fn [entry]
                        (when-let [rendered (session-admin/run-entry-renderer

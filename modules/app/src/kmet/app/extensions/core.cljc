@@ -600,17 +600,24 @@
   (reset! extension-binding headless-binding)
   nil)
 
+(declare bind-runtime-capabilities!)
+
 (defn install-front-end!
   "Install the front-end extension surface — the same map bind-extensions!
-  takes (:mode, :has-ui, :ui). The capability map is also registered under
-  [:app :ui] (`:kmet/ui-port`) so a listing can show who holds the port; the
-  process binding stays the read path. A later port-only swap
+  takes (:mode, :has-ui, :ui), plus an optional :runtime capability map (the
+  selected agent's `kmet.app.session.runtime/extension-runtime`) installed
+  with bind-runtime-capabilities!, so a command handler or extension fiber
+  acts on the agent this front end serves. The capability map is also
+  registered under [:app :ui] (`:kmet/ui-port`) so a listing can show who holds
+  the port; the process binding stays the read path. A later port-only swap
   (`set-ui-registry!`) updates the binding, not the registration. Disposal is
   the front end's own: the next surface to bind replaces it, and
   `unbind-extensions!` restores the headless defaults. Returns nil."
-  [{:keys [ui] :as surface}]
+  [{:keys [ui runtime] :as surface}]
   (registry/register! (handle) :kmet/ui-port :port (or ui {}) [:app :ui])
   (bind-extensions! surface)
+  (when (contains? surface :runtime)
+    (bind-runtime-capabilities! (or runtime {})))
   nil)
 
 (defn extension-mode

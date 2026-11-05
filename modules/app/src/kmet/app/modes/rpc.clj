@@ -774,13 +774,18 @@
             ;; the mode's stream is its own agent's events, not every agent's
             ;; the process booted (5d listened on the app scope)
             listener (atom nil)
+            ;; installed once the handle exists: the surface carries the
+            ;; agent's runtime capabilities, so an out-of-run extension handler
+            ;; acts on that agent
+            restore (atom nil)
+            restore! (fn []
+                       (when-let [f @restore]
+                         (reset! restore nil)
+                         (f)))
             ;; kmet1's rpc mode binds exactly this: a front end with a port,
             ;; whose extension UI calls travel the protocol — the row's port as
             ;; the base, the wire capabilities on top
-            port (ui-port (:port (srce/get ctx :ui)) out-)
-            restore (front-end/install! {:mode :rpc
-                                         :has-ui true
-                                         :ui port})]
+            port (ui-port (:port (srce/get ctx :ui)) out-)]
         (future
           (on-result
            {:exit (try
@@ -789,6 +794,11 @@
                     ;; `--model` pattern per creation and applies the rest over
                     ;; the settings it loads
                     (let [handle ((:create! agents) scope (invocation/create-opts config))]
+                      (reset! restore
+                              (front-end/install! {:mode :rpc
+                                                   :has-ui true
+                                                   :ui port
+                                                   :runtime (runtime/extension-runtime handle)}))
                       (try
                         ;; an out-of-run handler (an extension command over the
                         ;; wire) reads the process-wide slot; one agent serves
@@ -807,13 +817,14 @@
                         0
                         (finally
                           (events/unsubscribe! listener)
+                          (restore!)
                           ((:dispose! agents) handle))))
                     (catch Throwable t
                       (out/error! (or (ex-message t) (str t)))
                       1))}))
         (fn []
           (events/unsubscribe! listener)
-          (restore))))))
+          (restore!))))))
 
 (srce/defplugin plugin
   {:name :mode-rpc

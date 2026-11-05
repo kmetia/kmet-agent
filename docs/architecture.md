@@ -897,11 +897,11 @@ front end:
   projection is `kmet.app.wire`. `:agent-settled` carries the
   run's `:outcome` (`:completed` / `:error` / `:aborted`). A front end that
   needs data not on the stream extends the event, not the reader.
-- Extension UI splits into runtime capabilities (installed by `bootstrap`,
-  cleared by `dispose!`) and the front-end UI port
-  (`extensions/install-front-end!`, registered under `[:app :ui]`). Dialogs
-  ask through
-  `request-ui!`/`respond!`, so an asynchronous client can answer later; the
+- Extension UI splits into runtime capabilities (the front end installs the
+  selected agent's map with its surface; a run binds its own over it) and the
+  front-end UI port (`extensions/install-front-end!`, registered under
+  `[:app :ui]`). Dialogs ask through `request-ui!`/`respond!`, so an
+  asynchronous client can answer later; the
   degraded headless answers and the per-front-end capability table are in
   [`extension.md`](../modules/app/src/kmet/extension.md).
 - The RPC front end ([`rpc.md`](rpc.md)) is the headless consumer;

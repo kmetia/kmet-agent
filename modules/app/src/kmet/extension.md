@@ -294,7 +294,7 @@ the wrappers below or directly.
    :execute (fn [args] {:content "..." :is-error false})})
 (ext/unregister-tool! api "my-tool")
 (ext/get-all-tools api)
-(ext/get-active-tools api)      ; nil = all; else set of enabled names
+(ext/get-active-tools api)      ; nil = no process install; else the enabled names
 (ext/set-active-tools api ["read" "write"])
 
 (ext/tool-selection api)
@@ -1012,11 +1012,14 @@ message), then the host's expansion runs (pi: expandPromptTemplates; kmet1
 expands skill commands and prompt templates, and a host that names no chain
 expands nothing — the option is the host's policy, not the ABI's).
 
-Agent control is **runtime-bound** (pi: `bindCore` actions): the session
-runtime installs it at bootstrap, so it works in every front end —
-including headless print/json mode — and not only inside the interactive
-TUI. The UI capabilities below are the opposite: the front end owns and
-installs them, and they are inert headless.
+Agent control is **runtime-bound** (pi: `bindCore` actions): the front end
+installs the selected agent's capability map (`runtime/extension-runtime`,
+carried as `:runtime` on its surface) alongside its UI port, and a run binds
+the same map over it for the prompt's lifetime. An out-of-run command handler
+or extension fiber therefore acts on the agent the front end serves; this
+works in every front end — including headless print/json mode — and not only
+inside the interactive TUI. The UI capabilities below are the opposite: the
+front end owns and installs them, and they are inert headless.
 
 ### UI
 

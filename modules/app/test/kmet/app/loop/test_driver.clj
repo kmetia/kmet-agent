@@ -515,6 +515,31 @@
                 "and its own agent's model"))))
       (finally (off)))))
 
+(deftest a-front-end-installs-the-handles-runtime-capabilities
+  ;; A front end installs this map process-wide (`front-end/install!`), so an
+  ;; extension command or fiber outside a run acts on the agent it serves
+  ;; instead of resolving the headless defaults.
+  (let [{:keys [root agents]} (mounted)
+        handle (create! {:root root :agents agents})
+        caps (runtime/extension-runtime handle)
+        previous (:runtime (extensions/front-end-surface))]
+    (try
+      (is (map? caps))
+      (is (every? #(fn? (get caps %))
+                  [:get-active-tools :set-active-tools :tool-selection
+                   :set-tool-enabled! :set-model :get-thinking-level
+                   :set-thinking-level :send-user-message :send-message!])
+          "the capability map carries the out-of-run controls")
+      (extensions/bind-runtime-capabilities! {})
+      (is (nil? (extensions/get-active-tools))
+          "outside a run nothing answers until a front end installs the agent")
+      (extensions/bind-runtime-capabilities! caps)
+      (is (= [] (extensions/get-active-tools))
+          "the handle's map answers from the live agent, not a headless default")
+      (finally
+        (extensions/bind-runtime-capabilities! (or previous {}))
+        ((:dispose! agents) handle)))))
+
 (deftest a-runs-front-end-surface-is-the-agents
   ;; A front end publishes its mode, port and sinks on the agent it serves; a
   ;; run's handlers read that surface, not whatever install the process holds

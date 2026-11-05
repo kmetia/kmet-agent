@@ -31,6 +31,38 @@
                     :enabled-tools #{"read"}
                     :selection {:origin {"bash" :global "read" :project}}}))))
 
+(t/deftest test-restore-without-a-branch-entry-uses-the-effective-selection
+  (let [state (atom {:all-tools [] :enabled-tools #{} :scope nil :selection nil})
+        api {:get-all-tools (fn [] [{:name "read"} {:name "bash"}])
+             :session {:get-entries (fn [_] [])}
+             :tool-selection (fn []
+                               {:scope :project
+                                :entries {:global [] :project ["-bash"]}
+                                :paths {:global "/g/settings.edn" :project "/p/settings.edn"}
+                                :enabled #{"read"}
+                                :origin {"bash" :project "read" :project}})}]
+    (ext-fn 'restore-from-branch! api state)
+    (t/is (= #{"read"} (:enabled-tools @state))
+          "the settings-driven selection, not every live tool")
+    (t/is (= [{:name "read"} {:name "bash"}] (:all-tools @state)))))
+
+(t/deftest test-restore-keeps-a-branch-entry
+  (let [applied (atom nil)
+        state (atom {:all-tools [] :enabled-tools #{} :scope nil :selection nil})
+        api {:get-all-tools (fn [] [{:name "read"} {:name "bash"}])
+             :session {:get-entries
+                       (fn [_] [{:data {:enabled-tools ["bash"]}}])}
+             :set-active-tools (fn [names] (reset! applied names))
+             :tool-selection (fn []
+                               {:scope :global
+                                :entries {:global [] :project []}
+                                :paths {:global "/g/settings.edn" :project "/p/settings.edn"}
+                                :enabled #{"bash"}
+                                :origin {"read" :default "bash" :session}})}]
+    (ext-fn 'restore-from-branch! api state)
+    (t/is (= ["bash"] @applied) "the branch's saved selection is applied")
+    (t/is (= #{"bash"} (:enabled-tools @state)))))
+
 (t/deftest test-scope-line-names-the-target-and-counts
   (let [state (atom {:scope :project
                      :selection {:entries {:global ["read"]
@@ -42,6 +74,31 @@
     (swap! state assoc :scope :global)
     (t/is (= "Global · /home/me/.kmet/agent/settings.edn · global 1 · project 2"
              (ext-fn 'scope-line state)))))
+
+(t/deftest test-refresh-syncs-the-rows-with-the-effective-selection
+  (let [state (atom {:all-tools [{:name "bash"} {:name "read"}]
+                     :enabled-tools #{"bash" "read"}
+                     :selection nil
+                     :scope nil})
+        api {:tool-selection
+             (fn []
+               {:scope :project
+                :entries {:global [] :project ["-bash"]}
+                :paths {:global "/g/settings.edn" :project "/p/settings.edn"}
+                :enabled #{"read"}
+                :origin {"bash" :project "read" :project}})}]
+    (ext-fn 'refresh-selection! api state)
+    (t/is (= #{"read"} (:enabled-tools @state))
+          "the rows follow the effective selection, not a stale restore")
+    (t/is (= :project (:scope @state)))
+    (t/is (= "disabled" (:value (first (ext-fn 'selection-items @state)))))))
+
+(t/deftest test-refresh-without-a-selection-keeps-the-rows
+  (let [state (atom {:enabled-tools #{"read"} :selection nil :scope nil})
+        api {:tool-selection (fn [] nil)}]
+    (ext-fn 'refresh-selection! api state)
+    (t/is (= #{"read"} (:enabled-tools @state))
+          "a host without the capability view keeps the rows it had")))
 
 (t/deftest test-toggle-marks-the-session-origin
   (let [state (atom {:all-tools [{:name "read"} {:name "bash"}]

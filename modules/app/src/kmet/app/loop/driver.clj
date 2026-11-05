@@ -484,6 +484,11 @@
            :id id
            :ctx child
            :agent state
+           ;; the runtime-owned extension capabilities this agent answers
+           ;; outside a run (pi: bindCore): a front end installs the map
+           ;; process-wide while it serves this agent, and a run binds its own
+           ;; over it for the prompt's lifetime
+           :extension-runtime (extension-runtime)
            ;; the front end's submission chain over this handle: input
            ;; hooks, expansion, compaction queueing, then the handle's own
            ;; start-or-queue rule (pi: session.prompt). A queued message is

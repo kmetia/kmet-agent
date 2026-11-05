@@ -18,8 +18,20 @@
 (defn install!
   "Bind SURFACE for the run and return the fn that restores the surface bound
    before it. Installing and restoring are one pair, so every mode writes the
-   rule once: `(install! {:mode :rpc :has-ui true :ui port})`."
+   rule once: `(install! {:mode :rpc :has-ui true :ui port})`.
+
+   A `:runtime` map (the selected agent's
+   `kmet.app.session.runtime/extension-runtime`) is installed process-wide with
+   the surface, so an extension command or fiber outside a run acts on the
+   agent this mode serves; restoring puts the previous capabilities back.
+   Without the key the process's runtime capabilities are left alone."
   [surface]
-  (let [previous (extensions/front-end-surface)]
+  (let [previous (extensions/front-end-surface)
+        install-runtime? (contains? surface :runtime)]
     (extensions/bind-extensions! surface)
-    (fn [] (extensions/bind-extensions! previous))))
+    (when install-runtime?
+      (extensions/bind-runtime-capabilities! (or (:runtime surface) {})))
+    (fn []
+      (extensions/bind-extensions! previous)
+      (when install-runtime?
+        (extensions/bind-runtime-capabilities! (or (:runtime previous) {}))))))

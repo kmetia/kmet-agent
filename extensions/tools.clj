@@ -60,31 +60,33 @@
   (ext/set-active-tools api (vec (:enabled-tools @state))))
 
 (defn- refresh-selection!
-  "Re-read the settings view and keep the write scope the dialog already
-   chose. Returns the selection."
+  "Re-read the settings view, keep the write scope the dialog already chose,
+   and sync the rows with the effective selection. Returns the selection."
   [api state]
-  (let [selection (or (ext/tool-selection api) empty-selection)]
+  (let [selection (ext/tool-selection api)]
     (swap! state (fn [st]
-                   (assoc st
-                          :selection selection
-                          :scope (or (:scope st) (:scope selection)))))
+                   (cond-> (assoc st
+                                  :selection (or selection empty-selection)
+                                  :scope (or (:scope st) (:scope selection) :global))
+                     selection (assoc :enabled-tools (:enabled selection)))))
     selection))
 
 (defn- restore-from-branch!
   "Sync the selection with the session (pi: restoreFromBranch): the last
    tools-config entry on the active branch wins, filtered to tools that
-   still exist; without one, mirror the currently active tools."
+   still exist; without one, the effective selection supplies the enabled
+   set. Returns the selection."
   [api state]
   (let [sess (ext/session api)
-        all-tools (ext/get-all-tools api)
+        all-tools (or (ext/get-all-tools api) [])
         all-names (set (map :name all-tools))
         saved (last (keep (fn [e] (some-> (:data e) :enabled-tools))
-                          ((:get-entries sess) tools-config-type)))
-        enabled (if saved
-                  (set (filter all-names saved))
-                  (set (or (ext/get-active-tools api) all-names)))]
-    (swap! state assoc :all-tools all-tools :enabled-tools enabled)
-    (when saved (apply-tools! api state))))
+                          ((:get-entries sess) tools-config-type)))]
+    (swap! state assoc :all-tools all-tools)
+    (when saved
+      (swap! state assoc :enabled-tools (set (filter all-names saved)))
+      (apply-tools! api state))
+    (refresh-selection! api state)))
 
 ;; ─── The /tools dialog (pi: the ctx.ui.custom factory) ─────────────────────
 
@@ -155,11 +157,10 @@
       ;; the settings, not a stale runtime set, are the source it reports
       (ext/set-active-tools api nil)
       (persist-state! api state)
-      (let [selection (refresh-selection! api state)]
-        (swap! state assoc :enabled-tools (:enabled selection))
-        (settings-list/settings-list-set-items!
-         settings (selection-items @state) {:preserve-state? true})
-        (ext/ui-notify api (str "Saved " (name scope) " tool selection") :info)))
+      (refresh-selection! api state)
+      (settings-list/settings-list-set-items!
+       settings (selection-items @state) {:preserve-state? true})
+      (ext/ui-notify api (str "Saved " (name scope) " tool selection") :info))
     (catch Exception e
       (ext/ui-notify api (str "Cannot save tool selection: " (ex-message e))
                      :error))))

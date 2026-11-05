@@ -4,6 +4,7 @@
    auto-answers, and the install/unbind pair owns the port registration."
   (:require [clojure.test :as t :refer [deftest testing]]
             [kmet.app.extensions.core :as ex]
+            [kmet.app.front-end :as front-end]
             [kmet.app.registry :as registry]
             [kmet.test-utils :as tu]))
 
@@ -52,6 +53,41 @@
         (registry/deregister! (registry/current) :kmet/ui-port :port [:app :ui])))
     (t/is (= :print (ex/extension-mode))
           "unbinding restores the headless binding")))
+
+(deftest test-install-front-end-installs-runtime-capabilities
+  (testing "install-front-end! installs the surface's :runtime map"
+    (try
+      (ex/install-front-end! {:mode :interactive :has-ui true :ui {}
+                              :runtime {:get-active-tools (fn [] [:read])}})
+      (t/is (= [:read] (ex/runtime-call :get-active-tools))
+            "an out-of-run handler reads the agent's capabilities")
+      (finally
+        (ex/bind-runtime-capabilities! {})
+        (registry/deregister! (registry/current) :kmet/ui-port :port [:app :ui])))))
+
+(deftest test-front-end-install-restores-runtime-capabilities
+  (testing "the restore fn puts the previous runtime capabilities back"
+    (try
+      (ex/bind-runtime-capabilities! {:get-active-tools (fn [] [:before])})
+      (let [restore (front-end/install!
+                     {:mode :rpc :has-ui true :ui {}
+                      :runtime {:get-active-tools (fn [] [:handle])}})]
+        (t/is (= [:handle] (ex/runtime-call :get-active-tools)))
+        (restore)
+        (t/is (= [:before] (ex/runtime-call :get-active-tools))))
+      (finally
+        (ex/bind-runtime-capabilities! {})
+        (ex/unbind-extensions!))))
+  (testing "a surface without :runtime leaves the process install alone"
+    (try
+      (ex/bind-runtime-capabilities! {:get-active-tools (fn [] [:before])})
+      (let [restore (front-end/install! {:mode :print :has-ui false :ui {}})]
+        (t/is (= [:before] (ex/runtime-call :get-active-tools)))
+        (restore)
+        (t/is (= [:before] (ex/runtime-call :get-active-tools))))
+      (finally
+        (ex/bind-runtime-capabilities! {})
+        (ex/unbind-extensions!)))))
 
 (deftest test-port-only-swap-preserves-kind
   (testing "set-ui-registry!/clear-ui-registry! swap the port, not the kind"

@@ -69,6 +69,15 @@
   [engine]
   (some-> (agent-state engine) loop-state/tool-table))
 
+(defn extension-runtime
+  "The runtime-owned extension capabilities this engine's agent answers
+   outside a run (`kmet.app.extensions.core/runtime-call`) — nil for a bare
+   test engine. A front end installs this map process-wide for the agent it
+   serves, so an extension command or fiber acts on the selected agent; a run
+   binds its own capabilities over the process install for the prompt."
+  [engine]
+  (:extension-runtime engine))
+
 (defn session
   "The live session (an atom's value; a session switch replaces it). nil
    for a context-less engine or a bare test engine.
