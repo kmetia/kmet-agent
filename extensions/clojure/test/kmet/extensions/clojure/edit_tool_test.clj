@@ -841,3 +841,10 @@
                   nil nil {:cwd dir})]
       (is (not (:is-error result)) (:content result))
       (is (str/includes? (read-test-file (str dir "/form.clj")) "2")))))
+
+(deftest ^:bb-only test-unreadable-file-is-an-error-result
+  (let [dir (str (fs/absolutize (str test-dir "/unreadable.clj")))]
+    (fs/create-dirs dir)
+    (let [result (edit-tool/execute (edit-opts dir "defn" "f" "(defn f [] 1)"))]
+      (is (:is-error result))
+      (is (str/includes? (:content result) "Error editing")))))

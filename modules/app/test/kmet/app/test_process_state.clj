@@ -71,7 +71,7 @@
    {'report-wrong-shape
     "The one `--debug` switch's per-load diagnostic, owned by `kmet.app.debug`; a session loads on whichever thread asked for it and the switch is process-wide."}
 
-   "modules/app/src/kmet/app/tools/run_code.cljc"
+   "modules/app/src/kmet/app/tools/script.cljc"
    {'bridge-queue
     "The bridge's worker pool — a thread *bound*, not a setting (9b's written decision): the worker count caps concurrent tool executions process-wide, and everything per-run travels in the submission's `:bindings`."}
 

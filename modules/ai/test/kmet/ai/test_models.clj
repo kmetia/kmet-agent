@@ -146,7 +146,8 @@
                      (:thinking-level-map model)))
             (t/is (= {:supports-openai-grammar-tools true
                       :supports-tool-search true
-                      :supports-additional-tools true}
+                      :supports-additional-tools true
+                      :supports-mid-convo-system-messages true}
                      (:compat model))))))
       (t/is (= ["AZURE_OPENAI_API_KEY"] (:env-vars (m/get-provider :azure-openai-responses))))
       (t/is (= #{:anthropic-messages} (:api-types (m/get-provider :anthropic))))

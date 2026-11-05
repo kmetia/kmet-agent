@@ -402,7 +402,7 @@ bundled clojure and tree-sitter extensions are the shipped users of that: each
 declares its family's entry point directly (`clojure_edit`,
 `list_symbols`/`find_definition`) and contributes its refinements as one
 `:deferred` source, so a default composition declares 6 schemas fewer and
-announces the two sources instead. The clojure extension's tool records are
+announces the two sources instead. The clojure extension's edit-family tool records are
 schema/render wrappers over the shared `kmet.libs.clj-edit` engine; the same
 engine backs eval's core `clj/edit-form`, `clj/replace-sexp` and
 `clj/paren-repair` verbs, so structural editing does not require

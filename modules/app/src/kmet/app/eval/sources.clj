@@ -20,8 +20,8 @@
     "sandbox" "tools" "babashka.process" "kmet.libs.json"})
 
 (def reserved-source-keys
-  "Individual built-in keys outside the reserved namespaces. A source that
-   contributes one is refused as a whole."
+  "Built-in keys refused even when a namespace check would allow them. A
+   source that contributes one is refused as a whole."
   #{"eval/library" "eval/forget" "eval/sources" "eval/help"
     "user/edit" "user/write-file"
     "clj/edit-form" "clj/replace-sexp" "clj/paren-repair"})

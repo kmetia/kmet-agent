@@ -67,6 +67,7 @@
     "Every top-level definition is written to the agent's eval library and loaded by every session; a redefinition overwrites its file."
     "drop removes a definition from the library and unbinds it here; a code-less call may carry only drop."
     "Use (eval/patch 'name old new) to replace one subform in a named definition; it re-evaluates before writing, and the definition name must stay."
+    "Use (eval/edit-form 'name new-source) to replace the whole definition; new-source is a form or its source string. Edit files structurally with clj/edit-form, clj/replace-sexp and clj/paren-repair."
     "Report with (emit value) or end on the value you want reported; discover the surface with (all-ns) and (ns-publics), and list loaded definitions with (eval/library)."]
    :parameters {:type "object"
                 :properties

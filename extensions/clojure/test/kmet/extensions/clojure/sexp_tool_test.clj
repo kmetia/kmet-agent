@@ -747,3 +747,10 @@
       (is (not (:is-error result)) (:content result))
       (is (str/includes? (read-test-file (str dir "/form.clj")) "2")))
     (is (true? (:contextual? (sexp-tool/definition))))))
+
+(deftest ^:bb-only test-unreadable-file-is-an-error-result
+  (let [dir (str (fs/absolutize (str test-dir "/unreadable.clj")))]
+    (fs/create-dirs dir)
+    (let [result (sexp-tool/execute (sexp-opts dir "(defn f [] 1)" "(defn f [] 2)"))]
+      (is (:is-error result))
+      (is (str/includes? (:content result) "Error editing")))))

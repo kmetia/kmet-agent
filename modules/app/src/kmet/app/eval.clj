@@ -421,11 +421,8 @@
    is written when the replacement does not parse, changes the name, or fails
    to evaluate."
   [env cwd raw-name new-source]
-  (when-not (string? new-source)
-    (bad-request! (str "edit-form needs the new definition source, got "
-                       (pr-str new-source))
-                  {:name raw-name :form new-source}))
-  (let [{:keys [name record path]} (definition-target! env raw-name "edit-form")
+  (let [new-source (if (string? new-source) new-source (pr-str new-source))
+        {:keys [name record path]} (definition-target! env raw-name "edit-form")
         content (slurp path)
         patched-result (try (clj-edit/edit-definition-source content path record new-source)
                             (catch Throwable t

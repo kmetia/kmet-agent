@@ -27,7 +27,16 @@
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result) "[eval: edited user/greet")))
     (t/is (= "Hi A" (:content (support/eval! env "(greet \"A\")"))))
-    (t/is (str/includes? (slurp (definition-file env)) source))))
+    (t/is (str/includes? (slurp (definition-file env)) source))
+    (t/is (some #(= "user/greet" (:name %)) (support/eval-library env)))))
+
+(t/deftest edit-form-accepts-a-form-as-well-as-source
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(defn greet [x] (str \"Hello \" x))")
+    (let [result (support/eval! env
+                                "(eval/edit-form 'user/greet '(defn greet [x] (str \"Hey \" x)))")]
+      (t/is (not (:is-error result)) (:content result)))
+    (t/is (= "Hey A" (:content (support/eval! env "(greet \"A\")"))))))
 
 (t/deftest edit-form-failed-evaluation-keeps-file-and-live-definition
   (let [env (support/eval-ctx)]

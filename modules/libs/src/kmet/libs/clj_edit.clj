@@ -818,14 +818,18 @@
    formatted result. Returns the tool result map; `:content` is \"Edit
    applied.\" on success and the error report otherwise."
   [file-path find-edit-fn]
-  (let [original (slurp-utf8 file-path)
-        result (edit-source original file-path find-edit-fn)]
-    (if (:is-error result)
-      result
-      (do
-        (spit-utf8 file-path (:content result))
-        {:content "Edit applied."
-         :details (when-let [diff-str (:diff result)] {:diff diff-str})}))))
+  (try
+    (let [original (slurp-utf8 file-path)
+          result (edit-source original file-path find-edit-fn)]
+      (if (:is-error result)
+        result
+        (do
+          (spit-utf8 file-path (:content result))
+          {:content "Edit applied."
+           :details (when-let [diff-str (:diff result)] {:diff diff-str})})))
+    (catch Exception e
+      {:content (str "Error editing " file-path ": " (ex-message e))
+       :is-error true})))
 
 ;; ─── Top-level definition edit (clojure_edit and clj/edit-form) ─────────────
 
@@ -960,9 +964,10 @@
   "The usage error ARGS earns, or nil. Order is the contract: a required
    parameter before the operation's content rule, the content rule before the
    target file, and the file's existence before its form type — so a call
-   missing two things names the first one in this list."
+   missing two things names the first one in this list. CHECK-FILE? adds the
+   existence check; the pure source operation leaves it to its caller."
   [{:keys [file_path form_type form_identifier operation]}
-   op-kw missing-content? blank-insert?]
+   op-kw missing-content? blank-insert? check-file?]
   (cond
     (str/blank? file_path)
     {:content "Missing required parameter: file_path" :is-error true}
@@ -994,6 +999,9 @@
                    "\" — insert_before/insert_after need the content to insert. "
                    "An empty content deletes only with operation \"replace\".")
      :is-error true}
+
+    (and check-file? (not (fs/exists? file_path)))
+    {:content (str "File not found: " file_path) :is-error true}
 
     (= form_type "comment")
     {:content (str "Form type 'comment' is not supported. "
@@ -1072,17 +1080,25 @@
                               path))))))
     args))
 
+(defn- edit-args
+  "The operation keyword and content flags shared by the pure and writing
+   entry points."
+  [args]
+  (let [op-kw (get op-kinds (:operation args) :replace)
+        missing-content? (nil? (:content args))
+        blank-content? (and (not missing-content?) (str/blank? (:content args)))]
+    {:op-kw op-kw
+     :missing-content? missing-content?
+     :blank-content? blank-content?
+     :blank-insert? (and blank-content? (not= op-kw :replace))}))
+
 (defn edit-form-source
   "Apply the clojure_edit operation described by ARGS to SOURCE, without
-   reading or writing a file. Snapshots `:file_path` only supplies the
-   project's fmt config; the caller owns the file."
-  [source {:keys [form_type content operation]
-           :or   {operation "replace"} :as args}]
-  (let [op-kw (get op-kinds operation :replace)
-        missing-content? (nil? content)
-        blank-content? (and (not missing-content?) (str/blank? content))
-        blank-insert? (and blank-content? (not= op-kw :replace))]
-    (or (guard-args args op-kw missing-content? blank-insert?)
+   reading or writing a file. `:file_path` only supplies the project's fmt
+   config; the caller owns the file."
+  [source {:keys [form_type content] :as args}]
+  (let [{:keys [op-kw missing-content? blank-content? blank-insert?]} (edit-args args)]
+    (or (guard-args args op-kw missing-content? blank-insert? false)
         (content-error form_type content op-kw)
         (edit-source
          source
@@ -1103,21 +1119,20 @@
   [args]
   (let [args (resolved-args args)
         file_path (:file_path args)
-        op-kw (get op-kinds (:operation args) :replace)
-        missing-content? (nil? (:content args))
-        blank-content? (and (not missing-content?) (str/blank? (:content args)))
-        blank-insert? (and blank-content? (not= op-kw :replace))]
-    (or (guard-args args op-kw missing-content? blank-insert?)
-        (when-not (fs/exists? file_path)
-          {:content (str "File not found: " file_path) :is-error true})
-        (let [result (edit-form-source (slurp-utf8 file_path) args)]
-          (if (:is-error result)
-            result
-            (do
-              (spit-utf8 file_path (:content result))
-              {:content "Edit applied."
-               :details (when-let [diff-str (:diff result)]
-                          {:diff diff-str})}))))))
+        {:keys [op-kw missing-content? blank-insert?]} (edit-args args)]
+    (or (guard-args args op-kw missing-content? blank-insert? true)
+        (try
+          (let [result (edit-form-source (slurp-utf8 file_path) args)]
+            (if (:is-error result)
+              result
+              (do
+                (spit-utf8 file_path (:content result))
+                {:content "Edit applied."
+                 :details (when-let [diff-str (:diff result)]
+                            {:diff diff-str})})))
+          (catch Exception e
+            {:content (str "Error editing " file_path ": " (ex-message e))
+             :is-error true})))))
 
 ;; ─── S-expression edit (clojure_edit_replace_sexp and clj/replace-sexp) ─────
 
