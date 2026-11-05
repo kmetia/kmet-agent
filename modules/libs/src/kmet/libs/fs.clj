@@ -4,18 +4,15 @@
    Windows real-time AV, which opens a freshly written file to inspect it
    and holds its rename and delete until the scan ends.
 
-   Why not spit? Jolt's spit is itself atomic — it writes its own temp file
-   and renames that — so a caller that publishes through temp + rename (the
-   session store, the MCP credential store) pays two renames of freshly
-   created files, where babashka's spit writes in place. The byte-stream
-   writers here open the target directly on both hosts, so a publish costs
-   exactly one rename, and they write explicit UTF-8 rather than the host's
-   default charset.
+   Why not spit? A publish needs its own rename: `publish!` writes a sibling
+   temp and renames it over the target, while Jolt's spit (v0.8.24) and
+   babashka's write the target in place. Using spit for the temp would add
+   nothing to the byte-stream writer here, which writes explicit UTF-8
+   rather than the host's default charset.
 
-   The retry is kmet's own and stays after jolt#1263: that fix retries the
-   rename inside jolt's spit and its loader writes, but kmet renames with
-   fs/move (java.nio.file.Files/move on Jolt), whose rename it does not
-   wrap. A rename landing while the AV handle is open fails with
+   The retry is kmet's own: it renames with fs/move
+   (java.nio.file.Files/move on Jolt), which Jolt's own write paths do not
+   cover. A rename landing while the AV handle is open fails with
    \"permission denied\" even though nothing is wrong with the paths — and
    the failed temp cannot be cleaned up either, the scanner holds it. Both
    publish steps are therefore retried on a short ladder before the write

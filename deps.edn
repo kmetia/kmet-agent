@@ -1,10 +1,10 @@
-{:jolt/min-version "0.8.23"
+{:jolt/min-version "0.8.24"
  ;; Jolt's floor is the LATEST tagged release — the host is young and moves
  ;; fast, so kmet targets the newest release rather than the oldest one a
  ;; feature needs (jolt/README.md § Bundled-extension loader floor).
  ;; Between releases the tree tracks `main`: the workarounds for tickets fixed
- ;; there are gone (jolt-bugs.md), so until `v0.8.24` tags, `v0.8.23` is below
- ;; what the sources need; the floor rises with the tag.
+ ;; there are gone (jolt-bugs.md), so the floor rises with each tag and
+ ;; v0.8.23 is below what the sources need.
  ;; v0.8.11 was the first release with :jolt/native :static archives; v0.8.12
  ;; added jolt.loader/embedded-root?, the bundled-extension native loader's
  ;; floor. Static dist builds additionally verify Jolt emitted process-symbol

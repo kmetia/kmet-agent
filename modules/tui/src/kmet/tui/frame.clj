@@ -346,8 +346,8 @@
 
 (defn append-log!
   "Append TEXT to a file at PATH, ignoring errors (pi: appendFileSync).
-   io/writer :append, not spit: Jolt's spit is atomic (its own temp file
-   plus a rename), which a per-line debug append does not need."
+   io/writer :append, not spit: a per-line debug append needs only an open,
+   a write and a close, which the writer does directly."
   [path text]
   (try
     (with-open [w (io/writer path :append true)]

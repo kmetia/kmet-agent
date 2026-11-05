@@ -37,7 +37,7 @@ no provisions.
 kmet targets the **latest tagged Jolt release**: the root `deps.edn`
 `:jolt/min-version` and this lib's floor move to each new release tag (the
 host is young and fast-changing). `jolt.loader/embedded-root?` arrived in
-v0.8.12, below the current v0.8.23 floor, so bundled **directory**
+v0.8.12, below the current v0.8.24 floor, so bundled **directory**
 extensions always use the native loader over `embed:<prefix>` roots and
 bundled single-file resources map their namespace directly to the exact
 embedded key — no capability probe. A manifest declaring `:sci` still loads
