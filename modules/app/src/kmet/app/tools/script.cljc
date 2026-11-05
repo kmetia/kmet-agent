@@ -1082,6 +1082,20 @@
         val))
     (fn [form] (sci/eval-string* sci-ctx form))))
 
+(defn eval-source!
+  "Evaluate one SOURCE string in a kept SCI context during an environment
+   rebuild: the forms start in NS-ATOM's namespace and the namespace they end
+   in is stored back. Returns `{:value v}` or `{:error message}` — a broken
+   stored definition is data to report, never a reason to fail the call that
+   asked for the environment. The caller serializes calls."
+  [sci-ctx source ns-atom]
+  (try
+    (let [{:keys [val ns]} (sci/eval-string+ sci-ctx source {:ns @ns-atom})]
+      (reset! ns-atom ns)
+      {:value val})
+    (catch Throwable t
+      {:error (error-message t)})))
+
 (defn- start-eval-thread!
   "Start the daemon eval thread. The prelude runs here, on the eval thread,
    immediately before the user code: SCI's *ns* is per-thread, so aliases

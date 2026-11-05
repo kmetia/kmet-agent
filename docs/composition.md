@@ -345,11 +345,11 @@ Sandbox: Clojure; on babashka a full babashka surface, on the JVM the java.lang/
 
 **Label:** Eval
 
-**Parameters:** `code` (required), `timeout`, `max-output-bytes`
+**Parameters:** `code`, `timeout`, `keep`, `drop`, `max-output-bytes`
 
 **Description:**
 
-Evaluate Clojure forms in this agent's persistent environment. Definitions persist across calls for the agent's lifetime, and a successful call's namespace is re-entered by the next — use eval for a helper or state you will reuse, and run_code for a fresh, throwaway script. Output is the emitted text (or the final value of a silent success); stdout and stderr are discarded. Nothing is written to disk.
+Evaluate Clojure forms in this session's persistent environment. Definitions persist across calls for the session; use run_code for a fresh, throwaway script. A successful call's namespace is re-entered by the next. Definitions are private to the session unless keep promotes one to the shared project/global files that every session loads; drop removes every copy. Output is the emitted text (or the final value of a silent success); stdout and stderr are discarded.
 
 ---
 

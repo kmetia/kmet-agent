@@ -16,15 +16,18 @@ are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–3 done; **step 4 next** |
+| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–4 landed; **step 5 next** (step 4 residuals: reload surface, parallel env selection) |
 
 ## Persistent eval and eval sources
 
-Status: steps 1–3 done (the shared script layer, the file ops and the
-memory-only eval service); step 4 next. The tool is opt-in by default under
-S4.5, so step 4's tests and docs must select it explicitly. E17 moves the
-Clojure editing engine and the edit verbs into core; the rest of the clojure
-extension is a post-track task at the end of this section.
+Status: steps 1–4 landed (the shared script layer, the file ops, the
+memory-only service and the session store); step 5 next. Two step 4 residuals
+must close first: the rebuild does not replay the call surface (aliases and
+`emit`), and parallel calls can build two environments for one session. The
+tool is opt-in by default under S4.5; step 4's tests exercise it directly
+rather than through the default declared set. E17 moves the Clojure editing
+engine and the edit verbs into core; the rest of the clojure extension is a
+post-track task at the end of this section.
 Decisions closed (E1–E17); independent.
 Independent of every other track; the `:on-tool` hook covers it for free (step
 1 keeps the bridge on `kmet.app.tools.invoke`).

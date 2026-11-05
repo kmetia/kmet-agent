@@ -255,7 +255,7 @@ schema-validated at load).
 | `:permissions` | `{:policy :remember!}` — the tool-call decision | `kmet.app.permissions/permissions`, per agent |
 | `:approvals` | `{:ask!}` — the one `:ask` delivery seam | `kmet.app.permissions/approvals` at the root; the TUI and server rows supply their own |
 | `:shell` `:sandbox` | the agent's shell options; the realm names a script's tool calls are blocked from | provided per agent by the agents factory; a preset row that mounts first wins |
-| `:eval` | `{:eval! :kept :sources :failures :dispose!}` — the agent's persistent script environment | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
+| `:eval` | `{:eval! :kept :sources :failures :snapshot! :dispose!}` — the agent's persistent script environment, one per session | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
 | `:ui` | the capability service (`kmet.app.ui`) | `kmet.ui.headless/plugin`, `kmet.ui.tui/provider-plugin` |
 | `:extensions` | no service: the row binds the host's services (registry handle, ctx, resource ops, owner sweep) and publishes `process-handle` | `kmet.app.extensions/plugin` |
 
@@ -575,16 +575,22 @@ probe and no real use, and is gone;
 **`eval`** (`kmet.app.tools.eval`, the `:tool/eval` row) is the persistent
 counterpart. It shares `kmet.app.tools.script` — capability namespaces, capture,
 the tools bridge, deadline/abort and result assembly — but the state belongs to
-the agent, not the call: `kmet.app.eval/value` owns one SCI context (built
-lazily on the first call), one interrupt holder, one sticky namespace and one
-call lock. `seed!` installs the call's namespaces into that context each time,
-so the tool surface follows the agent's registry while definitions stay. A
-definition from one call is visible to the next, and the last namespace a
-successful call ended in is re-entered at the start of the next. Parallel calls
-serialize on the lock, and the deadline starts after it is taken; `:dispose!`
-clears the environment when the agent's handle is disposed. This is the
-memory-only stage: nothing is written to disk yet, and the kept index and eval
-sources are empty.
+the session, not the call: `kmet.app.eval/value` owns one SCI context per
+session (built lazily on the first call), its interrupt holder, sticky namespace
+and call lock. `seed!` installs the call's namespaces into that context each
+time, so the tool surface follows the agent's registry while definitions stay.
+A definition from one call is visible to the next in the same session, and the
+last namespace a successful call ended in is re-entered at the start of the
+next. Definitions are session-private and recorded as `:eval-definitions`
+entries; `:keep` writes a reviewable file under `<project>/.kmet/eval/<ns>/`
+or `~/.kmet/agent/eval/<ns>/`, `:drop` removes every copy, and a shared name
+redefined without `:keep` becomes a session shadow. The first eval in a session
+folds the active branch over the shared files; a branch/reset/switch or a
+compaction snapshot rebuilds. Parallel calls serialize on the environment lock,
+the deadline starts after it is taken, and `:dispose!` clears every environment.
+A broken shared file or stored entry is reported under `:failures` and skipped.
+The pure parse/fold lives in `kmet.app.eval.definitions`, the shared files in
+`kmet.app.eval.files`.
 
 The bridge pool is process-wide **by decision**: it is a bound, not a setting,
 and everything per-run travels in the submission's `:bindings`, so two agents
