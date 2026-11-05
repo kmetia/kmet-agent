@@ -51,7 +51,7 @@
     ((:handler eval-command/command)
      {:runtime (:engine env)
       :ui {:info (fn [label content] (swap! got conj [:info label content]))
-           :warning (fn [label content] (swap! got conj [:warning label content]))}}
+           :warning (fn [text] (swap! got conj [:warning text]))}}
      args)
     @got))
 
@@ -130,10 +130,10 @@
       (t/is (str/includes? content "[eval: forgot user/doomed (cwd)]")
             "a drop reads and deletes files without building an environment"))
     (t/is (not (fs/exists? path)))
-    (let [[level _ content] (first (run env "drop user/nope"))]
+    (let [[level content] (first (run env "drop user/nope"))]
       (t/is (= :warning level))
       (t/is (str/includes? content "no eval library definition")))
-    (let [[level _ content] (first (run env "drop"))]
+    (let [[level content] (first (run env "drop"))]
       (t/is (= :warning level))
       (t/is (str/includes? content "Usage: /eval drop")))))
 
@@ -173,10 +173,10 @@
           (t/is (str/includes? content "[eval: moved user/f (cwd → global)]")))))
     (t/is (not (fs/exists? cwd-file)))
     (t/is (fs/exists? global-file))
-    (let [[[level _ content]] (run env "move user/f global")]
+    (let [[[level content]] (run env "move user/f global")]
       (t/is (= :warning level))
       (t/is (str/includes? content "already in the global scope")))
-    (let [[[level _ content]] (run env "move user/f")]
+    (let [[[level content]] (run env "move user/f")]
       (t/is (= :warning level))
       (t/is (str/includes? content "Usage: /eval move")))
     (let [[[level _ content]] (run env "move user/f cwd")]
@@ -212,7 +212,7 @@
       (t/is (str/includes? help "/eval move <name> global|cwd"))
       (t/is (str/includes? help "/eval sources"))
       (t/is (str/includes? help "/eval help")))
-    (let [[level _ content] (first (run env "nonsense"))]
+    (let [[level content] (first (run env "nonsense"))]
       (t/is (= :warning level))
       (t/is (str/includes? content "Unknown verb: nonsense")))))
 
@@ -286,8 +286,8 @@
                {:runtime engine
                 :ui {:info (fn [label content]
                              (swap! got conj [:info label content]))
-                     :warning (fn [label content]
-                                (swap! got conj [:warning label content]))}}
+                     :warning (fn [text]
+                                (swap! got conj [:warning text]))}}
                args)
               @got)]
     (t/is (= [[:info "Eval" "linted x"]] (run "license-lint x")))

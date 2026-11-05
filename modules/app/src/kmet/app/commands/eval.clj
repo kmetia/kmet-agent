@@ -208,7 +208,7 @@
         [verb arg] (split-verb args)]
     (cond
       (nil? svc)
-      (out ui :warning "Eval" "The eval service is not available.")
+      (out ui :warning "The eval service is not available.")
 
       (= verb "list")
       (let [{:keys [entries failures]} ((:index svc) {:cwd cwd :session sess})]
@@ -222,15 +222,16 @@
       (let [names (names-arg arg)]
         (cond
           (empty? names)
-          (out ui :warning "Eval" "Usage: /eval drop <name>…")
+          (out ui :warning "Usage: /eval drop <name>…")
 
           (nil? sess)
-          (out ui :warning "Eval" "No active session.")
+          (out ui :warning "No active session.")
 
           :else
-          (let [result (drop! svc sess names cwd)]
-            (out ui (if (:is-error result) :warning :info)
-                 "Eval" (:content result)))))
+          (let [{:keys [is-error content]} (drop! svc sess names cwd)]
+            (if is-error
+              (out ui :warning content)
+              (out ui :info "Eval" content)))))
 
       (= verb "move")
       (if-let [[name scope] (move-args arg)]
@@ -239,8 +240,8 @@
                                       :cwd cwd})]
             (out ui :info "Eval" (:content result)))
           (catch Exception e
-            (out ui :warning "Eval" (or (ex-message e) (str e)))))
-        (out ui :warning "Eval" "Usage: /eval move <name> global|cwd"))
+            (out ui :warning (or (ex-message e) (str e)))))
+        (out ui :warning "Usage: /eval move <name> global|cwd"))
 
       (= verb "sources")
       (out ui :info "Eval" (sources-text svc cwd sess))
@@ -255,9 +256,9 @@
             (when-not (str/blank? (str output))
               (out ui :info "Eval" (str output))))
           (catch Throwable t
-            (out ui :warning "Eval" (str "eval verb failed: "
-                                         (or (ex-message t) (str t))))))
-        (out ui :warning "Eval" (str "Unknown verb: " verb ". Try /eval help."))))))
+            (out ui :warning (str "eval verb failed: "
+                                  (or (ex-message t) (str t))))))
+        (out ui :warning (str "Unknown verb: " verb ". Try /eval help."))))))
 
 (def command
   "The `/eval` command record, registered with the engine-portable builtins."

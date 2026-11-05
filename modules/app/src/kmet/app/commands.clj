@@ -10,10 +10,11 @@
    kmet.app.session.runtime engine), :ui (the front end's command-UI value)
    and :frontend (the front-end kind). Engine work calls the runtime; output
    and view work go through the UI value: the shared capabilities are
-   :message (assistant transcript line), :info (fn [label content]),
-   :warning, :status, :notify and :set-title — an engine-portable command
-   uses only those and :runtime. A front end's own commands may read more
-   from its value (the interactive mode puts its CoreState under :state).
+   :message (fn [text]), :info (fn [label content]), :warning (fn [text]),
+   :status (fn [text]), :notify (fn [text]) and :set-title (fn []) — an
+   engine-portable command uses only those and :runtime. A front end's own
+   commands may read more from its value (the interactive mode puts its
+   CoreState under :state).
    Handlers return nil; they act through the runtime and the UI value, never
    through an intent for the caller to interpret.
    The registry lives in the app root's store, under the `[:app :commands]`
