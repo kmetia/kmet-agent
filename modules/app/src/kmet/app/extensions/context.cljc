@@ -239,6 +239,7 @@
    drift guard in kmet.app.extensions.test-libs keeps this list and the source
    trees in sync."
   '[kmet.libs.archive
+    kmet.libs.clj-edit
     kmet.libs.clipboard
     kmet.libs.concurrent
     kmet.libs.crypto

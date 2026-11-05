@@ -194,3 +194,27 @@
     (reset! current 2)
     (t/is (= "2" (:content (support/eval! env "counter/value"))))
     (t/is (= 2 @reads))))
+
+(t/deftest core-ships-the-clojure-editing-verbs
+  (let [env (support/eval-ctx)
+        path (str (:cwd env) "/edit-me.clj")]
+    (spit path "(ns edit-me)\n\n(defn f [] 1)\n")
+    (let [result (support/eval! env
+                                (str "(:content (clj/edit-form {:file_path \"edit-me.clj\" "
+                                     ":form_type \"defn\" :form_identifier \"f\" "
+                                     ":operation \"replace\" "
+                                     ":content \"(defn f [] 2)\"}))"))]
+      (t/is (= "Edit applied." (:content result)))
+      (t/is (str/includes? (slurp path) "(defn f [] 2)")))
+    (let [result (support/eval! env
+                                (str "(:content (clj/replace-sexp {:file_path \"edit-me.clj\" "
+                                     ":match_form \"(defn f [] 2)\" "
+                                     ":new_form \"(defn f [] 3)\" "
+                                     ":operation \"replace\"}))"))]
+      (t/is (= "Edit applied." (:content result)))
+      (t/is (str/includes? (slurp path) "(defn f [] 3)")))
+    (spit path "(defn f []\n")
+    (let [result (support/eval! env
+                                "(:content (clj/paren-repair {:file_path \"edit-me.clj\" :format false}))")]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result) "Fixed")))))

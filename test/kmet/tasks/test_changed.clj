@@ -23,8 +23,8 @@
     (is (= 'kmet.extensions.tools (changed/path->ns "extensions/tools.clj")))
     (is (= 'kmet.extensions.clojure.core
            (changed/path->ns "extensions/clojure/src/kmet/extensions/clojure/core.clj")))
-    (is (= 'kmet.extensions.clojure.edit-util-test
-           (changed/path->ns "extensions/clojure/test/kmet/extensions/clojure/edit_util_test.clj"))))
+    (is (= 'kmet.libs.test-clj-edit
+           (changed/path->ns "modules/libs/test/kmet/libs/test_clj_edit.clj"))))
   (testing "Windows fs/glob separators normalize — the graph keys are /-spelled"
     (is (= 'kmet.ui.tui.model-selector
            (changed/path->ns "modules\\app\\src\\kmet\\ui\\tui\\model_selector.clj")))

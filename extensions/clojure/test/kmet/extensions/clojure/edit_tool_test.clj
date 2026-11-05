@@ -831,3 +831,13 @@
   (testing "missing path degrades to nil"
     (is (nil? (edit-tool/title {})))
     (is (nil? (edit-tool/title nil)))))
+
+(deftest ^:bb-only test-relative-file-path-resolves-against-the-call-cwd
+  (let [dir (str (fs/absolutize (str test-dir "/ctx-cwd")))]
+    (fs/create-dirs dir)
+    (spit (str dir "/form.clj") "(defn f [] 1)\n")
+    (let [result (edit-tool/execute
+                  (edit-opts "form.clj" "defn" "f" "(defn f [] 2)")
+                  nil nil {:cwd dir})]
+      (is (not (:is-error result)) (:content result))
+      (is (str/includes? (read-test-file (str dir "/form.clj")) "2")))))

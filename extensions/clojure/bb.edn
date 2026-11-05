@@ -20,7 +20,7 @@
  :tasks
  {test {:doc "Run clojure extension tests (args: test namespace names)"
         :task (let [nss (or (some->> *command-line-args* (map symbol))
-                            '[kmet.extensions.clojure.edit-util-test
+                            '[kmet.libs.test-clj-edit
                               kmet.extensions.clojure.edit-tool-test
                               kmet.extensions.clojure.sexp-tool-test
                               kmet.extensions.clojure.paren-repair-test

@@ -355,3 +355,13 @@
   (testing "missing path degrades to nil"
     (is (nil? (paren-repair/title {})))
     (is (nil? (paren-repair/title nil)))))
+
+(deftest ^:bb-only test-relative-file-path-resolves-against-the-call-cwd
+  (let [dir (str (fs/absolutize (str test-dir "/ctx-cwd")))]
+    (fs/create-dirs dir)
+    (spit (str dir "/broken.clj") "(defn f []\n")
+    (let [result (paren-repair/execute {:file_path "broken.clj" :format false}
+                                       nil nil {:cwd dir})]
+      (is (not (:is-error result)) (:content result))
+      (is (= "(defn f [])\n" (read-test-file (str dir "/broken.clj")))))
+    (is (true? (:contextual? (paren-repair/definition))))))

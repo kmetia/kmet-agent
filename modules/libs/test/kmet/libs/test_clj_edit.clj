@@ -1,9 +1,9 @@
-(ns kmet.extensions.clojure.edit-util-test
-  "Tests for the shared edit-util namespace."
+(ns kmet.libs.test-clj-edit
+  "Tests for the shared Clojure editing engine."
   (:require [clojure.test :as t :refer [deftest testing is]]
             [clojure.string :as str]
             [babashka.fs :as fs]
-            [kmet.extensions.clojure.edit-util :as util]
+            [kmet.libs.clj-edit :as util]
             [kmet.libs.edit-diff :as edit-diff]
             [rewrite-clj.node :as node]
             [rewrite-clj.parser :as p]

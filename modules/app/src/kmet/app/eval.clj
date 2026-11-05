@@ -29,6 +29,7 @@
             [kmet.app.tools.script :as script]
             [kmet.app.tools.util :as tool-util]
             [kmet.app.tools.write :as write-tool]
+            [kmet.libs.clj-edit :as clj-edit]
             [kmet.libs.concurrent :as concurrent]
             [kmet.srce.core :as srce]
             [sci.core :as sci]))
@@ -257,7 +258,8 @@
          (when (seq entries)
            (str " (" (str/join ", " (map :name entries)) ")"))
          "\nFailures: " (count @(:failures env))
-         "\nUse (eval/library), (eval/sources), (eval/forget 'name).")))
+         "\nUse (eval/library), (eval/sources), (eval/forget 'name), "
+         "(eval/patch 'name old new), (eval/edit-form 'name new-source).")))
 
 (defn- take-failures!
   "Failures are reported once: return the current list and clear the
@@ -311,22 +313,22 @@
   (doseq [file (eval-files/scan root)]
     (load-library-file! env file)))
 
-(defn- patch-target!
-  "Resolve RAW-NAME to the loaded definition, its file, and its record, or
-   throw the user-facing refusal. A source key has no file; an unwritten live
-   definition has no authoritative file."
-  [env raw-name]
+(defn- definition-target!
+  "Resolve RAW-NAME to the loaded definition, its file, and its record for
+   LABEL (\"patch\" or \"edit\"), or throw the user-facing refusal. A source key
+   has no file; an unwritten live definition has no authoritative file."
+  [env raw-name label]
   (let [raw-name (->name raw-name)
         name (when raw-name (qualify-name (env-ns env) raw-name))]
     (when-not name
-      (bad-request! (str "patch needs a definition name, got " (pr-str raw-name))
+      (bad-request! (str label " needs a definition name, got " (pr-str raw-name))
                     {:name raw-name}))
     (when (contains? @(:source-keys env) name)
-      (bad-request! (str "cannot patch source-provided " name
+      (bad-request! (str "cannot " label " source-provided " name
                          "; it has no library file")
                     {:name name :source true}))
     (when (contains? @(:unwritten env) name)
-      (bad-request! (str "cannot patch " name
+      (bad-request! (str "cannot " label " " name
                          ": its live definition is not written; re-evaluate it first")
                     {:name name :unwritten true}))
     (let [record (get @(:library env) name)
@@ -340,13 +342,13 @@
       {:name name :record record :path path})))
 
 (defn- patched-record!
-  [name record parsed]
+  [name record parsed label]
   (let [patched (some #(when (= name (:name %)) %) (:defs parsed))]
     (when-not patched
-      (bad-request! (str "patch changed the definition name of " name)
+      (bad-request! (str label " changed the definition name of " name)
                     {:name name}))
     (when-not (= (:ns record) (:ns patched))
-      (bad-request! (str "patch changed the namespace of " name)
+      (bad-request! (str label " changed the namespace of " name)
                     {:name name}))
     patched))
 
@@ -358,15 +360,43 @@
    (atom (or (sci/find-ns (:sci-ctx env) (symbol (:ns record)))
              (sci/create-ns (symbol (:ns record)))))))
 
+(defn- commit-definition!
+  "Re-evaluate PATCHED-RECORD, write PATCHED to PATH, and update the library.
+   A failed evaluation or write restores RECORD in the live environment and
+   leaves the old file authoritative; LABEL names the operation in errors.
+   VERB is the report line's past-tense verb."
+  [env cwd {:keys [name record path patched patched-record label verb]}]
+  (let [{:keys [error]} (eval-definition! env patched-record)]
+    (if error
+      (do
+        ;; best effort: put the old source back in the live environment; the
+        ;; file was never touched
+        (eval-definition! env record)
+        (bad-request! (str label " evaluation failed: " error)
+                      {:name name :error error}))
+      (do
+        (try
+          (eval-files/write-content! (:root env) path patched)
+          (catch Throwable t
+            ;; the old file is still authoritative; keep the live definition
+            ;; on it rather than on a file that did not land
+            (eval-definition! env record)
+            (bad-request! (str label " write failed: " (ex-message t))
+                          {:name name :error (ex-message t)})))
+        (swap! (:library env) assoc name (assoc patched-record :file path))
+        (swap! (:change-lines env) conj
+               (str "[eval: " verb " " name " → "
+                    (eval-files/display-path cwd path) "]"))
+        nil))))
+
 (defn- patch-definition!
   "Replace the first subform structurally equal to OLD with NEW inside NAME's
    own definition form, re-evaluate the definition, then write the whole file.
    The definition name and namespace must stay. A source-provided key or an
    unwritten live definition has no authoritative file and is refused; a
-   failed re-evaluation restores the old live definition and writes nothing.
-   The report line is recorded on the environment for the call result."
+   failed re-evaluation restores the old live definition and writes nothing."
   [env cwd raw-name old new]
-  (let [{:keys [name record path]} (patch-target! env raw-name)
+  (let [{:keys [name record path]} (definition-target! env raw-name "patch")
         content (slurp path)
         patched (try (patch/patched-content content record old new)
                      (catch Throwable t
@@ -376,29 +406,46 @@
                       (bad-request! (str "patched " name " does not parse: "
                                          (ex-message t))
                                     {:name name :file path})))
-        patched-record (patched-record! name record parsed)
-        {:keys [error]} (eval-definition! env patched-record)]
-    (if error
-      (do
-        ;; best effort: put the old source back in the live environment; the
-        ;; file was never touched
-        (eval-definition! env record)
-        (bad-request! (str "patch evaluation failed: " error)
-                      {:name name :error error}))
-      (do
-        (try
-          (eval-files/write-content! (:root env) path patched)
-          (catch Throwable t
-            ;; the old file is still authoritative; keep the live definition
-            ;; on it rather than on a file that did not land
-            (eval-definition! env record)
-            (bad-request! (str "patch write failed: " (ex-message t))
-                          {:name name :error (ex-message t)})))
-        (swap! (:library env) assoc name (assoc patched-record :file path))
-        (swap! (:patch-lines env) conj
-               (str "[eval: patched " name " → "
-                    (eval-files/display-path cwd path) "]"))
-        nil))))
+        patched-record (patched-record! name record parsed "patch")]
+    (commit-definition! env cwd {:name name
+                                 :record record
+                                 :path path
+                                 :patched patched
+                                 :patched-record patched-record
+                                 :label "patch"
+                                 :verb "patched"})))
+
+(defn- edit-form-definition!
+  "Replace NAME's whole library definition with NEW-SOURCE, re-evaluate it,
+   then write the file. The definition name and namespace must stay; nothing
+   is written when the replacement does not parse, changes the name, or fails
+   to evaluate."
+  [env cwd raw-name new-source]
+  (when-not (string? new-source)
+    (bad-request! (str "edit-form needs the new definition source, got "
+                       (pr-str new-source))
+                  {:name raw-name :form new-source}))
+  (let [{:keys [name record path]} (definition-target! env raw-name "edit-form")
+        content (slurp path)
+        patched-result (try (clj-edit/edit-definition-source content path record new-source)
+                            (catch Throwable t
+                              (bad-request! (ex-message t) {:name name})))
+        _ (when (:is-error patched-result)
+            (bad-request! (:content patched-result) {:name name :file path}))
+        patched (:content patched-result)
+        parsed (try (defs/parse patched "user")
+                    (catch Throwable t
+                      (bad-request! (str "edited " name " does not parse: "
+                                         (ex-message t))
+                                    {:name name :file path})))
+        patched-record (patched-record! name record parsed "edit-form")]
+    (commit-definition! env cwd {:name name
+                                 :record record
+                                 :path path
+                                 :patched patched
+                                 :patched-record patched-record
+                                 :label "edit-form"
+                                 :verb "edited"})))
 
 (defn- prime-state
   "A prepared state for evaluating library definitions at rebuild: the current
@@ -460,7 +507,7 @@
              :source-errors (atom [])
              :source-ids (atom [])
              :fresh-sources? (atom true)
-             :patch-lines (atom [])
+             :change-lines (atom [])
              :parsed-names (atom #{})
              :unwritten (atom #{})
              :forgotten (atom #{})
@@ -478,6 +525,9 @@
                                 'forget forget-fn
                                 'patch (fn [name old new]
                                          (patch-definition! @env-ref cwd name old new))
+                                'edit-form (fn [name new-source]
+                                             (edit-form-definition! @env-ref cwd
+                                                                    name new-source))
                                 'sources sources-fn
                                 'help help-fn})
                   (script/interrupt-fn interrupt "eval")
@@ -657,9 +707,9 @@
   (let [forgotten (mapv #(qualify-name (env-ns env) %) forgotten)
         drop (distinct (concat drop forgotten))
         parsed-names (set (map :name (:defs parsed)))
-        lines (atom (let [patched @(:patch-lines env)]
-                      (reset! (:patch-lines env) [])
-                      patched))
+        lines (atom (let [changes @(:change-lines env)]
+                      (reset! (:change-lines env) [])
+                      changes))
         defined (atom [])
         forgotten-names (atom [])
         write-errors (atom 0)
@@ -814,7 +864,7 @@
               (bad-request! "eval needs code or drop" {})
               (do
                 (reset! (:forgotten env) #{})
-                (reset! (:patch-lines env) [])
+                (reset! (:change-lines env) [])
                 (reset! (:parsed-names env) (set (map :name (:defs parsed))))
                 (let [result (run-code)]
                   (if (:is-error result)

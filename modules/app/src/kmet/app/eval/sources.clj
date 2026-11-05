@@ -5,7 +5,8 @@
    later calls. Validation happens here so `kmet.app.eval` only wires the
    values into SCI: a bad shape, a reserved namespace or key, or a reserved
    `/eval` verb refuses the whole source, never the eval call."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [kmet.libs.clj-edit :as clj-edit]))
 
 (def core-source-id
   "The one source allowed to contribute to the `user` namespace."
@@ -30,11 +31,19 @@
   #{"list" "search" "drop" "sources" "help" "--help" "-h"})
 
 (defn core-source
-  "The `:core` source's contribution: the two file verbs under `user`."
-  [{:keys [verbs]}]
-  {:doc "Core file verbs: (edit path old new) and (write-file path content)."
-   :ns {'user {'edit (:edit verbs)
-               'write-file (:write-file verbs)}}})
+  "The `:core` source's contribution: the two file verbs under `user` and the
+   Clojure editing verbs under `clj`. CWD is the call's source cwd, so a
+   relative path in a verb resolves like the tool it mirrors."
+  [{:keys [verbs cwd]}]
+  (let [with-cwd #(assoc % :cwd cwd)]
+    {:doc (str "Core file verbs: (edit path old new), (write-file path content); "
+               "Clojure editing: (clj/edit-form args), (clj/replace-sexp args), "
+               "(clj/paren-repair args).")
+     :ns {'user {'edit (:edit verbs)
+                 'write-file (:write-file verbs)}
+          'clj {'edit-form (fn [args] (clj-edit/edit-form (with-cwd args)))
+                'replace-sexp (fn [args] (clj-edit/replace-sexp (with-cwd args)))
+                'paren-repair (fn [args] (clj-edit/paren-repair (with-cwd args)))}}}))
 
 (defn source-key
   "The address of one contributed value — `user/edit`, `license/add!`."

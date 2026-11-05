@@ -10,7 +10,7 @@
   "clojure_eval — evaluate Clojure code in a running nREPL server."
   (:require [clojure.string :as str]
             [kmet.ui.tui.tool-renderers :as renderers]
-            [kmet.extensions.clojure.edit-util :as util]
+            [kmet.libs.clj-edit :as util]
             [kmet.extensions.clojure.nrepl :as nrepl]
             [kmet.libs.text :as text]
             [kmet.libs.theme :as theme]))

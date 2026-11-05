@@ -1,98 +1,13 @@
 ;; kmet.extensions.clojure.paren-repair — Delimiter repair for Clojure files.
 ;;
-;; Port of clojure-mcp paren_repair/{core,tool}.clj: detects unbalanced
-;; delimiters with edamame, balances them delimiter-only (parinferish's
-;; tokenizer + indentation-based closing), then formats with cljfmt
-;; (honoring the project's cljfmt.edn) and writes the file back with a
-;; unified diff.
+;; The repair engine lives in `kmet.libs.clj-edit`; this namespace keeps the
+;; tool schema, the around-tool hooks and the tool entry point.
 
 (ns kmet.extensions.clojure.paren-repair
   (:require [babashka.fs :as fs]
-            [clojure.string :as str]
-            [kmet.extensions.clojure.edit-util :as util]
-            [kmet.ui.tui.tool-renderers :as renderers]
-            [kmet.libs.edit-diff :as edit-diff]
-            [kmet.libs.path :as path]))
-
-;; ═══════════════════════════════════════════════════════════════════════════════
-;; Core repair logic
-;; ═══════════════════════════════════════════════════════════════════════════════
-
-(defn repair-string
-  "Repair delimiters in SOURCE and optionally format with cljfmt using
-   FMT-OPTS (resolved from the file's directory by the caller, so the
-   project's cljfmt.edn rules apply). Returns {:content str
-   :delimiter-fixed? bool :formatted? bool}."
-  [source format? fmt-opts]
-  (let [[repaired delimiter-fixed?] (util/repair-delimiters source)
-        formatted (if format?
-                    (util/format-source-string repaired fmt-opts)
-                    repaired)]
-    {:content formatted
-     :delimiter-fixed? delimiter-fixed?
-     :formatted? (not= repaired formatted)}))
-
-(defn repair-file!
-  "Repair delimiter errors in FILE-PATH and optionally format.
-   Returns {:success bool :message str :diff str-or-nil
-            :delimiter-fixed? bool :formatted? bool}.
-   A delimiter error that delimiter-only repair cannot fix (or a file that does
-   not parse at all) is an explicit failure carrying the precise report —
-   never a silent \"no changes\" success."
-  [file-path format?]
-  (cond
-    (not (fs/exists? file-path))
-    {:success false :message (str "File does not exist: " file-path)}
-
-    (not (util/clojure-file? file-path))
-    {:success false :message (util/not-clojure-file-msg "clojure_paren_repair" file-path)}
-
-    :else
-    (try
-      (let [original (util/slurp-utf8 file-path)
-            fmt-opts (util/project-fmt-opts file-path)
-            result (repair-string original format? fmt-opts)
-            final-content (:content result)
-            changed? (not= original final-content)]
-        (if changed?
-          (do (util/spit-utf8 file-path final-content)
-              (let [diff-str (edit-diff/generate-display-diff original final-content)
-                    status-parts (cond-> []
-                                   (:delimiter-fixed? result) (conj "delimiter-fixed")
-                                   (:formatted? result) (conj "formatted"))]
-                {:success true
-                 :message (str "Fixed [" (str/join ", " status-parts) "]")
-                 :delimiter-fixed? (:delimiter-fixed? result)
-                 :formatted? (:formatted? result)
-                 :diff diff-str}))
-          ;; Nothing changed — either the file is clean or the problem is
-          ;; beyond indent-mode repair. Say which, with the actual error.
-          (if-let [problem (util/parse-problem file-path final-content)]
-            {:success false
-             :message (str "Could not fix " file-path " — it still does not parse:\n"
-                           (:report problem)
-                           "\n"
-                           (case (:kind problem)
-                             :delimiter "delimiter-only repair inserts missing closers and drops stray ones — fix this one manually (e.g. with the edit tool)."
-                             "Fix the syntax error manually (e.g. with the edit tool)."))
-             :delimiter-fixed? false
-             :formatted? false
-             :diff nil}
-            {:success true
-             :message "No changes needed (parses cleanly; no delimiter errors)"
-             :delimiter-fixed? false
-             :formatted? false
-             :diff nil})))
-      (catch Exception e
-        {:success false
-         :message (str "Error: " (ex-message e))
-         :delimiter-fixed? false
-         :formatted? false
-         :diff nil}))))
-
-;; ═══════════════════════════════════════════════════════════════════════════════
-;; Tool execute
-;; ═══════════════════════════════════════════════════════════════════════════════
+            [kmet.libs.clj-edit :as util]
+            [kmet.libs.path :as path]
+            [kmet.ui.tui.tool-renderers :as renderers]))
 
 (defn title
   [args]
@@ -102,18 +17,9 @@
 
 (defn execute
   "Tool entry point.  Returns {:content str :is-error bool}."
-  [{:keys [file_path format]}]
-  (let [format? (if (nil? format) true (boolean format))]
-    (cond
-      (str/blank? file_path)
-      {:content "Missing required parameter: file_path" :is-error true}
-
-      :else
-      (let [result (repair-file! file_path format?)]
-        (if (:success result)
-          (cond-> {:content (:message result)}
-            (:diff result) (assoc :details {:diff (:diff result)}))
-          {:content (:message result) :is-error true})))))
+  ([args] (util/paren-repair args))
+  ([args _on-update _signal ctx]
+   (util/paren-repair (assoc args :cwd (:cwd ctx)))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════════
 ;; Tool registration
@@ -200,6 +106,7 @@
    :render-call renderers/render-edit-call
    :render-result renderers/render-edit-result
    :render-shell :self
+   :contextual? true
    :prompt-snippet "Fix unbalanced delimiters (parens/brackets/braces) in a Clojure file"
    :prompt-guidelines
    ["Use clojure_paren_repair when a Clojure file has unbalanced delimiters causing parse errors — after an errant edit or when the file won't compile."

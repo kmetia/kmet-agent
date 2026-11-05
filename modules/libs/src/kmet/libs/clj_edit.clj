@@ -1,10 +1,11 @@
-;; kmet.extensions.clojure.edit-util — Shared utilities for the Clojure extension tools.
+;; kmet.libs.clj-edit — Shared Clojure source editing engine.
 ;;
-;; Common file I/O, diff, formatting, and zipper helpers used by both
-;; kmet.extensions.clojure.edit-tool (clojure_edit) and
-;; kmet.extensions.clojure.sexp-tool (clojure_edit_replace_sexp).
+;; File I/O, parsing, delimiter repair, cljfmt formatting, zipper form
+;; replacement, duplicate-definition checks and the write pipeline used by the
+;; clojure extension tools, the eval core verbs and the eval library's
+;; `eval/edit-form`.
 
-(ns kmet.extensions.clojure.edit-util
+(ns kmet.libs.clj-edit
   (:require [babashka.fs :as fs]
             [cljfmt.core :as fmt]
             [clojure.edn :as edn]
@@ -740,19 +741,16 @@
         "definition, then retry. No change was written.")
    :is-error true})
 
-(defn edit-pipeline
-  "Run the shared edit pipeline: load FILE-PATH, call FIND-EDIT-FN with the
-   parsed zipper (which must return either {:error msg :similar-matches ...}
-   or {:zloc updated-zloc}), format the top-level forms the edit changed
-   with the project's cljfmt config, refuse an edit that would introduce a
-   duplicate top-level definition, write the file back, and return the tool
-   result map.
-   FIND-EDIT-FN may return nil instead of {:error ...} — that becomes the
-   not-found error."
-  [file-path find-edit-fn]
+(defn edit-source
+  "Apply FIND-EDIT-FN to SOURCE — the pure half of the edit pipeline. The
+   zipper edit must return nil (not found), `{:error msg :similar-matches …}`,
+   or `{:zloc updated-zloc}`; the changed top-level forms are formatted with
+   the project's cljfmt config and an edit that would introduce a duplicate
+   definition is refused. Returns `{:content <formatted source> :diff <str>}`
+   or an error result; the caller decides whether to write."
+  [source file-path find-edit-fn]
   (try
-    (let [original      (slurp-utf8 file-path)
-          zloc          (z/of-string original {:track-position? true})
+    (let [zloc          (z/of-string source {:track-position? true})
           orig-children (n/children (z/root zloc))
           result        (find-edit-fn zloc)]
       (if (and result (:error result))
@@ -774,18 +772,766 @@
                            (n/children (z/root new-zloc))
                            (project-fmt-opts file-path))
                 dups      (introduced-duplicates
-                           (top-level-definition-lines original)
+                           (top-level-definition-lines source)
                            (top-level-definition-lines formatted))]
             (if (seq dups)
               (duplicate-error file-path dups)
-              (do
-                (spit-utf8 file-path formatted)
-                (let [diff-str (edit-diff/generate-display-diff original formatted)]
-                  {:content "Edit applied."
-                   :details (when diff-str {:diff diff-str})})))))))
+              {:content formatted
+               :diff (edit-diff/generate-display-diff source formatted)})))))
     (catch Exception e
       {:content (str "Error editing " file-path ": " (ex-message e))
        :is-error true})))
+
+(defn edit-definition-source
+  "Replace RECORD's top-level form in SOURCE with NEW-SOURCE, which must be
+   exactly one complete form. Formats the changed form, refuses a duplicate
+   definition, and returns `{:content formatted :diff str}` or an error
+   result. This is the pure step behind eval/edit-form."
+  [source file-path record new-source]
+  (let [parsed (try (p/parse-string-all new-source)
+                    (catch Throwable t
+                      (throw (ex-info (str "cannot parse replacement: "
+                                           (ex-message t))
+                                      {:type :eval/edit-form}))))
+        forms (vec (remove n/whitespace-or-comment? (n/children parsed)))]
+    (when-not (= 1 (count forms))
+      (throw (ex-info (str "edit-form needs exactly one top-level form, got "
+                           (count forms))
+                      {:type :eval/edit-form})))
+    (let [new-node (first forms)
+          find-edit (fn [zloc]
+                      (let [root (loop [loc zloc]
+                                   (if (= :forms (n/tag (z/node loc)))
+                                     loc
+                                     (recur (z/up loc))))
+                            target (loop [loc (z/down root)]
+                                     (when loc
+                                       (if (= (:source record) (n/string (z/node loc)))
+                                         loc
+                                         (recur (z/right loc)))))]
+                        (when target
+                          {:zloc (z/replace target new-node)})))]
+      (edit-source source file-path find-edit))))
+
+(defn edit-pipeline
+  "Read FILE-PATH, apply FIND-EDIT-FN through `edit-source`, and write the
+   formatted result. Returns the tool result map; `:content` is \"Edit
+   applied.\" on success and the error report otherwise."
+  [file-path find-edit-fn]
+  (let [original (slurp-utf8 file-path)
+        result (edit-source original file-path find-edit-fn)]
+    (if (:is-error result)
+      result
+      (do
+        (spit-utf8 file-path (:content result))
+        {:content "Edit applied."
+         :details (when-let [diff-str (:diff result)] {:diff diff-str})}))))
+
+;; ─── Top-level definition edit (clojure_edit and clj/edit-form) ─────────────
+
+(def ^:private op-kinds
+  "The operations the tool publishes, and the keyword the edit pipeline
+   switches on. An unknown operation falls back to `:replace`, which is how the
+   tool has always read it."
+  {"replace" :replace
+   "insert_before" :insert-before
+   "insert_after" :insert-after})
+
+(defn- node-string [zloc]
+  (when zloc
+    (let [node (z/node zloc)
+          tag  (n/tag node)]
+      (str/trim
+       (if (= tag :meta)
+         (some-> zloc z/down z/right z/node n/string)
+         (n/string node))))))
+
+(defn- parse-form-name [form-name]
+  (if (string? form-name)
+    (let [normalized (-> form-name str/trim (str/replace #"\s+" " "))]
+      (str/split normalized #"\s+" 2))
+    [form-name nil]))
+
+(defn- tag-match? [expected actual]
+  (or (= actual expected)
+      (= actual (str expected "-"))))
+
+(defn- check-tag [first-elem tag]
+  (let [actual (str/trim (n/string (z/node first-elem)))]
+    (when (or (tag-match? tag actual)
+              ;; alias-qualified macros (t/deftest, s/def, my/defmethod) match
+              ;; by unqualified name — consistent with collect-similar
+              (when-let [sym (try (z/sexpr first-elem) (catch Exception _ nil))]
+                (and (symbol? sym) (tag-match? tag (name sym)))))
+      first-elem)))
+
+(defn- matches-dispatch? [dispatch-elem expected]
+  (when (and dispatch-elem expected)
+    (= (node-string dispatch-elem) expected)))
+
+(defn- is-top-level-form? [zloc tag dname]
+  (try
+    (some-> zloc
+            z/down
+            (check-tag tag)
+            z/right
+            (#(let [[exp-name exp-dispatch] (parse-form-name dname)]
+                (when (= (node-string %) exp-name)
+                  (if exp-dispatch
+                    (some-> % z/right (matches-dispatch? exp-dispatch))
+                    true)))))
+    (catch Exception _ false)))
+
+(defn- find-top-level-form
+  ([zloc tag dname] (find-top-level-form zloc tag dname 3))
+  ([zloc tag dname max-depth]
+   (let [similar   (atom [])
+         queue     (atom [[zloc 0]])
+         base-name (first (parse-form-name dname))]
+     (letfn [(collect-similar [loc]
+               (try
+                 (let [sexpr (z/sexpr loc)]
+                   (when (and (list? sexpr) (> (count sexpr) 1))
+                     (let [ftag  (first sexpr)
+                           fname (second sexpr)]
+                       (when (and (symbol? ftag) (symbol? fname)
+                                  (tag-match? tag (name ftag))
+                                  (= (name fname) base-name))
+                         (swap! similar conj {:form-name     dname
+                                              :qualified-name fname
+                                              :tag            ftag})))))
+                 (catch Exception _ nil)))]
+       (loop []
+         (if-let [[loc depth] (first @queue)]
+           (do (swap! queue rest)
+               (if (is-top-level-form? loc tag dname)
+                 {:zloc loc :similar-matches @similar}
+                 (do
+                   (collect-similar loc)
+                   (when-let [r (z/right loc)]
+                     (swap! queue conj [r depth]))
+                   (when (< depth max-depth)
+                     (loop [child (z/down loc)]
+                       (when child
+                         (swap! queue conj [child (inc depth)])
+                         (recur (z/right child)))))
+                   (recur))))
+           {:zloc nil :similar-matches @similar}))))))
+
+(defn- edit-top-level-form [zloc tag dname content-str edit-type]
+  (let [{:keys [zloc similar-matches]} (find-top-level-form zloc tag dname)]
+    (if-not zloc
+      {:error           true
+       :message         (str "Could not find form '" dname "' of type '" tag "'")
+       :similar-matches similar-matches}
+      (let [updated (case edit-type
+                      ;; an empty content with :replace deletes the form
+                      ;; (edit tool convention); z/remove also trims the
+                      ;; surrounding whitespace so no blank line is left
+                      :replace       (if (str/blank? content-str)
+                                       (z/remove zloc)
+                                       (replace-form zloc content-str))
+                      :insert-before (insert-before-form zloc content-str)
+                      :insert-after  (insert-after-form zloc content-str))]
+        {:zloc updated :similar-matches similar-matches}))))
+
+(defn- extract-dispatch-from-defmethod [source-str]
+  (try
+    (let [zloc  (z/of-string source-str)
+          sexpr (z/sexpr zloc)]
+      (when (and (list? sexpr)
+                 (= (first sexpr) 'defmethod)
+                 (>= (count sexpr) 3))
+        [(name (second sexpr))
+         (pr-str (nth sexpr 2))]))
+    (catch Exception _ nil)))
+
+(defn- enhance-defmethod-name [def-type def-name content]
+  (if (= def-type "defmethod")
+    (let [parts (str/split def-name #"\s+")]
+      (if (= (count parts) 1)
+        (if-let [[_ dispatch-str] (extract-dispatch-from-defmethod content)]
+          (str def-name " " dispatch-str)
+          def-name)
+        def-name))
+    def-name))
+
+(defn- guard-args
+  "The usage error ARGS earns, or nil. Order is the contract: a required
+   parameter before the operation's content rule, the content rule before the
+   target file, and the file's existence before its form type — so a call
+   missing two things names the first one in this list."
+  [{:keys [file_path form_type form_identifier operation]}
+   op-kw missing-content? blank-insert?]
+  (cond
+    (str/blank? file_path)
+    {:content "Missing required parameter: file_path" :is-error true}
+
+    (not (clojure-file? file_path))
+    {:content (not-clojure-file-msg "clojure_edit" file_path)
+     :is-error true}
+
+    (str/blank? form_type)
+    {:content (str "Missing required parameter: form_type "
+                   "(e.g. \"defn\", \"defmethod\", \"def\")")
+     :is-error true}
+
+    (str/blank? form_identifier)
+    {:content "Missing required parameter: form_identifier" :is-error true}
+
+    ;; Deletion follows the edit tool's convention: content stays required, and
+    ;; a blank value with "replace" removes the form; a missing content is
+    ;; still an error.
+    missing-content?
+    {:content (str "Missing required parameter: content"
+                   (if (= op-kw :replace)
+                     " — pass \"\" (empty string) to delete the form."
+                     " — insert_before/insert_after need the content to insert."))
+     :is-error true}
+
+    blank-insert?
+    {:content (str "content cannot be empty for operation \"" operation
+                   "\" — insert_before/insert_after need the content to insert. "
+                   "An empty content deletes only with operation \"replace\".")
+     :is-error true}
+
+    (= form_type "comment")
+    {:content (str "Form type 'comment' is not supported. "
+                   "Use the edit tool for comment blocks.")
+     :is-error true}))
+
+(def ^:private form-examples
+  "The balanced-form example a rejected content's message ends with, by form
+   type; anything else gets `(FORM_TYPE …)`."
+  {"defn" "defn my-fn [args] body"
+   "def" "def my-var value"
+   "deftest" "deftest my-test (is ...)"
+   "ns" "ns my.namespace"
+   "defmethod" "defmethod my-fn :dispatch [args] body"})
+
+(defn- content-error
+  "The error CONTENT earns for FORM-TYPE, or nil: unparsable content is rejected
+   up front, stating what is wrong and where — unbalanced delimiters AND other
+   reader errors, which used to surface later as a confusing pipeline failure —
+   then the form's own shape. On \"replace\" the content must produce the
+   anchor's type; an inserted form is independent of the anchor, so it is
+   checked against its own head (a def may be inserted beside a defn anchor)."
+  [form_type content op-kw]
+  (if-let [problem (parse-problem "content" content)]
+    {:content (str "Invalid " form_type " content: "
+                   (case (:kind problem)
+                     :delimiter "unbalanced delimiters"
+                     :syntax "invalid syntax")
+                   ".\n"
+                   (:report problem)
+                   "\nThe content must be a complete, balanced " form_type
+                   " form, e.g. ("
+                   (get form-examples form_type (str form_type " ...")) ").")
+     :is-error true}
+    (let [content-type (if (= op-kw :replace)
+                         form_type
+                         (or (form-head content) form_type))]
+      (when-let [shape-error (validate-form-shape content-type content)]
+        {:content (str "Invalid " content-type " content: " shape-error
+                       "\nPass the complete " content-type " form explicitly.")
+         :is-error true}))))
+
+(defn- find-edit
+  "The zipper edit for one pass: a blank content under \"replace\" is a deletion,
+   so nothing is parsed or re-indented; otherwise the replacement is re-indented
+   to the found form's column and the edit re-run, because one pass would leave
+   the content at column 0."
+  [zloc {:keys [file_path form_type content op-kw blank-content? enhanced-name]}]
+  (if blank-content?
+    (edit-top-level-form zloc form_type enhanced-name content op-kw)
+    (let [result (edit-top-level-form zloc form_type enhanced-name content op-kw)]
+      (if (:error result)
+        result
+        (let [found-zloc (:zloc result)
+              form-col (second (z/position found-zloc))
+              content' (if form-col
+                         (format-form-in-isolation content form-col
+                                                   (project-fmt-opts file_path))
+                         content)]
+          (edit-top-level-form zloc form_type enhanced-name content' op-kw))))))
+
+(defn- resolved-args
+  "ARGS with `:file_path` resolved against its `:cwd` (the tool's run cwd or
+   the eval source's call cwd). Absolute paths pass through."
+  [args]
+  (if-let [path (or (:file_path args) (get args "file_path"))]
+    (let [path (str path)]
+      (assoc args :file_path
+             (if (fs/absolute? path)
+               path
+               (str (fs/normalize
+                     (fs/path (or (:cwd args)
+                                  (get args "cwd")
+                                  (System/getProperty "user.dir")
+                                  ".")
+                              path))))))
+    args))
+
+(defn edit-form-source
+  "Apply the clojure_edit operation described by ARGS to SOURCE, without
+   reading or writing a file. Snapshots `:file_path` only supplies the
+   project's fmt config; the caller owns the file."
+  [source {:keys [form_type content operation]
+           :or   {operation "replace"} :as args}]
+  (let [op-kw (get op-kinds operation :replace)
+        missing-content? (nil? content)
+        blank-content? (and (not missing-content?) (str/blank? content))
+        blank-insert? (and blank-content? (not= op-kw :replace))]
+    (or (guard-args args op-kw missing-content? blank-insert?)
+        (content-error form_type content op-kw)
+        (edit-source
+         source
+         (:file_path args)
+         (fn [zloc]
+           (find-edit zloc {:file_path (:file_path args)
+                            :form_type form_type
+                            :content content
+                            :op-kw op-kw
+                            :blank-content? blank-content?
+                            :enhanced-name (enhance-defmethod-name
+                                            form_type (:form_identifier args) content)}))))))
+
+(defn edit-form
+  "The clojure_edit operation as a plain function: ARGS is its map, including
+   `:file_path`; returns the tool result map and writes the file. A relative
+   `:file_path` resolves against `:cwd` when supplied."
+  [args]
+  (let [args (resolved-args args)
+        file_path (:file_path args)
+        op-kw (get op-kinds (:operation args) :replace)
+        missing-content? (nil? (:content args))
+        blank-content? (and (not missing-content?) (str/blank? (:content args)))
+        blank-insert? (and blank-content? (not= op-kw :replace))]
+    (or (guard-args args op-kw missing-content? blank-insert?)
+        (when-not (fs/exists? file_path)
+          {:content (str "File not found: " file_path) :is-error true})
+        (let [result (edit-form-source (slurp-utf8 file_path) args)]
+          (if (:is-error result)
+            result
+            (do
+              (spit-utf8 file_path (:content result))
+              {:content "Edit applied."
+               :details (when-let [diff-str (:diff result)]
+                          {:diff diff-str})}))))))
+
+;; ─── S-expression edit (clojure_edit_replace_sexp and clj/replace-sexp) ─────
+
+(def ^:dynamic *match-clean* false)
+
+(defn- semantic-nodes? [node]
+  (if *match-clean*
+    (not (n/whitespace-or-comment? node))
+    (not (n/whitespace? node))))
+
+(defn- normalize-whitespace-node [node]
+  (if (= :forms (n/tag node))
+    (n/forms-node (map normalize-whitespace-node (n/children node)))
+    (if (n/inner? node)
+      (let [children (n/children node)
+            filtered (->> children
+                          (remove n/whitespace?)
+                          (map normalize-whitespace-node)
+                          (interpose (n/spaces 1))
+                          vec)]
+        (n/replace-children node filtered))
+      node)))
+
+(defn- normalize-and-clean-node [node]
+  (cond
+    (not (semantic-nodes? node)) nil
+    (= :forms (n/tag node))
+    (n/forms-node (->> (n/children node)
+                       (map normalize-and-clean-node)
+                       (filter some?)))
+    (n/inner? node)
+    (let [children (n/children node)
+          cleaned  (->> children
+                        (map normalize-and-clean-node)
+                        (filter some?)
+                        (interpose (n/spaces 1))
+                        vec)]
+      (n/replace-children node cleaned))
+    :else node))
+
+(defn- node->match-expr [node]
+  (when-let [n (if *match-clean*
+                 (normalize-and-clean-node node)
+                 (normalize-whitespace-node node))]
+    (n/string n)))
+
+(defn- zchild-match-exprs [zloc]
+  (let [nodes (if (= :forms (z/tag zloc))
+                (n/children (z/node zloc))
+                (->> (iterate z/right* zloc)
+                     (take-while some?)
+                     (map z/node)))]
+    (->> nodes
+         (filter (bound-fn* semantic-nodes?))
+         (keep (bound-fn* node->match-expr)))))
+
+(defn- str-forms->sexps [str-forms]
+  (zchild-match-exprs (z/of-node (p/parse-string-all str-forms))))
+
+(defn- match-multi-sexp [match-sexprs zloc]
+  (let [len         (count match-sexprs)
+        zloc-sexprs (zchild-match-exprs zloc)
+        matched     (map = match-sexprs zloc-sexprs)]
+    (and (every? identity matched)
+         (= (count matched) len))))
+
+;; ═══════════════════════════════════════════════════════════════════════════════
+;; Zipper: multi-sexp operations
+;; ═══════════════════════════════════════════════════════════════════════════════
+
+(defn- iterate-to-n [f x n]
+  (->> (iterate f x) (take n) last))
+
+(defn- zright-n [zloc n]
+  (iterate-to-n z/right zloc n))
+
+(defn- remove-match-expr
+  "Remove the matched expression at ZLOC with REMOVE-FN — z/remove* while
+   truncating for a replacement; z/remove for deletion, which also trims
+   the surrounding whitespace so a deleted expression takes its line with
+   it instead of leaving a blank one. Whitespace between the scan start
+   and the match is removed raw."
+  [zloc match-exp & [remove-fn]]
+  (let [remove-fn (or remove-fn z/remove*)]
+    (loop [zloc' zloc]
+      (when (and zloc' (not (z/end? zloc')))
+        (let [node (z/node zloc')]
+          (when (and (semantic-nodes? node)
+                     (not= match-exp (node->match-expr node)))
+            (throw (ex-info "Bad match state" {:node      (n/string node)
+                                               :match-exp match-exp})))
+          (if (and (semantic-nodes? node)
+                   (= match-exp (node->match-expr node)))
+            (remove-fn zloc')
+            (recur (-> zloc' z/remove* z/next*))))))))
+
+(defn- remove-match-exprs
+  "Remove each expression in MATCH-EXPRS starting at ZLOC, optionally with
+   REMOVE-FN (default z/remove*; deletion passes z/remove so the removed
+   expressions take their lines with them)."
+  [zloc match-exprs & [remove-fn]]
+  (let [end (last match-exprs)]
+    (reduce
+     (fn [zloc' match-expr]
+       (let [zl (remove-match-expr zloc' match-expr remove-fn)]
+         (cond
+           (= match-expr end) zl
+           (not (z/end? zl)) (z/next* zl))))
+     zloc
+     match-exprs)))
+
+(defn- truncate-matched-expression [zloc [start & match-exprs]]
+  (when-let [after-truncated (remove-match-exprs (z/right* zloc) match-exprs)]
+    (z/find after-truncated z/prev*
+            (fn [zloc]
+              (let [node (z/node zloc)]
+                (and (semantic-nodes? node)
+                     (= start (node->match-expr node))))))))
+
+(defn- replace-multi-helper [zloc match-exprs content-str]
+  (if (= 1 (count match-exprs))
+    (replace-form zloc content-str)
+    (let [truncated-zloc (truncate-matched-expression zloc match-exprs)]
+      (replace-form truncated-zloc content-str))))
+
+(defn- replace-multi [zloc match-sexprs content-str]
+  (if (or (nil? content-str) (zero? (count content-str)))
+    ;; deletion: z/remove also trims the surrounding whitespace, so the
+    ;; removed expression(s) take their line(s) with them
+    (let [after-loc (remove-match-exprs zloc match-sexprs z/remove)]
+      {:edit-span-loc after-loc :after-loc after-loc})
+    (let [edit-span-loc (replace-multi-helper zloc match-sexprs content-str)]
+      {:edit-span-loc edit-span-loc
+       :after-loc      (or (z/right edit-span-loc)
+                           (z/next edit-span-loc))})))
+
+(defn- insert-before-multi [zloc _match-sexprs replacement-node]
+  ;; Same shape as clj-edit/insert-before-form: a "\n\n" separator then
+  ;; the content, both inserted raw (z/insert-left would auto-space and
+  ;; glue the forms onto the anchor's line).
+  (let [edit-loc (-> zloc
+                     walk-back-to-non-comment z/next*
+                     (z/insert-left* (p/parse-string-all "\n\n"))
+                     z/left
+                     (z/insert-left* replacement-node)
+                     z/left)]
+    {:edit-span-loc edit-loc
+     :after-loc     (-> edit-loc z/splice
+                        (zright-n (count (n/child-sexprs replacement-node))))}))
+
+(defn- insert-after-multi [zloc match-sexprs replacement-node]
+  (let [anchor (-> (take (count match-sexprs) (iterate z/right zloc))
+                   last
+                   ;; past the match's own same-line trailing trivia, so a
+                   ;; trailing comment stays with the matched form
+                   walk-forward-past-trailing-comments)
+        comment-anchor? (= :comment (n/tag (z/node anchor)))
+        sep-node (p/parse-string-all (if comment-anchor? "\n" "\n\n"))
+        edit-loc (-> anchor
+                     (z/insert-right* sep-node)
+                     z/right
+                     (z/insert-right* replacement-node)
+                     z/right)
+        ;; a comment anchor already ends its line — terminate the inserted
+        ;; content's line too, or it glues to the next form
+        edit-loc (if comment-anchor?
+                   (z/insert-right* edit-loc (p/parse-string-all "\n"))
+                   edit-loc)]
+    {:edit-span-loc edit-loc
+     :after-loc     (-> edit-loc z/splice
+                        (zright-n (count (n/child-sexprs replacement-node))))}))
+
+(defn- find-multi-sexp [zloc match-sexprs]
+  (->> (iterate z/next zloc)
+       (take-while (complement z/end?))
+       (filter z/sexpr-able?)
+       (filter #(match-multi-sexp match-sexprs %))
+       first))
+
+(defn- find-and-edit-one-multi-sexp
+  ([zloc operation match-form new-form]
+   (find-and-edit-one-multi-sexp zloc operation match-form new-form nil))
+  ([zloc operation match-form new-form _reindent-fn]
+   (when-not (and (str/blank? new-form) (#{:insert-before :insert-after} operation))
+     (let [match-sexprs (str-forms->sexps match-form)]
+       (when-let [found-loc (find-multi-sexp zloc match-sexprs)]
+         (let [new-node (when-not (str/blank? new-form)
+                          (p/parse-string-all new-form))]
+           (condp = operation
+             :insert-before (insert-before-multi found-loc match-sexprs new-node)
+             :insert-after  (insert-after-multi found-loc match-sexprs new-node)
+             (replace-multi found-loc match-sexprs new-form))))))))
+
+(defn- find-and-edit-all-multi-sexp [zloc operation match-form new-form]
+  (when-not (and (str/blank? new-form) (#{:insert-before :insert-after} operation))
+    (loop [loc zloc
+           locations []]
+      (if-let [{:keys [after-loc edit-span-loc]}
+               (find-and-edit-one-multi-sexp loc operation match-form new-form)]
+        (recur after-loc (conj locations edit-span-loc))
+        (when (seq locations)
+          {:zloc loc :locations locations})))))
+
+(defn- find-and-edit-multi-sexp* [zloc match-form new-form {:keys [operation all?]}]
+  (if all?
+    (find-and-edit-all-multi-sexp zloc operation match-form new-form)
+    (when-let [{:keys [after-loc edit-span-loc]}
+               (find-and-edit-one-multi-sexp zloc operation match-form new-form)]
+      {:zloc after-loc :locations [edit-span-loc]})))
+
+(defn- find-and-edit-multi-sexp [zloc match-form new-form opts]
+  (or (find-and-edit-multi-sexp* zloc match-form new-form opts)
+      (binding [*match-clean* true]
+        (find-and-edit-multi-sexp* zloc match-form new-form opts))))
+
+;; ═══════════════════════════════════════════════════════════════════════════════
+;; Main execute
+;; ═══════════════════════════════════════════════════════════════════════════════
+
+(defn replace-sexp
+  "The clojure_edit_replace_sexp operation as a plain function: ARGS is its
+   map, including `:file_path`; returns the tool result map and writes the
+   file. A relative `:file_path` resolves against `:cwd` when supplied."
+  [raw-args]
+  (let [{:keys [file_path match_form new_form replace_all operation]}
+        (resolved-args raw-args)
+        op-kw (case operation
+                "replace"       :replace
+                "insert_before" :insert-before
+                "insert_after"  :insert-after
+                :replace)
+        ;; Original: replace_all forced false for insert operations
+        replace-all? (and (boolean replace_all)
+                          (not= op-kw :insert-before)
+                          (not= op-kw :insert-after))
+        ;; Deletion follows the edit tool's convention: new_form stays
+        ;; required, and an empty (blank) value with operation "replace"
+        ;; removes the matched expression(s) — zero complete expressions.
+        missing-new? (nil? new_form)
+        blank-new?   (and (not missing-new?) (str/blank? new_form))
+        content-form (when-not (or missing-new? blank-new?) new_form)
+        ;; Parse problems are detected once, up front, so every rejection
+        ;; below can state the actual error (kind + line/col report).
+        match-problem (when match_form (parse-problem "match_form" match_form))
+        new-problem   (when content-form (parse-problem "new_form" content-form))
+        shape-error   (when content-form
+                        (let [head (second (re-find #"^\((defn|defn-|defmacro|defmacro-|def|deftest|deftest-|defmethod|defprotocol|defrecord|ns)([ )])"
+                                                    (str/trim content-form)))]
+                          (when head
+                            (validate-form-shape head content-form))))]
+    (cond
+      (str/blank? file_path)
+      {:content "Missing required parameter: file_path" :is-error true}
+
+      (not (clojure-file? file_path))
+      {:content (not-clojure-file-msg "clojure_edit_replace_sexp" file_path)
+       :is-error true}
+
+      (not (fs/exists? file_path))
+      {:content (str "File not found: " file_path) :is-error true}
+
+      (str/blank? match_form)
+      {:content "Missing required parameter: match_form" :is-error true}
+
+;; Any parse problem in match_form is rejected outright — no auto-repair.
+;; The report states what is wrong and where (kind, line/col).
+      match-problem
+      {:content (str "match_form must be complete and balanced"
+                     " (unbalanced delimiters are rejected, not auto-repaired):\n"
+                     (:report match-problem)
+                     "\nPass the complete S-expression(s), e.g. \"(+ x 1)\".")
+       :is-error true}
+
+;; match_form must be at least one real S-expression (not comments/whitespace)
+      (let [parsed (try (p/parse-string-all match_form) (catch Exception _ nil))]
+        (or (nil? parsed)
+            (zero? (count (n/child-sexprs parsed)))))
+      {:content "match_form must contain at least one valid S-expression (not just comments or whitespace)"
+       :is-error true}
+
+;; new_form stays required (edit tool convention): an empty string deletes
+;; with "replace"; insertion has nothing to insert with an empty value.
+      missing-new?
+      {:content (str "Missing required parameter: new_form"
+                     (if (= op-kw :replace)
+                       " — pass \"\" (empty string) to delete the matched expression(s)."
+                       " — insert_before/insert_after need the content to insert."))
+       :is-error true}
+
+      (and blank-new? (not= op-kw :replace))
+      {:content (str "new_form cannot be empty for operation \"" operation
+                     "\" — insert_before/insert_after need the content to insert. "
+                     "An empty new_form deletes only with operation \"replace\".")
+       :is-error true}
+
+;; Any parse problem in new_form is rejected outright — no auto-repair.
+      new-problem
+      {:content (str "new_form must be complete and balanced"
+                     " (unbalanced delimiters are rejected, not auto-repaired):\n"
+                     (:report new-problem)
+                     "\nPass the complete S-expression(s), e.g. \"(* x 2)\".")
+       :is-error true}
+
+;; Balanced-but-broken definition forms are also rejected (e.g. "(def foo)"
+;; with no value, or "(defn- f)" with no arg vector) — with the validator's
+;; actual reason spelled out instead of a generic rejection.
+      shape-error
+      {:content (str "Invalid new_form — not a well-formed Clojure definition:\n"
+                     shape-error
+                     "\nPass a complete, valid expression.")
+       :is-error true}
+
+      :else
+      (let [find-edit (fn [zloc]
+                        (find-and-edit-multi-sexp
+                         zloc match_form content-form
+                         {:operation op-kw :all? replace-all?}))]
+        (edit-pipeline file_path find-edit)))))
+
+;; ─── Delimiter repair (clojure_paren_repair and clj/paren-repair) ──────────
+
+(defn repair-string
+  "Repair delimiters in SOURCE and optionally format with cljfmt using
+   FMT-OPTS (resolved from the file's directory by the caller, so the
+   project's cljfmt.edn rules apply). Returns {:content str
+   :delimiter-fixed? bool :formatted? bool}."
+  [source format? fmt-opts]
+  (let [[repaired delimiter-fixed?] (repair-delimiters source)
+        formatted (if format?
+                    (format-source-string repaired fmt-opts)
+                    repaired)]
+    {:content formatted
+     :delimiter-fixed? delimiter-fixed?
+     :formatted? (not= repaired formatted)}))
+
+(defn repair-file!
+  "Repair delimiter errors in FILE-PATH and optionally format.
+   Returns {:success bool :message str :diff str-or-nil
+            :delimiter-fixed? bool :formatted? bool}.
+   A delimiter error that delimiter-only repair cannot fix (or a file that does
+   not parse at all) is an explicit failure carrying the precise report —
+   never a silent \"no changes\" success."
+  [file-path format?]
+  (cond
+    (not (fs/exists? file-path))
+    {:success false :message (str "File does not exist: " file-path)}
+
+    (not (clojure-file? file-path))
+    {:success false :message (not-clojure-file-msg "clojure_paren_repair" file-path)}
+
+    :else
+    (try
+      (let [original (slurp-utf8 file-path)
+            fmt-opts (project-fmt-opts file-path)
+            result (repair-string original format? fmt-opts)
+            final-content (:content result)
+            changed? (not= original final-content)]
+        (if changed?
+          (do (spit-utf8 file-path final-content)
+              (let [diff-str (edit-diff/generate-display-diff original final-content)
+                    status-parts (cond-> []
+                                   (:delimiter-fixed? result) (conj "delimiter-fixed")
+                                   (:formatted? result) (conj "formatted"))]
+                {:success true
+                 :message (str "Fixed [" (str/join ", " status-parts) "]")
+                 :delimiter-fixed? (:delimiter-fixed? result)
+                 :formatted? (:formatted? result)
+                 :diff diff-str}))
+          ;; Nothing changed — either the file is clean or the problem is
+          ;; beyond indent-mode repair. Say which, with the actual error.
+          (if-let [problem (parse-problem file-path final-content)]
+            {:success false
+             :message (str "Could not fix " file-path " — it still does not parse:\n"
+                           (:report problem)
+                           "\n"
+                           (case (:kind problem)
+                             :delimiter "delimiter-only repair inserts missing closers and drops stray ones — fix this one manually (e.g. with the edit tool)."
+                             "Fix the syntax error manually (e.g. with the edit tool)."))
+             :delimiter-fixed? false
+             :formatted? false
+             :diff nil}
+            {:success true
+             :message "No changes needed (parses cleanly; no delimiter errors)"
+             :delimiter-fixed? false
+             :formatted? false
+             :diff nil})))
+      (catch Exception e
+        {:success false
+         :message (str "Error: " (ex-message e))
+         :delimiter-fixed? false
+         :formatted? false
+         :diff nil}))))
+
+;; ═══════════════════════════════════════════════════════════════════════════════
+;; Tool execute
+;; ═══════════════════════════════════════════════════════════════════════════════
+
+(defn paren-repair
+  "The clojure_paren_repair operation as a plain function: ARGS is its map,
+   including `:file_path`; returns the tool result map and writes the file. A
+   relative `:file_path` resolves against `:cwd` when supplied."
+  [raw-args]
+  (let [{:keys [file_path format]} (resolved-args raw-args)
+        format? (if (nil? format) true (boolean format))]
+    (cond
+      (str/blank? file_path)
+      {:content "Missing required parameter: file_path" :is-error true}
+
+      :else
+      (let [result (repair-file! file_path format?)]
+        (if (:success result)
+          (cond-> {:content (:message result)}
+            (:diff result) (assoc :details {:diff (:diff result)}))
+          {:content (:message result) :is-error true})))))
 
 (defn- title-home-path
   [p]
