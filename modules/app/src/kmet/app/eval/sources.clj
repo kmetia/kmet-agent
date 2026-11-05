@@ -13,10 +13,11 @@
   :core)
 
 (def reserved-source-namespaces
-  "Namespaces an extension source may not contribute to. `user` is the core
-   source's; `clj` is the shared Clojure editor that ships with the eval
-   service."
-  #{"user" "clj"})
+  "Namespaces an extension source may not contribute to: the core source's
+   `user` and `clj`, the eval namespace itself, and the fixed namespaces the
+   sandbox installs around it."
+  #{"user" "clj" "eval" "clojure" "clojure.core"
+    "sandbox" "tools" "babashka.process" "kmet.libs.json"})
 
 (def reserved-source-keys
   "Individual built-in keys outside the reserved namespaces. A source that

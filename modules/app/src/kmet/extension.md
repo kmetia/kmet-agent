@@ -401,8 +401,9 @@ the sources remain, but nothing can promote them (the run warns; see
 ### Eval sources (`register-eval-source!`)
 
 An eval source contributes live values and `/eval` verbs to every eval
-environment. Register it with a 1-arg fn; the eval service reads that fn on
-every call, so the contribution is current, not a snapshot:
+environment. Register it with a 1-arg fn; the eval service reads that fn when
+the environment is built and on later calls (the build's read is reused by the
+first call), so the contribution is current, not a snapshot:
 
 ```clojure
 (ext/register-eval-source! api :license
@@ -431,9 +432,11 @@ every call, so the contribution is current, not a snapshot:
   `/eval` prints when non-blank.
 - **Use the verbs within the call.** They read that call's signal and cwd, so
   capturing one past the call that produced it is unsupported.
-- `user` and `clj` are reserved for the built-in sources. Namespace what you
-  contribute (`license/add!`); a source that contributes a reserved namespace,
-  a built-in key, or a built-in `/eval` verb is refused as a whole.
+- `user` and `clj` are reserved for the built-in sources, as are the eval
+  layer's own namespaces (`eval`, `clojure.core`, `clojure`, `sandbox`,
+  `tools`, `babashka.process`, `kmet.libs.json`). Namespace what you contribute
+  (`license/add!`); a source that contributes a reserved namespace, a built-in
+  key, or a built-in `/eval` verb is refused as a whole.
 - A source-provided key is never written to the eval library. A model can
   redefine it live (the call line says `source; not stored`); `:drop` and
   `(eval/forget …)` restore the source value while the source is mounted. The

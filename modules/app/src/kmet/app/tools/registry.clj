@@ -238,8 +238,8 @@
 
 ;; ─── Eval sources ──────────────────────────────────────────────────────────
 ;; An eval source contributes live values to every eval environment: its
-;; `sources-fn` is read per call and returns the current namespaces, macros and
-;; `/eval` verbs. The registration lives on the same `:tools` handle as the
+;; `sources-fn` is read when an environment is built and on later calls,
+;; returning the current namespaces, macros and `/eval` verbs. The registration lives on the same `:tools` handle as the
 ;; tool sources, so unloading an owner sweeps both. The core source is the row
 ;; `:tool/eval` itself; extensions register through their own owner path.
 
@@ -262,7 +262,9 @@
       :macros   {'license {'with-license (fn [_form _env & args] ...)}}
       :commands {:lint {:description \"Lint\" :run (fn [{:keys [args]}] ...)}}}
 
-   The service calls it once per eval call with
+   The service reads it when an eval environment is built and on each later
+   eval call (the build's read is reused by the first call); `/eval sources`
+   and help read it too. It receives
    `{:cwd :project-dir :agent-dir :signal :verbs}`; a throwing source or a
    bad shape contributes nothing and is reported. OPTS may carry `:owner` —
    an extension passes its own owner path so unload disposes the source.

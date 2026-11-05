@@ -604,8 +604,8 @@ from the shipped extensions' side).
 ## Eval sources
 
 An extension can add live values and `/eval` verbs to the persistent eval
-environment. The source is read on every eval call, so it can expose current
-state instead of a snapshot:
+environment. The source is read when an eval environment is built and on later
+calls, so it can expose current state instead of a snapshot:
 
 ```clojure
 (ext/register-eval-source! api :license
@@ -624,8 +624,10 @@ state instead of a snapshot:
 (ext/unregister-eval-source! api :license)
 ```
 
-- Values live under the namespace you return; `user` and `clj` are reserved
-  for the built-in sources. Use `license/add!`, not `add!` or `user/add!`.
+- Values live under the namespace you return; `user`, `clj`, `eval` and the
+  sandbox's fixed namespaces (`clojure.core`, `clojure`, `sandbox`, `tools`,
+  `babashka.process`, `kmet.libs.json`) are reserved for the built-in sources.
+  Use `license/add!`, not `add!` or `user/add!`.
 - `:verbs` carries the call's `:edit` and `:write-file` operations. They read
   that call's cwd and cancel signal; use them within the call, never keep them.
 - `:commands` adds verbs to `/eval`; its built-in verbs (`list`, `search`,

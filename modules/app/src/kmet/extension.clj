@@ -135,7 +135,8 @@
 (defn register-eval-source!
   "Register (or replace) an eval source: ID → a 1-arg fn receiving the call
    context and returning `{:doc :ns :macros :commands}`. The service reads it
-   on every eval call, so the values it returns are the current ones.
+   when an eval environment is built and on later calls, so the values it
+   returns are the current ones.
 
    `:ns` and `:macros` contribute values to the eval environment; `:verbs` in
    the argument map are the shared file operations (`:edit`, `:write-file`) as

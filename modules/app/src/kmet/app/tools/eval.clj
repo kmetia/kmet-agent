@@ -39,7 +39,8 @@
       (if-let [service (some-> (:srce-ctx ctx) (srce/get :eval))]
         (try
           (if (str/blank? code)
-            ((:drop! service) {:drop drop})
+            ((:drop! service) {:drop drop
+                               :cwd (or (:cwd ctx) (tool-util/cwd))})
             ((:eval! service) {:code code
                                :drop drop
                                :timeout timeout

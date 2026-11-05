@@ -72,13 +72,17 @@
     (register! env :bad-clj (fn [_] {:ns {'clj {'edit-form 1}}}))
     (register! env :bad-macro (fn [_] {:macros {'user {'nope (fn [_ _] nil)}}}))
     (register! env :bad-key (fn [_] {:ns {'eval {'library 1}}}))
+    (register! env :bad-fixed (fn [_] {:ns {'tools {'call 1}}}))
     (register! env :bad-command (fn [_] {:commands {:list {:run (fn [_] nil)}}}))
     (let [result (support/eval! env "(+ 1 2)")
           errors (source-errors (:service env))
           ids (set (map :id errors))]
       (t/is (= "3" (:content result)))
-      (t/is (= #{:boom :bad-user :bad-clj :bad-macro :bad-key :bad-command} ids))
+      (t/is (= #{:boom :bad-user :bad-clj :bad-macro :bad-key
+                 :bad-fixed :bad-command} ids))
       (t/is (seq (get-in result [:details :source-errors])))
+      (t/is (str/includes? (pr-str (:details result)) "may not contribute to clj"))
+      (t/is (str/includes? (pr-str (:details result)) "may not contribute to eval"))
       (t/is (= "false" (:content (support/eval! env "(some? (resolve 'user/nope))"))))
       (t/is (nil? (get (support/eval! env "(eval/sources)") :id))))))
 
@@ -124,6 +128,22 @@
     (support/eval! env "(ns license) (eval/forget 'value)")
     (t/is (= "false" (:content (support/eval! env "(ns license) (some? (resolve 'value))"))))))
 
+(t/deftest a-code-less-drop-does-not-restore-an-unloaded-source
+  (let [env (support/eval-ctx)
+        dereg (register! env :license
+                         (fn [_] {:ns {'license {'value 1}}}))]
+    (t/is (= "1" (:content (support/eval! env "(ns license) value"))))
+    (dereg)
+    (let [result ((:drop! (:service env))
+                  {:session (:session env)
+                   :drop ["license/value"]
+                   :cwd (:cwd env)})]
+      (t/is (not (:is-error result)) (:content result)))
+    (t/is (= "false"
+             (:content (support/eval! env
+                                      "(ns license) (some? (resolve 'value))")))
+          "the unloaded source's live value is gone, not restored")))
+
 (t/deftest source-commands-are-collected-with-their-description
   (let [env (support/eval-ctx)]
     (register! env :license
@@ -131,11 +151,15 @@
                  {:commands {:license-report
                              {:description "Report licenses"
                               :run (fn [{:keys [args cwd]}]
-                                     (str "args=" args " cwd=" cwd))}}}))
+                                     (str "args=" args " cwd=" cwd))}
+                             :foo/list
+                             {:description "Namespaced verb"
+                              :run (fn [_] "namespaced")}}}))
     (let [commands ((:source-commands (:service env)))
           command (:license-report commands)]
       (t/is (= "Report licenses" (:description command)))
-      (t/is (= "args=x cwd=/tmp" ((:run command) {:args "x" :cwd "/tmp"}))))))
+      (t/is (= "args=x cwd=/tmp" ((:run command) {:args "x" :cwd "/tmp"})))
+      (t/is (= "namespaced" ((:run (:foo/list commands)) {}))))))
 
 (t/deftest eval-sources-and-help-list-the-source-layer
   (let [env (support/eval-ctx)]
@@ -159,10 +183,14 @@
 
 (t/deftest source-values-are-read-on-every-call
   (let [current (atom 1)
+        reads (atom 0)
         env (support/eval-ctx)]
     (register! env :counter
                (fn [_]
+                 (swap! reads inc)
                  {:ns {'counter {'value @current}}}))
     (t/is (= "1" (:content (support/eval! env "counter/value"))))
+    (t/is (= 1 @reads) "the build's read is reused by the first call")
     (reset! current 2)
-    (t/is (= "2" (:content (support/eval! env "counter/value"))))))
+    (t/is (= "2" (:content (support/eval! env "counter/value"))))
+    (t/is (= 2 @reads))))

@@ -9,7 +9,9 @@
             [kmet.app.extensions.core :as extensions]
             [kmet.app.registries :as registries]
             [kmet.app.commands :as commands]
+            [kmet.app.eval :as eval-service]
             [kmet.app.registry :as registry]
+            [kmet.app.session.core :as session]
             [kmet.srce.core :as srce]
             [kmet.app.prompts :as prompts]
             [kmet.app.skills :as skills]
@@ -140,6 +142,19 @@
                               [:exposure :description]))
               "the ABI carries the source's exposure and description into the
                registry")
+        (let [agent-ctx (srce/isolate (support/composition-ctx))
+              cwd (test-tmp/temp-dir! "test-ext-eval-cwd-")
+              sess (session/create-session
+                    (test-tmp/temp-dir! "test-ext-eval-session-")
+                    {:cwd cwd})
+              service (eval-service/value agent-ctx
+                                          {:agent-dir (test-tmp/temp-dir!
+                                                       "test-ext-eval-agent-")})
+              result ((:eval! service)
+                      {:code "owned-eval/answer" :session sess :cwd cwd})]
+          (t/is (not (:is-error result)) (:content result))
+          (t/is (= "42" (:content result))
+                "an extension eval source contributes values to a real environment"))
         (t/is (= 1 (count @(:deregister-fns (first (extensions/registered-extensions)))))
               "only the event subscription stays on the tracked list")
         (extensions/unload-all-extensions!)

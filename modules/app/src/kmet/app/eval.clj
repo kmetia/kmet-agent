@@ -32,7 +32,6 @@
             [kmet.srce.core :as srce]
             [rewrite-clj.node :as n]
             [rewrite-clj.parser :as p]
-            [rewrite-clj.zip :as z]
             [sci.core :as sci]))
 
 ;; ─── Session and root ────────────────────────────────────────────────────
@@ -150,7 +149,8 @@
   (into {}
         (map (fn [[verb command]]
                (let [verb (source-verb id verb)]
-                 (when (contains? source-command-names (name verb))
+                 (when (and (nil? (namespace verb))
+                            (contains? source-command-names (name verb)))
                    (bad-source! id (str "eval source " (pr-str id)
                                         " may not replace /eval " (name verb))))
                  (when-not (and (map? command) (fn? (:run command)))
@@ -182,11 +182,11 @@
                                     (for [[ns vars] macros, name (keys vars)]
                                       (eval-sources/source-key ns name))))
           _ (when-not (eval-sources/core-source? id)
-              (when-let [ns (some eval-sources/reserved-namespace?
-                                  (concat (keys ns-map) (keys macros)))]
+              (when-let [ns (first (filter eval-sources/reserved-namespace?
+                                           (concat (keys ns-map) (keys macros))))]
                 (bad-source! id (str "eval source " (pr-str id)
                                      " may not contribute to " ns)))
-              (when-let [key (some eval-sources/reserved-key? contributed)]
+              (when-let [key (first (filter eval-sources/reserved-key? contributed))]
                 (bad-source! id (str "eval source " (pr-str id)
                                      " may not contribute the built-in key " key))))
           values (into {}
@@ -240,14 +240,16 @@
    invalid source contributes nothing; its error is reported in :info and
    :errors."
   [service cwd signal]
-  (let [results (mapv #(call-source service % cwd signal)
-                      (source-registrations service))
+  (let [registrations (source-registrations service)
+        results (mapv #(call-source service % cwd signal)
+                      registrations)
         good (filterv #(contains? % :values) results)
         errors (mapv #(select-keys % [:id :error])
                      (filterv #(contains? % :error) results))
         values (reduce (fn [acc source] (merge acc (:values source))) {} good)
         commands (reduce (fn [acc source] (merge acc (:commands source))) {} good)]
-    {:values values
+    {:ids (mapv :id registrations)
+     :values values
      :keys (set (keys values))
      :commands commands
      :info (mapv (fn [result]
@@ -305,7 +307,7 @@
    the SCI namespace additions for a new call. Returns the namespaces, info,
    errors and commands."
   [service env cwd signal]
-  (let [{:keys [values keys commands info errors]}
+  (let [{:keys [ids values keys commands info errors]}
         (resolve-sources service cwd signal)
         stale (remove keys @(:active-source-keys env))]
     (doseq [name stale
@@ -313,12 +315,26 @@
       (unbind! env name nil))
     (swap! (:source-keys env) into keys)
     (reset! (:active-source-keys env) keys)
+    (reset! (:source-ids env) ids)
     (reset! (:source-values env) values)
     (reset! (:source-info env) info)
+    (reset! (:source-errors env) errors)
     {:namespaces (source-namespaces values #(source-known? env %))
      :commands commands
      :info info
      :errors errors}))
+
+(defn- current-source-seed
+  "The source layer already resolved for ENV, without invoking its fns again.
+   Used by the first call after a rebuild: the build read the source layer to
+   compile the library, so re-reading it immediately would double every
+   source's work (and its side effects)."
+  [env]
+  {:namespaces (source-namespaces @(:source-values env)
+                                  #(source-known? env %))
+   :info @(:source-info env)
+   :errors @(:source-errors env)
+   :commands {}})
 
 ;; ─── Library index ────────────────────────────────────────────────────────
 
@@ -406,25 +422,45 @@
   (doseq [file (eval-files/scan root)]
     (load-library-file! env file)))
 
-(defn- find-subform
-  "The first zipper node whose value structurally equals FORM, or nil."
-  [root form]
-  (loop [loc (z/next* root)]
-    (when loc
-      (let [node (z/node loc)
-            match? (try (= form (n/sexpr node))
-                        (catch Throwable _ false))]
-        (cond
-          match? loc
-          (z/end? loc) nil
-          :else (recur (z/next* loc)))))))
+(defn- subform-match?
+  [node form]
+  (try (= form (n/sexpr node))
+       (catch Throwable _ false)))
+
+(defn- replace-first-subform
+  "Replace the first node in NODE's subtree whose value structurally equals
+   FORM with REPLACEMENT. Returns `[node replaced?]`; only one match is
+   replaced."
+  [node form replacement]
+  (if (subform-match? node form)
+    [replacement true]
+    (if-let [children (try (seq (n/children node))
+                           (catch Throwable _ nil))]
+      (loop [children (vec children)
+             i 0]
+        (if (< i (count children))
+          (let [[child replaced?] (replace-first-subform (nth children i)
+                                                         form replacement)]
+            (if replaced?
+              [(n/replace-children node (assoc children i child)) true]
+              (recur children (inc i))))
+          [node false]))
+      [node false])))
+
+(defn- definition-node-index
+  "The index of the top-level node whose text is RECORD's source, or nil."
+  [children record]
+  (first (keep-indexed (fn [i node]
+                         (when (= (:source record) (n/string node)) i))
+                       children)))
 
 (defn- patch-definition!
-  "Replace the first subform structurally equal to OLD with NEW in NAME's
-   library file, re-evaluate the patched file, then write it. The definition
-   name must not change. A source-provided key has no file and is refused; a
+  "Replace the first subform structurally equal to OLD with NEW inside NAME's
+   own definition form, re-evaluate the definition, then write the whole file.
+   The definition name and namespace must stay. A source-provided key or an
+   unwritten live definition has no authoritative file and is refused; a
    failed re-evaluation restores the old live definition and writes nothing.
-   Returns the report line."
+   The report line is recorded on the environment for the call result."
   [env cwd raw-name old new]
   (let [raw-name (->name raw-name)
         name (when raw-name (qualify-name (env-ns env) raw-name))]
@@ -435,6 +471,10 @@
       (bad-request! (str "cannot patch source-provided " name
                          "; it has no library file")
                     {:name name :source true}))
+    (when (contains? @(:unwritten env) name)
+      (bad-request! (str "cannot patch " name
+                         ": its live definition is not written; re-evaluate it first")
+                    {:name name :unwritten true}))
     (let [record (get @(:library env) name)
           path (or (:file record) (eval-files/path-for-name (:root env) name))]
       (when-not record
@@ -444,53 +484,69 @@
         (bad-request! (str "the library file for " name " is missing: " path)
                       {:name name :file path}))
       (let [content (slurp path)
-            root (try (z/of-string content)
+            root (try (p/parse-string-all content)
                       (catch Throwable t
                         (bad-request! (str "cannot parse " path ": " (ex-message t))
                                       {:name name :file path})))
-            loc (find-subform root old)]
-        (when-not loc
-          (bad-request! (str "no subform in " name " matches " (pr-str old))
-                        {:name name :form old}))
+            children (vec (n/children root))
+            idx (definition-node-index children record)]
+        (when (nil? idx)
+          (bad-request! (str "the definition form for " name " is not in " path)
+                        {:name name :file path}))
         (let [replacement (try (p/parse-string (pr-str new))
                                (catch Throwable t
                                  (bad-request! (str "cannot parse replacement: "
                                                     (ex-message t))
                                                {:name name :form new})))
-              patched (n/string (z/root (z/replace loc replacement)))
-              parsed (try (defs/parse patched "user")
-                          (catch Throwable t
-                            (bad-request! (str "patched " name " does not parse: "
-                                               (ex-message t))
-                                          {:name name :file path})))
-              patched-record (some #(when (= name (:name %)) %) (:defs parsed))]
-          (when-not patched-record
-            (bad-request! (str "patch changed the definition name of " name)
-                          {:name name :file path}))
-          (when-not (= (:ns record) (:ns patched-record))
-            (bad-request! (str "patch changed the namespace of " name)
-                          {:name name :file path}))
-          (let [eval-record (fn [r]
-                              (rearm-build! env)
-                              (script/eval-source!
-                               (:sci-ctx env) (:source r)
-                               (atom (or (sci/find-ns (:sci-ctx env)
-                                                      (symbol (:ns r)))
-                                         (sci/create-ns (symbol (:ns r)))))))
-                {:keys [error]} (eval-record patched-record)]
-            (if error
-              (do
-                ;; best effort: put the old source back in the live environment;
-                ;; the file was never touched
-                (eval-record record)
-                (bad-request! (str "patch evaluation failed: " error)
-                              {:name name :error error}))
-              (do
-                (eval-files/write-content! (:root env) path patched)
-                (swap! (:library env) assoc name
-                       (assoc patched-record :file path))
-                (str "[eval: patched " name " → "
-                     (eval-files/display-path cwd path) "]")))))))))
+              [patched-def replaced?] (replace-first-subform
+                                       (nth children idx) old replacement)]
+          (when-not replaced?
+            (bad-request! (str "no subform in " name " matches " (pr-str old))
+                          {:name name :form old}))
+          (let [patched (n/string (n/replace-children
+                                   root (assoc children idx patched-def)))
+                parsed (try (defs/parse patched "user")
+                            (catch Throwable t
+                              (bad-request! (str "patched " name " does not parse: "
+                                                 (ex-message t))
+                                            {:name name :file path})))
+                patched-record (some #(when (= name (:name %)) %) (:defs parsed))]
+            (when-not patched-record
+              (bad-request! (str "patch changed the definition name of " name)
+                            {:name name :file path}))
+            (when-not (= (:ns record) (:ns patched-record))
+              (bad-request! (str "patch changed the namespace of " name)
+                            {:name name :file path}))
+            (let [eval-record (fn [r]
+                                (rearm-build! env)
+                                (script/eval-source!
+                                 (:sci-ctx env) (:source r)
+                                 (atom (or (sci/find-ns (:sci-ctx env)
+                                                        (symbol (:ns r)))
+                                           (sci/create-ns (symbol (:ns r)))))))
+                  {:keys [error]} (eval-record patched-record)]
+              (if error
+                (do
+                  ;; best effort: put the old source back in the live environment;
+                  ;; the file was never touched
+                  (eval-record record)
+                  (bad-request! (str "patch evaluation failed: " error)
+                                {:name name :error error}))
+                (do
+                  (try
+                    (eval-files/write-content! (:root env) path patched)
+                    (catch Throwable t
+                      ;; the old file is still authoritative; keep the live
+                      ;; definition on it rather than on a file that did not land
+                      (eval-record record)
+                      (bad-request! (str "patch write failed: " (ex-message t))
+                                    {:name name :error (ex-message t)})))
+                  (swap! (:library env) assoc name
+                         (assoc patched-record :file path))
+                  (swap! (:patch-lines env) conj
+                         (str "[eval: patched " name " → "
+                              (eval-files/display-path cwd path) "]"))
+                  nil)))))))))
 
 (defn- prime-state
   "A prepared state for evaluating library definitions at rebuild: the current
@@ -549,6 +605,10 @@
              :model-shadows (atom #{})
              :source-values (atom {})
              :source-info (atom [])
+             :source-errors (atom [])
+             :source-ids (atom [])
+             :fresh-sources? (atom true)
+             :patch-lines (atom [])
              :parsed-names (atom #{})
              :unwritten (atom #{})
              :forgotten (atom #{})
@@ -741,7 +801,9 @@
   (let [forgotten (mapv #(qualify-name (env-ns env) %) forgotten)
         drop (distinct (concat drop forgotten))
         parsed-names (set (map :name (:defs parsed)))
-        lines (atom [])
+        lines (atom (let [patched @(:patch-lines env)]
+                      (reset! (:patch-lines env) [])
+                      patched))
         defined (atom [])
         forgotten-names (atom [])
         write-errors (atom 0)
@@ -864,7 +926,11 @@
                        (let [handle (or (srce/get (:agent-ctx service) :tools)
                                         (throw (ex-info "the eval service needs the agent's :tools service"
                                                         {:type :eval/no-tools})))
-                             sources (refresh-sources! service env cwd signal)]
+                             sources (if (and (compare-and-set! (:fresh-sources? env) true false)
+                                              (= @(:source-ids env)
+                                                 (mapv :id (source-registrations service))))
+                                       (current-source-seed env)
+                                       (refresh-sources! service env cwd signal))]
                          (script/run {:tool "eval"
                                       :code code
                                       :timeout timeout
@@ -892,6 +958,7 @@
               (bad-request! "eval needs code or drop" {})
               (do
                 (reset! (:forgotten env) #{})
+                (reset! (:patch-lines env) [])
                 (reset! (:parsed-names env) (set (map :name (:defs parsed))))
                 (let [result (run-code)]
                   (if (:is-error result)
@@ -914,49 +981,54 @@
 
 (defn- drop-request!
   "Drop NAMES for SESSION without building an environment: delete the files
-   and, when an environment exists, unbind the live names. Returns the
-   tool/command result map, or throws (the caller reports)."
-  [service session names]
-  (when @(:disposed? service)
-    (throw (ex-info "the agent's eval service is disposed"
-                    {:type :eval/disposed})))
-  (let [session (or session (extensions/get-session))
-        _ (when-not session
-            (throw (ex-info "eval needs a session" {:type :eval/no-session})))
-        started (concurrent/monotonic-ms)
-        lock (session-lock (:session-locks service) (:id session))]
-    (locking lock
-      (let [env (get @(:envs service) (:id session))
-            root (library-root service)
-            names (mapv #(qualify-name (or (some-> env env-ns) "user") %)
-                        (normalize-drop names))
-            known? (if env
-                     #(known-name? env %)
-                     #(fs/exists? (eval-files/path-for-name root %)))]
-        (validate-drop! known? names)
-        (let [forgotten (atom [])
-              failures (atom [])]
-          (doseq [name names]
-            (try
-              (let [error (if env
-                            (:error (drop-one! env name))
-                            (do (eval-files/delete-name! root name) nil))]
-                (swap! forgotten conj name)
-                (when error
-                  (swap! failures conj {:name name :error error})))
-              (catch Throwable t
-                (swap! failures conj {:name name :error (ex-message t)}))))
-          (let [failures @failures]
-            {:content (str/join "\n"
-                                (concat (map #(str "[eval: forgot " % "]")
-                                             @forgotten)
-                                        (map #(str "[eval: failed " (:name %) ": "
-                                                   (:error %) "]")
-                                             failures)))
-             :details (cond-> {:forgotten @forgotten
-                               :elapsed-ms (- (concurrent/monotonic-ms) started)}
-                        (seq failures) (assoc :failures failures))
-             :is-error (boolean (seq failures))}))))))
+   and, when an environment exists, refresh its source layer and unbind the
+   live names. Returns the tool/command result map, or throws (the caller
+   reports)."
+  ([service session names] (drop-request! service session names nil))
+  ([service session names cwd]
+   (when @(:disposed? service)
+     (throw (ex-info "the agent's eval service is disposed"
+                     {:type :eval/disposed})))
+   (let [session (or session (extensions/get-session))
+         _ (when-not session
+             (throw (ex-info "eval needs a session" {:type :eval/no-session})))
+         started (concurrent/monotonic-ms)
+         lock (session-lock (:session-locks service) (:id session))]
+     (locking lock
+       (let [env (get @(:envs service) (:id session))
+             _ (when env
+                 (refresh-sources! service env
+                                   (or cwd (tool-util/cwd)) nil))
+             root (library-root service)
+             names (mapv #(qualify-name (or (some-> env env-ns) "user") %)
+                         (normalize-drop names))
+             known? (if env
+                      #(known-name? env %)
+                      #(fs/exists? (eval-files/path-for-name root %)))]
+         (validate-drop! known? names)
+         (let [forgotten (atom [])
+               failures (atom [])]
+           (doseq [name names]
+             (try
+               (let [error (if env
+                             (:error (drop-one! env name))
+                             (do (eval-files/delete-name! root name) nil))]
+                 (swap! forgotten conj name)
+                 (when error
+                   (swap! failures conj {:name name :error error})))
+               (catch Throwable t
+                 (swap! failures conj {:name name :error (ex-message t)}))))
+           (let [failures @failures]
+             {:content (str/join "\n"
+                                 (concat (map #(str "[eval: forgot " % "]")
+                                              @forgotten)
+                                         (map #(str "[eval: failed " (:name %) ": "
+                                                    (:error %) "]")
+                                              failures)))
+              :details (cond-> {:forgotten @forgotten
+                                :elapsed-ms (- (concurrent/monotonic-ms) started)}
+                         (seq failures) (assoc :failures failures))
+              :is-error (boolean (seq failures))})))))))
 
 (defn- current-environment [service]
   (when-let [session (extensions/get-session)]
@@ -1003,7 +1075,7 @@
                             {:type :eval/no-session})))
         cwd (or (:cwd opts) (get-in opts [:ctx :cwd]) (tool-util/cwd))]
     (if (and (str/blank? (str (:code opts))) (seq (:drop opts)))
-      (drop-request! service session (:drop opts))
+      (drop-request! service session (:drop opts) cwd)
       (let [lock (session-lock (:session-locks service) (:id session))]
         (locking lock
           (let [env (ensure-environment! service session cwd)]
@@ -1029,8 +1101,8 @@
                   :session-locks session-locks
                   :disposed? disposed?}]
      {:eval! #(eval-call! service %)
-      :drop! (fn [{:keys [session drop]}]
-               (drop-request! service session drop))
+      :drop! (fn [{:keys [session drop cwd]}]
+               (drop-request! service session drop cwd))
       :library #(service-library service)
       :index #(service-index service)
       :sources (fn

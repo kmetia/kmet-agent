@@ -10,6 +10,8 @@
             [kmet.app.eval :as eval-service]
             [kmet.app.eval.files :as eval-files]
             [kmet.app.session.core :as session]
+            [kmet.app.test-eval-support :as support]
+            [kmet.app.tools.registry :as tools]
             [kmet.srce.core :as srce]
             [kmet.test-tmp :as test-tmp]
             [kmet.test-utils :as tu]))
@@ -181,6 +183,38 @@
     (t/is (:service? @called))
     (let [[_ _ help] (first (run env "help"))]
       (t/is (str/includes? help "/eval license/lint  Lint a definition")))))
+
+(t/deftest a-real-source-command-and-sources-report
+  (let [env (support/eval-ctx)
+        _ (tools/register-eval-source!
+           (:tools env) :license
+           (fn [_]
+             {:doc "License helpers"
+              :commands {:license-lint
+                         {:description "Lint licenses"
+                          :run (fn [{:keys [args]}]
+                                 (str "linted " args))}}}))
+        got (atom [])
+        engine {:agent-state (atom {:ctx (:ctx env)})
+                :session (atom (:session env))
+                :cwd (atom (:cwd env))}
+        run (fn [args]
+              (reset! got [])
+              ((:handler eval-command/command)
+               {:runtime engine
+                :ui {:info (fn [label content]
+                             (swap! got conj [:info label content]))
+                     :warning (fn [label content]
+                                (swap! got conj [:warning label content]))}}
+               args)
+              @got)]
+    (t/is (= [[:info "Eval" "linted x"]] (run "license-lint x")))
+    (let [[[_ _ content]] (run "sources")]
+      (t/is (str/includes? content "- core"))
+      (t/is (str/includes? content "- license: License helpers")))
+    (let [[[_ _ content]] (run "help")]
+      (t/is (str/includes? content "/eval license-lint"))
+      (t/is (str/includes? content "Lint licenses")))))
 
 (t/deftest runtime-builtins-register-eval
   (builtins/register-runtime-commands! (constantly nil))

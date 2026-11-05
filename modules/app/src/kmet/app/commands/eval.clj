@@ -112,9 +112,9 @@
         (catch Throwable _
           (remove str/blank? (str/split arg #"\s+")))))))
 
-(defn- drop! [svc sess names]
+(defn- drop! [svc sess names cwd]
   (try
-    ((:drop! svc) {:session sess :drop (vec names)})
+    ((:drop! svc) {:session sess :drop (vec names) :cwd cwd})
     (catch Exception e
       {:is-error true :content (or (ex-message e) (str e))})))
 
@@ -196,7 +196,7 @@
           (out ui :warning "Eval" "No active session.")
 
           :else
-          (let [result (drop! svc sess names)]
+          (let [result (drop! svc sess names cwd)]
             (out ui (if (:is-error result) :warning :info)
                  "Eval" (:content result)))))
 

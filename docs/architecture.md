@@ -616,11 +616,12 @@ addresses that sanitize to the same file name share a file; the last write
 wins. A source-provided key may be redefined live but is never written. A
 call that ends in a normal error writes nothing; definitions it evaluated
 before the error stay live and are forgettable. `(eval/patch 'name old new)`
-replaces the first structurally equal subform in the named definition's file,
-re-evaluates the definition, and only then writes the file; an unknown old
-form, a changed definition name, or a failed re-evaluation leaves the file and
-the live definition untouched, and a source-provided key (which has no file)
-is refused. A timed-out or aborted call is not tracked, because its interpreter
+replaces the first structurally equal subform inside the named definition,
+re-evaluates the definition, and only then writes the file; the report line
+joins the call's result lines. An unknown old form, a changed definition name,
+or a failed re-evaluation leaves the file and the live definition untouched.
+A source-provided key or an unwritten live definition (whose file is not
+authoritative) is refused. A timed-out or aborted call is not tracked, because its interpreter
 may still be running. A failed write is
 reported and the live definition remains until the process ends, with the old
 file authoritative for the next build. A failed delete or unbind is reported;

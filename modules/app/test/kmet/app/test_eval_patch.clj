@@ -4,6 +4,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.app.eval.files :as eval-files]
             [kmet.app.test-eval-support :as support]
             [kmet.app.tools.registry :as tools]))
 
@@ -31,7 +32,9 @@
 (t/deftest patch-replaces-a-value-form
   (let [env (support/eval-ctx)]
     (support/eval! env "(def answer 1)")
-    (t/is (= "42" (:content (support/eval! env "(eval/patch 'user/answer 1 42) answer"))))
+    (let [content (:content (support/eval! env "(eval/patch 'user/answer 1 42) answer"))]
+      (t/is (str/includes? content "[eval: patched user/answer"))
+      (t/is (str/starts-with? content "42")))
     (t/is (str/includes? (slurp (str (fs/path (:agent-dir env)
                                               "eval" "user" "answer.clj")))
                          "(def answer 42)"))))
@@ -75,6 +78,53 @@
       (t/is (str/includes? (:content result) "patch evaluation failed"))
       (t/is (= before (slurp path))))
     (t/is (= "Hello A" (:content (support/eval! env "(greet \"A\")"))))))
+
+(t/deftest patch-is-scoped-to-the-named-definition
+  (let [env (support/eval-ctx)
+        path (str (fs/path (:agent-dir env) "eval" "user" "pair.clj"))]
+    (fs/create-dirs (fs/parent path))
+    (spit path ";; kmet eval: written by the eval tool\n(ns user)\n(def a 1)\n(def b 2)\n")
+    (t/is (= "1" (:content (support/eval! env "a"))))
+    (let [before (slurp path)
+          result (support/eval! env "(eval/patch 'user/a 2 3)")]
+      (t/is (:is-error result))
+      (t/is (str/includes? (:content result) "no subform"))
+      (t/is (= before (slurp path))))
+    (support/eval! env "(eval/patch 'user/a 'user 1)")
+    (t/is (str/includes? (slurp path) "(def b 2)"))
+    (t/is (= "2" (:content (support/eval! env "b")))
+          "a patch to a never reaches a sibling definition")))
+
+(t/deftest patch-a-defmethod-body
+  (let [env (support/eval-ctx)]
+    (support/eval! env (str "(defmulti area :shape)\n"
+                            "(defmethod area :rect [m] :old)"))
+    (let [result (support/eval! env
+                                "(eval/patch \"user/area :rect\" :old :new)")]
+      (t/is (not (:is-error result)) (:content result)))
+    (t/is (= ":new" (:content (support/eval! env "(area {:shape :rect})"))))))
+
+(t/deftest patch-refuses-an-unwritten-live-definition
+  (let [env (support/eval-ctx)]
+    (with-redefs [eval-files/write-definition!
+                  (fn [& _] (throw (ex-info "disk full" {})))]
+      (t/is (:is-error (support/eval! env "(defn greet [x] x)"))))
+    (let [result (support/eval! env "(eval/patch 'user/greet 1 2)")]
+      (t/is (:is-error result))
+      (t/is (str/includes? (:content result) "not written")))))
+
+(t/deftest patch-write-failure-keeps-the-old-file
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(defn greet [x] (str \"Hello \" x))")
+    (let [path (definition-file env)
+          before (slurp path)
+          result (with-redefs [eval-files/write-content!
+                               (fn [& _] (throw (ex-info "disk full" {})))]
+                   (support/eval! env "(eval/patch 'user/greet \"Hello \" \"Hi \")"))]
+      (t/is (:is-error result))
+      (t/is (= before (slurp path)))
+      (t/is (= "Hello A" (:content (support/eval! env "(greet \"A\")")))
+            "a failed patch write restores the old live definition"))))
 
 (t/deftest patch-refuses-a-source-provided-key
   (let [env (support/eval-ctx)]
