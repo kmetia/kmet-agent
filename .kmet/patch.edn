@@ -1,4 +1,1 @@
-{:rows [],
- :patch
- [{:id :ext/clojure, :plugin :ext/clojure}
-  {:id :ext/tree-sitter, :plugin :ext/tree-sitter}]}
+{:rows [], :patch [{:id :ext/tree-sitter, :plugin :ext/tree-sitter}]}

@@ -782,6 +782,32 @@
       {:content (str "Error editing " file-path ": " (ex-message e))
        :is-error true})))
 
+(defn- recorded-source? [record node]
+  (= (:source record) (n/string node)))
+
+(defn definition-node-index
+  "Index of the top-level node in CHILDREN whose exact source is RECORD's
+   `:source`, or nil. The recorded source is authoritative: a definition is
+   found by the bytes the library wrote, not by a re-derived form name."
+  [children record]
+  (first (keep-indexed (fn [i node]
+                         (when (recorded-source? record node) i))
+                       children)))
+
+(defn definition-loc
+  "The zipper location of RECORD's top-level form in ZLOC, matched by exact
+   recorded source, or nil. ZLOC may point at a form or the file's forms node."
+  [zloc record]
+  (let [root (loop [loc zloc]
+               (cond
+                 (nil? loc) nil
+                 (= :forms (n/tag (z/node loc))) loc
+                 :else (recur (z/up loc))))]
+    (when root
+      (some (fn [loc]
+              (when (recorded-source? record (z/node loc)) loc))
+            (take-while some? (iterate z/right* (z/down root)))))))
+
 (defn edit-definition-source
   "Replace RECORD's top-level form in SOURCE with NEW-SOURCE, which must be
    exactly one complete form. Formats the changed form, refuses a duplicate
@@ -800,17 +826,8 @@
                       {:type :eval/edit-form})))
     (let [new-node (first forms)
           find-edit (fn [zloc]
-                      (let [root (loop [loc zloc]
-                                   (if (= :forms (n/tag (z/node loc)))
-                                     loc
-                                     (recur (z/up loc))))
-                            target (loop [loc (z/down root)]
-                                     (when loc
-                                       (if (= (:source record) (n/string (z/node loc)))
-                                         loc
-                                         (recur (z/right loc)))))]
-                        (when target
-                          {:zloc (z/replace target new-node)})))]
+                      (when-let [target (definition-loc zloc record)]
+                        {:zloc (z/replace target new-node)}))]
       (edit-source source file-path find-edit))))
 
 (defn- write-edited!

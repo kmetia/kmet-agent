@@ -5,7 +5,8 @@
    is selected by its exact recorded source, and the first structurally equal
    subform inside that form is replaced. Sibling definitions and the file's
    `(ns …)` form are never candidates."
-  (:require [rewrite-clj.node :as n]
+  (:require [kmet.libs.clj-edit :as clj-edit]
+            [rewrite-clj.node :as n]
             [rewrite-clj.parser :as p]))
 
 (defn- bad-patch! [message data]
@@ -34,12 +35,6 @@
           [node false]))
       [node false])))
 
-(defn- definition-node-index
-  [children record]
-  (first (keep-indexed (fn [i node]
-                         (when (= (:source record) (n/string node)) i))
-                       children)))
-
 (defn patched-content
   "Return CONTENT with the first subform equal to OLD replaced by NEW inside
    RECORD's own top-level form. Throws `:eval/patch` for an unreadable file,
@@ -51,7 +46,7 @@
                                      (ex-message t))
                                 {:file (:file record)})))
         children (vec (n/children root))
-        idx (definition-node-index children record)]
+        idx (clj-edit/definition-node-index children record)]
     (when (nil? idx)
       (bad-patch! (str "the definition form for " (:name record)
                        " is not in the library file")

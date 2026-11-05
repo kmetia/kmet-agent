@@ -398,3 +398,12 @@
                                         "(def constant 1)")))
     (is (string? (util/validate-form-shape (util/form-head "(def constant)")
                                            "(def constant)")))))
+
+(deftest ^:bb-only test-definition-loc-matches-the-recorded-source
+  (let [source "(ns user)\n\n(def a 1)\n(def b 2)\n"
+        zloc (z/of-string source)]
+    (is (= "(def b 2)"
+           (node/string (z/node (util/definition-loc zloc {:source "(def b 2)"})))))
+    (is (nil? (util/definition-loc zloc {:source "(def nope 3)"})))
+    (is (= "(ns user)"
+           (node/string (z/node (util/definition-loc zloc {:source "(ns user)"})))))))
