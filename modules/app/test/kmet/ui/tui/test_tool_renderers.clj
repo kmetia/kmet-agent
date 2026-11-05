@@ -459,13 +459,33 @@
   [comp width]
   (first (core/render comp width)))
 
-(deftest test-code-call-plain-rendering
-  (testing "run_code and clj eval render the code as bold tool-title text, no highlighting"
+(deftest test-code-call-highlighting
+  (testing "the code argument is syntax-highlighted beyond the bold label"
     (let [code "(defn f [x] x)"
           run-code (raw-line (r/render-run-code-call "run_code" {:code code} th 120 {}) 120)
-          clj-eval (raw-line (r/render-code-call "clj eval $" code "" th 120 {}) 120)]
-      (is (str/starts-with? run-code (theme/fg th :tool-title (theme/bold (str "run $ " code)))))
-      (is (str/starts-with? clj-eval (theme/fg th :tool-title (theme/bold (str "clj eval $ " code)))))))
+          clj-eval (raw-line (r/render-code-call "clj eval $" code "" th 120 {}) 120)
+          kw-esc (theme/get-fg-ansi th :syntax-keyword)]
+      (is (str/starts-with? run-code
+                            (theme/fg th :tool-title (theme/bold "run $ "))))
+      (is (str/starts-with? clj-eval
+                            (theme/fg th :tool-title (theme/bold "clj eval $ "))))
+      (is (str/includes? run-code kw-esc) "run_code code is syntax-highlighted")
+      (is (str/includes? clj-eval kw-esc) "clj eval code is syntax-highlighted")))
+  (testing "the language arity selects the grammar"
+    (let [raw (raw-line (r/render-code-call "js $" "const x = 1;" "" "javascript"
+                                            th 120 {}) 120)]
+      (is (str/includes? raw (theme/get-fg-ansi th :syntax-keyword))
+          "JavaScript keywords come from the JavaScript grammar")))
+  (testing "the highlight cache lives in renderer state and keeps other keys"
+    (let [state (atom {:timer-id :ticker})
+          ctx #(hash-map :state @state :set-state! (fn [s] (reset! state s)))]
+      (r/render-code-call "run $" "(defn f [x] x)" "" th 120 (ctx))
+      (is (= :ticker (:timer-id @state)) "the tool ticker's key survives")
+      (let [cache (get-in @state [:code-highlight :cache])]
+        (is (some? cache))
+        (r/render-code-call "run $" "(defn f [x] (inc x))" "" th 120 (ctx))
+        (is (identical? cache (get-in @state [:code-highlight :cache]))
+            "a second render reuses the cache atom"))))
   (testing "collapsed and expanded render the same call line"
     (let [code "(+ 1 2)"
           render #(raw-line (r/render-run-code-call "run_code" {:code code} th 120

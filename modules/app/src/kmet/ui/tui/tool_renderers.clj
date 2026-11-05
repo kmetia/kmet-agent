@@ -1029,25 +1029,54 @@
    (into [:container {}]
          (output-result-nodes content theme width expanded? ended-at truncation))))
 
+(defn- code-highlight-cache
+  "The growing-code cache for LANG under THEME, kept in the tool's renderer
+   state so a streaming script re-tokenizes only its tail. A theme or language
+   change starts a fresh cache: the styled prefix is ANSI for one theme only.
+   Nil when the context carries no renderer state (one-shot renders, tests) —
+   the highlighter then runs without a cache."
+  [context lang theme]
+  (let [state (:state context)
+        entry (:code-highlight state)]
+    (if (and entry (= lang (:lang entry)) (= theme (:theme entry)))
+      (:cache entry)
+      (when-let [set-state! (:set-state! context)]
+        (let [cache (atom nil)]
+          (set-state! (assoc state :code-highlight
+                             {:lang lang :theme theme :cache cache}))
+          cache)))))
+
 (defn render-code-call
   "The shared call line for tools whose primary argument is code (run_code,
-   clojure_eval): `<label> <code>` rendered verbatim, whatever the display
-   mode (no head window, no expand hint — the bash call line's policy).
-   LABEL and CODE are one bold tool-title line — no syntax highlighting, like
-   the shell call lines; a leading blank line in CODE is dropped so the
-   prompt is never alone above an empty line. SUFFIX is appended as given
-   (pre-styled)."
-  [label code suffix theme _width _context]
-  (let [code-str (if (string? code)
-                   (text/trim-leading-blank-lines code)
-                   (if (nil? code) "" nil))
-        code-display (cond
-                       (nil? code-str) (theme/fg theme :error "[invalid arg]")
-                       (empty? code-str) (theme/fg theme :tool-output "...")
-                       :else code-str)
-        code-line (theme/fg theme :tool-title
-                            (theme/bold (str label " " code-display)))]
-    (h/compile-tree (tool-text (str code-line suffix)))))
+   eval, clojure_eval): `<label> <code>`, rendered verbatim whatever the
+   display mode (no head window, no expand hint — the bash call line's
+   policy). LABEL stays bold tool-title; CODE is syntax-highlighted for LANG
+   (the 6-arg arity defaults to Clojure). Quiet mode never runs renderers, so
+   the one-line quiet title stays plain. A leading blank line in CODE is
+   dropped so the prompt is never alone above an empty line. SUFFIX is
+   appended as given (pre-styled)."
+  ([label code suffix theme width context]
+   (render-code-call label code suffix "clojure" theme width context))
+  ([label code suffix lang theme _width context]
+   (let [code-str (if (string? code)
+                    (text/trim-leading-blank-lines code)
+                    (if (nil? code) "" nil))
+         label-str (theme/fg theme :tool-title (theme/bold (str label " ")))]
+     (if (or (nil? code-str) (empty? code-str))
+       (let [code-display (if (nil? code-str)
+                            (theme/fg theme :error "[invalid arg]")
+                            (theme/fg theme :tool-output "..."))]
+         (h/compile-tree (tool-text (str label-str code-display suffix))))
+       (let [highlighted (theme/render-highlighted
+                          theme code-str lang
+                          (code-highlight-cache context lang theme))
+             lines (if (seq highlighted) highlighted [code-str])
+             body (str label-str
+                       (first lines)
+                       (when (< 1 (count lines))
+                         (str "\n" (str/join "\n" (rest lines))))
+                       suffix)]
+         (h/compile-tree (tool-text body)))))))
 
 (def ^:private code-tool-labels
   "The call-line label for a code tool. An unknown tool falls back to the

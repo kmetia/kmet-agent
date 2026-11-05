@@ -518,10 +518,12 @@ plain-text output body: styled lines, a collapsed line window with an expand
 hint and truncation warnings — the opt-in grep/find/ls and powershell tools
 use it), `shell-call-renderer` (the shell call line for a supplied prompt —
 bash is `(shell-call-renderer "$")`; the powershell tool uses `"ps $"`)
-and `render-code-call` (the `run_code`/`clojure_eval` call line: the code
-argument rendered verbatim in the call line's bold tool-title text, no syntax
-highlighting, whatever the display mode; a leading blank line in the argument
-is dropped so the prompt is never alone above an empty line);
+and `render-code-call` (the `run_code`/`eval`/`clojure_eval` call line: the
+label in bold tool-title text, the code argument rendered verbatim and
+syntax-highlighted for its language — Clojure by default, or the 7-arg arity's
+language — whatever the display mode; quiet never runs renderers, so the
+one-line quiet title stays plain; a leading blank line in the argument is
+dropped so the prompt is never alone above an empty line);
 the namespace is
 explicitly shared with extensions. Path display helpers are public too:
 `render-tool-path` (shortened, accent, hyperlinked path) and `link-path`
