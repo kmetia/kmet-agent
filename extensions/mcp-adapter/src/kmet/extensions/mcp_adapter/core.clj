@@ -694,7 +694,7 @@
            (str "Servers: " (str/join ", " summaries) ". ")
            "No servers with cached tools. ")
          "Servers connect lazily on first use. "
-         "For several calls in one request use the run_code tool — MCP tools are in its surface by name. "
+         "For several MCP calls in one request, use an enabled script tool (`run_code` or `eval`) — MCP tools are in the script's surface by name. "
          "search: \"screenshot\" · tool: \"" (name prefix) "_tool\" args: {...}.")))
 
 (defn- register-proxy-tool!

@@ -130,7 +130,7 @@
 ;; ─── Extension-contributed tool sources ────────────────────────────────────
 ;; A source contributes a whole catalog without registering each tool. Its
 ;; `:exposure` decides where the catalog lands (pi: a server's exposure):
-;; `:sandbox` (the default, pi's `codemode`) is callable from `run_code` only
+;; `:sandbox` (the default, pi's `codemode`) is callable from a script sandbox only
 ;; and never declared; `:deferred` joins the model-facing table undeclared and
 ;; becomes declared once `tool_search` loads one of its tools. The mcp-adapter
 ;; contributes its cached MCP catalog as a `:sandbox` source
@@ -182,7 +182,7 @@
    — and must return the *current* catalog, not a snapshot.
 
    OPTS:
-     :exposure    — `:sandbox` (the default): callable from the `run_code`
+     :exposure    — `:sandbox` (the default): callable from a script
                     sandbox only, never declared; `:deferred`: also joins the
                     model-facing table, undeclared until `tool_search` loads
                     the tool.
@@ -222,7 +222,7 @@
 
 (defn get-contributed-tools
   "Merge every `:sandbox` source registered in REGISTRY into its current
-   tools — the extra surface `run_code` adds to the model's tool set. A
+   tools — the extra surface a script sandbox adds to its callable set. A
    `:deferred` source is not here: its tools are in `get-all-tools`."
   [reg]
   (merge-source-tools (sources-with-exposure reg :sandbox)))
