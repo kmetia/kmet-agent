@@ -1,5 +1,40 @@
 # Todo
 
+## Decision: one global eval library (2026-11-05)
+
+The eval scope model is collapsed to **global only**. One library per agent
+home, auto-written:
+
+```
+~/.kmet/agent/eval/<ns>/<name>.clj
+```
+
+- **Define = write.** A successful top-level definition writes its file
+  immediately (nodecode's "defining is keeping"). No `:keep`, no
+  `<project>/.kmet/eval`, no session entries.
+- **Load = scan.** An environment is built by reading the library. No fold,
+  snapshot, branch fingerprint, or project overlay.
+- **Sessions are runtime caches** over the one library. Resume, fork and
+  branch do not rewind definitions; a new session loads the files.
+- **Forget = delete.** Remove the file and unbind the live name; a flat
+  `:drop` or `(eval/forget 'name)` is enough.
+- **`run_code` is the throwaway tool; `eval` is the library.**
+- **Isolation is a home**, not a scope: `KMET_CODING_AGENT_DIR` (or a
+  profile) gives a separate library.
+
+This supersedes the session/project scope rules in step 4 and the
+project/global material below. The step list is to be rewritten before step 4
+work continues; the remaining steps (eval sources, patches, the Clojure
+engine, docs) are otherwise unchanged.
+
+**TODO:** clean up the rest of this file to match the decision — rewrite step
+4, the test plan, the limits and E3/E4/E6/E10, and remove the session/project
+scope prose. Deferred; not part of step 4 work yet.
+
+Reference: nodecode keeps one layer per home (`~/.nodecode/cells/<identity>/`),
+one file per definition, and has no session or project scope for code; its
+only project filter is metadata on memories/skills, not loaded definitions.
+
 One track remains: persistent eval. Landed work — the `github-copilot`
 anthropic auth, the prompt-caching parity pass, the around tool hook, the
 remaining openai-compat keys, **P5** (tool exposure, the declared/callable
