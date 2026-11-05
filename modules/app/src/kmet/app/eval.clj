@@ -155,6 +155,26 @@
           (swap! (:session-defs env) assoc (:name record) record))))
     (reset! ns-atom nil)))
 
+(defn- prime-state
+  "A prepared state for evaluating stored definitions at rebuild: the current
+   tool surface is installed so a definition that names a tool var compiles,
+   with an inert dispatcher and a discarded emit channel until a real call
+   binds its state."
+  [service cwd]
+  (let [handle (srce/get (:agent-ctx service) :tools)]
+    (script/prepare {:tool "eval"
+                     :cwd cwd
+                     :get-all-tools (if handle
+                                      #(registry/get-all-tools handle)
+                                      (constantly []))
+                     :get-contributed-tools (if handle
+                                              #(registry/get-contributed-tools handle)
+                                              (constantly {}))
+                     :select-tools registry/select-tools
+                     :execute-tool (fn [& _]
+                                     {:content "tools are not callable during rebuild"
+                                      :is-error true})})))
+
 (defn- build-environment
   "Build a fresh environment for SESSION: the SCI context, the kept index, and
    the shared and session definitions evaluated into it."
@@ -180,8 +200,11 @@
                   (script/interrupt-fn interrupt "eval")
                   "eval")
         env (assoc env :sci-ctx sci-ctx :interrupt interrupt)]
-    (read-shared! env roots)
-    (load-session-definitions! env session)
+    (script/with-prime-context
+      sci-ctx (prime-state service cwd)
+      (fn []
+        (read-shared! env roots)
+        (load-session-definitions! env session)))
     (reset! (:built-entries env) (fingerprint session))
     env))
 
@@ -521,6 +544,15 @@
               (error-result service env result started)
               (finish-call! service env session cwd parsed keep drop result started))))))))
 
+(defn- session-lock
+  "The lock for one session's environment selection and evaluation. The map
+   keeps one lock per session id until disposal; two threads racing to create
+   it agree on the map's final value."
+  [locks id]
+  (or (get @locks id)
+      (let [lock (Object.)]
+        (get (swap! locks #(if (contains? % id) % (assoc % id lock))) id))))
+
 (defn- session-environment!
   "The environment for SESSION, built under the service's build lock."
   [service session cwd]
@@ -547,22 +579,24 @@
 
 (defn- snapshot-session! [service session]
   (when (and session (not @(:disposed? service)))
-    (let [entries (definition-entries session)
-          folded (defs/fold-entries entries)]
-      (when (seq entries)
-        (try
-          (session/append-custom-entry!
-           session defs/eval-definitions-type
-           {:version 1
-            :snapshot true
-            :defs (mapv #(select-keys % [:name :ns :kind :source])
-                        (:defs folded))})
-          (catch Throwable t
-            (swap! (:service-failures service) conj
-                   {:session (:id session)
-                    :error (ex-message t)})
-            (debug/log "eval snapshot after compaction failed: " t)
-            nil))))))
+    (let [lock (session-lock (:session-locks service) (:id session))]
+      (locking lock
+        (let [entries (definition-entries session)
+              folded (defs/fold-entries entries)]
+          (when (seq entries)
+            (try
+              (session/append-custom-entry!
+               session defs/eval-definitions-type
+               {:version 1
+                :snapshot true
+                :defs (mapv #(select-keys % [:name :ns :kind :source])
+                            (:defs folded))})
+              (catch Throwable t
+                (swap! (:service-failures service) conj
+                       {:session (:id session)
+                        :error (ex-message t)})
+                (debug/log "eval snapshot after compaction failed: " t)
+                nil))))))))
 
 (defn- eval-call! [service opts]
   (when @(:disposed? service)
@@ -573,8 +607,10 @@
             (throw (ex-info "eval needs a session"
                             {:type :eval/no-session})))
         cwd (or (:cwd opts) (get-in opts [:ctx :cwd]) (tool-util/cwd))
-        env (session-environment! service session cwd)]
-    (eval!* service env session cwd opts)))
+        lock (session-lock (:session-locks service) (:id session))]
+    (locking lock
+      (let [env (session-environment! service session cwd)]
+        (eval!* service env session cwd opts)))))
 
 (defn value
   "The `:eval` service for AGENT-CTX. The environments are keyed by session
@@ -587,12 +623,14 @@
   ([agent-ctx {:keys [agent-dir]}]
    (let [envs (atom {})
          failures (atom [])
+         session-locks (atom {})
          build-lock (Object.)
          disposed? (atom false)
          service {:agent-ctx agent-ctx
                   :agent-dir (or agent-dir (cfg/get-agent-dir))
                   :envs envs
                   :service-failures failures
+                  :session-locks session-locks
                   :disposed? disposed?
                   :build-lock build-lock}]
      {:eval! #(eval-call! service %)
@@ -604,5 +642,6 @@
                   (locking build-lock
                     (reset! disposed? true)
                     (reset! envs {})
+                    (reset! session-locks {})
                     (reset! failures [])
                     nil))})))

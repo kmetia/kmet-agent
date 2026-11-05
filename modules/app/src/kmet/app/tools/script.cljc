@@ -133,6 +133,16 @@
    the key is then omitted from the hook payload."
   nil)
 
+(def ^:dynamic *call-state*
+  "The prepared state of the script call currently executing on this thread.
+   The per-call namespace functions are stable and read this, so a definition
+   kept in a persistent eval environment uses the current call's emit, cwd,
+   process wrappers and tools instead of the call that compiled it."
+  nil)
+
+(defn- call-cwd []
+  (or (:cwd *call-state*) (tool-util/cwd)))
+
 (defn- tool-error-type
   "The tool's error keyword for SUFFIX — `:run-code/output-limit` for
    run_code, `:eval/…` for eval. The tool name is the only part the type
@@ -371,24 +381,28 @@
                     [k @v]))))
         (ns-publics ns-sym)))
 
-(defn- core-fns [cwd]
+(defn- core-fns []
   ;; SCI's builtin clojure.core lacks slurp/spit/file-seq (the extensions'
   ;; build-context-namespaces carries the same patches) — inject the host
-  ;; fns, resolving relative paths against the session cwd like the tools.
-  {'slurp (fn [f & opts] (apply slurp (path-in-cwd cwd f) opts))
-   'spit (fn [f content & opts] (apply spit (path-in-cwd cwd f) content opts))
-   'file-seq (fn [dir] (file-seq (fs/file (path-in-cwd cwd dir))))})
+  ;; fns, resolving relative paths against the current call's cwd like the
+  ;; tools. The functions read *call-state* at call time so a kept definition
+  ;; follows the current call.
+  {'slurp (fn [f & opts] (apply slurp (path-in-cwd (call-cwd) f) opts))
+   'spit (fn [f content & opts] (apply spit (path-in-cwd (call-cwd) f) content opts))
+   'file-seq (fn [dir] (file-seq (fs/file (path-in-cwd (call-cwd) dir))))})
 
 (defn- process-fns
-  "babashka.process with the session cwd as the default :dir and pid tracking
-   for `process` (kmet's shutdown kills tracked children). babashka.process
-   takes opts FIRST for token commands and LAST for a command vector — the
-   wrapper normalizes both shapes."
-  [cwd]
+  "babashka.process with the current call's cwd as the default :dir and pid
+   tracking for `process` (kmet's shutdown kills tracked children).
+   babashka.process takes opts FIRST for token commands and LAST for a
+   command vector — the wrapper normalizes both shapes. The default dir is
+   read at call time, so a kept definition follows the current call."
+  []
   (let [fns (shared-fns 'babashka.process)
         with-dir (fn [f]
                    (fn [& args]
-                     (let [[a & more] args]
+                     (let [cwd (call-cwd)
+                           [a & more] args]
                        (cond
                          ;; (f opts cmd & inputs) — normalize to the vector form
                          (and (map? a) (vector? (first more)))
@@ -530,21 +544,35 @@
     (swap! images conj block)
     nil))
 
-(defn- sandbox-fns [cwd writers emit-state]
-  {'cwd (fn [] cwd)
+(defn- emit-with-state
+  "Emit through the current call's channel; a build-time definition evaluation
+   has no call to report to and emits nothing."
+  [v]
+  (when-let [state *call-state*]
+    (emit! (:emit-state state) v)))
+
+(defn- emit-image-with-state [x]
+  (when-let [state *call-state*]
+    (emit-image! (:emit-state state) (:cwd state) x)))
+
+(defn- sandbox-fns []
+  {'cwd (fn [] (call-cwd))
    'env (fn [k] (System/getenv (str k)))
    'now (fn [] (System/currentTimeMillis))
    'sleep (fn [ms] (Thread/sleep (long ms)))
-   'emit (fn [v] (emit! emit-state v))
-   'emit-image (fn [x] (emit-image! emit-state cwd x))
+   'emit emit-with-state
+   'emit-image emit-image-with-state
    ;; a derefable result on a daemon thread (babashka/jolt futures are
    ;; daemon-backed; SCI's own future is unavailable in a value-shared ctx).
-   ;; The writers are re-bound: a future does not convey SCI's var bindings
-   ;; on Jolt, so a spawned println would write to an unbound *out*.
+   ;; The state and writers are re-bound: a future does not convey SCI's var
+   ;; bindings on Jolt, so a spawned println would write to an unbound *out*.
    'spawn (fn [f]
-            (if-let [{:keys [out-w err-w]} @writers]
-              (future (eval-with-io out-w err-w f))
-              (future (f))))})
+            (let [state *call-state*]
+              (future
+                (binding [*call-state* state]
+                  (if-let [{:keys [out-w err-w]} (some-> state :writers deref)]
+                    (eval-with-io out-w err-w f)
+                    (f))))))})
 
 (defn- tool-name
   "The registry name for X — strings pass through, keywords/symbols lose
@@ -557,22 +585,26 @@
     (or (keyword? x) (symbol? x)) (name x)
     :else (str x)))
 
+(defn- current-surface []
+  (or (:surface *call-state*) {}))
+
 (defn- discovery-fns
-  "tools/list and tools/describe over the surface this base was built for —
-   discovery is a bridge-local read of the active set, never a dispatch.
-   Each entry carries the tool's model-facing declaration (name, description,
+  "tools/list and tools/describe over the current call's surface — discovery
+   is a bridge-local read of the active set, never a dispatch. Each entry
+   carries the tool's model-facing declaration (name, description,
    parameters), so a script chooses a call without one describe per candidate;
    :execute and the UI-only :label never leave the registry."
-  [surface]
+  []
   {'list (fn []
            (mapv #(select-keys % [:name :description :parameters])
-                 (vals surface)))
+                 (vals (current-surface))))
    'describe (fn [name]
-               (if-let [t (get surface (tool-name name))]
-                 (select-keys t [:name :description :parameters])
-                 {:is-error true
-                  :content (str "Unknown tool: " name ". Active tools: "
-                                (str/join ", " (keys surface)))}))})
+               (let [surface (current-surface)]
+                 (if-let [t (get surface (tool-name name))]
+                   (select-keys t [:name :description :parameters])
+                   {:is-error true
+                    :content (str "Unknown tool: " name ". Active tools: "
+                                  (str/join ", " (keys surface)))})))})
 
 (def ^:private bundled-lib-namespace?
   "The fixed bundled extension set's membership predicate
@@ -757,26 +789,30 @@
   (require-host-namespaces!)
   (full-babashka-namespaces))
 
+(declare tools-namespace)
+
 (defn call-namespaces
   "The per-call half of the sandbox namespaces: SCI core patches
    (slurp/spit/file-seq/pmap), json, the cwd/pid-tracking process wrappers,
    the `tools` namespace (discovery, dispatch, the result readers and one var
    per active tool), the cwd/emit/spawn helpers, and the bare `emit`/`sh`.
-   `seed!` layers these over `base-namespaces` for the call, so a def in one
-   run_code script is invisible to the next."
-  [{:keys [cwd tools-ns writers emit-state]}]
-  (let [process (process-fns cwd)]
+   The functions read `*call-state*` at call time, so a kept context's
+   definitions follow the current call; `seed!` layers them over
+   `base-namespaces` for the call."
+  [{:keys [surface]}]
+  (let [process (process-fns)
+        sandbox (sandbox-fns)]
     (cond-> {'clojure.core (merge {'pmap (deref #'pmap)}
-                                  (core-fns cwd)
+                                  (core-fns)
                                   (extra-core-vars-map))
              ;; kmet.libs.json under its real name and the short `json` alias
              ;; scripts would otherwise have to require
              'kmet.libs.json (shared-fns 'kmet.libs.json)
              'babashka.process process
-             'sandbox (sandbox-fns cwd writers emit-state)
-             'tools tools-ns
-             'user {'emit (fn [v] (emit! emit-state v))
-                    'emit-image (fn [x] (emit-image! emit-state cwd x))}}
+             'sandbox sandbox
+             'tools (tools-namespace (or surface {}))
+             'user {'emit emit-with-state
+                    'emit-image emit-image-with-state}}
       ;; the cwd-defaulting sh is preloaded bare alongside the aliases
       (contains? process 'sh) (assoc-in ['user 'sh] (get process 'sh)))))
 
@@ -951,6 +987,17 @@
    'text (fn [r] (:content r))
    'error (fn [r] (when (:is-error r) (:content r)))})
 
+(defn- dispatch-current!
+  "Dispatch through the current call's bridge. A definition evaluated outside
+   a call (the rebuild) gets an inert promise instead of a stale bridge."
+  [name args]
+  (if-let [state *call-state*]
+    (dispatch! (assoc (:bridge state) :surface (:surface state)) name args)
+    (let [p (promise)]
+      (deliver p {:is-error true
+                  :content "tools are not available outside a script call"})
+      p)))
+
 (defn- tools-namespace
   "The `tools` namespace a script sees: discovery, the dispatch fns and the
    result readers in one map, so what a script lists, calls and can name by
@@ -961,20 +1008,22 @@
    every active tool whose name is a plain symbol is also a var
    (`(tools/edit {…})`) that dispatches exactly like `call`. The namespace's
    own names win — they are identities, a tool name is data — so a tool that
-   is itself called `text` stays reachable through `call`."
-  [surface opts]
+   is itself called `text` stays reachable through `call`. Dispatch reads the
+   current call's bridge, so a kept definition calls this call's tools."
+  [surface]
   (let [;; variadic so `call` is this fn itself, not a wrapper around it
-        dispatch (fn [name & [args]] (dispatch! opts name args))
-        discovery (discovery-fns surface)
+        dispatch (fn [name & [args]] (dispatch-current! name args))
+        discovery (discovery-fns)
         dispatch-fns
         {'call dispatch
          'call! (fn [name & [args]]
                   (let [name (tool-name name)
-                        result @(dispatch name args)]
+                        result @(dispatch name args)
+                        tool-name (or (:tool *call-state*) "eval")]
                     (if (:is-error result)
-                      (throw (ex-info (str (:tool opts) ": tool call failed: "
+                      (throw (ex-info (str tool-name ": tool call failed: "
                                            name " — " (:content result))
-                                      {:type (tool-error-type (:tool opts) "tool-call-failed")
+                                      {:type (tool-error-type tool-name "tool-call-failed")
                                        :tool name
                                        :result result}))
                       result)))}
@@ -1100,19 +1149,22 @@
   "Start the daemon eval thread. The prelude runs here, on the eval thread,
    immediately before the user code: SCI's *ns* is per-thread, so aliases
    registered on the caller thread would not necessarily land in the
-   namespace the script evaluates in. Returns {:done promise :result atom};
-   the thread closes the writers in its finally, which ends the readers."
-  [sci-ctx code prelude capture ns-atom]
+   namespace the script evaluates in. The prepared STATE is bound as
+   *call-state* for the whole run, so kept definitions use this call's
+   emit/tools/cwd. Returns {:done promise :result atom}; the thread closes the
+   writers in its finally, which ends the readers."
+  [sci-ctx code prelude capture ns-atom state]
   (let [done (promise)
         result (atom nil)
         thread (Thread. (fn []
                           (try
                             (let [eval-form (form-evaluator sci-ctx ns-atom)
-                                  v (eval-with-io (:out-w capture) (:err-w capture)
-                                                  (fn []
-                                                    (when prelude
-                                                      (eval-form prelude))
-                                                    (eval-form code)))]
+                                  v (binding [*call-state* state]
+                                      (eval-with-io (:out-w capture) (:err-w capture)
+                                                    (fn []
+                                                      (when prelude
+                                                        (eval-form prelude))
+                                                      (eval-form code))))]
                               (reset! result {:status :ok :value v}))
                             (catch Throwable t
                               (let [reason (:reason (ex-data t))]
@@ -1226,8 +1278,7 @@
                      :check *tool-check*
                      :assistant-message *assistant-message*
                      :on-update on-update
-                     :trace trace}
-        tools-ns (tools-namespace surface bridge-opts)]
+                     :trace trace}]
     {:tool tool
      :cwd cwd
      :timeout-ms timeout-ms
@@ -1244,8 +1295,22 @@
      :trace trace
      :writers writers
      :live? live?
-     :tools-ns tools-ns
+     :bridge bridge-opts
      :emit-state emit-state}))
+
+(defn with-prime-context
+  "Seed CTX with the fixed call surface and the standard aliases, then run F
+   with a prime call state bound. A stored definition evaluated inside F
+   compiles against the same per-call vocabulary a real call gets; the prime
+   state gives top-level code a cwd, an inert tool surface and a discarded
+   emit channel until the next call binds the real state."
+  [ctx state f]
+  (seed! ctx state)
+  (binding [*call-state* state]
+    ;; the aliases belong to the user namespace the rebuild evaluates stored
+    ;; definitions in; do not depend on the host thread's last SCI namespace
+    (sci/eval-string* ctx (str "(ns user)\n" alias-prelude))
+    (f)))
 
 (defn- sandbox-realm
   "The realm the script's inner tool calls execute in: a child of the run's
@@ -1286,7 +1351,7 @@
                                    (:abort state)
                                    (:capture-bytes (:limits state)))
             _ (reset! (:writers state) capture)
-            {:keys [done result]} (start-eval-thread! sci-ctx code prelude capture ns-atom)]
+            {:keys [done result]} (start-eval-thread! sci-ctx code prelude capture ns-atom state)]
         (if deadline
           (when-not (deref done timeout-ms false)
             (compare-and-set! (:abort state) nil :timeout)

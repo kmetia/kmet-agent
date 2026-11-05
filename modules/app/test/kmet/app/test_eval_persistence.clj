@@ -366,3 +366,49 @@
     (support/eval! env nil :keep [["../x" "project"]])
     (t/is (fs/exists? safe))
     (t/is (not (fs/exists? escaped)))))
+
+(t/deftest test-a-kept-definition-uses-the-current-call-surface
+  (let [env (support/eval-ctx)
+        session (:session env)
+        cwd (:cwd env)]
+    (spit (str (fs/path cwd "note.txt")) "kept\n")
+    (support/eval! env "(defn parse-json [s] (json/parse-string s))")
+    (support/eval! env "(defn say [] (emit :hi))")
+    (support/eval! env "(defn read-note [] (str/trim (slurp \"note.txt\")))")
+    (support/eval! env (str "(defn echo-hi [] "
+                            "(tools/text (deref (tools/call \"bash\" "
+                            "{:command \"echo hi\"}))))"))
+    (let [restarted (support/restart-service env)]
+      (t/is (= "1"
+               (:content (support/eval-in! restarted session cwd
+                                           "(get (parse-json \"{\\\"a\\\":1}\") \"a\")")))
+            "the standard alias prelude is replayed")
+      (t/is (= ":hi" (:content (support/eval-in! restarted session cwd "(say)"))))
+      (t/is (= ":hi" (:content (support/eval-in! restarted session cwd "(say)")))
+            "a kept definition emits into the current call")
+      (t/is (= "kept"
+               (:content (support/eval-in! restarted session cwd "(read-note)")))
+            "slurp resolves against the current call's cwd")
+      (t/is (str/includes?
+             (:content (support/eval-in! restarted session cwd "(echo-hi)"))
+             "hi")
+            "a kept definition dispatches through the current call's tools"))))
+
+(t/deftest ^:slow test-parallel-definitions-on-one-session-both-survive
+  (let [env (support/eval-ctx)
+        service (:service env)
+        session (:session env)
+        cwd (:cwd env)
+        calls (mapv (fn [i]
+                      (future
+                        (support/eval-in! service session cwd
+                                          (str "(do (sandbox/sleep 10) "
+                                               "(def p" i " " i ") p" i ")"))))
+                    (range 8))]
+    (doseq [call calls]
+      (t/is (not (:is-error @call)) (:content @call)))
+    (t/is (= "[true true true true true true true true]"
+             (:content (support/eval-in! service session cwd
+                                         (str "(emit (mapv #(some? (resolve %)) "
+                                              "'[p0 p1 p2 p3 p4 p5 p6 p7]))"))))
+          "both parallel calls' definitions are in the live environment")))

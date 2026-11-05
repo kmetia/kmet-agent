@@ -586,11 +586,14 @@ entries; `:keep` writes a reviewable file under `<project>/.kmet/eval/<ns>/`
 or `~/.kmet/agent/eval/<ns>/`, `:drop` removes every copy, and a shared name
 redefined without `:keep` becomes a session shadow. The first eval in a session
 folds the active branch over the shared files; a branch/reset/switch or a
-compaction snapshot rebuilds. Parallel calls serialize on the environment lock,
-the deadline starts after it is taken, and `:dispose!` clears every environment.
-A broken shared file or stored entry is reported under `:failures` and skipped.
-The pure parse/fold lives in `kmet.app.eval.definitions`, the shared files in
-`kmet.app.eval.files`.
+compaction snapshot rebuilds. The rebuild seeds the call vocabulary and the
+standard aliases before evaluating stored definitions, and each kept
+definition's per-call primitives (`emit`, `cwd`, the process wrappers and the
+tool bridge) read the current call's state rather than the call that compiled
+them. Parallel calls serialize on a per-session lock, the deadline starts after
+it is taken, and `:dispose!` clears every environment. A broken shared file or
+stored entry is reported under `:failures` and skipped. The pure parse/fold
+lives in `kmet.app.eval.definitions`, the shared files in `kmet.app.eval.files`.
 
 The bridge pool is process-wide **by decision**: it is a bound, not a setting,
 and everything per-run travels in the submission's `:bindings`, so two agents
