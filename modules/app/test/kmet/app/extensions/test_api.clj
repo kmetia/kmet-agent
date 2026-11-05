@@ -80,6 +80,18 @@
     (t/is (not (contains? (:commands @state) "dc")))
     (t/is (empty? (get-in @state [:handlers :agent-end])))))
 
+(t/deftest test-nullable-api-eval-source
+  (let [{:keys [api state]} (ext/create-nullable-api)
+        sources-fn (fn [_] {:ns {'nullable-eval {'answer 42}}})
+        dereg (ext/register-eval-source! api :nullable-eval sources-fn)]
+    (t/is (identical? sources-fn (get-in @state [:eval-sources :nullable-eval])))
+    (t/is (fn? dereg))
+    (dereg)
+    (t/is (not (contains? (:eval-sources @state) :nullable-eval)))
+    (ext/register-eval-source! api :nullable-eval sources-fn)
+    (ext/unregister-eval-source! api :nullable-eval)
+    (t/is (not (contains? (:eval-sources @state) :nullable-eval)))))
+
 (t/deftest test-nullable-api-alias-registration
   ;; register-alias!/deregister replay for extensions that contribute tag
   ;; aliases (kmet.hikap.alias)

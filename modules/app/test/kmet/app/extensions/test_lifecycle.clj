@@ -108,6 +108,8 @@
                       "                           :execute (fn [_] {:content \"ok\"})})\n"
                       "  (ext/register-tool-source! api :owned-source (fn [] {})\n"
                       "    {:exposure :deferred :description \"Owned catalog\"})\n"
+                      "  (ext/register-eval-source! api :owned-eval\n"
+                      "    (fn [_] {:ns {'owned-eval {'answer 42}}}))\n"
                       "  (ext/register-skill! api \"---\\nname: owned-skill\\ndescription: d\\n---\\nbody\")\n"
                       "  (ext/register-prompt! api {:name \"owned-prompt\" :content \"body\"})\n"
                       "  (ext/register-flag! api \"owned-flag\")\n"
@@ -122,6 +124,7 @@
         (doseq [[service tag name] [[:commands :kmet/command "owned-cmd"]
                                     [:tools :kmet/tool "owned-tool"]
                                     [:tools :kmet/tool-source :owned-source]
+                                    [:tools :kmet/eval-source :owned-eval]
                                     [:skills :kmet/skill "owned-skill"]
                                     [:prompts :kmet/prompt "owned-prompt"]]]
           (t/is (= [owner]
@@ -149,6 +152,9 @@
               "the contributed tool source went with the owner too — a
                :sandbox source is invisible in the tool table, so only this
                registry shows it")
+        (t/is (nil? (registry/entry (srce/get (support/composition-ctx) :tools)
+                                    :kmet/eval-source :owned-eval))
+              "the eval source went with the owner too")
         (t/is (empty? (registry/entries (registry/current) :kmet/flag))
               "one dispose took everything the extension registered"))
       (finally

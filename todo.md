@@ -361,7 +361,7 @@ plus ~150 moved (step 2).
    is printed as the command's output. Built-in verb names (`list`, `search`,
    `drop`, `sources`, `help`) are reserved and a source contributing one is
    refused.
-6. **The extension ABI.** `kmet.extension/register-eval-source!` /
+6. **Step 6 (done): the extension ABI.** `kmet.extension/register-eval-source!` /
    `unregister-eval-source!`; the api keys in
    `kmet.app.extensions.core/create-extension-api`; `create-nullable-api`
    gains `:eval-sources` (the API capability, not a command);

@@ -601,6 +601,46 @@ contract reference's § UI, and
 [`extensions/README.md`](../extensions/README.md#building-ui) documents it
 from the shipped extensions' side).
 
+## Eval sources
+
+An extension can add live values and `/eval` verbs to the persistent eval
+environment. The source is read on every eval call, so it can expose current
+state instead of a snapshot:
+
+```clojure
+(ext/register-eval-source! api :license
+  (fn [{:keys [cwd verbs]}]
+    (let [{:keys [edit]} verbs]
+      {:doc "Add the SPDX header to a source file."
+       :ns {'license {'add! (fn [path]
+                              (edit (str (fs/path cwd path))
+                                    "(ns "
+                                    ";; SPDX-License-Identifier: MIT
+(ns "))}}
+       :macros {}
+       :commands {:license-lint
+                  {:description "List files without an SPDX header"
+                   :run (fn [{:keys [args]}] ...)}}})))
+(ext/unregister-eval-source! api :license)
+```
+
+- Values live under the namespace you return; `user` and `clj` are reserved
+  for the built-in sources. Use `license/add!`, not `add!` or `user/add!`.
+- `:verbs` carries the call's `:edit` and `:write-file` operations. They read
+  that call's cwd and cancel signal; use them within the call, never keep them.
+- `:commands` adds verbs to `/eval`; its built-in verbs (`list`, `search`,
+  `drop`, `sources`, `help`) are reserved.
+- A source key is never written to the eval library. A model redefinition
+  shadows it live, and dropping the name restores the source value while the
+  source is mounted. The key stays non-storable after the source unloads.
+- A throwing or malformed source contributes nothing and is reported; it never
+  fails the eval call. The source is removed automatically when the extension
+  unloads.
+
+The full shape, the macro convention and the call context are in the contract
+reference's [Eval sources](../modules/app/src/kmet/extension.md#eval-sources-register-eval-source)
+section.
+
 ## Testing an extension
 
 Extensions are testable in isolation with the **nullable API** — a test

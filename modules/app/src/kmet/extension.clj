@@ -77,6 +77,7 @@
 ;;   :register-tool! :unregister-tool! :get-all-tools :create-bash-tool
 ;;   :get-active-tools :set-active-tools :tool-selection :set-tool-enabled!
 ;;   :register-tool-source! :unregister-tool-source!  — sandbox tool sources
+;;   :register-eval-source! :unregister-eval-source!  — eval values and verbs
 ;;   :on-event :emit-event!                             — event bus
 ;;   :on-input :on-before-agent-start                   — hooks
 ;;   :on-tool                                           — the around tool hook
@@ -130,6 +131,25 @@
 (defn unregister-tool-source!
   "Remove a sandbox tool source by ID."
   [api id] ((:unregister-tool-source! api) id))
+
+(defn register-eval-source!
+  "Register (or replace) an eval source: ID → a 1-arg fn receiving the call
+   context and returning `{:doc :ns :macros :commands}`. The service reads it
+   on every eval call, so the values it returns are the current ones.
+
+   `:ns` and `:macros` contribute values to the eval environment; `:verbs` in
+   the argument map are the shared file operations (`:edit`, `:write-file`) as
+   values, and are only valid during the call that produced them. `user` and
+   `clj` are reserved for the built-in sources; namespace what you contribute
+   (for example `license/add!`). A source-provided key is never written to the
+   eval library; a model redefinition shadows it live and a drop restores the
+   source value while the source is mounted. `:commands` adds `/eval` verbs;
+   the built-in verb names are reserved. Removed automatically when the
+   extension unloads. Returns the deregister fn."
+  [api id sources-fn] ((:register-eval-source! api) id sources-fn))
+(defn unregister-eval-source!
+  "Remove an eval source by ID."
+  [api id] ((:unregister-eval-source! api) id))
 
 (defn get-all-tools [api] ((:get-all-tools api)))
 (defn get-active-tools [api] ((:get-active-tools api)))
@@ -393,6 +413,7 @@
   "A test-fixture api that captures registrations into a state atom.
    Returns {:api ... :state atom}. State shape:
      {:commands {name cmd} :tools {name tool} :tool-sources {id fn}
+      :eval-sources {id fn}
       :handlers {event-type [handler ...]} :flags {name opts}
       :entry-renderers {custom-type renderer} :message-renderers {custom-type renderer}
       :aliases {alias-kw fn}
@@ -407,7 +428,8 @@
    pass a temp dir in tests that exercise agent-dir state)."
   ([] (create-nullable-api {}))
   ([{:keys [agent-dir]}]
-   (let [state (atom {:commands {} :tools {} :tool-sources {} :handlers {}
+   (let [state (atom {:commands {} :tools {} :tool-sources {} :eval-sources {}
+                      :handlers {}
                       :flags {} :entry-renderers {} :message-renderers {}
                       :aliases {}
                       :skills [] :prompts []
@@ -439,6 +461,10 @@
                                        (swap! state assoc-in [:tool-sources id] tools-fn)
                                        (fn [] (swap! state update :tool-sources dissoc id)))
               :unregister-tool-source! (fn [id] (swap! state update :tool-sources dissoc id))
+              :register-eval-source! (fn [id sources-fn]
+                                       (swap! state assoc-in [:eval-sources id] sources-fn)
+                                       (fn [] (swap! state update :eval-sources dissoc id)))
+              :unregister-eval-source! (fn [id] (swap! state update :eval-sources dissoc id))
               :get-all-tools (fn [] (vals (:tools @state)))
               :get-active-tools (fn [] (keys (:tools @state)))
               :set-active-tools (fn [names] (swap! state assoc :active-tools names))

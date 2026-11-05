@@ -218,8 +218,9 @@ an unsatisfied dependency the mount stays pending until the ctx provides the
 names, and with `{}` it is active as soon as it loads. Unloading disposes the
 fiber after `shutdown`, whatever state it was in.
 
-What the plugin's `:apply` registers is **owned**: commands, tools and tool sources,
-skills, prompts, hooks, renderers, flags, and the resources a
+What the plugin's `:apply` registers is **owned**: commands, tools, tool
+sources and eval sources, skills, prompts, hooks, renderers, flags, and the
+resources a
 `:resources-discover` contribution loads land in the app's registries under
 `[:app :extensions <name>]`, so unload deregisters them tag by tag — a failing
 cleanup is reported and never skips the rest. What lives outside any registry
@@ -231,9 +232,9 @@ the extension, and unload runs those in reverse registration order after
 A registration is addressed by name, and a contested name follows its
 registry's rule: commands, prompt templates, skills and flags belong to the
 first registration that took it (extensions load before the builtins, so an
-extension's name beats a builtin's), while tools and tool sources layer — the
-last definition shadows the earlier ones. Unloading a winner restores what a
-shadowed registration was hiding.
+extension's name beats a builtin's), while tools, tool sources and eval
+sources layer — the last definition shadows the earlier ones. Unloading a
+winner restores what a shadowed registration was hiding.
 
 Unload is registration-complete, not screen-complete. `unload-extension!`
 runs `shutdown`, deregisters every registration and drops the extension's
@@ -396,6 +397,53 @@ the sources remain, but nothing can promote them (the run warns; see
   description is the only thing the model sees before it does, so it has to
   name the capability (and, practically, the tools) rather than point at the
   family.
+
+### Eval sources (`register-eval-source!`)
+
+An eval source contributes live values and `/eval` verbs to every eval
+environment. Register it with a 1-arg fn; the eval service reads that fn on
+every call, so the contribution is current, not a snapshot:
+
+```clojure
+(ext/register-eval-source! api :license
+  (fn [{:keys [cwd project-dir agent-dir signal verbs]}]
+    (let [{:keys [edit]} verbs]
+      {:doc "Add the SPDX header to a source file."
+       :ns {'license {'add! (fn [path]
+                              (edit (str (fs/path cwd path))
+                                    "(ns "
+                                    ";; SPDX-License-Identifier: MIT\n(ns "))}}
+       :macros {}
+       :commands {:license-lint
+                  {:description "List files without an SPDX header"
+                   :run (fn [{:keys [args cwd]}] ...)}}})))
+(ext/unregister-eval-source! api :license)
+```
+
+- The fn receives the call's `:cwd`, `:project-dir`, `:agent-dir`, the cancel
+  `:signal`, and `:verbs` — keyword-keyed (`{:edit f :write-file g}`) values
+  of the same file operations the environment exposes as `user/edit` and
+  `user/write-file`, built for that call.
+- `:ns` and `:macros` contribute values to the environment. `:macros` entries
+  are host macro fns (they receive SCI's form and environment before their
+  arguments). `:commands` entries add verbs to `/eval`; a command's `:run`
+  receives `{:args :session :cwd :service}` and returns nil or a string, which
+  `/eval` prints when non-blank.
+- **Use the verbs within the call.** They read that call's signal and cwd, so
+  capturing one past the call that produced it is unsupported.
+- `user` and `clj` are reserved for the built-in sources. Namespace what you
+  contribute (`license/add!`); a source that contributes a reserved namespace,
+  a built-in key, or a built-in `/eval` verb is refused as a whole.
+- A source-provided key is never written to the eval library. A model can
+  redefine it live (the call line says `source; not stored`); `:drop` and
+  `(eval/forget …)` restore the source value while the source is mounted. The
+  key stays non-storable after the source unloads.
+- A source that throws or returns a bad shape contributes nothing and is
+  reported; it never fails an eval call. Sources are removed automatically
+  when the extension unloads.
+- There is no system-prompt section for eval sources (it would vary inside the
+  cached prefix). If the model should know about the capability unprompted,
+  register a skill instead.
 
 ### Tool execute contract
 
@@ -1320,7 +1368,7 @@ involved. Call the plugin's `:apply` with it and assert what was registered:
     (is (= 1 (count (get-in @state [:handlers :session-start]))))))
 ```
 
-State shape: `:commands` `:tools` `:tool-sources` `:handlers` `:flags` `:shortcuts`
+State shape: `:commands` `:tools` `:tool-sources` `:eval-sources` `:handlers` `:flags` `:shortcuts`
 `:markdown-transformers` `:entry-renderers` `:message-renderers` `:aliases`
 `:tool-hooks` `:input-hooks`
 `:before-agent-start-hooks` `:tool-selection` `:tool-enabled-writes`

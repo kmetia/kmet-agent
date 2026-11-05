@@ -1217,6 +1217,17 @@
                                  (tools/unregister-tool-source!
                                   (handle) id
                                   (extension-owner name)))
+      ;; eval sources contribute live values and `/eval` verbs to every eval
+      ;; environment; the source is owned by the extension, so unload removes
+      ;; it from the `:tools` handle with the other registrations
+      :register-eval-source! (fn [id sources-fn]
+                               (tools/register-eval-source!
+                                (handle) id sources-fn
+                                {:owner (extension-owner name)}))
+      :unregister-eval-source! (fn [id]
+                                 (tools/unregister-eval-source!
+                                  (handle) id
+                                  (extension-owner name)))
       ;; pi: createBashTool — the bash tool constructor with its options
       ;; (spawnHook / exposeSessionEnvironment / commandPrefix / shellPath /
       ;; operations). The built-in bash tool is the same constructor with
