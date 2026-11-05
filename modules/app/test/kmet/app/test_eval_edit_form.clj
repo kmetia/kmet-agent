@@ -1,8 +1,7 @@
 (ns kmet.app.test-eval-edit-form
   "`(eval/edit-form 'name new-source)`: whole-definition replacement that
    re-evaluates before it writes."
-  (:require [babashka.fs :as fs]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :as t]
             [kmet.app.eval.files :as eval-files]
             [kmet.app.test-eval-support :as support]
@@ -14,7 +13,7 @@
                                {:owner [:test :eval-edit-form id]}))
 
 (defn- definition-file [env]
-  (str (fs/path (:agent-dir env) "eval" "user" "greet.clj")))
+  (support/library-file env :cwd "user" "greet.clj"))
 
 (defn- edit-form! [env name source]
   (support/eval! env (str "(eval/edit-form '" name " " (pr-str source) ")")))

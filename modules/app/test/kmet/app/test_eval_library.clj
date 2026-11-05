@@ -1,7 +1,8 @@
 (ns kmet.app.test-eval-library
-  "The eval library: every successful definition writes `<agent-dir>/eval`,
-   sessions load it as a runtime cache, drops and `(eval/forget)` delete and
-   unbind, and legacy project files or session entries are ignored."
+  "The eval library: definitions write the cwd scope by default (or the active
+   scope on redefinition), sessions load both roots as a runtime cache, drops
+   and `(eval/forget)` delete and unbind, and legacy project files or session
+   entries are ignored."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
@@ -13,23 +14,25 @@
             [kmet.test-tmp :as test-tmp]))
 
 (defn- library-file [env & parts]
-  (str (apply fs/path (:agent-dir env) "eval" parts)))
+  (apply support/library-file env :cwd parts))
 
 (t/deftest test-a-definition-writes-a-reviewable-file
   (let [env (support/eval-ctx)
         result (support/eval! env "(defn report [x] (str \"R\" x))")
         path (library-file env "user" "report.clj")]
     (t/is (not (:is-error result)) (:content result))
-    (t/is (str/includes? (:content result) "[eval: defined user/report → "))
+    (t/is (str/includes? (:content result) "[eval: defined user/report (cwd) → "))
     (t/is (fs/exists? path))
     (t/is (str/includes? (slurp path) ";; kmet eval: written by the eval tool"))
     (t/is (str/includes? (slurp path) "(ns user)"))
     (t/is (str/includes? (slurp path) "(defn report [x] (str \"R\" x))"))
     (t/is (= [{:name "user/report" :ns "user" :kind :defn
-               :doc nil :arglists '([x]) :file path}]
+               :doc nil :arglists '([x]) :file path
+               :scope :cwd :active true}]
              (support/eval-library env)))
     (t/is (= [{:name "user/report" :ns "user" :kind :defn
-               :doc nil :arglists '([x]) :file path}]
+               :doc nil :arglists '([x]) :file path
+               :scope :cwd :active true}]
              (get-in result [:details :defined])))
     (t/is (str/includes? (:content (support/eval! env "(eval/library)"))
                          "user/report"))))
@@ -40,7 +43,7 @@
         _ (support/eval! env "(defn f [] :one)")
         result (support/eval! env "(defn f [] :two)")
         content (slurp path)]
-    (t/is (str/includes? (:content result) "[eval: defined user/f → "))
+    (t/is (str/includes? (:content result) "[eval: defined user/f (cwd) → "))
     (t/is (str/includes? content ":two"))
     (t/is (not (str/includes? content ":one")))
     (let [restarted (support/restart-service env)]
@@ -106,7 +109,7 @@
         _ (support/eval! env "(defn doomed [] 1)")
         result (support/eval! env nil :drop ["user/doomed"])]
     (t/is (not (:is-error result)) (:content result))
-    (t/is (str/includes? (:content result) "[eval: forgot user/doomed]"))
+    (t/is (str/includes? (:content result) "[eval: forgot user/doomed (cwd)]"))
     (t/is (not (fs/exists? path)))
     (t/is (= "false"
              (:content (support/eval! env "(emit (some? (resolve 'doomed)))")))
@@ -119,7 +122,7 @@
     (support/eval! env "(def x 1)")
     (let [dropped (support/call-tool env "eval" {:drop ["user/x"]})]
       (t/is (not (:is-error dropped)) (:content dropped))
-      (t/is (str/includes? (:content dropped) "[eval: forgot user/x]"))
+      (t/is (str/includes? (:content dropped) "[eval: forgot user/x (cwd)]"))
       (t/is (not (fs/exists? path))))
     (let [empty-call (support/call-tool env "eval" {})]
       (t/is (:is-error empty-call))
@@ -149,7 +152,7 @@
     (support/eval! env "(defn f [] 1)")
     (let [result (support/eval! env "(eval/forget 'user/f)")]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (str/includes? (:content result) "[eval: forgot user/f]"))
+      (t/is (str/includes? (:content result) "[eval: forgot user/f (cwd)]"))
       (t/is (not (fs/exists? path))))
     (support/eval! env "(defn f [] 2)")
     (support/eval! env "(eval/forget 'f)")
@@ -203,6 +206,23 @@
       (t/is (= "2" (:content next-result)))
       (t/is (nil? (get-in next-result [:details :failures]))
             "a build failure is reported once, then cleared"))))
+
+(t/deftest test-a-file-without-a-loaded-record-can-still-be-dropped
+  (let [env (support/eval-ctx)
+        broken (library-file env "user" "broken.clj")
+        late (library-file env "user" "late.clj")]
+    (fs/create-dirs (fs/parent broken))
+    (spit broken "(ns user)\n(throw (ex-info \"boom\" {}))\n")
+    (t/is (seq (get-in (support/eval! env "(emit :ok)")
+                       [:details :failures])))
+    (fs/create-dirs (fs/parent late))
+    (spit late "(ns user)\n(def late 1)\n")
+    (let [dropped (support/eval! env nil :drop ["user/broken" "user/late"])]
+      (t/is (not (:is-error dropped)) (:content dropped))
+      (t/is (str/includes? (:content dropped) "[eval: forgot user/broken (cwd)]"))
+      (t/is (str/includes? (:content dropped) "[eval: forgot user/late (cwd)]")))
+    (t/is (not (fs/exists? broken)))
+    (t/is (not (fs/exists? late)))))
 
 (t/deftest test-a-written-definition-uses-the-current-call-surface
   (let [env (support/eval-ctx)
@@ -283,9 +303,9 @@
           result (support/eval-in! service other cwd
                                    "(emit [(some? (resolve 'legacy)) (some? (resolve 'entry-only))])")]
       (t/is (= "[false false]" (:content result))
-            "only the home library is loaded")
+            "only the agent home's library roots are loaded")
       (t/is (= [] (support/library-for service other))
-            "only the home library is loaded"))))
+            "only the agent home's library roots are loaded"))))
 
 (t/deftest test-a-write-failure-is-reported-and-leaves-the-live-definition
   (let [env (support/eval-ctx)]
@@ -295,7 +315,7 @@
                    (support/eval! env "(def x 2)"))]
       (t/is (:is-error result))
       (t/is (= :eval/write-failed (get-in result [:details :error])))
-      (t/is (str/includes? (:content result) "[eval: define failed user/x:"))
+      (t/is (str/includes? (:content result) "[eval: define failed user/x (cwd):"))
       (t/is (seq (get-in result [:details :failures])))
       (t/is (= "2" (:content (support/eval! env "x")))
             "the live definition remains"))
@@ -316,7 +336,7 @@
           "the live definition remains")
     (let [dropped (support/eval! env nil :drop ["user/lost"])]
       (t/is (not (:is-error dropped)) (:content dropped))
-      (t/is (str/includes? (:content dropped) "[eval: forgot user/lost]")))
+      (t/is (str/includes? (:content dropped) "[eval: forgot user/lost (unwritten)]")))
     (t/is (= "false"
              (:content (support/eval! env "(emit (some? (resolve 'lost)))")))
           "a failed write is still forgettable")))
@@ -327,7 +347,7 @@
     (support/eval! env "(def x 1)")
     (let [dropped (support/eval! env nil :drop ["x"])]
       (t/is (not (:is-error dropped)) (:content dropped))
-      (t/is (str/includes? (:content dropped) "[eval: forgot user/x]")))
+      (t/is (str/includes? (:content dropped) "[eval: forgot user/x (cwd)]")))
     (t/is (not (fs/exists? path)))
     (t/is (= [] (support/eval-library env)))
     (t/is (= "false"
@@ -342,7 +362,7 @@
           "the definition evaluated before the throw is live")
     (let [dropped (support/eval! env nil :drop ["user/z"])]
       (t/is (not (:is-error dropped)) (:content dropped))
-      (t/is (str/includes? (:content dropped) "[eval: forgot user/z]")))
+      (t/is (str/includes? (:content dropped) "[eval: forgot user/z (unwritten)]")))
     (t/is (= "false"
              (:content (support/eval! env "(emit (some? (resolve 'z)))")))
           "an errored call's live definition is forgettable")))
@@ -363,12 +383,12 @@
 (t/deftest test-forget-uses-the-call-s-final-namespace
   (let [env (support/eval-ctx)
         path (library-file env "demo" "y.clj")]
-    (eval-files/write-definition! (str (fs/path (:agent-dir env) "eval"))
+    (eval-files/write-definition! (support/global-root env)
                                   {:name "demo/y" :ns "demo" :kind :defn
                                    :source "(defn y [] 1)"})
     (let [result (support/eval! env "(ns demo) (eval/forget 'y)")]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (str/includes? (:content result) "[eval: forgot demo/y]")))
+      (t/is (str/includes? (:content result) "[eval: forgot demo/y (global)]")))
     (t/is (not (fs/exists? path)))))
 
 (t/deftest test-a-partial-drop-reports-what-landed
@@ -382,7 +402,7 @@
                       (delete root name)))]
       (let [result (support/eval! env "(emit :ok)" :drop ["user/a" "user/b"])]
         (t/is (:is-error result))
-        (t/is (str/includes? (:content result) "[eval: forgot user/a]"))
+        (t/is (str/includes? (:content result) "[eval: forgot user/a (cwd)]"))
         (t/is (str/includes? (:content result) "[eval: failed: disk full]"))))))
 
 (t/deftest test-an-unbind-failure-is-reported
@@ -392,7 +412,7 @@
     (with-redefs [script/eval-source! (fn [& _] {:error "boom"})]
       (let [result (support/eval! env nil :drop ["user/x"])]
         (t/is (:is-error result))
-        (t/is (str/includes? (:content result) "[eval: forgot user/x]"))
+        (t/is (str/includes? (:content result) "[eval: forgot user/x (cwd)]"))
         (t/is (str/includes? (:content result) "[eval: failed user/x: boom]"))
         (t/is (seq (get-in result [:details :failures])))))
     (t/is (not (fs/exists? path)))
@@ -411,7 +431,7 @@
                       (delete root name)))]
       (let [result (support/eval! env nil :drop ["user/a" "user/b"])]
         (t/is (:is-error result))
-        (t/is (str/includes? (:content result) "[eval: forgot user/a]"))
+        (t/is (str/includes? (:content result) "[eval: forgot user/a (cwd)]"))
         (t/is (str/includes? (:content result) "[eval: failed user/b: disk full]"))
         (t/is (seq (get-in result [:details :failures])))))))
 
@@ -428,8 +448,8 @@
     (support/eval! env "(def a 1)")
     (let [result (support/eval! env "(def b 2)" :drop ["user/a"])]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (str/includes? (:content result) "[eval: forgot user/a]"))
-      (t/is (str/includes? (:content result) "[eval: defined user/b → "))
+      (t/is (str/includes? (:content result) "[eval: forgot user/a (cwd)]"))
+      (t/is (str/includes? (:content result) "[eval: defined user/b (cwd) → "))
       (t/is (not (fs/exists? a)))
       (t/is (fs/exists? b)))))
 

@@ -23,12 +23,12 @@
   "Built-in keys refused even when a namespace check would allow them. A
    source that contributes one is refused as a whole."
   #{"eval/library" "eval/forget" "eval/sources" "eval/help" "eval/describe"
-    "user/edit" "user/write-file"
+    "eval/move" "user/edit" "user/write-file"
     "clj/edit-form" "clj/replace-sexp" "clj/paren-repair"})
 
 (def ^:private reserved-command-names
   "The unqualified `/eval` verbs a source may not replace."
-  #{"list" "search" "drop" "sources" "help" "--help" "-h"})
+  #{"list" "search" "drop" "move" "sources" "help" "--help" "-h"})
 
 (defn- described
   "Attach a verb's model-facing interface to its function value. The keys are

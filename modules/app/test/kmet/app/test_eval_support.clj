@@ -2,7 +2,8 @@
   "Shared harness for the eval service tests: a scratch project cwd, a scratch
    agent dir, a session, the service provisioned on a test ctx, and the two
    call paths (service and tool)."
-  (:require [kmet.app.eval :as eval-service]
+  (:require [babashka.fs :as fs]
+            [kmet.app.eval :as eval-service]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.session.core :as session]
             [kmet.app.tools.registry :as tools]
@@ -34,6 +35,22 @@
    far as the eval library is concerned."
   [{:keys [ctx agent-dir]}]
   (eval-service/value ctx {:agent-dir agent-dir}))
+
+(defn global-root
+  "The global eval library root for ENV."
+  [{:keys [agent-dir]}]
+  (str (fs/path agent-dir "eval")))
+
+(defn cwd-root
+  "The cwd eval library root for ENV."
+  [{:keys [agent-dir cwd]}]
+  (str (fs/path agent-dir "eval-scopes" (session/encode-cwd cwd))))
+
+(defn library-file
+  "A definition file under ENV's SCOPE root, then PARTS."
+  [env scope & parts]
+  (str (apply fs/path (case scope :global (global-root env) :cwd (cwd-root env))
+              parts)))
 
 (defn- opts-map
   [opts]

@@ -2,8 +2,9 @@
   "The `eval` tool: model-written Clojure in the agent session's persistent
    SCI environment (`kmet.app.eval`). Unlike `run_code`, the environment is
    kept across calls, so a definition from one call is visible to the next.
-   Every successful definition is written to the agent home's eval library
-   and loaded by every session; a new session or a restart sees it. The
+   Every successful definition is written to the agent home's eval library —
+   the session cwd's scope by default, the global scope when requested — and
+   loaded by every session; a new session or a restart sees both layers. The
    fresh-context, output-economy tool stays `run_code`.
 
    The row also registers the `:core` eval source, which puts the shared
@@ -33,7 +34,7 @@
    direct extension call reports the missing service instead of starting a
    process-wide environment. A call may carry only `:drop`, in which case it
    removes a library definition without evaluating forms."
-  [{:keys [code timeout max-output-bytes drop]} on-update signal ctx]
+  [{:keys [code timeout max-output-bytes drop scope]} on-update signal ctx]
   (let [code (some-> code str)]
     (if (and (str/blank? code) (empty? drop))
       {:content "No code or drop provided." :is-error true}
@@ -41,9 +42,11 @@
         (try
           (if (str/blank? code)
             ((:drop! service) {:drop drop
+                               :scope scope
                                :cwd (or (:cwd ctx) (tool-util/cwd))})
             ((:eval! service) {:code code
                                :drop drop
+                               :scope scope
                                :timeout timeout
                                :limits (script/resolve-limits max-output-bytes)
                                :signal signal
@@ -66,9 +69,12 @@
                      "to the agent's eval library, so new sessions and a restart "
                      "load them; local let/fn bindings are scratch, so a top-level "
                      "definition is a library write. An already-running session is "
-                     "a cache and does not pick up another session's new files. A "
-                     "redefinition overwrites its file; drop deletes the file and "
-                     "unbinds this session's live name. A call that ends in a "
+                     "a cache and does not pick up another session's new files. New "
+                     "definitions are saved in the cwd scope unless scope is global; "
+                     "a redefinition stays in the active definition's scope. Drop "
+                     "deletes the file and unbinds this session's live name; "
+                     "(eval/move 'name :global|:cwd) moves a definition between "
+                     "scopes. A call that ends in a "
                      "normal error writes nothing; its definitions stay live and "
                      "can be forgotten. A successful call's namespace is "
                      "re-entered by the next. Output is the emitted text (or the "
@@ -81,8 +87,8 @@
     "Define what should survive the call: every top-level definition is written to the agent's eval library, while let/fn bindings are scratch. Use local bindings for throwaway code."
     "Give every saved definition a docstring: it is the interface later calls see, with its arglists. A missing docstring does not stop the save, but the result line and listings say (no docstring), and (eval/describe 'name :doc) is nil."
     "New sessions and a restart load the library; an already-running session is a cache and does not see another session's new files. A call that ends in a normal error writes nothing; its definitions stay live and can be forgotten."
-    "A redefinition overwrites its file; drop or (eval/forget 'name) deletes the file and unbinds this session's live name. A code-less call may carry only drop."
-    "Use (eval/patch 'name old new) to replace one subform in a named definition; it re-evaluates before writing, and the definition name must stay. Use (eval/edit-form 'name new-source) to replace the whole definition; edit files structurally with clj/edit-form, clj/replace-sexp and clj/paren-repair."
+    "A redefinition overwrites its file; drop or (eval/forget 'name) deletes the file and unbinds this session's live name. A code-less call may carry only drop (plus scope)."
+    "New definitions default to the cwd scope; pass scope global to save a new name globally. An existing active name keeps its scope, and the scope option may only name its active layer. Move a definition with (eval/move 'name :global|:cwd) or /eval move; a move does not re-evaluate. Use (eval/patch 'name old new) to replace one subform in a named definition; it re-evaluates before writing, and the definition name must stay. Use (eval/edit-form 'name new-source) to replace the whole definition; edit files structurally with clj/edit-form, clj/replace-sexp and clj/paren-repair."
     "Use (eval/describe 'name) for one definition's kind, docstring, arglists, file, scope and source; (eval/describe 'name key) returns one field. (eval/sources) stays the registered-source listing, including each contributed verb's interface."
     "Report with (emit value) or end on the value you want reported; stdout and stderr are discarded."]
    :parameters {:type "object"
@@ -95,6 +101,9 @@
                  "drop" {:type "array"
                          :items {:type "string"}
                          :description "Definition names to remove: deletes the library file and unbinds the live name. May be used without code."}
+                 "scope" {:type "string"
+                          :enum ["cwd" "global"]
+                          :description "Library layer for a new definition or a drop: cwd (default for new names) or global. A redefinition keeps its active layer."}
                  "max-output-bytes" {:type "number"
                                      :description "Maximum result bytes (default 16 KiB; capped at 50 KiB)"}}
                 :required []}

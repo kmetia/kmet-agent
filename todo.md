@@ -5,8 +5,7 @@
 Status: done (2026-11-05). This was the interface half of persistent-eval
 step 10, pulled out and moved ahead of the cwd-scope task: it is independent
 of scopes and avoids a second update of the exact `(eval/library)` maps the
-scope work rewrites. The prompt-start manifest half (10b) stays after the
-scope task.
+scope work rewrites. The prompt-start manifest half (10b) is next.
 
 The model must see the interface, not just a name: a saved definition exposes
 its docstring and arglists, `(eval/describe 'name)` reads the interface and
@@ -80,10 +79,10 @@ the same metadata.
 
 ## Task: cwd-scoped eval library (2026-11-05)
 
-Status: in progress. Step 0 (the shared cwd key) is done; the eval scopes
-then use it in steps 1–9. Step 10a (interface discovery) is done and landed
-first. Supersedes the one-global-library decision below; that decision stays
-as the step-4R history.
+Status: done (2026-11-05). Step 0 (the shared cwd key), the eval scopes in
+steps 1–9, and step 10a (interface discovery) are landed. Supersedes the
+one-global-library decision below; that decision stays as the step-4R
+history.
 
 The eval environment keeps one durable visibility layer per session cwd, with
 the home library as an explicit global layer. One definition per address is
@@ -303,9 +302,9 @@ are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; 10a done; 10b (manifest) planned after the cwd-scope task; **cwd-scope task in progress** |
+| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; 10a done; cwd-scope task done; **10b (manifest) next** |
 | Eval library interface discovery (10a) | saved definitions and source-provided verbs expose an interface and implementation through `(eval/describe)`, not just names | **done** (2026-11-05) |
-| Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **in progress** — step 0 (shared cwd key) done; 10a done; scopes next |
+| Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **done** (2026-11-05) — cwd default, explicit global, shadow/drop, move, pinned scope |
 | Clojure extension surface review | the extension's tools now overlap E17's core editing engine and its eval `clj/*` verbs; decide the remaining surface from usage | **measuring** — description and skill trimmed 2026-11-05; decision gate after the eval cwd-scope work |
 
 ## Persistent eval and eval sources
@@ -313,12 +312,10 @@ are dropped too — see § Deferred.
 Status: steps 1–9 done (the shared script layer, the file ops, the one-home
 library, the source registry and ABI, `eval/patch`, the shared Clojure editing
 engine with its core verbs, and the docs/catalog pass); step 10 is split: 10a
-(the interface and source-verb docs) is done; 10b (the discovery manifest and
-first-eval report) is planned after the cwd-scope task. The cwd-scope task is
-in progress. The scope
-material below is step-4R history; the cwd-scoped task
-above supersedes it, while the sandbox, source and editing material still
-applies. The tool is opt-in
+(the interface and source-verb docs) and the cwd-scope task are done; 10b (the
+discovery manifest and first-eval report) is next. The scope
+material below is step-4R history; the cwd-scoped task above supersedes it,
+while the sandbox, source and editing material still applies. The tool is opt-in
 by default under S4.5; step 4R's tests exercise it directly rather than through
 the default declared set. E17 moved the Clojure editing engine and the edit
 verbs into core; the rest of the clojure extension is a post-track task at the
@@ -563,8 +560,8 @@ a skill, the existing seam.
 A name alone is not discoverability: it says something exists but not how to
 call it or what it does, so the model still has to open the file. Step 10
 turns the listing into an interface listing. **10a** (records, source metadata,
-`(eval/describe)`, docs) is done; **10b** (the prompt manifest and first-eval
-report) runs after the cwd-scope task.
+`(eval/describe)`, docs) and the cwd-scope task are done; **10b** (the prompt
+manifest and first-eval report) is next.
 
 - **Record the interface.** `kmet.app.eval.definitions` extracts `:doc` (the
   docstring, else attr-map or symbol metadata) and `:arglists` (for `defn`,
@@ -605,7 +602,7 @@ report) runs after the cwd-scope task.
   listing changed, and only while the `eval` tool is selected. It never
   rebuilds the system prompt.
 - **Loaded is not saved.** With an environment, list its loaded records (the
-  session's snapshot, with `:scope`/active state after the cwd-scope task);
+  session's snapshot, with `:scope`/active state);
   without one, list the disk index as "saved; loads on first eval". Never
   advertise a disk-only name as live in an already-built session, and never
   build an environment just to produce the message. The first eval call
@@ -724,7 +721,7 @@ plus ~150 moved (step 2).
    line: a persistent context makes Jolt's `eval-in` more attractive later;
    the decision is unchanged); the tier table and the clojure extension's
    remaining surface (E17 and the post-track task).
-10. **Step 10b (planned, after the cwd-scope task): the discovery manifest
+10. **Step 10b (planned, next): the discovery manifest
     and first-eval report.** Step 10a (done) supplies `:doc`/`:arglists`/
     `:source` through `(eval/describe)` for library definitions and source
     verbs. Implement the manifest half of the Discovery design:
@@ -1020,7 +1017,8 @@ scanning the library, sessions are runtime caches, and forget deletes the file
 and unbinds the live name. This supersedes E3, E4 and E6 and amends E5, E10,
 E12, E14 and E15; the landed step 4R is its implementation. The reference is
 nodecode: one layer per home, one file per definition, no session or project
-scope for code. Superseded by § Task: cwd-scoped eval library (2026-11-05).
+scope for code. Superseded and replaced by § Task: cwd-scoped eval library
+(done 2026-11-05).
 
 ## Post-track task: the rest of the clojure extension
 

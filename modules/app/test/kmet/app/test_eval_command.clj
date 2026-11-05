@@ -1,6 +1,6 @@
 (ns kmet.app.test-eval-command
-  "The `/eval` command: list, search, drop, sources, help, source verbs and
-   registration lifetime."
+  "The `/eval` command: list, search, move, drop, sources, help, source verbs
+   and registration lifetime."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
@@ -40,6 +40,8 @@
       :service service
       :session sess
       :library-root (str (fs/path agent-dir "eval"))
+      :cwd-root (str (fs/path agent-dir "eval-scopes"
+                              (session/encode-cwd cwd)))
       :engine {:agent-state (atom {:ctx root})
                :session (atom sess)
                :cwd (atom cwd)}})))
@@ -54,7 +56,7 @@
     @got))
 
 (defn- write-def! [env record]
-  (eval-files/write-definition! (:library-root env)
+  (eval-files/write-definition! (:cwd-root env)
                                 (merge {:ns "user" :kind :defn} record)))
 
 (t/deftest list-with-an-empty-library
@@ -76,8 +78,9 @@
       (t/is (str/includes? content "user/report"))
       (t/is (str/includes? content "demo/area"))
       (t/is (str/includes? content "2 definitions"))
-      (t/is (str/includes? content "eval/user/report.clj"))
-      (t/is (str/includes? content "eval/demo/area.clj")))
+      (t/is (str/includes? content "(cwd)"))
+      (t/is (str/includes? content "report.clj"))
+      (t/is (str/includes? content "area.clj")))
     (let [[_ _ content] (first (run env "list report"))]
       (t/is (str/includes? content "user/report"))
       (t/is (not (str/includes? content "demo/area"))))))
@@ -89,10 +92,10 @@
     (write-def! env {:name "user/plain" :source "(def plain 1)"})
     (let [[[level _ content]] (run env "list")]
       (t/is (= :info level))
-      (t/is (str/includes? content "user/report  defn ([x])"))
+      (t/is (str/includes? content "user/report  defn ([x])  (cwd)"))
       (t/is (str/includes? content "Render."))
-      (t/is (str/includes? content "user/plain  def  (no docstring; see "))
-      (t/is (str/includes? content "eval/user/plain.clj")))
+      (t/is (str/includes? content "user/plain  def  (cwd)  (no docstring; see "))
+      (t/is (str/includes? content "plain.clj")))
     (let [[_ _ content] (first (run env "list report"))]
       (t/is (str/includes? content "Render."))
       (t/is (not (str/includes? content "user/plain"))))))
@@ -124,7 +127,7 @@
                              (throw (ex-info "must not build" {:type :test})))}
             #(run env "drop user/doomed"))]
       (t/is (= :info level))
-      (t/is (str/includes? content "[eval: forgot user/doomed]")
+      (t/is (str/includes? content "[eval: forgot user/doomed (cwd)]")
             "a drop reads and deletes files without building an environment"))
     (t/is (not (fs/exists? path)))
     (let [[level _ content] (first (run env "drop user/nope"))]
@@ -142,9 +145,55 @@
                               :source "(defmethod area :rect [m] :rect)"})]
     (let [[[level _ content]] (run env "drop \"user/area :rect\"")]
       (t/is (= :info level))
-      (t/is (str/includes? content "[eval: forgot user/area :rect]")))
+      (t/is (str/includes? content "[eval: forgot user/area :rect (cwd)]")))
     (t/is (not (fs/exists? path)))
-    (t/is (fs/exists? (eval-files/path-for-name (:library-root env) "user/area")))))
+    (t/is (fs/exists? (eval-files/path-for-name (:cwd-root env) "user/area")))))
+
+(t/deftest list-marks-both-scopes-and-shadowing
+  (let [env (eval-env)]
+    (write-def! env {:name "user/f" :source "(defn f [] :cwd)"})
+    (eval-files/write-definition! (:library-root env)
+                                  {:name "user/f" :ns "user" :kind :defn
+                                   :source "(defn f [] :global)"})
+    (let [[[level _ content]] (run env "list")]
+      (t/is (= :info level))
+      (t/is (str/includes? content "2 definitions"))
+      (t/is (str/includes? content "user/f  defn ([])  (cwd)"))
+      (t/is (str/includes? content "user/f  defn ([])  (global, shadowed)")))))
+
+(t/deftest move-command-moves-without-building-an-environment
+  (let [env (eval-env)
+        cwd-file (write-def! env {:name "user/f" :source "(defn f [] 1)"})
+        global-file (eval-files/path-for-name (:library-root env) "user/f")]
+    (with-redefs-fn {#'eval-service/build-environment
+                     (fn [& _] (throw (ex-info "must not build" {:type :test})))}
+      (fn []
+        (let [[[level _ content]] (run env "move user/f global")]
+          (t/is (= :info level))
+          (t/is (str/includes? content "[eval: moved user/f (cwd → global)]")))))
+    (t/is (not (fs/exists? cwd-file)))
+    (t/is (fs/exists? global-file))
+    (let [[[level _ content]] (run env "move user/f global")]
+      (t/is (= :warning level))
+      (t/is (str/includes? content "already in the global scope")))
+    (let [[[level _ content]] (run env "move user/f")]
+      (t/is (= :warning level))
+      (t/is (str/includes? content "Usage: /eval move")))
+    (let [[[level _ content]] (run env "move user/f cwd")]
+      (t/is (= :info level))
+      (t/is (str/includes? content "[eval: moved user/f (global → cwd)]")))
+    (t/is (fs/exists? cwd-file))))
+
+(t/deftest move-command-accepts-a-quoted-method-address
+  (let [env (eval-env)
+        cwd-file (write-def! env {:name "user/area :rect" :kind :defmethod
+                                  :source "(defmethod area :rect [m] :rect)"})
+        global (eval-files/path-for-name (:library-root env) "user/area :rect")]
+    (let [[[level _ content]] (run env "move \"user/area :rect\" global")]
+      (t/is (= :info level))
+      (t/is (str/includes? content "[eval: moved user/area :rect (cwd → global)]")))
+    (t/is (not (fs/exists? cwd-file)))
+    (t/is (fs/exists? global))))
 
 (t/deftest sources-and-help
   (let [env (eval-env)]
@@ -160,6 +209,7 @@
       (t/is (str/includes? help "/eval list [pattern]"))
       (t/is (str/includes? help "/eval search <text>"))
       (t/is (str/includes? help "/eval drop <name>"))
+      (t/is (str/includes? help "/eval move <name> global|cwd"))
       (t/is (str/includes? help "/eval sources"))
       (t/is (str/includes? help "/eval help")))
     (let [[level _ content] (first (run env "nonsense"))]

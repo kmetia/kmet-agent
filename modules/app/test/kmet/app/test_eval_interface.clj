@@ -74,7 +74,7 @@
 
 (t/deftest test-describe-returns-the-interface-and-source
   (let [env (support/eval-ctx)
-        path (str (fs/path (:agent-dir env) "eval" "user" "report.clj"))
+        path (support/library-file env :cwd "user" "report.clj")
         source "(defn report \"Render a report.\" [x] (str x))"
         _ (support/eval! env source)
         described (describe-map env "(eval/describe 'user/report)")]
@@ -83,7 +83,7 @@
               :doc "Render a report."
               :arglists '([x])
               :file path
-              :scope :global
+              :scope :cwd
               :source source}
              described))
     (t/is (= described (describe-map env "(eval/describe 'user/report nil)"))
@@ -116,7 +116,7 @@
 
 (t/deftest test-describe-never-reads-a-changed-file
   (let [env (support/eval-ctx)
-        path (str (fs/path (:agent-dir env) "eval" "user" "f.clj"))
+        path (support/library-file env :cwd "user" "f.clj")
         _ (support/eval! env "(defn f \"Original.\" [] 1)")]
     (spit path "(ns user)\n(defn f \"Changed on disk.\" [] 2)\n")
     (t/is (= "Original."
@@ -157,15 +157,15 @@
           help (:content (support/eval! env "(eval/help)"))]
       (t/is (str/includes? library ":doc \"Doc line.\\nMore.\""))
       (t/is (str/includes? library ":arglists ([x])"))
-      (t/is (str/includes? help "user/documented defn ([x]) — Doc line."))
-      (t/is (str/includes? help "user/undocumented defn ([x]) — (no docstring)"))
+      (t/is (str/includes? help "user/documented defn ([x]) (cwd) — Doc line."))
+      (t/is (str/includes? help "user/undocumented defn ([x]) (cwd) — (no docstring)"))
       (t/is (= "true"
                (:content (support/eval! env
                                         "(emit (nil? (eval/describe 'undocumented :doc)))")))))))
 
 (t/deftest test-an-unwritten-definition-is-described
   (let [env (support/eval-ctx)
-        path (str (fs/path (:agent-dir env) "eval" "user" "lost.clj"))
+        path (support/library-file env :cwd "user" "lost.clj")
         failed (with-redefs [eval-files/write-definition!
                              (fn [& _] (throw (ex-info "disk full" {:type :test})))]
                  (support/eval! env "(defn lost \"Lost doc.\" [x] x)"))]
@@ -189,7 +189,7 @@
 
 (t/deftest test-a-failed-redefinition-describes-the-live-record
   (let [env (support/eval-ctx)
-        path (str (fs/path (:agent-dir env) "eval" "user" "stable.clj"))
+        path (support/library-file env :cwd "user" "stable.clj")
         _ (support/eval! env "(defn stable \"Old.\" [] 1)")]
     (with-redefs [eval-files/write-definition!
                   (fn [& _] (throw (ex-info "disk full" {:type :test})))]
@@ -269,7 +269,7 @@
   (let [env (support/eval-ctx)
         result (support/eval! env "(defn undocumented [] 1)")]
     (t/is (str/includes? (:content result)
-                         "[eval: defined user/undocumented → "))
+                         "[eval: defined user/undocumented (cwd) → "))
     (t/is (str/includes? (:content result) "(no docstring)"))
     (let [documented (support/eval! env "(defn documented \"Doc.\" [] 1)")]
       (t/is (not (str/includes? (:content documented) "(no docstring)"))))))

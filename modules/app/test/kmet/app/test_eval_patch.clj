@@ -14,7 +14,7 @@
                                {:owner [:test :eval-patch id]}))
 
 (defn- definition-file [env]
-  (str (fs/path (:agent-dir env) "eval" "user" "greet.clj")))
+  (support/library-file env :cwd "user" "greet.clj"))
 
 (t/deftest patch-updates-the-live-definition-and-the-file
   (let [env (support/eval-ctx)]
@@ -35,8 +35,7 @@
     (let [content (:content (support/eval! env "(eval/patch 'user/answer 1 42) answer"))]
       (t/is (str/includes? content "[eval: patched user/answer"))
       (t/is (str/starts-with? content "42")))
-    (t/is (str/includes? (slurp (str (fs/path (:agent-dir env)
-                                              "eval" "user" "answer.clj")))
+    (t/is (str/includes? (slurp (support/library-file env :cwd "user" "answer.clj"))
                          "(def answer 42)"))))
 
 (t/deftest patch-not-found-leaves-file-and-live-definition

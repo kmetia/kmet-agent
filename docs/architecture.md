@@ -255,7 +255,7 @@ schema-validated at load).
 | `:permissions` | `{:policy :remember!}` — the tool-call decision | `kmet.app.permissions/permissions`, per agent |
 | `:approvals` | `{:ask!}` — the one `:ask` delivery seam | `kmet.app.permissions/approvals` at the root; the TUI and server rows supply their own |
 | `:shell` `:sandbox` | the agent's shell options; the realm names a script's tool calls are blocked from | provided per agent by the agents factory; a preset row that mounts first wins |
-| `:eval` | `{:eval! :drop! :library :index :sources :source-commands :failures :dispose!}` — the agent's persistent script environment over the home eval library, one per session | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
+| `:eval` | `{:eval! :drop! :move! :library :index :sources :source-commands :failures :dispose!}` — the agent's persistent script environment over the global and cwd eval libraries, one per session | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
 | `:ui` | the capability service (`kmet.app.ui`) | `kmet.ui.headless/plugin`, `kmet.ui.tui/provider-plugin` |
 | `:extensions` | no service: the row binds the host's services (registry handle, ctx, resource ops, owner sweep) and publishes `process-handle` | `kmet.app.extensions/plugin` |
 
@@ -588,17 +588,36 @@ and call lock. `seed!` installs the call's namespaces into that context each
 time, so the tool surface follows the agent's registry while definitions stay.
 A definition from one call is visible to the next in the same session, and the
 last namespace a successful call ended in is re-entered at the start of the
-next. Every successful top-level definition is written immediately to the agent
-home's library, `<agent-dir>/eval/<ns>/<name>.clj` (one verbatim source slice;
-`kmet.app.eval.files`), and a redefinition overwrites it. A session's first
-eval scans and evaluates the library; a new session or a restarted process
-loads it, while an already-built environment is a runtime cache and never
-refreshes. Sessions share the library but not the environment. `:drop` and
-`(eval/forget 'name)` delete the file and unbind the live name. The
-engine-portable builtins register `/eval` (`list`, `search`, `drop`, `sources`,
-`help`, plus verbs an eval source contributes), independent of the
-`:tool/eval` row, so removing the row leaves the command and its service. The
-row also registers the `:core` eval source (the shared `edit`/`write-file` ops
+next. Every successful top-level definition is written immediately to one of
+two durable layers: the global `<agent-dir>/eval/<ns>/<name>.clj`, or the
+session cwd's `<agent-dir>/eval-scopes/<shared-cwd-key>/<ns>/<name>.clj` (one
+verbatim source slice each; `kmet.app.eval.files`). Existing `<agent-dir>/eval`
+files are the global layer; nothing is moved automatically. The key is the
+shared injective session-dir encoder, pinned when the environment is built: a
+later
+call's `:cwd` still resolves file verbs and sources, but never moves the
+library root. Global loads first, then cwd; a name's stack is `[global cwd]`
+and the last record is live, so cwd shadows global. New names default to cwd;
+redefining an active name keeps its layer. `:scope :global` or `:cwd` chooses
+a new name's layer and is accepted for an existing name only when it names
+the active layer. A session's first eval scans and evaluates both layers; a
+new session or a restarted process loads them, while an already-built
+environment is a runtime cache and never refreshes. Sessions share the files
+but not the environment. `:drop` and `(eval/forget 'name)` target the active
+record by default; a scoped drop targets either layer. Dropping the active
+record deletes its file, unbinds the live name, and re-evaluates the next
+record (restoring a shadowed global); dropping a non-active record deletes
+only its file and leaves the live definition. A code-less drop needs no
+environment and resolves cwd first, or `:scope`.
+`(eval/move 'name :global|:cwd)` and `/eval move <name> global|cwd` move an
+active definition without
+re-evaluating; they refuse collisions, same-scope moves, and source-provided
+or unwritten targets, take both root locks in the fixed global-then-cwd order,
+and roll back the target if the source delete fails. The engine-portable
+builtins register `/eval` (`list`, `search`, `drop`, `move`, `sources`, `help`,
+plus verbs an eval source contributes), independent of the `:tool/eval` row,
+so removing the row leaves the command and its service. The row also
+registers the `:core` eval source (the shared `edit`/`write-file` ops
 under `user`, and `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair` from
 the shared `kmet.libs.clj-edit` engine), so removing it leaves the command
 without those verbs. The clojure extension's tools wrap the same engine; the
@@ -607,10 +626,12 @@ guidelines and `(eval/help)` name the shared script surface (aliases, the
 `tools` namespace, require-able namespaces and bundled libs) without depending
 on `run_code`, since either row can be selected alone; host-specific sandbox
 differences stay in this section, not in the model-facing text. `list` and
-`search` read the disk index, so they show the
-library rather than one session's cache; `drop` deletes the files directly and
-unbinds the live name only when that session already has an environment, so a
-drop never builds one. The environment build
+`search` read the disk index across both roots (the built environment's pinned
+roots when the session has one, else the command cwd), so they show the
+library rather than one session's cache and mark each entry `(cwd)` or
+`(global)` and shadowed. `drop` deletes the files directly and unbinds the
+live name only when that session already has an environment, so a drop never
+builds one. The environment build
 seeds the call vocabulary and the standard aliases before evaluating the
 library, and each definition's per-call primitives (`emit`, `cwd`, the process
 wrappers and the tool bridge) read the current call's state rather than the
@@ -631,8 +652,10 @@ write or an errored call) and returns `{:name :kind :doc :arglists :file
 the stored defining form for a written definition (no generated `(ns …)`
 header) or the retained in-memory form for an unwritten one, and a source
 verb's `:source` metadata when the source supplies it. `:file` is nil for
-source-provided and unwritten entries; a written definition in the current
-single library reports `:scope :global`. Source verbs carry the same keys as
+source-provided and unwritten entries; a written definition reports `:scope
+:global` or `:cwd`, and a shadowed global record is visible in
+`(eval/library)` and the disk listings with `:active false`. Load, write and
+unbind failures carry `:scope` too. Source verbs carry the same keys as
 metadata on their values (`with-meta`), which `normalize-source` validates and
 `source-var` puts on the SCI var, so `(meta #'license/add!)` works; the plural
 `(eval/sources)` stays the registered-source listing and includes each verb's
@@ -644,13 +667,24 @@ arglist), and `(eval/describe 'name :doc)` is nil.
 Limits: a definition file is the defining form only — its `(ns …)` requires are
 not stored, so the standard aliases are replayed and anything else must be
 self-contained. A file's generated `(ns …)` form runs before the aliases.
-Files load sorted by path; a `defmethod` file needs its `defmulti` file, and
-interdependent files can load out of order. Dropping a `defmethod` address
+Files load sorted by path within each layer, global before cwd; a `defmethod`
+file needs its `defmulti` file, and interdependent files can load out of
+order. A global definition cannot depend on a cwd definition (the cwd layer
+loads later), a shadowed global still runs its top-level side effects, and
+moving a global definition to cwd can break other global files. Dropping a
+shadowed `defmulti` re-evaluates the next record for that address, but
+methods from the other layer may need a rebuild. A move updates the file and
+the record only; it never re-evaluates. Dropping a `defmethod` address
 deletes its file and removes only that method; the multimethod and its other
 methods stay live. A multi-name `declare` writes its
-whole source under each name, so dropping one leaves the others declared. Two
-addresses that sanitize to the same file name share a file; the last write
-wins. A source-provided key may be redefined live but is never written. A
+whole source under each name, so dropping one leaves the others declared (and
+the next build can restore the dropped name); moving one is refused because
+its file defines the siblings. Two addresses that
+sanitize to the same file name share a file; the last write wins. A
+hand-written file with several top-level definitions is still one address and
+file: moving one address is refused, and dropping one deletes the file for
+the others (a restart loses them). A source-provided key may be redefined
+live but is never written. A
 call that ends in a normal error writes nothing; definitions it evaluated
 before the error stay live and are forgettable. `(eval/patch 'name old new)`
 replaces the first structurally equal subform inside the named definition,
@@ -669,9 +703,13 @@ file authoritative for the next build. A failed delete or unbind is reported;
 a failed unbind leaves the live definition until a restart. A session environment and its lock are
 retained until the agent is disposed; deleting a session does not release them,
 and two sessions in one home share the files but not the live environment.
-`(eval/library)` lists the definitions the current environment loaded. Build
-failures are reported once, on the next result, and then cleared; `/eval list`
-still shows them from the disk index.
+A cwd scope is one layer per normalized cwd, shared by sessions with that
+cwd; worktrees and subdirectories are separate scopes by design, and
+symlinks are separate because the key uses the normalized path, not
+`realpath`. `(eval/library)`
+lists every record the current environment loaded, active and shadowed.
+Build failures are reported once, on the next result, and then cleared;
+`/eval list` still shows them from the disk index.
 Interpreted build code is bounded by a build deadline; host-blocked top-level
 code still has the sandbox's interrupt-grace limitation. Definition report
 lines are appended after the script's output budget, not counted inside it.

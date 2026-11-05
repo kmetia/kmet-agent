@@ -1,9 +1,10 @@
 (ns kmet.app.commands.eval
   "The `/eval` slash command: the human-facing view of the eval library.
 
-   Verbs: `list [pattern]`, `search <text>`, `drop <name>…`, `sources` and
-   `help`. An eval source may contribute a verb through the service's
-   `:source-commands` map; built-in names are reserved. The command is
+   Verbs: `list [pattern]`, `search <text>`, `drop <name>…`, `move <name>
+   global|cwd`, `sources` and `help`; entries show their cwd/global scope and
+   whether an entry is shadowed. An eval source may contribute a verb through
+   the service's `:source-commands` map; built-in names are reserved. The command is
    registered with the engine-portable builtins, independent of the
    `:tool/eval` row."
   (:require [clojure.edn :as edn]
@@ -45,11 +46,16 @@
 (defn- entry-path [cwd file]
   (if file (eval-files/display-path cwd file) "(no file)"))
 
-(defn- entry-line [cwd {:keys [name kind file arglists doc]}]
+(defn- scope-tag [{:keys [scope active]}]
+  (str "(" (name (or scope :global))
+       (when (false? active) ", shadowed") ")"))
+
+(defn- entry-line [cwd {:keys [name kind file arglists doc] :as entry}]
   (let [path (entry-path cwd file)
         arg (eval-format/arglists-text arglists)
         doc-line (eval-format/doc-line doc)]
     (str name "  " (kind-name kind) (or arg "")
+         "  " (scope-tag entry)
          (if (and (nil? doc-line) (nil? arg))
            (str "  (no docstring; see " path ")")
            (str "  " path))
@@ -89,7 +95,7 @@
     (catch Throwable _ nil)))
 
 (defn- search-line [cwd p {:keys [name file] :as entry}]
-  (let [line (str name "  " (entry-path cwd file))
+  (let [line (str name "  " (scope-tag entry) "  " (entry-path cwd file))
         hit (when (and file (not (name-match? entry p)))
               (source-line file p))]
     (if hit
@@ -126,6 +132,16 @@
     (catch Exception e
       {:is-error true :content (or (ex-message e) (str e))})))
 
+(defn- move-args
+  "Parse `<name> global|cwd`, allowing a quoted defmethod address."
+  [arg]
+  (let [arg (str/trim arg)
+        i (str/last-index-of arg " ")]
+    (when (and i (pos? i))
+      (let [names (names-arg (str/trim (subs arg 0 i)))]
+        (when (= 1 (count names))
+          [(first names) (str/trim (subs arg (inc i)))])))))
+
 (defn- source-id [s]
   (let [id (if (map? s) (:id s) s)]
     (if (keyword? id) (name id) (str id))))
@@ -135,21 +151,22 @@
         error (when (map? s) (:error s))
         doc (when (map? s) (:doc s))
         verbs (when (map? s) (:verbs s))]
-    (cond
-      (seq error) (str "- " id ": " error)
-      :else (str "- " id
-                 (when (seq doc) (str ": " doc))
-                 (when (seq verbs)
-                   (str "\n" (str/join "\n"
-                                       (map eval-format/verb-line verbs))))))))
+    (if (seq error)
+      (str "- " id ": " error)
+      (str "- " id
+           (when (seq doc) (str ": " doc))
+           (when (seq verbs)
+             (str "\n" (str/join "\n" (map eval-format/verb-line verbs))))))))
 
 (defn- failure-line [failure]
-  (str "  failure: " (or (:file failure) (:name failure) (:source failure) "?")
+  (str "  failure: " (or (:file failure) (:name failure) (:source failure)
+                         (:root failure) "?")
+       (when-let [scope (:scope failure)] (str " (" (name scope) ")"))
        ": " (or (:error failure) "unknown error")))
 
-(defn- sources-text [svc cwd]
+(defn- sources-text [svc cwd sess]
   (let [sources ((:sources svc) {:cwd cwd})
-        entries (:entries ((:index svc)))
+        entries (:entries ((:index svc) {:cwd cwd :session sess}))
         failures ((:failures svc))
         n (count entries)]
     (str/join "\n"
@@ -158,6 +175,7 @@
                  (map source-report-line sources)
                  ["No eval sources."])
                [(str n " definition" (when (not= 1 n) "s") " loaded")]
+               (map #(entry-line cwd %) entries)
                (map failure-line failures)))))
 
 (defn- source-commands [svc cwd]
@@ -172,6 +190,7 @@
   (let [verbs ["/eval list [pattern]     List library definitions"
                "/eval search <text>     Search names and source"
                "/eval drop <name>…      Delete files and unbind the live names"
+               "/eval move <name> global|cwd  Move a definition to the other scope"
                "/eval sources           List eval sources and loaded definitions"
                "/eval help              This help"]
         contributed (map (fn [[verb {:keys [description]}]]
@@ -192,11 +211,12 @@
       (out ui :warning "Eval" "The eval service is not available.")
 
       (= verb "list")
-      (let [{:keys [entries failures]} ((:index svc))]
+      (let [{:keys [entries failures]} ((:index svc) {:cwd cwd :session sess})]
         (out ui :info "Eval" (list-text (filter-entries entries arg) failures cwd)))
 
       (= verb "search")
-      (out ui :info "Eval" (search-text (:entries ((:index svc))) cwd arg))
+      (out ui :info "Eval" (search-text (:entries ((:index svc) {:cwd cwd :session sess}))
+                                        cwd arg))
 
       (= verb "drop")
       (let [names (names-arg arg)]
@@ -212,8 +232,18 @@
             (out ui (if (:is-error result) :warning :info)
                  "Eval" (:content result)))))
 
+      (= verb "move")
+      (if-let [[name scope] (move-args arg)]
+        (try
+          (let [result ((:move! svc) {:session sess :name name :scope scope
+                                      :cwd cwd})]
+            (out ui :info "Eval" (:content result)))
+          (catch Exception e
+            (out ui :warning "Eval" (or (ex-message e) (str e)))))
+        (out ui :warning "Eval" "Usage: /eval move <name> global|cwd"))
+
       (= verb "sources")
-      (out ui :info "Eval" (sources-text svc cwd))
+      (out ui :info "Eval" (sources-text svc cwd sess))
 
       (contains? #{"help" "--help" "-h"} verb)
       (out ui :info "Eval" (help-text svc cwd))
@@ -232,6 +262,6 @@
 (def command
   "The `/eval` command record, registered with the engine-portable builtins."
   {:name "eval"
-   :description "List, search or drop eval library definitions"
-   :argument-hint "<list|search|drop|sources|help> [args]"
+   :description "List, search, move or drop eval library definitions"
+   :argument-hint "<list|search|move|drop|sources|help> [args]"
    :handler handle})

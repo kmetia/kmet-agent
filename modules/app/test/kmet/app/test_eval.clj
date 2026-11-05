@@ -1,8 +1,9 @@
 (ns kmet.app.test-eval
   "The `:eval` service and tool: one persistent environment per session,
-   definitions written to the shared library and reloaded, isolation between
-   agents, the sticky namespace, and disposal."
-  (:require [clojure.string :as str]
+   definitions written to the cwd or global library and reloaded, isolation
+   between agents, the sticky namespace, and disposal."
+  (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :as t]
             [kmet.app.session.core :as session]
             [kmet.app.test-eval-support :as support]
@@ -42,7 +43,7 @@
                          :session other
                          :cwd (:cwd env)
                          :limits (script/resolve-limits nil)})))
-          "a new session builds its environment from the shared library")))
+          "a new session builds its environment from the library roots")))
 
 (t/deftest test-a-definition-is-not-visible-to-run-code
   (let [env (support/eval-ctx)]
@@ -80,6 +81,18 @@
           "eval's prompt must stand alone when run_code is not selected")
     (t/is (not (str/includes? text "Jolt")))
     (t/is (not (str/includes? text "JVM")))))
+
+(t/deftest test-the-tool-schema-exposes-both-scopes
+  (t/is (= ["cwd" "global"]
+           (get-in eval-tool/definition [:parameters :properties "scope" :enum]))))
+
+(t/deftest test-the-tool-passes-scope-to-a-definition
+  (let [env (support/eval-ctx)]
+    (t/is (not (:is-error (support/call-tool env "eval"
+                                             {:code "(defn g [] :g)"
+                                              :scope "global"}))))
+    (t/is (fs/exists? (support/library-file env :global "user" "g.clj")))
+    (t/is (not (fs/exists? (support/library-file env :cwd "user" "g.clj"))))))
 
 (t/deftest test-the-script-descriptions-share-the-sandbox-summary
   (let [env (support/eval-ctx)

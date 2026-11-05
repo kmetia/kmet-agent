@@ -74,12 +74,13 @@
     (register! env :bad-key (fn [_] {:ns {'eval {'library 1}}}))
     (register! env :bad-fixed (fn [_] {:ns {'tools {'call 1}}}))
     (register! env :bad-command (fn [_] {:commands {:list {:run (fn [_] nil)}}}))
+    (register! env :bad-move (fn [_] {:commands {:move {:run (fn [_] nil)}}}))
     (let [result (support/eval! env "(+ 1 2)")
           errors (source-errors (:service env))
           ids (set (map :id errors))]
       (t/is (= "3" (:content result)))
       (t/is (= #{:boom :bad-user :bad-clj :bad-macro :bad-key
-                 :bad-fixed :bad-command} ids))
+                 :bad-fixed :bad-command :bad-move} ids))
       (t/is (seq (get-in result [:details :source-errors])))
       (t/is (str/includes? (pr-str (:details result)) "may not contribute to clj"))
       (t/is (str/includes? (pr-str (:details result)) "may not contribute to eval"))
@@ -91,17 +92,17 @@
     (register! env :license
                (fn [_] {:ns {'license {'value 1}}}))
     (let [result (support/eval! env "(ns license) (def value 2) value")
-          path (str (fs/path (:agent-dir env) "eval" "license" "value.clj"))]
+          path (support/library-file env :cwd "license" "value.clj")]
       (t/is (str/starts-with? (:content result) "2"))
       (t/is (str/includes? (:content result)
                            "[eval: redefined license/value (source; not stored)]"))
       (t/is (not (fs/exists? path))))
     (t/is (= "2" (:content (support/eval! env "(ns license) value"))))
     (let [result (support/eval! env "(ns license) (eval/forget 'value)")]
-      (t/is (str/includes? (:content result) "[eval: forgot license/value]")))
+      (t/is (str/includes? (:content result) "[eval: forgot license/value (source)]")))
     (t/is (= "1" (:content (support/eval! env "(ns license) value")))
           "forget restores the source value")
-    (t/is (not (fs/exists? (str (fs/path (:agent-dir env) "eval" "license" "value.clj")))))))
+    (t/is (not (fs/exists? (support/library-file env :cwd "license" "value.clj"))))))
 
 (t/deftest a-code-less-drop-restores-a-source-value
   (let [env (support/eval-ctx)]
@@ -111,14 +112,14 @@
     (let [result ((:drop! (:service env))
                   {:session (:session env) :drop ["license/value"]})]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (str/includes? (:content result) "[eval: forgot license/value]")))
+      (t/is (str/includes? (:content result) "[eval: forgot license/value (source)]")))
     (t/is (= "1" (:content (support/eval! env "(ns license) value"))))))
 
 (t/deftest a-source-key-stays-non-storable-after-unload
   (let [env (support/eval-ctx)
         dereg (register! env :license
                          (fn [_] {:ns {'license {'value 1}}}))
-        path (str (fs/path (:agent-dir env) "eval" "license" "value.clj"))]
+        path (support/library-file env :cwd "license" "value.clj")]
     (support/eval! env "(ns license) (def value 3)")
     (dereg)
     (t/is (str/starts-with?
@@ -127,6 +128,17 @@
     (t/is (not (fs/exists? path)))
     (support/eval! env "(ns license) (eval/forget 'value)")
     (t/is (= "false" (:content (support/eval! env "(ns license) (some? (resolve 'value))"))))))
+
+(t/deftest a-scoped-forget-of-a-source-key-still-restores-it
+  (let [env (support/eval-ctx)]
+    (register! env :license
+               (fn [_] {:ns {'license {'value 1}}}))
+    (support/eval! env "(ns license) (def value 2)")
+    (let [result (support/eval! env "(ns license) (eval/forget 'value)"
+                                :scope :global)]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result) "[eval: forgot license/value (source)]")))
+    (t/is (= "1" (:content (support/eval! env "(ns license) value"))))))
 
 (t/deftest a-code-less-drop-does-not-restore-an-unloaded-source
   (let [env (support/eval-ctx)

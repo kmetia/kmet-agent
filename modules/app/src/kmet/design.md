@@ -126,7 +126,8 @@ force it (context economics are identical); SCI stays the default until it is
 taken.
 
 With `:eval`'s persistent context, a native Jolt evaluator becomes more
-attractive later, but the decision is unchanged. The hard-isolation tier is a
+attractive later, but the decision is unchanged; its cwd/global library
+scopes layer files, not evaluators. The hard-isolation tier is a
 separate process — a lean `kmet --script` mode or an RPC-shaped script mode —
 which is the only way to make a runaway script killable. It waits on a measured
 need (boot cost per call) or a second consumer
