@@ -78,6 +78,14 @@
       (kfs/publish! path (file-content record))
       path)))
 
+(defn restore-definition!
+  "Restore PATH to OLD-CONTENT, or delete it when OLD-CONTENT is nil. Used to
+   roll a promote back when the session entry cannot be appended."
+  [path old-content]
+  (if (some? old-content)
+    (kfs/publish! path old-content)
+    (fs/delete-if-exists path)))
+
 (defn move-definition!
   "Write RECORD under TO-ROOT and remove its FROM-ROOT file, holding both
    locks. A failed removal rolls the new file back and rethrows, leaving the
@@ -117,11 +125,14 @@
         (mapcat
          (fn [{:keys [root scope]}]
            (when (fs/exists? root)
-             (for [file (sort (map str (fs/glob root "**/*.clj")))]
-               (try
-                 {:file file :scope scope :content (slurp file)}
-                 (catch Throwable t
-                   {:file file :scope scope :error (ex-message t)}))))))
+             (try
+               (for [file (sort (map str (fs/glob root "**/*.clj")))]
+                 (try
+                   {:file file :scope scope :content (slurp file)}
+                   (catch Throwable t
+                     {:file file :scope scope :error (ex-message t)})))
+               (catch Throwable t
+                 [{:root root :scope scope :error (ex-message t)}])))))
         roots))
 
 (defn display-path

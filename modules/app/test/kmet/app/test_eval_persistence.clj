@@ -4,10 +4,14 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.app.compaction.stage :as compaction]
+            [kmet.app.eval :as eval-service]
             [kmet.app.eval.definitions :as defs]
             [kmet.app.extensions.core :as extensions]
+            [kmet.app.loop :as loop]
             [kmet.app.session.core :as session]
             [kmet.app.test-eval-support :as support]
+            [kmet.app.tools.script :as script]
             [kmet.test-tmp :as test-tmp]))
 
 (defn- project-file [env & parts]
@@ -331,6 +335,9 @@
     (with-redefs [session/append-custom-entry!
                   (fn [& _] (throw (ex-info "disk full" {:type :test})))]
       (t/is (nil? ((:snapshot! service) session))))
+    (binding [extensions/*agent-context* {:session (constantly session)}]
+      (t/is (seq ((:failures service)))
+            "the failed snapshot append is reported"))
     (let [restarted (support/restart-service env)]
       (t/is (= "1"
                (:content (support/eval-in! restarted session (:cwd env) "x")))
@@ -412,3 +419,176 @@
                                          (str "(emit (mapv #(some? (resolve %)) "
                                               "'[p0 p1 p2 p3 p4 p5 p6 p7]))"))))
           "both parallel calls' definitions are in the live environment")))
+
+(t/deftest test-a-kept-definition-in-another-namespace-replays-aliases
+  (let [env (support/eval-ctx)
+        session (:session env)
+        cwd (:cwd env)]
+    (support/eval! env "(ns demo) (def x 1)")
+    (support/eval! env "(defn join [xs] (str/join \",\" xs))")
+    (let [restarted (support/restart-service env)]
+      (t/is (= "a,b"
+               (:content (support/eval-in! restarted session cwd
+                                           "(demo/join [\"a\" \"b\"])")))
+            "the alias prelude is replayed in the definition's namespace"))))
+
+(t/deftest test-a-stored-definition-compiles-with-a-disabled-tool
+  (let [env (support/eval-ctx)]
+    (support/eval! env (str "(defn echo-hi [] "
+                            "(tools/text (deref (tools/bash {:command \"echo hi\"}))))"))
+    (let [restarted (support/restart-service env)
+          result (binding [script/*enabled-tools-fn* (constantly #{})]
+                   (support/eval-in! restarted (:session env) (:cwd env)
+                                     "(emit :ok)"))]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (nil? (get-in result [:details :failures]))
+            "the rebuild surface keeps every registry tool, not only enabled ones"))))
+
+(t/deftest test-a-syntax-error-keeps-the-script-result-shape
+  (let [env (support/eval-ctx)
+        result (support/call-tool env "eval" {:code "(defn broken ["})]
+    (t/is (:is-error result))
+    (t/is (= :error (get-in result [:details :error])))
+    (t/is (str/includes? (str/lower-case (:content result)) "eof"))))
+
+(t/deftest test-a-failed-session-append-keeps-the-shared-file
+  (let [env (support/eval-ctx)
+        path (project-file env "user" "x.clj")]
+    (support/eval! env "(def x 1)")
+    (support/eval! env nil :keep [["user/x" "project"]])
+    (t/is (fs/exists? path))
+    (with-redefs [session/append-custom-entry!
+                  (fn [& _] (throw (ex-info "disk full" {:type :test})))]
+      (let [result (support/eval! env nil :keep [["user/x" "session"]])]
+        (t/is (:is-error result))
+        (t/is (fs/exists? path)
+              "deletes wait for the session append")))))
+
+(t/deftest test-a-drop-removes-the-live-definition-on-the-next-eval
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(def x 1)")
+    (support/eval! env nil :drop ["user/x"])
+    (t/is (= "false"
+             (:content (support/eval! env "(emit (some? (resolve 'x)))"))))))
+
+(t/deftest test-a-snapshot-works-before-the-first-eval
+  (let [env (support/eval-ctx)
+        session (:session env)]
+    (session/append-custom-entry!
+     session defs/eval-definitions-type
+     {:version 1
+      :defs [{:name "user/x" :ns "user" :kind :def :source "(def x 1)"}]})
+    (let [snapshot ((:snapshot! (:service env)) session)]
+      (t/is (true? (get-in snapshot [:data :snapshot])))
+      (t/is (= ["user/x"] (entry-names snapshot))))))
+
+(t/deftest test-a-compaction-appends-an-eval-snapshot
+  (let [env (support/eval-ctx)
+        session (:session env)
+        agent (loop/make-agent-state :ctx (:ctx env) :session session)
+        _ (support/eval! env "(def x 1)")
+        entry (first (support/definition-entries session))
+        result (#'compaction/record-compaction! agent session {:summary "summary"}
+                                                (:id entry) nil false)
+        branch (session/get-branch session)
+        snapshot (some #(when (true? (get-in % [:data :snapshot])) %) branch)]
+    (t/is (some? result))
+    (t/is (some? snapshot))
+    (t/is (= ["user/x"] (entry-names snapshot)))
+    (t/is (< (.indexOf branch (:entry result))
+             (.indexOf branch snapshot))
+          "the snapshot follows the compaction entry")))
+
+(t/deftest test-an-imported-session-folds-its-definitions
+  (let [env (support/eval-ctx)
+        session (:session env)
+        cwd (:cwd env)
+        _ (support/eval! env "(def x 41)")
+        _ (session/append-entry session {:role :assistant
+                                         :content [{:type :text :text "ok"}]})
+        plan (session/plan-session-import (:file session)
+                                          (test-tmp/temp-dir! "eval-import-"))
+        imported (session/load-session (session/copy-imported-session! plan))]
+    (t/is (= "42" (:content (support/eval-in! (:service env) imported cwd "(+ x 1)")))
+          "an imported session folds its definition entries like a resume")))
+
+(t/deftest test-project-wins-the-global-eval-file
+  (let [base (support/eval-ctx)
+        cwd (:cwd base)
+        agent-dir (:agent-dir base)
+        global (support/eval-ctx {:cwd cwd :agent-dir agent-dir})
+        project (support/eval-ctx {:cwd cwd :agent-dir agent-dir})
+        reader (support/eval-ctx {:cwd cwd :agent-dir agent-dir})]
+    (support/eval! global "(defn where [] :global)")
+    (support/eval! global nil :keep [["user/where" "global"]])
+    (support/eval! project "(defn where [] :project)")
+    (support/eval! project nil :keep [["user/where" "project"]])
+    (t/is (= ":project"
+             (:content (support/eval-in! (:service reader) (:session reader)
+                                         cwd "(where)")))
+          "project files load after global ones")))
+
+(t/deftest test-the-tool-accepts-code-less-keep-and-drop
+  (let [env (support/eval-ctx)
+        path (project-file env "user" "x.clj")]
+    (support/eval! env "(def x 1)")
+    (let [kept (support/call-tool env "eval" {:keep [["user/x" "project"]]})]
+      (t/is (not (:is-error kept)) (:content kept))
+      (t/is (fs/exists? path)))
+    (let [dropped (support/call-tool env "eval" {:drop ["user/x"]})]
+      (t/is (not (:is-error dropped)) (:content dropped))
+      (t/is (not (fs/exists? path))))))
+
+(t/deftest test-a-drop-removes-both-shared-copies
+  (let [env (support/eval-ctx)
+        project (project-file env "user" "x.clj")
+        global (global-file env "user" "x.clj")]
+    (support/eval! env "(def x 1)")
+    (support/eval! env nil :keep [["user/x" "global"]])
+    (fs/create-dirs (fs/parent project))
+    (fs/copy global project)
+    (t/is (fs/exists? global))
+    (t/is (fs/exists? project))
+    (support/eval! env nil :drop ["user/x"])
+    (t/is (not (fs/exists? global)))
+    (t/is (not (fs/exists? project)))))
+
+(t/deftest ^:slow test-a-rebuild-loop-is-interrupted
+  (let [env (support/eval-ctx)
+        session (:session env)]
+    (session/append-custom-entry!
+     session defs/eval-definitions-type
+     {:version 1
+      :defs [{:name "user/spin" :ns "user" :kind :def
+              :source "(def spin (loop [] (recur)))"}]})
+    (with-redefs-fn {#'eval-service/build-timeout-ms 50}
+      (fn []
+        (let [result (support/eval! env "(emit :ok)")]
+          (t/is (not (:is-error result)) (:content result))
+          (t/is (seq (get-in result [:details :failures]))
+                "a looping rebuild definition is recorded and skipped"))))))
+
+(t/deftest test-a-failed-promote-append-removes-the-new-file
+  (let [env (support/eval-ctx)
+        path (project-file env "user" "x.clj")]
+    (support/eval! env "(def x 1)")
+    (with-redefs [session/append-custom-entry!
+                  (fn [& _] (throw (ex-info "disk full" {:type :test})))]
+      (let [result (support/eval! env nil :keep [["user/x" "project"]])]
+        (t/is (:is-error result))
+        (t/is (not (fs/exists? path))
+              "a failed promote rolls the new shared file back")))))
+
+(t/deftest test-a-failed-move-append-keeps-the-old-shared-file
+  (let [env (support/eval-ctx)
+        project (project-file env "user" "x.clj")
+        global (global-file env "user" "x.clj")]
+    (support/eval! env "(def x 1)")
+    (support/eval! env nil :keep [["user/x" "global"]])
+    (support/eval! env "(def x 2)")
+    (with-redefs [session/append-custom-entry!
+                  (fn [& _] (throw (ex-info "disk full" {:type :test})))]
+      (let [result (support/eval! env nil :keep [["user/x" "project"]])]
+        (t/is (:is-error result))
+        (t/is (fs/exists? global) "the old shared file is authoritative")
+        (t/is (not (fs/exists? project)))))))

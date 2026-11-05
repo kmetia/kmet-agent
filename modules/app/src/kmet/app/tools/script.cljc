@@ -99,6 +99,14 @@
        " '[kmet.libs.json :as json]"
        " '[babashka.process :as p])"))
 
+(defn alias-source
+  "Enter NS and install the standard aliases, for a stored definition
+   evaluated outside a real call. A rebuild replays this per definition's
+   namespace; the alias prelude a real call runs lives in the sticky
+   namespace and is not part of the kept source."
+  [ns]
+  (str "(ns " ns ")\n" alias-prelude))
+
 ;; ─── Run-level context ────────────────────────────────────────────────────
 
 (def ^:dynamic *enabled-tools-fn*
@@ -1309,7 +1317,7 @@
   (binding [*call-state* state]
     ;; the aliases belong to the user namespace the rebuild evaluates stored
     ;; definitions in; do not depend on the host thread's last SCI namespace
-    (sci/eval-string* ctx (str "(ns user)\n" alias-prelude))
+    (sci/eval-string* ctx (alias-source "user"))
     (f)))
 
 (defn- sandbox-realm
