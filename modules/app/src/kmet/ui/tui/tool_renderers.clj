@@ -1125,14 +1125,14 @@
 (defn render-run-code-result
   "Result body for run_code: the shell-style body (output preview, truncation
    warning) plus the inner-call summary and attached-image count lines. Eval
-   composes the same `code-tool-result-nodes` with its kept/source summaries.
+   composes the same `code-tool-result-nodes` with its defined/source summaries.
    The elapsed/took state line — the tool's own measured time when the result
    carries it — is the tool component's tail line (state-result-nodes)."
   [content _is-error theme width expanded? _started-at ended-at truncation context]
   (result-tree (code-tool-result-nodes content theme width expanded? ended-at truncation context)))
 
 (defn- definition-summary-nodes
-  "One muted summary line for the definitions an eval call KEPT or DROPPED."
+  "One muted summary line for the definitions an eval call WROTE or FORGOT."
   [context theme k verb]
   (when-let [entries (seq (get-in context [:details k]))]
     (let [n (count entries)
@@ -1159,22 +1159,23 @@
                          (when (seq ids) (str ": " ids)))))))
 
 (defn- eval-failure-nodes
-  "One muted line counting the eval sources that failed to load."
+  "One muted line counting eval failures: a broken library file, a failed
+   write, or a failed unbind."
   [context theme]
   (when-let [failures (seq (get-in context [:details :failures]))]
     (let [n (count failures)]
       (summary-node theme
-                    (str n " eval source" (when (not= 1 n) "s") " failed")))))
+                    (str n " eval failure" (when (not= 1 n) "s"))))))
 
 (defn render-eval-result
-  "Result body for eval: the shared code-tool body plus the kept, dropped,
-   source and source-failure summary lines when the details carry them. The
+  "Result body for eval: the shared code-tool body plus the defined, forgotten,
+   source and failure summary lines when the details carry them. The
    elapsed/took state line is the tool component's tail line, as for run_code."
   [content _is-error theme width expanded? _started-at ended-at truncation context]
   (result-tree
    (concat (code-tool-result-nodes content theme width expanded? ended-at truncation context)
-           (definition-summary-nodes context theme :kept "kept")
-           (definition-summary-nodes context theme :dropped "dropped")
+           (definition-summary-nodes context theme :defined "defined")
+           (definition-summary-nodes context theme :forgotten "forgotten")
            (eval-source-nodes context theme)
            (eval-failure-nodes context theme))))
 

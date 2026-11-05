@@ -1,0 +1,184 @@
+(ns kmet.app.test-eval-command
+  "The `/eval` command: list, search, drop, sources, help, source verbs and
+   registration lifetime."
+  (:require [babashka.fs :as fs]
+            [clojure.string :as str]
+            [clojure.test :as t]
+            [kmet.app.commands :as commands]
+            [kmet.app.commands.eval :as eval-command]
+            [kmet.app.eval :as eval-service]
+            [kmet.app.eval.files :as eval-files]
+            [kmet.app.registries :as registries]
+            [kmet.app.session.core :as session]
+            [kmet.app.tools.eval :as eval-tool]
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]
+            [kmet.test-utils :as tu]))
+
+(t/use-fixtures :each tu/with-clean-app-registries)
+
+(defn- eval-env
+  ([] (eval-env {}))
+  ([{:keys [service-commands service-sources]}]
+   (let [root (srce/root {:name :test-eval-command})
+         cwd (test-tmp/temp-dir! "eval-command-project-")
+         agent-dir (test-tmp/temp-dir! "eval-command-agent-")
+         service (cond-> (eval-service/value root {:agent-dir agent-dir})
+                   service-commands
+                   (assoc :source-commands (constantly service-commands))
+                   service-sources
+                   (assoc :sources (constantly service-sources)))
+         sess (session/create-session (test-tmp/temp-dir! "eval-command-session-")
+                                      {:cwd cwd})]
+     (srce/provide! root :eval service)
+     {:root root
+      :cwd cwd
+      :agent-dir agent-dir
+      :service service
+      :session sess
+      :library-root (str (fs/path agent-dir "eval"))
+      :engine {:agent-state (atom {:ctx root})
+               :session (atom sess)
+               :cwd (atom cwd)}})))
+
+(defn- run [env args]
+  (let [got (atom [])]
+    ((:handler eval-command/command)
+     {:runtime (:engine env)
+      :ui {:info (fn [label content] (swap! got conj [:info label content]))
+           :warning (fn [label content] (swap! got conj [:warning label content]))}}
+     args)
+    @got))
+
+(defn- write-def! [env record]
+  (eval-files/write-definition! (:library-root env)
+                                (merge {:ns "user" :kind :defn} record)))
+
+(t/deftest list-with-an-empty-library
+  (let [env (eval-env)
+        [[level label content]] (run env "")]
+    (t/is (= :info level))
+    (t/is (= "Eval" label))
+    (t/is (= "No eval definitions." content))))
+
+(t/deftest list-shows-and-filters-definitions
+  (let [env (eval-env)]
+    (write-def! env {:name "user/report"
+                     :source "(defn report [x] (str \"R\" x))"})
+    (write-def! env {:name "demo/area"
+                     :ns "demo"
+                     :source "(defn area [w h] (* w h))"})
+    (let [[[level _ content]] (run env "list")]
+      (t/is (= :info level))
+      (t/is (str/includes? content "user/report"))
+      (t/is (str/includes? content "demo/area"))
+      (t/is (str/includes? content "2 definitions"))
+      (t/is (str/includes? content "eval/user/report.clj"))
+      (t/is (str/includes? content "eval/demo/area.clj")))
+    (let [[_ _ content] (first (run env "list report"))]
+      (t/is (str/includes? content "user/report"))
+      (t/is (not (str/includes? content "demo/area"))))))
+
+(t/deftest search-matches-names-and-source
+  (let [env (eval-env)
+        _ (write-def! env {:name "user/report"
+                           :source "(defn report [x] (str \"R\" x))"})
+        _ (write-def! env {:name "user/other" :source "(defn other [] :ok)"})]
+    (let [[_ _ content] (first (run env "search report"))]
+      (t/is (str/includes? content "user/report"))
+      (t/is (not (str/includes? content "user/other"))))
+    (let [[_ _ content] (first (run env "search :ok"))]
+      (t/is (str/includes? content "user/other"))
+      (t/is (str/includes? content "(defn other [] :ok)")))
+    (let [[_ _ content] (first (run env "search absent-name"))]
+      (t/is (str/includes? content "No eval definitions match")))
+    (let [[_ _ content] (first (run env "search"))]
+      (t/is (str/includes? content "Usage: /eval search")))))
+
+(t/deftest drop-removes-the-file-and-reports
+  (let [env (eval-env)
+        path (write-def! env {:name "user/doomed"
+                              :source "(defn doomed [] 1)"})]
+    (t/is (fs/exists? path))
+    (let [[[level _ content]]
+          (with-redefs-fn {#'eval-service/build-environment
+                           (fn [& _]
+                             (throw (ex-info "must not build" {:type :test})))}
+            #(run env "drop user/doomed"))]
+      (t/is (= :info level))
+      (t/is (str/includes? content "[eval: forgot user/doomed]")
+            "a drop reads and deletes files without building an environment"))
+    (t/is (not (fs/exists? path)))
+    (let [[level _ content] (first (run env "drop user/nope"))]
+      (t/is (= :warning level))
+      (t/is (str/includes? content "no eval library definition")))
+    (let [[level _ content] (first (run env "drop"))]
+      (t/is (= :warning level))
+      (t/is (str/includes? content "Usage: /eval drop")))))
+
+(t/deftest drop-accepts-a-quoted-method-address
+  (let [env (eval-env)
+        _ (write-def! env {:name "user/area" :kind :defmulti
+                           :source "(defmulti area :shape)"})
+        path (write-def! env {:name "user/area :rect" :kind :defmethod
+                              :source "(defmethod area :rect [m] :rect)"})]
+    (let [[[level _ content]] (run env "drop \"user/area :rect\"")]
+      (t/is (= :info level))
+      (t/is (str/includes? content "[eval: forgot user/area :rect]")))
+    (t/is (not (fs/exists? path)))
+    (t/is (fs/exists? (eval-files/path-for-name (:library-root env) "user/area")))))
+
+(t/deftest sources-and-help
+  (let [env (eval-env)]
+    (let [[[level _ content]] (run env "sources")]
+      (t/is (= :info level))
+      (t/is (= "No eval sources." content)))
+    (let [with-source (eval-env {:service-sources [{:id :core :doc "Core verbs"}]})
+          [[_ _ content]] (run with-source "sources")]
+      (t/is (= "- core: Core verbs" content)))
+    (let [[_ _ help] (first (run env "help"))]
+      (t/is (str/includes? help "/eval list [pattern]"))
+      (t/is (str/includes? help "/eval search <text>"))
+      (t/is (str/includes? help "/eval drop <name>"))
+      (t/is (str/includes? help "/eval sources"))
+      (t/is (str/includes? help "/eval help")))
+    (let [[level _ content] (first (run env "nonsense"))]
+      (t/is (= :warning level))
+      (t/is (str/includes? content "Unknown verb: nonsense")))))
+
+(t/deftest a-source-contributed-verb-dispatches-and-appears-in-help
+  (let [called (atom nil)
+        env (eval-env
+             {:service-commands
+              {:license/lint {:description "Lint a definition"
+                              :run (fn [{:keys [args session cwd service]}]
+                                     (reset! called {:args args
+                                                     :session session
+                                                     :cwd cwd
+                                                     :service? (some? service)})
+                                     "Linted 1 definition")}}})]
+    (let [[[level label content]] (run env "license/lint user/report")]
+      (t/is (= :info level))
+      (t/is (= "Eval" label))
+      (t/is (= "Linted 1 definition" content)))
+    (t/is (= "user/report" (:args @called)))
+    (t/is (= (:session env) (:session @called)))
+    (t/is (= (:cwd env) (:cwd @called)))
+    (t/is (:service? @called))
+    (let [[_ _ help] (first (run env "help"))]
+      (t/is (str/includes? help "/eval license/lint  Lint a definition")))))
+
+(t/deftest the-tool-row-registers-and-unregisters-the-command
+  (let [ctx (srce/root)
+        _ (srce/plugin! ctx registries/tools)
+        row (srce/plugin! ctx eval-tool/plugin)]
+    (t/is (some? (commands/find-command "eval")))
+    (srce/dispose! row)
+    (t/is (nil? (commands/find-command "eval")))))
+
+(t/deftest registration-is-reversible
+  (let [deregister (eval-command/register!)]
+    (t/is (some? (commands/find-command "eval")))
+    (t/is (fn? deregister))
+    (deregister)
+    (t/is (nil? (commands/find-command "eval")))))

@@ -28,8 +28,7 @@
             [kmet.app.extensions.core :as extensions]
             [kmet.ai.models :as models]
             [kmet.libs.http :as libs-http]
-            [kmet.app.config :as cfg]
-            [kmet.srce.core :as srce]))
+            [kmet.app.config :as cfg]))
 
 (defn reset-compaction-blocked!
   "Clear the per-prompt compaction gate (the driver calls this at run start;
@@ -352,16 +351,6 @@
                       (assoc :details (:details summary-result))
                       from-extension?
                       (assoc :from-hook true)))]
-    ;; A snapshot bounds the eval fold to the current definition set. It is a
-    ;; session entry after the compaction entry, generated from the pure
-    ;; branch fold (never the live SCI context), so it works before the
-    ;; session's first eval. A failed append is the service's failure to
-    ;; report and never fails the compaction.
-    (when-let [service (some-> (:ctx agent) (srce/get :eval))]
-      (when-let [snapshot! (:snapshot! service)]
-        (try (snapshot! sess)
-             (catch Throwable t
-               (debug/log "eval snapshot after compaction failed: " t)))))
     (state/refresh-context-from-session! agent)
     (state/emit agent {:type :context-replaced :messages @(:messages agent)})
     (debug/log "compacted session with LLM summary")

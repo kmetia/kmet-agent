@@ -255,7 +255,7 @@ schema-validated at load).
 | `:permissions` | `{:policy :remember!}` — the tool-call decision | `kmet.app.permissions/permissions`, per agent |
 | `:approvals` | `{:ask!}` — the one `:ask` delivery seam | `kmet.app.permissions/approvals` at the root; the TUI and server rows supply their own |
 | `:shell` `:sandbox` | the agent's shell options; the realm names a script's tool calls are blocked from | provided per agent by the agents factory; a preset row that mounts first wins |
-| `:eval` | `{:eval! :kept :sources :failures :snapshot! :dispose!}` — the agent's persistent script environment, one per session | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
+| `:eval` | `{:eval! :drop! :library :index :sources :source-commands :failures :dispose!}` — the agent's persistent script environment over the home eval library, one per session | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
 | `:ui` | the capability service (`kmet.app.ui`) | `kmet.ui.headless/plugin`, `kmet.ui.tui/provider-plugin` |
 | `:extensions` | no service: the row binds the host's services (registry handle, ctx, resource ops, owner sweep) and publishes `process-handle` | `kmet.app.extensions/plugin` |
 
@@ -508,7 +508,7 @@ probe and no real use, and is gone;
   requiring a kmet namespace is the named boundary error. Jolt's SCI exposes no
   class table and the JVM host an explicit `java.lang`/`java.io`/`java.util`
   subset. A `def` in one call is invisible to the next (`eval` is the
-  kept-context counterpart below), and redefining an injected var stays
+  persistent-context counterpart below), and redefining an injected var stays
   call-local.
 - **The bridge.** `(tools/call name args)` returns a promise that settles with
   the record's verbatim result map (`{:content :is-error :details :truncation
@@ -581,39 +581,51 @@ and call lock. `seed!` installs the call's namespaces into that context each
 time, so the tool surface follows the agent's registry while definitions stay.
 A definition from one call is visible to the next in the same session, and the
 last namespace a successful call ended in is re-entered at the start of the
-next. Definitions are session-private and recorded as `:eval-definitions`
-entries; `:keep` writes a reviewable file under `<project>/.kmet/eval/<ns>/`
-or `~/.kmet/agent/eval/<ns>/`, `:drop` removes every copy, and a shared name
-redefined without `:keep` becomes a session shadow. The first eval in a session
-folds the active branch over the shared files; a branch/reset/switch or a
-compaction snapshot rebuilds. The rebuild seeds the call vocabulary and the
-standard aliases before evaluating stored definitions, and each kept
-definition's per-call primitives (`emit`, `cwd`, the process wrappers and the
-tool bridge) read the current call's state rather than the call that compiled
-them. Parallel calls serialize on a per-session lock, the deadline starts after
-it is taken, and `:dispose!` clears every environment. A broken shared file or
-stored entry is reported under `:failures` and skipped. The pure parse/fold
-lives in `kmet.app.eval.definitions`, the shared files in `kmet.app.eval.files`.
+next. Every successful top-level definition is written immediately to the agent
+home's library, `<agent-dir>/eval/<ns>/<name>.clj` (one verbatim source slice;
+`kmet.app.eval.files`), and a redefinition overwrites it. A session's first
+eval scans and evaluates the library; a new session or a restarted process
+loads it, while an already-built environment is a runtime cache and never
+refreshes. Sessions share the library but not the environment. `:drop` and
+`(eval/forget 'name)` delete the file and unbind the live name. The
+`:tool/eval` row also registers `/eval` (`list`, `search`, `drop`, `sources`,
+`help`, plus verbs an eval source contributes), so removing the row removes
+the command with it. `list` and `search` read the disk index, so they show the
+library rather than one session's cache; `drop` deletes the files directly and
+unbinds the live name only when that session already has an environment, so a
+drop never builds one. The environment build
+seeds the call vocabulary and the standard aliases before evaluating the
+library, and each definition's per-call primitives (`emit`, `cwd`, the process
+wrappers and the tool bridge) read the current call's state rather than the
+call that compiled them. Parallel calls serialize on a per-session lock, the
+deadline starts after it is taken, and `:dispose!` clears every environment. A
+broken library file is reported under `:failures` and skipped. The pure parse
+and address rules live in `kmet.app.eval.definitions`.
 
-Limits: a session definition is the defining form only — its `(ns …)` requires
-are not stored, so the standard aliases are replayed and anything else must be
-self-contained. A shared file may carry its own ns form and requires; the
-standard aliases are installed after it. Shared files load global→project,
-sorted by path; a kept `defmethod` needs its `defmulti` kept too, and
-interdependent files can load out of order. A multi-name `declare` keeps its
+Limits: a definition file is the defining form only — its `(ns …)` requires are
+not stored, so the standard aliases are replayed and anything else must be
+self-contained. A file's generated `(ns …)` form runs before the aliases.
+Files load sorted by path; a `defmethod` file needs its `defmulti` file, and
+interdependent files can load out of order. Dropping a `defmethod` address
+deletes its file and removes only that method; the multimethod and its other
+methods stay live. A multi-name `declare` writes its
 whole source under each name, so dropping one leaves the others declared. Two
 addresses that sanitize to the same file name share a file; the last write
-wins. `:drop` removes the stored copies and the live var disappears on the next
-eval's rebuild. A session environment and its lock are retained until the agent
-is disposed; deleting a session does not release them. `(eval/kept)` lists
-stored definitions from the first eval in the session onward, and build
-failures are reported on each result until the environment rebuilds.
-Interpreted rebuild code is bounded by a rebuild deadline; host-blocked
-top-level code still has the sandbox's interrupt-grace limitation. A move
-writes the new file, appends the session entry, then deletes the old file, so a
-concurrent rebuild can briefly see both scopes; a failed post-commit delete is
-reported and can leave both copies until a retry. Definition report lines are
-appended after the script's output budget, not counted inside it.
+wins. A source-provided key may be redefined live but is never written. A
+call that ends in a normal error writes nothing; definitions it evaluated
+before the error stay live and are forgettable. A timed-out or aborted call is
+not tracked, because its interpreter may still be running. A failed write is
+reported and the live definition remains until the process ends, with the old
+file authoritative for the next build. A failed delete or unbind is reported;
+a failed unbind leaves the live definition until a restart. A session environment and its lock are
+retained until the agent is disposed; deleting a session does not release them,
+and two sessions in one home share the files but not the live environment.
+`(eval/library)` lists the definitions the current environment loaded. Build
+failures are reported once, on the next result, and then cleared; `/eval list`
+still shows them from the disk index.
+Interpreted build code is bounded by a build deadline; host-blocked top-level
+code still has the sandbox's interrupt-grace limitation. Definition report
+lines are appended after the script's output budget, not counted inside it.
 
 The bridge pool is process-wide **by decision**: it is a bound, not a setting,
 and everything per-run travels in the submission's `:bindings`, so two agents

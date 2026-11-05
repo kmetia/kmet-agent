@@ -1,31 +1,25 @@
 (ns kmet.app.eval
-  "The `:eval` service: one persistent SCI environment per agent session.
+  "The `:eval` service: one persistent SCI environment per agent session over
+   the agent home's eval library.
 
-   An environment is built lazily on a session's first eval from the shared
-   project/global definition files and the session's `:eval-definitions`
-   entries, and is reused while the active branch's definition entries are
-   unchanged. A branch, reset, switch or compaction snapshot invalidates it;
-   the next eval rebuilds from the active branch. One lock per environment
-   serializes parallel calls, and the deadline clock starts after it is taken.
-
-   Definitions made by a call are session-private: each successful call that
-   changes the set appends one `:eval-definitions` entry. `:keep` promotes a
-   definition to the project/global files (or demotes it back to the session),
-   `:drop` removes every copy, and a shared name redefined without `:keep`
-   becomes a session shadow. A broken shared file or stored entry is recorded
-   under `:failures` and skipped, never fatal.
+   A session's environment is built lazily on its first eval by scanning
+   `<agent-dir>/eval/<ns>/<name>.clj`. Every successful top-level definition
+   writes its file immediately; a redefinition overwrites it. A new session or
+   a restarted process loads the library; an already-built environment is a
+   runtime cache and never refreshes. `:drop` and `(eval/forget 'name)` delete
+   the file and unbind the live name. Sessions share the library but not the
+   environment. A broken file is recorded under `:failures` and skipped, never
+   fatal.
 
    `kmet.app.tools.eval` owns the model-facing tool; `kmet.app.eval.files`
    owns the reviewable files and `kmet.app.eval.definitions` the pure parse
-   and fold."
+   and address rules."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.config :as cfg]
-            [kmet.app.debug :as debug]
             [kmet.app.eval.definitions :as defs]
             [kmet.app.eval.files :as eval-files]
             [kmet.app.extensions.core :as extensions]
-            [kmet.app.session.core :as session]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
             [kmet.app.tools.util :as tool-util]
@@ -33,22 +27,15 @@
             [kmet.srce.core :as srce]
             [sci.core :as sci]))
 
-;; ─── Session and branch ───────────────────────────────────────────────────
+;; ─── Session and root ────────────────────────────────────────────────────
 
 (defn- resolve-session [session]
   (or session (extensions/get-session)))
 
-(defn- definition-entries [session]
-  (filter #(= defs/eval-definitions-type (:custom-type %))
-          (session/get-branch session)))
-
-(defn- fingerprint [session]
-  (defs/definition-ids (session/get-branch session)))
-
 (def ^:private build-timeout-ms
-  "Bound on one stored definition/file evaluated during a rebuild. Interpreted
-   code is interrupted at the deadline and recorded as a failure; host-blocked
-   code still has the sandbox's documented limitation."
+  "Bound on one library file evaluated during a rebuild. Interpreted code is
+   interrupted at the deadline and recorded as a failure; host-blocked code
+   still has the sandbox's documented limitation."
   10000)
 
 (defn- rearm-build!
@@ -59,83 +46,80 @@
                   :deadline (+ (concurrent/monotonic-ms) build-timeout-ms)
                   :abort (atom nil)}))
 
-;; ─── Roots ────────────────────────────────────────────────────────────────
+(defn- library-root
+  "The one eval library root for SERVICE: `<agent-dir>/eval`."
+  [service]
+  (str (fs/path (:agent-dir service) "eval")))
 
-(defn- eval-roots
-  "The two shared scopes for CWD. Loading order is global then project;
-   project wins a name collision."
-  [agent-dir cwd]
-  {:global {:root (str (fs/path agent-dir "eval")) :scope :global}
-   :project {:root (str (fs/path cwd ".kmet" "eval")) :scope :project}})
+;; ─── Names ────────────────────────────────────────────────────────────────
 
-(defn- root-for [roots scope]
-  (get-in roots [scope :root]))
+(defn- ->name [x]
+  (cond
+    (string? x) x
+    (symbol? x) (str x)
+    (keyword? x) (subs (str x) 1)
+    :else nil))
 
-(defn- display [cwd path]
-  (eval-files/display-path cwd path))
+(defn- bad-request! [message data]
+  (throw (ex-info message (assoc data :type :eval/bad-request))))
 
-;; ─── Kept index ───────────────────────────────────────────────────────────
+(defn- env-ns [env]
+  (or (some-> @(:sticky-ns env) str) "user"))
 
-(defn- scope-rank [scope]
-  (case scope :session 0 :project 1 :global 2 3))
+(defn- qualify-name [ns name]
+  (if (str/includes? name "/") name (str ns "/" name)))
 
-(defn- session-kept
-  "A session definition; when a shared file has the same name, the shared
-   entry it shadows."
-  [shared record]
-  (cond-> {:name (:name record)
-           :scope :session
-           :ns (:ns record)
-           :kind (:kind record)}
-    (get shared (:name record))
-    (assoc :shadowing (select-keys (get shared (:name record)) [:scope :file]))))
-
-(defn- shared-kept [record]
-  {:name (:name record)
-   :scope (:scope record)
-   :ns (:ns record)
-   :kind (:kind record)
-   :file (:file record)})
-
-(defn- kept-entries
-  "The service's `(eval/kept)` value: every shared file and every session
-   definition, a session entry carrying the shared file it shadows."
-  [env]
-  (let [shared @(:shared env)]
-    (->> (concat (map #(session-kept shared %) (vals @(:session-defs env)))
-                 (map shared-kept (vals shared)))
-         (sort-by (juxt :name scope-rank))
-         vec)))
-
-(defn- tracked
-  "The effective definition for NAME: the session copy wins a shared file."
+(defn- known-name?
+  "A drop/forget target: loaded from the library, present as a file, a
+   source-provided key, or a live definition that was not written (a failed
+   write or an errored call)."
   [env name]
-  (or (get @(:session-defs env) name)
-      (get @(:shared env) name)))
+  (boolean
+   (or (get @(:library env) name)
+       (fs/exists? (eval-files/path-for-name (:root env) name))
+       (contains? @(:source-keys env) name)
+       (contains? @(:unwritten env) name))))
 
-(defn- effective-failures [service env]
-  (into (vec @(:service-failures service))
-        (when env @(:failures env))))
+;; ─── Library index ────────────────────────────────────────────────────────
+
+(defn- library-entry [record]
+  (select-keys record [:name :ns :kind :file]))
+
+(defn- library-entries
+  "The service's `(eval/library)` value: one entry per loaded definition."
+  [env]
+  (->> (vals @(:library env))
+       (map library-entry)
+       (sort-by :name)
+       vec))
+
+(defn- take-failures!
+  "Failures are reported once: return the current list and clear the
+   environment's entries. Service-level failures stay."
+  [service env]
+  (let [failures (into (vec @(:service-failures service))
+                       (when env @(:failures env)))]
+    (when env (reset! (:failures env) []))
+    failures))
 
 ;; ─── Environment build ────────────────────────────────────────────────────
 
 (defn- record-failure! [failures failure]
   (swap! failures conj failure))
 
-(defn- load-shared-file!
-  "Read, parse and evaluate one shared file into ENV. The original ns form runs
-   first (preserving its requires), then the standard aliases, then the rest of
-   the file, so aliases are not reset by the ns form. A read, parse or eval
-   failure is recorded and skipped."
-  [env ns-atom {:keys [file scope content error]}]
+(defn- load-library-file!
+  "Read, parse and evaluate one library file into ENV. The original ns form
+   runs first (preserving its requires), then the standard aliases, then the
+   rest of the file, so aliases are not reset by the ns form. A read, parse or
+   eval failure is recorded and skipped."
+  [env ns-atom {:keys [file content error]}]
   (if error
-    (record-failure! (:failures env)
-                     {:file file :scope scope :error error})
+    (record-failure! (:failures env) {:file file :error error})
     (let [parsed (try
                    (defs/parse content "user")
                    (catch Throwable t
                      (record-failure! (:failures env)
-                                      {:file file :scope scope :error (ex-message t)})
+                                      {:file file :error (ex-message t)})
                      nil))]
       (when parsed
         (let [{:keys [ns-form body]} (defs/split-ns content)
@@ -145,40 +129,21 @@
           (let [result (script/eval-source! (:sci-ctx env) source ns-atom)]
             (if (:error result)
               (record-failure! (:failures env)
-                               {:file file :scope scope :error (:error result)})
+                               {:file file :error (:error result)})
               (doseq [record (:defs parsed)]
-                (swap! (:shared env) assoc (:name record)
-                       (assoc record :scope scope :file file))))))))))
+                (swap! (:library env) assoc (:name record)
+                       (assoc record :file file))))))))))
 
-(defn- read-shared!
-  "Read and evaluate the shared definition files into ENV."
-  [env roots]
+(defn- read-library!
+  "Read and evaluate every definition file in ROOT into ENV, sorted by path."
+  [env root]
   (let [ns-atom (atom nil)]
-    (doseq [file (eval-files/scan [(:global roots) (:project roots)])]
-      (load-shared-file! env ns-atom file))
-    (reset! ns-atom nil)))
-
-(defn- load-session-definitions!
-  "Fold the active branch and evaluate its definitions into ENV. A definition
-   that throws is recorded and skipped; the rest still load."
-  [env session]
-  (let [folded (defs/fold-entries (definition-entries session))
-        ns-atom (atom nil)]
-    (doseq [failure (:failures folded)]
-      (record-failure! (:failures env) failure))
-    (doseq [record (:defs folded)]
-      (let [source (str (script/alias-source (:ns record))
-                        "\n" (:source record) "\n")
-            _ (rearm-build! env)
-            result (script/eval-source! (:sci-ctx env) source ns-atom)]
-        (if (:error result)
-          (record-failure! (:failures env)
-                           {:name (:name record) :error (:error result)})
-          (swap! (:session-defs env) assoc (:name record) record))))
+    (doseq [file (eval-files/scan root)]
+      (load-library-file! env ns-atom file))
     (reset! ns-atom nil)))
 
 (defn- prime-state
-  "A prepared state for evaluating stored definitions at rebuild: the current
+  "A prepared state for evaluating library definitions at rebuild: the current
    tool surface is installed so a definition that names a tool var compiles,
    with an inert dispatcher and a discarded emit channel until a real call
    binds its state."
@@ -201,95 +166,72 @@
                                      {:content "tools are not callable during rebuild"
                                       :is-error true})})))
 
+(defn- request-forget!
+  "Record `(eval/forget 'NAME)` for the caller to apply after evaluation. An
+   unqualified name resolves in the namespace the call ends in; the lookup
+   itself happens in `apply-changes!`, after the call has run."
+  [env name]
+  (let [raw (->name name)]
+    (when-not raw
+      (bad-request! (str "forget needs a definition name, got " (pr-str name))
+                    {:name name}))
+    (when (and (str/includes? raw "/")
+               (not (contains? @(:parsed-names env) raw))
+               (not (known-name? env raw)))
+      (bad-request! (str "no eval library definition named " raw)
+                    {:name raw}))
+    (swap! (:forgotten env) conj raw)
+    raw))
+
 (defn- build-environment
-  "Build a fresh environment for SESSION: the SCI context, the kept index, and
-   the shared and session definitions evaluated into it."
-  [service session cwd]
-  (let [roots (eval-roots (:agent-dir service) cwd)
+  "Build a fresh environment: the SCI context, the library index, and every
+   library definition evaluated into it."
+  [service cwd]
+  (let [root (library-root service)
         failures (atom [])
-        shared (atom {})
-        session-defs (atom {})
-        env {:session session
-             :session-id (:id session)
-             :session-file (:file session)
+        library (atom {})
+        env {:root root
              :failures failures
-             :shared shared
-             :session-defs session-defs
+             :library library
+             :source-keys (atom #{})
+             :parsed-names (atom #{})
+             :unwritten (atom #{})
+             :restore-source (atom nil)
+             :forgotten (atom #{})
              :sticky-ns (atom nil)
-             :built-entries (atom nil)
              :lock (Object.)}
         interrupt (script/interrupt-holder)
-        kept-fn (fn [] (kept-entries env))
+        library-fn (fn [] (library-entries env))
+        forget-fn (fn [name] (request-forget! env name))
         sci-ctx (script/context
                   (assoc (script/base-namespaces)
-                         'eval {'kept kept-fn})
+                         'eval {'library library-fn
+                                'forget forget-fn})
                   (script/interrupt-fn interrupt "eval")
                   "eval")
         env (assoc env :sci-ctx sci-ctx :interrupt interrupt)]
     (script/with-prime-context
       sci-ctx (prime-state service cwd)
       (fn []
-        (read-shared! env roots)
-        (load-session-definitions! env session)))
-    (reset! (:built-entries env) (fingerprint session))
+        (read-library! env root)))
     env))
 
 (defn- ensure-environment!
-  "The current environment for SESSION, rebuilt when the branch's definition
-   entries changed or when it was never built."
+  "The current environment for SESSION, built from the library on first use.
+   An existing environment is reused: a session is a runtime cache, not a
+   branch-scoped definition log."
   [service session cwd]
-  (let [id (:id session)
-        current (fingerprint session)
-        existing (get @(:envs service) id)]
-    (if (and existing
-             (= (:session-file existing) (:file session))
-             (= @(:built-entries existing) current))
-      existing
-      (let [env (build-environment service session cwd)]
-        (when @(:disposed? service)
-          (throw (ex-info "the agent's eval service is disposed"
-                          {:type :eval/disposed})))
-        (swap! (:envs service) assoc id env)
-        env))))
+  (let [id (:id session)]
+    (or (get @(:envs service) id)
+        (let [env (build-environment service cwd)]
+          (when @(:disposed? service)
+            (throw (ex-info "the agent's eval service is disposed"
+                            {:type :eval/disposed})))
+          (get (swap! (:envs service)
+                      #(if (contains? % id) % (assoc % id env)))
+               id)))))
 
 ;; ─── Request normalization ────────────────────────────────────────────────
-
-(defn- ->name [x]
-  (cond
-    (string? x) x
-    (symbol? x) (str x)
-    (keyword? x) (subs (str x) 1)
-    :else nil))
-
-(defn- ->scope [x]
-  (cond
-    (keyword? x) x
-    (symbol? x) (keyword (name x))
-    (string? x) (keyword (str/replace x #"^:" ""))
-    :else nil))
-
-(def ^:private scopes #{:session :project :global})
-
-(defn- bad-request! [message data]
-  (throw (ex-info message (assoc data :type :eval/bad-request))))
-
-(defn- normalize-keep [keep]
-  (mapv (fn [entry]
-          (when-not (and (sequential? entry) (= 2 (count entry)))
-            (bad-request! (str "keep entries are [name scope] pairs, got "
-                               (pr-str entry))
-                          {:keep entry}))
-          (let [[name scope] entry
-                name (->name name)
-                scope (->scope scope)]
-            (when-not name
-              (bad-request! "keep needs a definition name" {:keep entry}))
-            (when-not (contains? scopes scope)
-              (bad-request! (str "keep scope must be :session, :project or :global, got "
-                                 (pr-str scope))
-                            {:keep entry}))
-            {:name name :scope scope}))
-        (or keep [])))
 
 (defn- normalize-drop [drop]
   (mapv (fn [entry]
@@ -301,191 +243,160 @@
 
 ;; ─── Validation ───────────────────────────────────────────────────────────
 
-(defn- known? [env parsed name]
-  (or (some #(when (= name (:name %)) %) (:defs parsed))
-      (tracked env name)))
+(defn- validate-drop!
+  "Validate NAMES against KNOWN?: no duplicates, every name known."
+  [known? names]
+  (when-not (= (count names) (count (distinct names)))
+    (bad-request! "drop names a definition twice" {:drop names}))
+  (doseq [name names]
+    (when-not (known? name)
+      (bad-request! (str "no eval library definition named " name)
+                    {:name name :drop true}))))
 
 (defn- validate-requests!
-  "Validate every keep/drop before anything evaluates: unknown names, a name
-   in both lists, duplicate list entries, and a scope outside the three."
-  [env parsed keep drop]
-  (doseq [{:keys [name]} keep]
-    (when-not (known? env parsed name)
-      (bad-request! (str "no tracked eval definition named " name)
-                    {:name name :keep true})))
-  (doseq [name drop]
-    (when-not (known? env parsed name)
-      (bad-request! (str "no tracked eval definition named " name)
-                    {:name name :drop true})))
-  (when-not (= (count keep) (count (distinct (map :name keep))))
-    (bad-request! "keep names a definition twice" {:keep keep}))
-  (when-not (= (count drop) (count (distinct drop)))
-    (bad-request! "drop names a definition twice" {:drop drop}))
-  (let [keep-names (set (map :name keep))]
+  "Validate a drop before anything evaluates: duplicate entries, unknown
+   names, and a name the call itself defines. Forget requests are validated
+   when `(eval/forget …)` runs and again when changes apply."
+  [env parsed drop]
+  (validate-drop! #(known-name? env %) drop)
+  (let [parsed-names (set (map :name (:defs parsed)))]
     (doseq [name drop]
-      (when (contains? keep-names name)
-        (bad-request! (str "a definition cannot be both kept and dropped: " name)
+      (when (contains? parsed-names name)
+        (bad-request! (str "a definition cannot be defined and dropped in one call: "
+                           name)
                       {:name name})))))
 
 ;; ─── Applying a call's changes ────────────────────────────────────────────
 
-(defn- add-record [records record]
-  (let [i (.indexOf ^java.util.List records (:name record))]
-    (if (neg? i) (conj records record) (assoc records i record))))
+(defn- address-parts
+  "ADDRESS → `[namespace var-symbol dispatch]`; DISPATCH is the printed
+   defmethod dispatch, nil for an ordinary definition."
+  [address]
+  (let [i (str/index-of address "/")
+        ns (if i (subs address 0 i) "user")
+        part (if i (subs address (inc i)) address)
+        [sym dispatch] (str/split part #" " 2)]
+    [ns sym dispatch]))
 
-(defn- parsed-map [parsed]
-  (into {} (map (juxt :name identity)) (:defs parsed)))
+(defn- unbind!
+  "Remove NAME's live var from ENV's SCI context. A defmethod removes only
+   its method; an ordinary definition unmaps the var. Returns an error string
+   or nil."
+  [env name record]
+  (let [[ns sym dispatch] (address-parts (or (:name record) name))
+        form (if dispatch
+               (str "(clojure.core/remove-method " sym " " dispatch ")")
+               (str "(clojure.core/ns-unmap *ns* '" sym ")"))]
+    (try
+      (:error (script/eval-source! (:sci-ctx env) form (atom (symbol ns))))
+      (catch Throwable t (ex-message t)))))
 
-(defn- delete-shared!
-  "Delete NAME's project/global files, returning the removed paths."
-  [roots name]
-  (eval-files/delete-name! [(root-for roots :project) (root-for roots :global)] name))
+(defn- interned?
+  "Is RECORD live? An ordinary definition must be in its namespace's own map
+   (not merely inherited from clojure.core); a defmethod must be present in
+   its multimethod."
+  [env record]
+  (let [[ns sym dispatch] (address-parts (:name record))
+        form (if dispatch
+               (str "(contains? (clojure.core/methods " sym ") " dispatch ")")
+               (str "(contains? (clojure.core/ns-interns *ns*) '" sym ")"))]
+    (try
+      (true? (:val (sci/eval-string+ (:sci-ctx env) form {:ns (symbol ns)})))
+      (catch Throwable _ false))))
+
+(defn- mark-transient!
+  "After a failed call, remember parsed definitions that are live but not
+   written, so drop/forget can unbind them."
+  [env parsed]
+  (doseq [record (defs/collapse (:defs parsed))
+          :when (not (get @(:library env) (:name record)))
+          :when (interned? env record)]
+    (swap! (:unwritten env) conj (:name record))))
+
+(defn- drop-one!
+  "Delete NAME's library file and unbind its live var. A source-provided key
+   has no file; its source seed is restored when the source layer provides
+   one."
+  [env name]
+  (let [record (get @(:library env) name)
+        source? (contains? @(:source-keys env) name)
+        live? (and (not source?) (interned? env (or record {:name name})))
+        file (when-not source?
+               (eval-files/delete-name! (:root env) name))
+        error (when live? (unbind! env name record))]
+    (swap! (:library env) dissoc name)
+    (swap! (:unwritten env) disj name)
+    (when source?
+      (when-let [restore @(:restore-source env)] (restore name)))
+    {:name name :file file :error error}))
+
+(defn- apply-definition!
+  "Write RECORD to the library and index it. A source-provided key stays live
+   but is never written. A failed write is recorded and reported; the live
+   definition remains."
+  [env cwd record]
+  (let [name (:name record)]
+    (if (contains? @(:source-keys env) name)
+      {:line (str "[eval: redefined " name " (source; not stored)]")}
+      (try
+        (let [path (eval-files/write-definition! (:root env) record)]
+          (swap! (:library env) assoc name (assoc record :file path))
+          (swap! (:unwritten env) disj name)
+          {:line (str "[eval: defined " name " → " (eval-files/display-path cwd path) "]")
+           :entry (library-entry (assoc record :file path))})
+        (catch Throwable t
+          (swap! (:unwritten env) conj name)
+          (record-failure! (:failures env) {:name name :error (ex-message t)})
+          {:line (str "[eval: define failed " name ": " (ex-message t) "]")
+           :error (ex-message t)})))))
 
 (defn- apply-changes!
-  "Apply the successful call's definition deltas: new session definitions,
-   keeps, and drops. Returns the report the tool result carries."
-  [service env session cwd parsed keep drop]
-  (let [roots (eval-roots (:agent-dir service) cwd)
-        shared (:shared env)
-        session-defs (:session-defs env)
-        parsed-by-name (parsed-map parsed)
-        keep-by-name (into {} (map (juxt :name identity)) keep)
-        drop-names (set drop)
-        adds (atom [])
-        removes (atom #{})
-        deletes (atom [])
-        old-deletes (atom [])
-        rollbacks (atom [])
-        committed? (atom false)
-        kept (atom [])
-        dropped (atom [])
-        shadowed (atom [])
-        lines (atom [])]
-    (letfn [(rollback! []
-              (doseq [{:keys [path old-content]} @rollbacks]
-                (try (eval-files/restore-definition! path old-content)
-                     (catch Throwable _ nil))))
-            (add-line! [line] (swap! lines conj line))
-            (add-remove! [name] (swap! removes conj name))
-            (add-session! [record]
-              (swap! adds add-record (select-keys record [:name :ns :kind :source])))
-            (drop! [name]
-              (when (contains? @session-defs name)
-                (add-remove! name))
-              (swap! deletes conj name)
-              (swap! shared dissoc name)
-              (swap! dropped conj name)
-              (add-line! (str "[eval: dropped " name "]")))
-            (ordinary! [record]
-              (let [name (:name record)]
-                (when-not (or (contains? keep-by-name name)
-                              (contains? drop-names name))
-                  (let [session-record (get @session-defs name)
-                        shared-record (get @shared name)]
-                    (cond
-                      session-record
-                      (when (not= (:source session-record) (:source record))
-                        (add-session! record))
-
-                      shared-record
-                      (do (add-session! record)
-                          (swap! shadowed conj name)
-                          (add-line! (str "[eval: shadowing " name
-                                          " (session; file unchanged: "
-                                          (display cwd (:file shared-record)) ")]")))
-
-                      :else
-                      (add-session! record))))))
-            (keep-session! [name record shared-record]
-              (when shared-record
-                (swap! deletes conj name)
-                (swap! shared dissoc name))
-              (let [session-record (get @session-defs name)]
-                (when (or (nil? session-record)
-                          (not= (:source session-record) (:source record)))
-                  (add-session! record)))
-              (swap! kept conj {:name name :scope :session})
-              (add-line! (if shared-record
-                           (str "[eval: moved " name " "
-                                (display cwd (:file shared-record)) " → session]")
-                           (str "[eval: kept " name " → session]"))))
-            (keep-shared! [name scope record session-record]
-              (let [old (get @shared name)
-                    old-scope (:scope old)
-                    target-root (root-for roots scope)
-                    target-path (eval-files/definition-path target-root record)
-                    moved? (and old (not= old-scope scope))
-                    old-target (when (fs/exists? target-path) (slurp target-path))
-                    path (eval-files/write-definition! target-root record)]
-                (swap! rollbacks conj {:path path :old-content old-target})
-                (when moved?
-                  (swap! old-deletes conj {:root (root-for roots old-scope)
-                                           :name name
-                                           :path path}))
-                (swap! shared assoc name (assoc record :scope scope :file path))
-                (when session-record
-                  (add-remove! name)
-                  (swap! session-defs dissoc name))
-                (swap! kept conj {:name name :scope scope})
-                (add-line! (if moved?
-                             (str "[eval: moved " name " "
-                                  (display cwd (:file old)) " → " (display cwd path) "]")
-                             (str "[eval: kept " name " → " (display cwd path) "]")))))
-            (keep! [name scope]
-              (let [record (or (get parsed-by-name name)
-                               (get @session-defs name)
-                               (get @shared name))
-                    session-record (get @session-defs name)
-                    shared-record (get @shared name)]
-                (when-not record
-                  (bad-request! (str "no tracked eval definition named " name)
-                                {:name name}))
-                (if (= scope :session)
-                  (keep-session! name record shared-record)
-                  (keep-shared! name scope record session-record))))
-            (commit! []
-              (let [new-defs (defs/collapse @adds)
-                    removed (vec (sort @removes))]
-                (if (or (seq new-defs) (seq removed))
-                  (do
-                    (session/append-custom-entry!
-                     session defs/eval-definitions-type
-                     {:version 1
-                      :defs (mapv #(select-keys % [:name :ns :kind :source]) new-defs)
-                      :removed removed})
-                    (reset! committed? true)
-                    (swap! session-defs
-                           (fn [m]
-                             (apply dissoc
-                                    (reduce (fn [m r] (assoc m (:name r) r)) m new-defs)
-                                    removed))))
-                  (reset! committed? true))
-                (doseq [name @deletes]
-                  (delete-shared! roots name))
-                (doseq [{:keys [root name path]} @old-deletes]
-                  (try
-                    (eval-files/delete-name! [root] name)
-                    (catch Throwable t
-                      (try (eval-files/restore-definition! path nil)
-                           (catch Throwable _ nil))
-                      (throw t))))
-                (reset! (:built-entries env)
-                        (if (seq @dropped)
-                          ::invalid
-                          (fingerprint session)))
-                {:lines @lines
-                 :kept @kept
-                 :dropped @dropped
-                 :shadowed @shadowed}))]
-      (try
-        (doseq [name drop] (drop! name))
-        (doseq [record (:defs parsed)] (ordinary! record))
-        (doseq [{:keys [name scope]} keep] (keep! name scope))
-        (commit!)
-        (catch Throwable t
-          (when-not @committed?
-            (rollback!))
-          (throw t))))))
+  "Apply the successful call's changes: drop/forget first, then write every
+   definition the call made. Returns the report the tool result carries; a
+   failure keeps the partial report."
+  [env cwd parsed drop forgotten]
+  (let [forgotten (mapv #(qualify-name (env-ns env) %) forgotten)
+        drop (distinct (concat drop forgotten))
+        parsed-names (set (map :name (:defs parsed)))
+        lines (atom [])
+        defined (atom [])
+        forgotten-names (atom [])
+        write-errors (atom 0)
+        unbind-errors (atom 0)]
+    (try
+      (doseq [name drop]
+        (when (contains? parsed-names name)
+          (bad-request! (str "a definition cannot be defined and dropped in one call: "
+                             name)
+                        {:name name})))
+      (validate-drop! #(known-name? env %) drop)
+      (doseq [name drop]
+        (let [{:keys [error]} (drop-one! env name)]
+          (swap! lines conj (if error
+                              (str "[eval: forgot " name
+                                   " (unbind failed: " error ")]")
+                              (str "[eval: forgot " name "]")))
+          (swap! forgotten-names conj name)
+          (when error
+            (swap! unbind-errors inc)
+            (record-failure! (:failures env) {:name name :error error}))))
+      (doseq [record (defs/collapse (:defs parsed))]
+        (let [{:keys [line entry error]} (apply-definition! env cwd record)]
+          (swap! lines conj line)
+          (when entry (swap! defined conj entry))
+          (when error (swap! write-errors inc))))
+      {:lines @lines
+       :defined @defined
+       :forgotten @forgotten-names
+       :write-errors @write-errors
+       :unbind-errors @unbind-errors}
+      (catch Throwable t
+        {:lines (conj @lines (str "[eval: failed: " (ex-message t) "]"))
+         :defined @defined
+         :forgotten @forgotten-names
+         :write-errors @write-errors
+         :unbind-errors @unbind-errors
+         :error (ex-message t)}))))
 
 ;; ─── The call ─────────────────────────────────────────────────────────────
 
@@ -514,51 +425,49 @@
     (:images base) (assoc :images (:images base))))
 
 (defn- error-result
-  "A failed call reports its error, never applies keep/drop, and still names
-   the build failures the next attempt would see."
+  "A failed call reports its error, never applies definitions or drops, and
+   reports the build failures collected for this attempt."
   [service env base started]
   (let [base (base-result base started)
-        failures (effective-failures service env)]
+        failures (take-failures! service env)]
     (result-parts
      base
      (assoc base
             :is-error true
             :details (cond-> (merge (:details base)
-                                    {:kept [] :dropped [] :shadowed []})
+                                    {:defined [] :forgotten []})
                        (seq failures) (assoc :failures failures))))))
 
 (defn- finish-call!
   "Merge the script result with the definition report: content lines after
-   the emitted output, and the kept/dropped/shadowed vocabulary in :details."
-  [service env session cwd parsed keep drop base started]
+   the emitted output, and the defined/forgotten vocabulary in :details."
+  [service env cwd parsed drop forgotten base started]
   (let [base (base-result base started)
-        changes (try
-                  (apply-changes! service env session cwd parsed keep drop)
-                  (catch Throwable t
-                    (reset! (:built-entries env) ::invalid)
-                    {:lines [(str "[eval: failed: " (ex-message t) "]")]
-                     :error (ex-message t)
-                     :kept [] :dropped [] :shadowed []}))
+        changes (apply-changes! env cwd parsed drop forgotten)
+        _ (when (:error changes) (mark-transient! env parsed))
         lines (:lines changes)
-        base-content (:content base)
-        content (cond
-                  (empty? lines) base-content
-                  (empty? base-content) (str/join "\n" lines)
-                  :else (str base-content "\n" (str/join "\n" lines)))
-        failures (effective-failures service env)
-        is-error (boolean (:error changes))]
+        content (str/join "\n" (remove str/blank?
+                                       [(:content base) (str/join "\n" lines)]))
+        failures (take-failures! service env)
+        write-errors (pos? (:write-errors changes 0))
+        unbind-errors (pos? (:unbind-errors changes 0))
+        failed? (or (:error changes) write-errors unbind-errors)]
     (result-parts
      base
      (assoc base
             :content (if (str/blank? content) "(no output)" content)
-            :is-error is-error
+            :is-error (boolean failed?)
             :details (cond-> (merge (:details base)
-                                    (select-keys changes [:kept :dropped :shadowed]))
+                                    (select-keys changes [:defined :forgotten]))
                        (seq failures) (assoc :failures failures)
-                       (:error changes) (assoc :error :eval/change-failed))))))
+                       failed? (assoc :error
+                                      (cond
+                                        (:error changes) :eval/change-failed
+                                        write-errors :eval/write-failed
+                                        :else :eval/unbind-failed)))))))
 
 (defn- eval!*
-  [service env session cwd {:keys [code timeout limits signal on-update ctx keep drop]}]
+  [service env cwd {:keys [code timeout limits signal on-update ctx drop]}]
   (let [code (some-> code str)
         lock (:lock env)]
     (locking lock
@@ -566,8 +475,7 @@
         (throw (ex-info "the agent's eval service is disposed"
                         {:type :eval/disposed})))
       (let [started (concurrent/monotonic-ms)
-            keep (normalize-keep keep)
-            drop (normalize-drop drop)
+            drop (mapv #(qualify-name (env-ns env) %) (normalize-drop drop))
             {:keys [parsed error]} (try-parse-code code env)
             run-code (fn []
                        (let [handle (or (srce/get (:agent-ctx service) :tools)
@@ -589,20 +497,23 @@
                                       :select-tools registry/select-tools
                                       :execute-tool #(registry/execute-tool handle %1 %2 %3)})))]
         (if error
-          (if (or (seq keep) (seq drop))
-            (throw (ex-info (str "eval could not read the code: " (ex-message error))
-                            {:type :eval/invalid-code} error))
-            (error-result service env (run-code) started))
+          (error-result service env (run-code) started)
           (do
-            (validate-requests! env parsed keep drop)
+            (validate-requests! env parsed drop)
             (if (str/blank? code)
-              (if (or (seq keep) (seq drop))
-                (finish-call! service env session cwd parsed keep drop nil started)
-                (bad-request! "eval needs code, keep or drop" {}))
-              (let [result (run-code)]
-                (if (:is-error result)
-                  (error-result service env result started)
-                  (finish-call! service env session cwd parsed keep drop result started))))))))))
+              (bad-request! "eval needs code or drop" {})
+              (do
+                (reset! (:forgotten env) #{})
+                (reset! (:parsed-names env) (set (map :name (:defs parsed))))
+                (let [result (run-code)]
+                  (if (:is-error result)
+                    (do
+                      (when-not (contains? #{:timeout :aborted :incomplete}
+                                           (get-in result [:details :error]))
+                        (mark-transient! env parsed))
+                      (error-result service env result started))
+                    (finish-call! service env cwd parsed drop
+                                  @(:forgotten env) result started)))))))))))
 
 (defn- session-lock
   "The lock for one session's environment selection and evaluation. The map
@@ -613,48 +524,74 @@
       (let [lock (Object.)]
         (get (swap! locks #(if (contains? % id) % (assoc % id lock))) id))))
 
-(defn- session-environment!
-  "The environment for SESSION. The caller holds the session lock."
-  [service session cwd]
+(defn- drop-request!
+  "Drop NAMES for SESSION without building an environment: delete the files
+   and, when an environment exists, unbind the live names. Returns the
+   tool/command result map, or throws (the caller reports)."
+  [service session names]
   (when @(:disposed? service)
     (throw (ex-info "the agent's eval service is disposed"
                     {:type :eval/disposed})))
-  (ensure-environment! service session cwd))
+  (let [session (or session (extensions/get-session))
+        _ (when-not session
+            (throw (ex-info "eval needs a session" {:type :eval/no-session})))
+        started (concurrent/monotonic-ms)
+        lock (session-lock (:session-locks service) (:id session))]
+    (locking lock
+      (let [env (get @(:envs service) (:id session))
+            root (library-root service)
+            names (mapv #(qualify-name (or (some-> env env-ns) "user") %)
+                        (normalize-drop names))
+            known? (if env
+                     #(known-name? env %)
+                     #(fs/exists? (eval-files/path-for-name root %)))]
+        (validate-drop! known? names)
+        (let [forgotten (atom [])
+              failures (atom [])]
+          (doseq [name names]
+            (try
+              (let [error (if env
+                            (:error (drop-one! env name))
+                            (do (eval-files/delete-name! root name) nil))]
+                (swap! forgotten conj name)
+                (when error
+                  (swap! failures conj {:name name :error error})))
+              (catch Throwable t
+                (swap! failures conj {:name name :error (ex-message t)}))))
+          (let [failures @failures]
+            {:content (str/join "\n"
+                                (concat (map #(str "[eval: forgot " % "]")
+                                             @forgotten)
+                                        (map #(str "[eval: failed " (:name %) ": "
+                                                   (:error %) "]")
+                                             failures)))
+             :details (cond-> {:forgotten @forgotten
+                               :elapsed-ms (- (concurrent/monotonic-ms) started)}
+                        (seq failures) (assoc :failures failures))
+             :is-error (boolean (seq failures))}))))))
 
 (defn- current-environment [service]
   (when-let [session (extensions/get-session)]
     (get @(:envs service) (:id session))))
 
-(defn- service-kept [service]
+(defn- service-library
+  "The definitions the current environment loaded."
+  [service]
   (if-let [env (current-environment service)]
-    (kept-entries env)
+    (library-entries env)
     []))
 
-(defn- service-failures [service]
+(defn- service-failures
+  [service]
   (into (vec @(:service-failures service))
         (when-let [env (current-environment service)]
           @(:failures env))))
 
-(defn- snapshot-session! [service session]
-  (when (and session (not @(:disposed? service)))
-    (let [lock (session-lock (:session-locks service) (:id session))]
-      (locking lock
-        (let [entries (definition-entries session)
-              folded (defs/fold-entries entries)]
-          (when (and (seq entries) (not @(:disposed? service)))
-            (try
-              (session/append-custom-entry!
-               session defs/eval-definitions-type
-               {:version 1
-                :snapshot true
-                :defs (mapv #(select-keys % [:name :ns :kind :source])
-                            (:defs folded))})
-              (catch Throwable t
-                (swap! (:service-failures service) conj
-                       {:session (:id session)
-                        :error (ex-message t)})
-                (debug/log "eval snapshot after compaction failed: " t)
-                nil))))))))
+(defn- service-index
+  "The library on disk, read without evaluating anything — what `/eval` lists
+   and searches, independent of any session's environment."
+  [service]
+  (eval-files/index (library-root service)))
 
 (defn- eval-call! [service opts]
   (when @(:disposed? service)
@@ -664,18 +601,20 @@
         _ (when-not session
             (throw (ex-info "eval needs a session"
                             {:type :eval/no-session})))
-        cwd (or (:cwd opts) (get-in opts [:ctx :cwd]) (tool-util/cwd))
-        lock (session-lock (:session-locks service) (:id session))]
-    (locking lock
-      (let [env (session-environment! service session cwd)]
-        (eval!* service env session cwd opts)))))
+        cwd (or (:cwd opts) (get-in opts [:ctx :cwd]) (tool-util/cwd))]
+    (if (and (str/blank? (str (:code opts))) (seq (:drop opts)))
+      (drop-request! service session (:drop opts))
+      (let [lock (session-lock (:session-locks service) (:id session))]
+        (locking lock
+          (let [env (ensure-environment! service session cwd)]
+            (eval!* service env cwd opts)))))))
 
 (defn value
   "The `:eval` service for AGENT-CTX. The environments are keyed by session
    and owned here; the `:tools` handle is resolved from AGENT-CTX on the first
    call, so the script surface is the agent's own table.
 
-   OPTS: `:agent-dir` pins the global eval root (tests, a sandboxed
+   OPTS: `:agent-dir` pins the library root (tests, a sandboxed
    composition); it defaults to `cfg/get-agent-dir`."
   ([agent-ctx] (value agent-ctx nil))
   ([agent-ctx {:keys [agent-dir]}]
@@ -690,10 +629,13 @@
                   :session-locks session-locks
                   :disposed? disposed?}]
      {:eval! #(eval-call! service %)
-      :kept #(service-kept service)
+      :drop! (fn [{:keys [session drop]}]
+               (drop-request! service session drop))
+      :library #(service-library service)
+      :index #(service-index service)
       :sources (constantly [])
+      :source-commands (constantly {})
       :failures #(service-failures service)
-      :snapshot! #(snapshot-session! service %)
       :dispose! (fn []
                   (reset! disposed? true)
                   (reset! envs {})

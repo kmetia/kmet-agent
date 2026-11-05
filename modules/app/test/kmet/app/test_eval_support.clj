@@ -3,7 +3,6 @@
    agent dir, a session, the service provisioned on a test ctx, and the two
    call paths (service and tool)."
   (:require [kmet.app.eval :as eval-service]
-            [kmet.app.eval.definitions :as defs]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.session.core :as session]
             [kmet.app.tools.registry :as tools]
@@ -16,14 +15,15 @@
   "A test agent: tool table, `:eval` service, and one session. OPTS may pin
    `:cwd` and `:agent-dir`, which a restart or a second session reuses."
   ([] (eval-ctx {}))
-  ([{:keys [cwd agent-dir]}]
+  ([{:keys [cwd agent-dir session]}]
    (let [cwd (or cwd (test-tmp/temp-dir! "eval-project-"))
          agent-dir (or agent-dir (test-tmp/temp-dir! "eval-agent-"))
          ctx (srce/root {:name :test-eval})
          handle (tu/tools-service! ctx)
          service (eval-service/value ctx {:agent-dir agent-dir})
-         sess (session/create-session (test-tmp/temp-dir! "eval-session-")
-                                      {:cwd cwd})]
+         sess (or session
+                  (session/create-session (test-tmp/temp-dir! "eval-session-")
+                                          {:cwd cwd}))]
      (srce/provide! ctx :eval service)
      (tu/mount-builtin-tools! ctx)
      {:ctx ctx :tools handle :service service :session sess
@@ -31,7 +31,7 @@
 
 (defn restart-service
   "A second service over the same agent ctx and roots — a process restart as
-   far as the eval store is concerned."
+   far as the eval library is concerned."
   [{:keys [ctx agent-dir]}]
   (eval-service/value ctx {:agent-dir agent-dir}))
 
@@ -66,12 +66,13 @@
     (tools/execute-tool (:tools env) tool-name args
                         {:ctx {:srce-ctx (:ctx env) :cwd (:cwd env)}})))
 
-(defn definition-entries
-  [session]
-  (session/get-custom-entries session defs/eval-definitions-type))
+(defn library-for
+  "The service's `(eval/library)` value for an explicit SESSION."
+  [service session]
+  (binding [extensions/*agent-context* {:session (constantly session)}]
+    ((:library service))))
 
-(defn eval-kept
-  "The service's `(eval/kept)` value with the run's session binding."
+(defn eval-library
+  "The service's `(eval/library)` value with the run's session binding."
   [env]
-  (binding [extensions/*agent-context* {:session (constantly (:session env))}]
-    ((:kept (:service env)))))
+  (library-for (:service env) (:session env)))

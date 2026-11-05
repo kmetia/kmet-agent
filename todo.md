@@ -15,21 +15,17 @@ home, auto-written:
 - **Load = scan.** An environment is built by reading the library. No fold,
   snapshot, branch fingerprint, or project overlay.
 - **Sessions are runtime caches** over the one library. Resume, fork and
-  branch do not rewind definitions; a new session loads the files.
+  branch do not rewind definitions; a new session or a restarted process
+  loads the files, and an already-built environment never refreshes.
 - **Forget = delete.** Remove the file and unbind the live name; a flat
   `:drop` or `(eval/forget 'name)` is enough.
 - **`run_code` is the throwaway tool; `eval` is the library.**
 - **Isolation is a home**, not a scope: `KMET_CODING_AGENT_DIR` (or a
   profile) gives a separate library.
 
-This supersedes the session/project scope rules in step 4 and the
-project/global material below. The step list is to be rewritten before step 4
-work continues; the remaining steps (eval sources, patches, the Clojure
-engine, docs) are otherwise unchanged.
-
-**TODO:** clean up the rest of this file to match the decision — rewrite step
-4, the test plan, the limits and E3/E4/E6/E10, and remove the session/project
-scope prose. Deferred; not part of step 4 work yet.
+This supersedes the session/project scope rules of step 4 and the
+project/global material it replaced. It landed as **step 4R** (see § Steps);
+the test plan, limits and decisions below state the current model.
 
 Reference: nodecode keeps one layer per home (`~/.nodecode/cells/<identity>/`),
 one file per definition, and has no session or project scope for code; its
@@ -51,17 +47,17 @@ are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–4 done; **step 5 next** |
+| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–4R done; **step 5 next** |
 
 ## Persistent eval and eval sources
 
-Status: steps 1–4 done (the shared script layer, the file ops, the
-memory-only service and the session store); step 5 next. The tool is opt-in by
-default under S4.5; step 4's tests exercise it directly rather than through the
-default declared set. E17 moves the Clojure editing engine and the edit verbs
-into core; the rest of the clojure extension is a post-track task at the end of
-this section.
-Decisions closed (E1–E17); independent.
+Status: steps 1–4R done (the shared script layer, the file ops, the
+memory-only service and the one-home library); step 5 next. The tool is opt-in
+by default under S4.5; step 4R's tests exercise it directly rather than through
+the default declared set. E17 moves the Clojure editing engine and the edit
+verbs into core; the rest of the clojure extension is a post-track task at the
+end of this section.
+Decisions closed (E1–E18); independent.
 Independent of every other track; the `:on-tool` hook covers it for free (step
 1 keeps the bridge on `kmet.app.tools.invoke`).
 Reference: nodecode (`~/src/cvstree/nodecode/`) — an SBCL agent whose one tool
@@ -92,13 +88,12 @@ process, extensions are isolated and contribute by value, and the sandbox
 boundary is a realm around a tool call. So the port takes three shapes that
 the original does not need:
 
-- **per session, not per process.** The environment belongs to the session,
-  not the process or the agent handle: a new session starts empty, a resume
-  restores that session's definitions, and a subagent gets its own, never the
-  parent's.
-- **persistence is opt-in per definition.** Definitions stay in the session
-  store; nothing is written into the user's repository unless a `:keep`
-  entry names it, and a kept file is reviewable text.
+- **per home, not per process.** The library belongs to the agent home; a
+  session's environment is a runtime cache over it. A new session or a
+  restarted process loads the files, and a subagent in the same home sees them.
+- **definitions persist by default; isolation is a home.** Every successful
+  top-level definition is written immediately, and the reviewable file is the
+  record. `KMET_CODING_AGENT_DIR` (or a profile) gives a separate library.
 - **extensions contribute definitions the way they contribute tools** — a
   registry tag, an owner path, one unload sweep. No new ABI shape.
 
@@ -108,7 +103,7 @@ the original does not need:
 |---|---|---|
 | script sandbox | `kmet.app.tools.run-code`, one SCI ctx per call, ~1,000 lines of machinery | moves to `kmet.app.tools.script`; both tools use it |
 | file ops | inline in `kmet.app.tools.edit` / `.write` `execute` | extracted as ops; tool and verb share them |
-| per-agent services | `:shell` (atom), `:sandbox` (data), `:permissions` (memory) — the agents factory provides each | `:eval` joins them, with one environment per session |
+| per-agent services | `:shell` (atom), `:sandbox` (data), `:permissions` (memory) — the agents factory provides each | `:eval` joins them, with one environment per session over the home library |
 | extension contribution | `register-tool!`, `register-tool-source!` (`:kmet/tool-source` on the `:tools` handle), commands, skills | `register-eval-source!` (`:kmet/eval-source`), same handle, same sweep |
 | model's code tool | `run_code` only | `run_code` + `eval` |
 
@@ -123,7 +118,7 @@ Three tiers of what a script can call, and only the third is a source:
 | tier | provided by | examples | removable |
 |---|---|---|---|
 | primitives | `kmet.app.tools.script`, shared with `run_code` | `slurp`, `spit`, `sh`, `p/*`, `fs/*`, `json`, `emit`, `emit-image`, `tools/list`, `tools/describe`, `tools/call`, `(cwd)`, `(env k)`, `(now)`, `(sleep ms)`, `(spawn f)` | no |
-| eval vocabulary | the `:eval` service (it needs kept-definition state) | `(eval/kept)`, `(eval/sources)`, `(eval/help)`, `(eval/patch …)`, `(eval/forget …)`, `(eval/edit-form …)` | no |
+| eval vocabulary | the `:eval` service (it needs library state) | `(eval/library)`, `(eval/sources)`, `(eval/help)`, `(eval/forget …)`, `(eval/patch …)`, `(eval/edit-form …)` | no |
 | verbs | the `:core` eval source shipped by the eval tool (including the Clojure editing verbs after E17), and every mounted extension's own source | `edit`, `write-file`, `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair`; extension-specific verbs | yes (`{:core false}`) |
 
 **The service.** `:eval` is provided per agent by the agents factory
@@ -132,10 +127,13 @@ child ctx can never shadow it and a preset may configure it first. Value is a
 map of fns (`docs/architecture.md` § Service catalog's convention):
 
 ```clojure
-{:eval!    (fn [{:keys [code timeout keep drop signal on-update ctx]}])
- :kept     (fn [] [{:name "user/f" :scope :session
-                    :shadowing {:scope :project :file "…"}} …])
+{:eval!    (fn [{:keys [code timeout drop signal on-update ctx]}])
+ :library  (fn [] [{:name "user/f" :ns "user" :kind :defn
+                    :file "…"} …])
+ :index    (fn [] {:entries [{:name "user/f" …}] :failures [{:file "…" :error "…"}]})
+ :drop!    (fn [{:keys [session drop]}])
  :sources  (fn [] [{:id :core :doc "…"} …])
+ :source-commands (fn [] {:lint {:description "…" :run (fn [ctx])}})
  :failures (fn [] [{:file "…" :error "…"} …])
  :dispose! (fn [])}
 ```
@@ -145,33 +143,35 @@ one sticky current namespace (`sci/*ns*` is thread-local, so the last
 namespace a call entered is re-entered at the start of the next), one
 `Object` lock (a parallel batch serializes; the deadline clock starts *after*
 the lock is taken) — keyed by the run's session and built lazily on the first
-eval call there. A session switch selects that environment (rebuilding it
-from the session's entries if it is not retained). The kept-definition index
-tracks the session's definitions and the shared project/global files.
+eval call there by scanning the home library. A session switch selects that
+environment; an already-built environment is not refreshed. The library index
+tracks the definitions the environment loaded; `:index` is the on-disk
+library, read without evaluating, and is what `/eval list` and `/eval search`
+use so they show the library rather than one session's cache.
 
 **The tool.** `:tool/eval` joins `:bundle/minimal` beside `:tool/run_code`,
 with `:default-enabled? false` (S4.5): off until selected or enabled by
 `/config`/`/tools`.
 
 ```jsonc
-{"code": "Clojure forms. Definitions persist for this session; kept project/global definitions are shared across sessions. Omit when only :keep/:drop acts.",
+{"code": "Clojure forms. Top-level definitions are written to the agent's eval library and loaded by every session. Omit when only :drop acts.",
  "timeout": 0,
- "keep": [["user/f1", "project"], ["user/f2", "global"]],
  "drop": ["user/old-fn"],
  "max-output-bytes": 0}
 ```
 
-`code` is optional when `:keep` or `:drop` is present, so a tracked definition
-can be promoted, moved or dropped without evaluating forms. `:keep` may also
-name `:session`, demoting a shared definition back to this session.
+`code` is optional when `:drop` is present, so a definition can be removed
+without evaluating forms. `:drop` deletes the file and unbinds the live name;
+`(eval/forget 'name)` is the in-environment spelling.
 
 Result content is the emitted text (or a silent success's final value, the
-REPL rule) plus one line per kept, moved or shadowed definition — `[eval:
-kept user/report → session]`, `[eval: kept user/report →
-.kmet/eval/user/report.clj]`, `[eval: moved user/report
-~/.kmet/agent/eval/… → .kmet/eval/…]`, `[eval: shadowing user/report
-(session; file unchanged: .kmet/eval/…)]`; `:details` carries `:timeout
-:elapsed-ms :kept :dropped :shadowed :sources :calls :error`. Deadline,
+REPL rule) plus one line per written definition or removal — `[eval: defined
+user/report → ~/.kmet/agent/eval/user/report.clj]`, `[eval: forgot
+user/old-fn]`, and `[eval: redefined user/edit (source; not stored)]` for a
+source-provided key; `:details` carries `:timeout :elapsed-ms :defined
+:forgotten :sources :calls :error`, and `:failures` names any broken library
+file or failed write. A failed write makes the result an error, leaves the
+live definition in place, and leaves the previous file authoritative. Deadline,
 abort, the sandbox realm, capture and the output budget are the shared script
 layer's, not a second copy.
 
@@ -192,113 +192,62 @@ sandbox:
 interrupt and per-call namespaces are re-aimed through atoms rather than
 rebuilt.
 
-**Persistence.** Project/global definitions are one file per definition, the
-verbatim source slice (`rewrite-clj.parser/parse-string-all`, its `:list`
-children, `node/string`; rewrite-clj is already an app dependency and a
-shared extension lib):
+**Persistence.** The library is one file per definition, the verbatim source
+slice (`rewrite-clj.parser/parse-string-all`, its `:list` children,
+`node/string`; rewrite-clj is already an app dependency and a shared
+extension library):
 
 ```
-<project>/.kmet/eval/<ns>/<name>.clj        :scope :project   (cfg/project-dir)
-~/.kmet/agent/eval/<ns>/<name>.clj          :scope :global    (cfg/get-agent-dir)
+<agent-dir>/eval/<ns>/<name>.clj          (cfg/get-agent-dir)
 
-;; kmet eval: kept by the eval tool
+;; kmet eval: written by the eval tool
 (ns user)
 (defn report [x] …)
 ```
 
-Session definitions are `:custom` entries with `:custom-type
-:eval-definitions`, one per successful call **that changes the session's
-definition set** (the verbatim slices, keyed by `<ns>/<name>`). A call that
-defines nothing and carries no `:keep`/`:drop` delta — a pure expression or
-an output-only eval — writes no entry; a call whose only definitions are
-source-provided keys writes none either; a no-op keep/drop writes none.
-
-```clojure
-{:role :custom
- :custom-type :eval-definitions
- :data {:version 1
-        :defs [{:name "user/report" :ns "user" :kind :defn
-                :source "(defn report [x] …)\n"}]
-        :removed ["user/old-fn"]}}
-```
-
-They are read lazily on the first eval in the session, not when the session
-opens: load the shared files, fold the active branch's entries in order
-(`:defs` add/replace, `:removed` delete), filter source-provided keys, then
-evaluate the folded definitions. The environment records the branch leaf it
-was built from; a branch/reset/switch invalidates it and the next eval
-rebuilds from the active branch. Entries are append-only and branch-scoped:
-`fork-session` copies them, an imported or `fork-from` session folds them
-like a resume, a branch to an earlier entry drops the later definitions, and
-deleting the session deletes them.
-
-On compaction (`:session-compact`, after the compaction entry), append one
-snapshot entry:
-
-```clojure
-{:role :custom
- :custom-type :eval-definitions
- :data {:version 1
-        :snapshot true
-        :defs [{:name "user/report" :ns "user" :source "…"}]}}
-```
-
-The fold resets to a snapshot's `:defs` and ignores earlier definition
-entries, so removed names and superseded sources drop out of the effective
-state; old entries stay in the append-only log (they are branch parents).
-A branch to before the snapshot folds the old entries, and a fork copies the
-snapshot. Snapshot generation uses the pure branch fold, not the live SCI
-context, so it also works before the session's first eval; a failed snapshot
-append is reported and does not fail the compaction, and the old entries
-remain loadable.
+Every successful call that makes top-level definitions writes each one
+immediately; a redefinition overwrites the same file. A call that defines
+nothing writes nothing, and a call that ends in error applies no writes or
+drops. The file is the address: lookup, deletion and review are address
+operations either way. A source-provided key (a builtin verb, or a key an
+extension source contributes) may be redefined live but is never written.
 
 Kept forms: top-level `def`, `defn`, `defn-`, `defonce`, `defmulti`,
 `defprotocol`, `defrecord`, `deftype`, `defmacro`, `declare` (keyed by the
-defining symbol), and `defmethod` (keyed `<multi> <dispatch>`, file name or
-store key sanitized). A def nested in `do`/`when`/`comment` is not kept —
-nodecode keeps it, kmet deliberately does not, because the definition needs a
-stable address (the file name in a shared scope, the session-store key in a
-session).
+defining symbol), and `defmethod` (keyed `<multi> <dispatch>`, file name
+sanitized). Dropping a `defmethod` address removes only that method; the
+multimethod and its other methods stay live. A def nested in `do`/`when`/
+`comment` is not written — nodecode writes it, kmet deliberately does not,
+because the definition needs a stable address (the file name).
 
-Load order for a session: global files first, then project files, sorted by
-path, then the session's folded definitions. Project wins a global name
-collision, and the session definition wins a shared one. Shared files are
-read only when the environment is built: another session sees a later
-`:keep` only on its first eval, a rebuild (branch/reset/switch), resume, fork
-or import — not on its next ordinary eval. Its own session definition of the
-same name still wins. A file or session entry that throws is recorded under
-`:failures` and reported by the next result and by `/eval-sources`; the agent
-still works.
+Load order for a session: every file under the library root, sorted by path;
+the generated `(ns …)` form runs first, then the standard aliases, then the
+body. A broken file is recorded under `:failures` and skipped; the agent still
+works. A new session, resume, fork, import or restarted process builds from
+the library. An already-built environment does not refresh: two sessions in
+one home share the files but not the live definitions, and a definition
+written by one is visible to another only when that session is built again.
+Branches do not rewind definitions.
 
-Every top-level definition is tracked in the session's index with its
-verbatim source; a new definition is session-scoped and recorded as a
-session entry, except source-provided keys (below). `:keep` is the only
-writer of the shared scopes: an entry `[name scope]` saves a definition to
-`:project` or `:global`, moves an existing shared definition (`:project` ↔
-`:global`; write the new file first, then remove the old), or demotes one
-with `[name :session]`. It may name a tracked definition from an earlier
-call, so a definition can be promoted, moved or demoted without re-sending
-its source. A redefinition without `:keep` updates the session copy; for a
-shared name it creates a session shadow and leaves the file untouched
-(reported; the session wins at load). `:drop` removes the session copy and
-both shared files. A name in both `:keep` and `:drop`, or a `:keep` naming
-neither a tracked definition nor one of this call's top-level defining
-forms, is an error; validation happens before evaluation. A call with
-`:keep`/`:drop` and no `:code` performs just those operations. Shared files
-take the EDN store's file lock (`kmet.libs.edn-store/with-file-lock`),
-because two sessions can save at once; session entries are appended under
-the session's own lock (`append-entry`/`append-custom-entry!`). A failed
-move rolls the new file back and reports, leaving the old file
-authoritative.
+Session entries from the old model (`:eval-definitions`), project
+`<cwd>/.kmet/eval` files and compaction snapshots are ignored, never loaded or
+migrated. Global files already in `<agent-dir>/eval` are the library.
 
-Source-provided verb keys — the builtin `user/edit`, `user/write-file`, and
-after E17 `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair`, or a name
-an extension source contributes (`license/add!`) — may be redefined in the
-live session but are never stored: `:keep` naming one is an error, no session
-entry and no shared file is written, and `:drop` removes the redefinition so
-the next `seed!` restores the source's value. The service remembers the keys
-a source has contributed, so unloading the source does not make its keys
-storable.
+`:drop` deletes the addressed file and unbinds the live name; `(eval/forget
+'name)` is the same operation from code. A name may not be defined and dropped
+in one call. A name that is a source-provided key has no file; dropping it
+restores the source seed. Writes and deletes take the EDN store's file lock
+(`kmet.libs.edn-store/with-file-lock`), because two sessions can save at once.
+A failed write is reported, leaves the live definition in place and still
+forgettable, and leaves the previous file authoritative for the next build.
+A call that ends in a normal error writes nothing; definitions it evaluated
+before the error stay live and are tracked as unwritten, so `:drop`/
+`(eval/forget …)` can remove them. A timed-out or aborted call may still have
+its interpreter thread running, so its partial definitions are not tracked.
+A code-less `:drop` deletes the files directly and unbinds only when the
+session already has an environment; it never builds one. A failed delete or
+unbind is reported, and a failed unbind can leave the live definition until
+the process restarts.
 
 **Eval sources.** The extension-visible half, and the cell analogue:
 
@@ -332,20 +281,24 @@ storable.
   Precedence: among sources, later registration wins; the session's own
   definitions always win (the service records every `def*` target the model
   evaluated and `seed!` skips those names). A source-provided key is never
-  stored or kept (see § Persistence).
+  written (see § Persistence); a model redefinition shadows it live, and
+  `:drop`/`(eval/forget …)` restores the source's value.
 
-**Discovery.** `(eval/sources)` and `(eval/kept)` inside the environment
-(`(eval/help)` summarises all three tiers; `(eval/kept)` lists this session's
-definitions and the shared files), and a read-only `/eval-sources` builtin
-command for the human. No system-prompt section: it would sit in the cached
-prefix and vary per session, so it would invalidate the whole prefix every
-time one changed; a source that needs the model to know something unprompted
-registers a skill, the existing seam.
+**Discovery.** `(eval/sources)` and `(eval/library)` inside the environment
+(`(eval/help)` summarises all three tiers; `(eval/library)` lists the
+definitions this environment loaded), the `/eval <verb>` builtin command for
+the human — `list [pattern]`, `search <text>`, `drop <name>…`,
+`sources`, `help`, plus verbs an eval source contributes through
+`:source-commands`. Built-in verb names are reserved;
+a source contributing one is refused. No system-prompt section: it would sit
+in the cached prefix and vary per session, so it would invalidate the whole
+prefix every time one changed; a source that needs the model to know
+something unprompted registers a skill, the existing seam.
 
 ### Steps
 
-Nine steps, each one commit; steps 1–2 are behaviour-preserving and every
-later step is additive. Estimated ~2,000 new lines, ~1,000 moved (step 1)
+Nine steps plus the cleanup step 4R. Steps 1–2 are behaviour-preserving and
+every later step is additive. Estimated ~2,000 new lines, ~1,000 moved (step 1)
 plus ~150 moved (step 2).
 
 1. **`kmet.app.tools.script`.** Move the reusable sandbox out of
@@ -370,29 +323,23 @@ plus ~150 moved (step 2).
    provides the default like `:sandbox`; the handle's `:dispose!` calls the
    service's. `kmet.app.tools.eval` + the `:tool/eval` row in
    `:bundle/minimal`, a sharp description against `run_code` (and one line
-   added to `run_code`'s pointing at `eval`). No persistence, no verbs.
-4. **Session scope, lazy fold and `:keep`.** Replace the agent-wide context
-   with one lazy environment per session, keyed by the run's session. Session
-   definitions are `:custom` `:eval-definitions` entries, one per successful
-   call that changes the session's definition set (`:defs`/`:removed`,
-   source-provided keys excluded); a call with no definitions and no
-   keep/drop delta writes no entry, and neither does a source-key-only
-   redefinition. The first eval in a session loads shared files and folds the
-   active branch, and a branch/reset/switch invalidates the environment so the
-   next eval rebuilds. Shared files are load-time: another already-built
-   session does not re-read them on each eval; it sees a keep only when its
-   environment is built, and its own session copy still wins. On compaction (`:session-compact`) append a
-   `:snapshot true` entry after the compaction entry, generated from the pure
-   branch fold; the fold resets to the latest snapshot and ignores older
-   definition entries, and a failed snapshot append does not fail the
-   compaction. `:keep` promotes or moves to project/global, or
-   demotes to session; `:drop` removes every copy; a shared name redefined
-   without `:keep` becomes a session shadow. Result lines, `:details` and
-   `(eval/kept)` report session vs file entries. Fork and import fold the
-   source session's definitions like a resume; imported definitions run with
-   the same authority, so the limit is documented. Code-less `:keep`/`:drop`
-   calls. Tests and docs
-   must select the opt-in `:tool/eval` row explicitly (S4.5).
+   added to `run_code`'s pointing at `eval`).
+4. **Step 4R (done): the one home library.** Every successful top-level
+   definition is written immediately under `<agent-dir>/eval/<ns>/<name>.clj`
+   (one verbatim source slice, atomic publication under the root lock); a
+   redefinition overwrites it. A session's environment is built lazily on its
+   first eval by scanning that root (sorted by path) and evaluating every file;
+   an already-built environment is a runtime cache and never refreshes.
+   `:drop` and `(eval/forget 'name)` delete the file and unbind the live name;
+   a source-provided key is never written. No session `:eval-definitions`
+   entries, no project `<cwd>/.kmet/eval`, no fold, no snapshot, no branch
+   fingerprint, no shadowing. The compaction snapshot hook is removed; legacy
+   entries and project files are ignored. `(eval/library)` replaces
+   `(eval/kept)`. Result lines and `:details` report `:defined` and
+   `:forgotten`; a failed write is reported without rolling back the live
+   definition or other writes. The `:tool/eval` row also registers the
+   `/eval` command (`list`, `search`, `drop`, `sources`, `help`) and removes
+   it on dispose; source-contributed command verbs arrive in step 5.
 5. **`:kmet/eval-source` and `:core`.** Registry fns
    (`register-eval-source!` / `unregister-` / `get-eval-sources`) in
    `kmet.app.tools.registry`; `registry-tags` + `host-tags`; the service
@@ -405,23 +352,28 @@ plus ~150 moved (step 2).
    `bash-tool/*shell*`, `bash-tool/*session-env-fn*`,
    `read-tool/*skill-resolver*`) so a verb resolves paths exactly as its tool
    does. A source contributing a builtin key is refused, and the service
-   records each source's keys as non-storable for the agent: a model
-   redefinition shadows one in session scope, `:keep` refuses it and `:drop`
-   restores the source's value. `(eval/sources)`, `(eval/help)` and
-   `/eval-sources`.
+   records each source's keys as non-storable: a model redefinition shadows
+   one live, `:drop`/`(eval/forget …)` restores the source's value and writes
+   no file. `(eval/sources)`, `(eval/help)` and `/eval sources`. Sources also
+   return `:commands` (`{:lint {:description … :run (fn [ctx])}}`) for the
+   `/eval` command; a `:run` returns nil or a string, and a non-blank string
+   is printed as the command's output. Built-in verb names (`list`, `search`,
+   `drop`, `sources`, `help`) are reserved and a source contributing one is
+   refused.
 6. **The extension ABI.** `kmet.extension/register-eval-source!` /
    `unregister-eval-source!`; the api keys in
    `kmet.app.extensions.core/create-extension-api`; `create-nullable-api`
-   gains `:eval-sources`; `modules/app/src/kmet/extension.md` +
+   gains `:eval-sources` (the API capability, not a command);
+   `modules/app/src/kmet/extension.md` +
    `docs/extensions.md` (the `license` example, the `user` prohibition, "use
    the verbs within the call"). The loader's opaque `:meta` (S4) is the later
    static projection for extension-provided eval verbs, e.g. `:meta {:eval
    [{:name "clj/edit-form"}]}`; the live `:kmet/eval-source` registry stays
    authoritative, and the metadata reader lands only when a consumer needs it.
 7. **The eval vocabulary.** `(eval/patch 'name old new)` (structural subform
-   replacement through rewrite-clj, re-evaluate, write back to the same
-   scope) and `(eval/forget 'name)`. Deferred out of v1 so the structural
-   editor gets its own review.
+   replacement through rewrite-clj, re-evaluate, write the library file).
+   `(eval/forget 'name)` landed with step 4R. The structural editor gets its
+   own review.
 8. **The Clojure editing engine and verbs.** Extract
    `kmet.extensions.clojure.edit-util` to `kmet.libs.clj-edit` — the shared
    engine (`edit-pipeline`, `edit-source`, `replace-form`,
@@ -430,23 +382,23 @@ plus ~150 moved (step 2).
    require it. The `:core` source always ships `clj/edit-form`,
    `clj/replace-sexp` and `clj/paren-repair` (map args and result parity with
    the tools), so the rich editor needs neither `:ext/clojure` nor a tool
-   schema. Add the live `eval/edit-form`: find the definition's stored source
-   (shared file or session entry), apply the edit to the source, re-evaluate,
-   then write and update the index (`edit-source` is the pure step);
-   `eval/patch` stays the minimal subform op. The extension keeps the tools,
-   hooks and skill and drops its eval source (extension-specific verbs may
-   return later); it is not added to `:bundle/minimal`. Resolve paths against
-   the source `:cwd` in the verbs and `(:cwd ctx)` in the tools, which become
-   `:contextual?`; no process-cwd assumption (E17).
-9. **Docs and catalog.** `docs/architecture.md` § Service catalog (`:eval`) and
-   § Tools and the script sandbox (the eval tool, the extraction, and the
-   scoping of "a `def` in one call is invisible to the next" to `run_code`);
-   `bb generate-catalog`; `docs/pi-alignment.md` § codemode (the persistent
-   `store`/`load` half and the extension analogue are no longer missing);
-   `modules/app/src/kmet/design.md` § Open at HEAD 5 (one line: a persistent
-   context makes Jolt's `eval-in` more attractive later; the decision is
-   unchanged); the tier table and the clojure extension's remaining surface
-   (E17 and the post-track task).
+   schema. Add the live `eval/edit-form`: find the definition's library file,
+   apply the edit to the source, re-evaluate, then write the same file and
+   update the index (`edit-source` is the pure step); `eval/patch` stays the
+   minimal subform op. The extension keeps the tools, hooks and skill and
+   drops its eval source (extension-specific verbs may return later); it is
+   not added to `:bundle/minimal`. Resolve paths against the source `:cwd` in
+   the verbs and `(:cwd ctx)` in the tools, which become `:contextual?`; no
+   process-cwd assumption (E17).
+9. **Docs and catalog.** `docs/architecture.md` § Service catalog (`:eval`)
+   and § Tools and the script sandbox (the eval tool, the extraction, the
+   library and the scoping of "a `def` in one call is invisible to the next"
+   to `run_code`); `bb generate-catalog`; `docs/pi-alignment.md` § codemode
+   (the persistent `store`/`load` half and the extension analogue are no
+   longer missing); `modules/app/src/kmet/design.md` § Open at HEAD 5 (one
+   line: a persistent context makes Jolt's `eval-in` more attractive later;
+   the decision is unchanged); the tier table and the clojure extension's
+   remaining surface (E17 and the post-track task).
 
 ### Test plan
 
@@ -457,55 +409,51 @@ plus ~150 moved (step 2).
 - **Step 2:** a table test runs one edit through `registry/execute-tool` and
   through the verb and asserts identical file bytes, and the same
   `:edit-error` message for not-found, duplicate and no-change.
-- **Step 3–4:** two `value` instances behave as two agents (definitions do
-  not cross); two sessions of one agent do not share definitions; a new
-  session starts empty, resume and switch restore that session's definitions,
-  and a process restart restores them from the session log; a branch
-  inherits its parent's definitions and a deleted session removes its store;
-  project/global `:keep`s load into every session, with a session copy
-  winning a shared name; `:keep` writes/moves the expected shared files and
-  session definitions append only to the session log, never a project file; a
-  definition can be promoted, moved or demoted in a later call without
-  redefining it; load order is global→project→session; a broken file/entry
-  becomes a `:failure` and the agent still evals; a saved name redefined
-  without `:keep` leaves its shared file bytes unchanged and is reported as
-  a session shadow; an explicit `:keep` then writes it; `:drop` removes the
-  session copy and both shared files; a name in `:keep` and `:drop`, or a
-  `:keep` for an unknown name, errors; a builtin verb can be redefined in
-  session scope but `:keep` for it errors and writes nothing, and `:drop`
-  restores the core seed; `defmethod` addresses are distinct per dispatch;
-  `(eval/kept)` matches the session index and shows session entries with
-  their shadows.
-- **Step 4 (session EDNL):** nothing is folded before the first eval in a
-  session; the first eval folds only the active branch; a branch/reset/switch
-  invalidates the environment and rebuilds it; a compaction appends a
-  snapshot, the fold resets to it and drops tombstones; a branch to before the
-  snapshot sees the old entries; a fork copies the snapshot; a fork/import
-  loads the source session's definitions; a snapshot append
-  failure leaves the old entries loadable; definition entries never project
-  into LLM context; malformed entries become `:failures`; a pure expression
-  eval, a source-key-only redefinition and a no-op keep/drop append no
-  session entry; a shared `:keep` is not visible to another already-built
-  session on its next eval, only after that session rebuilds, and its session
-  copy still wins.
+- **Steps 3–4R:** two `value` instances with separate homes behave as two
+  agents; two sessions in one home build separate environments from the same
+  library; a new session, resume or restarted process loads the library; an
+  already-built session does not refresh and its stale view is reported as a
+  cache, not a bug; `define=write` leaves the expected file bytes and reports
+  one defined line per definition, including a redefinition (which overwrites
+  the file); a pure expression writes nothing, and a call that ends in error
+  writes nothing; `:drop`/`(eval/forget 'name)` deletes the file and unbinds
+  the live name; unknown names, duplicate drops and a name defined and dropped
+  in one call error before evaluating; `defmethod` addresses are distinct per
+  dispatch; a broken file becomes a `:failure`, is reported once, and the
+  agent still evals; files load sorted by path; a source-provided key redefined live is never
+  written and dropping it restores the seed; a failed write is reported and
+  the live definition remains — still droppable/forgettable — with the old
+  file authoritative after a restart; a definition evaluated before an error
+  is live and forgettable, while one after the error is not; an unqualified
+  drop qualifies against the sticky namespace and removes its library entry;
+  an unqualified `(eval/forget …)` resolves in the namespace the call ends in;
+  a qualified define+forget in one call reports the conflict, not an unknown
+  name; a partial drop reports what landed before the failure, including an
+  unbind or delete failure; project files and legacy
+  `:eval-definitions` entries are ignored; `(eval/library)` matches the loaded
+  index; two parallel definitions on one session both survive; the `/eval`
+  command lists, searches and drops from the library without building an
+  environment, and its registration follows the `:tool/eval` row.
 - **Step 5–6:** a source's fns are callable on the next call; a source's
   `:verbs` and the environment's `user/edit` behave identically (assert by
   behaviour — same file bytes — not by identity); unload removes the names on
   the next call and leaves the model's definitions; a throwing source
   contributes nothing; a source contributing `user` or `clj`, or a builtin
-  key, is refused; an extension verb can be redefined in session scope but
-  `:keep` for it errors and writes nothing, and `:drop` restores the source
-  value while mounted; a contributed key stays non-storable after its source
-  unloads; a source that captures `:verbs` past its call is documented as
-  unsupported (no test); the `/eval-sources` output names sources, kept
-  definitions and failures.
+  key, is refused; an extension verb can be redefined in session scope but is
+  never written, and `:drop`/`(eval/forget …)` restores the source value while
+  mounted; a contributed key stays non-storable after its source unloads; a
+  source that captures `:verbs` past its call is documented as unsupported (no
+  test); the `/eval` command lists, searches, drops, reports sources and
+  dispatches a source verb; a verb's non-blank return string is printed; an
+  unknown verb and a reserved source verb are reported; `/eval sources`
+  names sources, loaded definitions and failures.
 - **Step 8:** the shared engine's tests; `(clj/edit-form …)` and
   `clojure_edit` on the same fixture produce identical bytes and the same
   bad-form message, with the verb core and the tool present only when
   `:ext/clojure` is mounted; `eval/edit-form` updates the live definition,
-  writes only after a successful re-eval, and leaves the store/index
-  untouched on failure; relative paths resolve under the source `:cwd` while
-  the process cwd differs.
+  writes only after a successful re-eval, and leaves the file/index untouched
+  on failure; relative paths resolve under the source `:cwd` while the
+  process cwd differs.
 - **Both hosts:** the eval tests run under babashka and Jolt's views
   (`bb test-changed` plus `jolt test` where the tree has it); `sci/init`
   once per session and the `swap!`-based `seed!` are the two host-sensitive
@@ -513,19 +461,19 @@ plus ~150 moved (step 2).
 
 ### Limits, stated in the docs
 
-- Same authority as `bash`. Kept shared definitions run in every session;
-  a session definition runs when that session is resumed, forked or imported.
-  That is the feature and the risk. Shared files are plain text in the project
-  for review; session definitions live in the session EDNL log under the
-  sessions dir, and no sandbox is claimed.
+- Same authority as `bash`. Every definition in a home's library runs in every
+  session built from that home; a source-provided key is live but not written.
+  That is the feature and the risk. Library files are plain text under
+  `~/.kmet/agent/eval` for review; no sandbox is claimed.
 - A host-blocked call still hits the existing interrupt-grace limitation
   (no process isolation — `modules/app/src/kmet/design.md` § Open at HEAD 5).
 - Nothing is kept from `run_code`; nothing from `eval` is visible to
-  `run_code` or to a subagent; sessions have separate logs and environments,
-  and two agents share neither.
-- The session log and kept files are unbounded (the model can define as much
-  as it wants); a compaction snapshot bounds the fold, not the bytes. The
-  capture and result budgets are the shared script layer's.
+  `run_code`. Two homes never share; two agents or sessions in one home share
+  the library files but each has its own live environment, so a definition is
+  visible to another only when that environment is built again.
+- The library is unbounded (the model can define as much as it wants); a
+  written file is the record, not a compaction fold. The capture and result
+  budgets are the shared script layer's.
 
 ### Decisions
 
@@ -540,49 +488,50 @@ shadowing an ancestor's service) — the same reason `:shell`, `:sandbox` and
 `:permissions` are factory-provided. A preset row may mount first and
 configure it; the `:tool/eval` row is what a profile removes to hide the tool.
 
-**E3 — session lifetime.** Definitions belong to the session: `new-session!`
-starts with no session definitions (only the shared project/global ones),
-`resume-session!` restores them by the lazy fold, switching sessions swaps
-environments, and a branch inherits its parent's definitions up to the branch
-point. Session scope is durable in the session EDNL log; a compaction
-snapshot folds its history. `:keep` promotes a definition to project/global
-for cross-session sharing. Subagents are their own agent and sessions, so
-definitions never cross. Fork and import load the source session's
-definitions like a resume; an imported file carries executable definitions.
+**E3 — one library per home; a session is a cache.** Definitions belong to the
+agent home: `new-session!` starts with a fresh environment built from the
+library, `resume-session!`/fork/import build from it the same way, and
+switching sessions swaps environments. An already-built environment is not
+refreshed, so a definition written by one session is visible to another only
+when that session is built again. There is no session definition log, no
+branch rewind and no per-session persistence. `KMET_CODING_AGENT_DIR` (or a
+profile) isolates a home; subagents, agents and sessions in one home share the
+files but not the live environment.
 
-**E4 — session scope is private; `:keep` writes shared files.** A
-model-facing default of "write into the user's repository" is not a default
-kmet takes. Every new definition is recorded as a session entry, never in
-the project. Only `:keep` entries write `:project`/`:global`;
-`:keep :session` demotes one back. Source-provided keys are never stored.
-`:keep` may be used with no code, so a tracked definition can be promoted,
-moved or demoted later; `:drop` removes every copy.
+**E4 — define = write; forget = delete; no scopes.** Every successful
+top-level definition is written immediately to
+`<agent-dir>/eval/<ns>/<name>.clj`; a redefinition overwrites it. There is no
+`:keep`, no project scope, no move or demotion. `:drop` or `(eval/forget
+'name)` deletes the file and unbinds the live name. A source-provided key is
+never written. A failed write is reported and the live definition remains
+(and can still be forgotten), with the previous file authoritative for the
+next build. A call that ends in a normal error writes nothing; its evaluated
+definitions remain live and forgettable (a timed-out/aborted call is not
+tracked, because its interpreter may still be running). A code-less drop never
+builds an environment. A failed delete or unbind is reported; a failed unbind
+leaves the live definition until a restart.
 
-**E5 — one address per definition, verbatim source.** In a shared scope the
-file is the address (`<ns>/<name>.clj`); in the session log the folded name
-is. Lookup, deletion and review are address operations either way.
-`pr-str` of the parsed form would normalise away reader sugar; the
-rewrite-clj slice keeps the bytes the model wrote.
+**E5 — one address per definition, verbatim source.** The file is the address
+(`<ns>/<name>.clj`); lookup, deletion and review are address operations.
+`pr-str` of the parsed form would normalise away reader sugar; the rewrite-clj
+slice keeps the bytes the model wrote. Session keys from the old model are
+gone.
 
-**E6 — session definitions are private; a shared redefinition shadows until
-kept.** Every top-level definition is tracked with its verbatim source and
-recorded as `:eval-definitions` session entries, except source-provided
-keys. A redefinition without `:keep` updates the session copy; for a
-project/global name it creates a session shadow and leaves the shared file
-untouched (reported; the session wins at load). `:keep` writes/moves a shared
-definition and appends a session removal, or demotes one with `:keep
-:session`; there is no silent re-scope. `:drop` removes every copy, because a
-silent delete is the one outcome a model cannot review.
+**E6 — a redefinition overwrites; there is no shadow.** A model redefinition
+of any library name writes the same file (or, for a source-provided key, only
+the live environment). There is no session copy to shadow a shared one and no
+silent re-scope. A failed write leaves the old file authoritative and reports
+the failure.
 
 **E7 — top-level defining forms only.** A def inside `do`/`when`/`comment` is
-not kept, unlike nodecode: a computed definition has no stable address, and
-the alternative (an aggregate file or session entry per call) makes
-per-definition deletion and review impossible.
+not written, unlike nodecode: a computed definition has no stable address, and
+the alternative (an aggregate file per call) makes per-definition deletion and
+review impossible.
 
 **E8 — `defmethod` keyed by `<multi> <dispatch>`.** Otherwise every method of
 one multimethod lands on one address and the last one wins at load. The
-sanitized dispatch in the shared file name (and the store key) is the
-address; `:kept` names the full key.
+sanitized dispatch in the file name is the address; `(eval/library)` names the
+full key.
 
 **E9 — eval sources are values; neither tool nests the other.** The
 contribution crosses the isolation boundary the way every other capability
@@ -591,14 +540,13 @@ given. `script-tool-names` excludes both tools from any script's surface, so
 `run_code` cannot start an `eval` and an `eval` cannot start another.
 
 **E10 — sources cannot redefine builtins; the agent's overrides are never
-stored.** Later-registration-wins is app-wide, so an extension that took
+written.** Later-registration-wins is app-wide, so an extension that took
 `edit` would silently replace the built-in in every agent. The rule is
 enforced by the service: a source contributing to `user`, `clojure.core`,
 `tools`, `sandbox`, `eval`, `fs` or `clj`, or contributing a builtin key, is
 refused and reported. The agent itself may redefine a builtin or extension
-verb in session scope, but a source-provided key is never stored: `:keep`
-naming one is refused, there is no session entry or project/global file, and
-`:drop` restores the source's value.
+verb live, but a source-provided key is never written: there is no library
+file, and `:drop`/`(eval/forget …)` restores the source's value.
 
 **E11 — host operations cross as values, not as requirable namespaces.**
 `sources-fn` receives `:verbs` — the same fns the script calls — so an
@@ -607,11 +555,13 @@ requirable and without moving the file ops or the mutation lock into `libs`.
 A libs extraction happens when a consumer needs the op *outside* a source; E17
 is that consumer for the Clojure engine (`kmet.libs.clj-edit`).
 
-**E12 — discovery is in-code, plus one read-only command.** `(eval/sources)`,
-`(eval/kept)`, `(eval/help)` and `/eval-sources`; no system-prompt section.
-A dynamic per-session section sits in the cached prefix and varies per
-session, so it would invalidate the whole prefix every time one changed. A
-source that needs unprompted presence registers a skill, the existing seam.
+**E12 — discovery is in-code, plus commands.**
+`(eval/sources)`, `(eval/library)`, `(eval/help)`, the `/eval` command
+(`list`, `search`, `drop`, `sources`, `help`, plus source verbs); no
+system-prompt section. A dynamic per-session section sits
+in the cached prefix and varies per session, so it would invalidate the whole
+prefix every time one changed. A source that needs unprompted presence
+registers a skill, the existing seam.
 
 **E13 — `:core` ships the language-neutral file verbs plus the Clojure editing
 verbs.** `edit` and `write-file` are the two operations a bare profile (no
@@ -629,11 +579,17 @@ nothing the value contract cannot express); `*`/`/` value chains across calls
 (no REPL value history in SCI); `$` named strings (the tool's argument is the
 code); `fork` (subagents, not this tool); an event vocabulary for kept
 paragraphs (no reader); per-agent eval sources (the registry is app-wide,
-like tool sources); auto-save on any definition.
+like tool sources); auto-save on any definition is now the model rather than a
+declined option; `:keep`, a project `<cwd>/.kmet/eval` scope, session
+definition entries and compaction snapshots (superseded by E18).
 
-**E15 — names closed.** `/eval-sources` (the alternative `/eval` is recorded
-and declined for v1: a read-only report that looks like an evaluator invites
-the wrong expectation); `clj/*` for the Clojure verbs (core-provided after
+**E15 — names closed.** `/eval` is the human command: `list`, `search`,
+`drop`, `sources`, `help`, plus keyword-keyed verbs an eval source contributes
+through `:source-commands` (a `:run` returns nil or a string); the built-in
+names are reserved. `/eval sources` is the source report. `(eval/library)` is
+the listing (the old `(eval/kept)` name is retired with the scope model);
+`(eval/forget 'name)` is
+the in-environment delete; `clj/*` for the Clojure verbs (core-provided after
 E17; not the tool names `clojure_*`, and never bare).
 
 **E16 — the service is built-in; the verbs are the extension point.** `:eval`
@@ -667,6 +623,15 @@ hooks and skill; mounting it is no longer required for the verbs, and it is
 not added to `:bundle/minimal`. This supersedes E11's "no libs extraction"
 condition and E13's Clojure clause. The rest of the extension is reconsidered
 by the post-track task below.
+
+**E18 — one global eval library (2026-11-05).** The eval scope model is global
+only: one auto-written library per agent home, every successful top-level
+definition writes its file immediately, a session's environment is built by
+scanning the library, sessions are runtime caches, and forget deletes the file
+and unbinds the live name. This supersedes E3, E4 and E6 and amends E5, E10,
+E12, E14 and E15; the landed step 4R is its implementation. The reference is
+nodecode: one layer per home, one file per definition, no session or project
+scope for code.
 
 ## Post-track task: the rest of the clojure extension
 

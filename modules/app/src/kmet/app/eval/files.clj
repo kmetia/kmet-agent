@@ -1,11 +1,11 @@
 (ns kmet.app.eval.files
-  "Shared eval definition files: one verbatim source slice per file under
-   `<project>/.kmet/eval/<ns>/<name>.clj` (project scope) or
-   `<agent-dir>/eval/<ns>/<name>.clj` (global scope).
+  "The eval library files: one verbatim source slice per definition under
+   `<agent-dir>/eval/<ns>/<name>.clj`.
 
-   The file is the address and stays reviewable text. Writes and moves take
-   the EDN store's directory lock per root, because two sessions can save at
-   once; a move locks both roots in path order."
+   The file is the address and stays reviewable text. Every successful
+   top-level definition writes its file; loading scans the root. Writes and
+   deletes take the EDN store's directory lock, because two sessions in one
+   home can save at once."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.eval.definitions :as defs]
@@ -13,8 +13,8 @@
             [kmet.libs.fs :as kfs]))
 
 (def header
-  "The first line of every kept definition file."
-  ";; kmet eval: kept by the eval tool")
+  "The first line of every library file."
+  ";; kmet eval: written by the eval tool")
 
 (defn definition-path
   "The file for RECORD under eval ROOT."
@@ -55,20 +55,6 @@
   [root & body]
   `(with-root-lock* ~root (fn [] ~@body)))
 
-(defn- with-root-locks* [roots f]
-  (let [roots (->> roots (map str) distinct sort)]
-    (letfn [(run [roots]
-              (if-let [root (first roots)]
-                (with-root-lock* root #(run (rest roots)))
-                (f)))]
-      (run roots))))
-
-(defmacro ^:private with-root-locks
-  "Run BODY with every ROOTS lock held, acquired in sorted path order so two
-   moves between the same roots cannot deadlock."
-  [roots & body]
-  `(with-root-locks* ~roots (fn [] ~@body)))
-
 (defn write-definition!
   "Write RECORD to ROOT and return the path. A failed write leaves the old
    file in place (atomic publication)."
@@ -78,49 +64,57 @@
       (kfs/publish! path (file-content record))
       path)))
 
-(defn restore-definition!
-  "Restore PATH to OLD-CONTENT, or delete it when OLD-CONTENT is nil. Used to
-   roll a promote back when the session entry cannot be appended."
-  [path old-content]
-  (if (some? old-content)
-    (kfs/publish! path old-content)
-    (fs/delete-if-exists path)))
-
 (defn delete-name!
-  "Remove NAME's file under every ROOT, holding all locks. The delete path is
-   derived from the address, so a losing copy in the other scope is removed
-   too."
-  [roots name]
-  (let [roots (filter fs/exists? roots)]
-    (with-root-locks roots
-      (into []
-            (keep (fn [root]
-                    (let [path (path-for-name root name)]
-                      (when (fs/delete-if-exists path) path))))
-            roots))))
+  "Remove NAME's file under ROOT, returning the deleted path or nil."
+  [root name]
+  (let [path (path-for-name root name)]
+    (with-root-lock root
+      (when (fs/delete-if-exists path) path))))
 
 (defn scan
-  "Read every definition file under ROOTS (a seq of `{:root :scope}`), global
-   or project order as given. Returns `[{:file :scope :content}]`, sorted by
-   path inside a root; an unreadable file is reported as `{:file :error}`."
-  [roots]
-  (into []
-        (mapcat
-         (fn [{:keys [root scope]}]
-           (when (fs/exists? root)
-             (try
-               (for [file (sort (map str (fs/glob root "**/*.clj")))]
-                 (try
-                   {:file file :scope scope :content (slurp file)}
-                   (catch Throwable t
-                     {:file file :scope scope :error (ex-message t)})))
-               (catch Throwable t
-                 [{:root root :scope scope :error (ex-message t)}])))))
-        roots))
+  "Read every definition file under ROOT. Returns `[{:file :content}]`,
+   sorted by path; an unreadable file is reported as `{:file :error}`."
+  [root]
+  (if-not (fs/exists? root)
+    []
+    (try
+      (mapv (fn [file]
+              (try
+                {:file file :content (slurp file)}
+                (catch Throwable t
+                  {:file file :error (ex-message t)})))
+            (sort (map str (fs/glob root "**/*.clj"))))
+      (catch Throwable t
+        [{:root root :error (ex-message t)}]))))
+
+(defn index
+  "Read ROOT without evaluating anything: the definitions the files name and
+   the files that could not be parsed. Used by `/eval` before an environment
+   exists."
+  [root]
+  (reduce (fn [acc {:keys [file content error] :as entry}]
+            (cond
+              (:root entry)
+              (update acc :failures conj entry)
+
+              error
+              (update acc :failures conj {:file file :error error})
+
+              :else
+              (try
+                (let [parsed (defs/parse content "user")]
+                  (update acc :entries into
+                          (map #(select-keys (assoc % :file file)
+                                             [:name :ns :kind :file])
+                               (:defs parsed))))
+                (catch Throwable t
+                  (update acc :failures conj {:file file :error (ex-message t)})))))
+          {:entries [] :failures []}
+          (scan root)))
 
 (defn display-path
-  "A path for a result line: project files relative to CWD
-   (`.kmet/eval/user/f.clj`), global files under `~` (`~/.kmet/agent/...`)."
+  "A path for a result line: under `~` shown as `~/.kmet/agent/...`, else
+   relative to CWD when it is inside it, else absolute."
   [cwd path]
   (let [path (fs/absolutize path)
         cwd (fs/absolutize cwd)
