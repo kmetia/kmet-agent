@@ -9,6 +9,7 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [kmet.app.eval.files :as eval-files]
+            [kmet.app.eval.format :as eval-format]
             [kmet.app.session.runtime :as runtime]
             [kmet.srce.core :as srce]))
 
@@ -44,8 +45,15 @@
 (defn- entry-path [cwd file]
   (if file (eval-files/display-path cwd file) "(no file)"))
 
-(defn- entry-line [cwd {:keys [name kind file]}]
-  (str name "  " (kind-name kind) "  " (entry-path cwd file)))
+(defn- entry-line [cwd {:keys [name kind file arglists doc]}]
+  (let [path (entry-path cwd file)
+        arg (eval-format/arglists-text arglists)
+        doc-line (eval-format/doc-line doc)]
+    (str name "  " (kind-name kind) (or arg "")
+         (if (and (nil? doc-line) (nil? arg))
+           (str "  (no docstring; see " path ")")
+           (str "  " path))
+         (when doc-line (str "  — " doc-line)))))
 
 (defn- name-match? [{:keys [name ns]} p]
   (or (str/includes? (str/lower-case (str name)) p)
@@ -125,11 +133,15 @@
 (defn- source-report-line [s]
   (let [id (source-id s)
         error (when (map? s) (:error s))
-        doc (when (map? s) (:doc s))]
+        doc (when (map? s) (:doc s))
+        verbs (when (map? s) (:verbs s))]
     (cond
       (seq error) (str "- " id ": " error)
-      (seq doc) (str "- " id ": " doc)
-      :else (str "- " id))))
+      :else (str "- " id
+                 (when (seq doc) (str ": " doc))
+                 (when (seq verbs)
+                   (str "\n" (str/join "\n"
+                                       (map eval-format/verb-line verbs))))))))
 
 (defn- failure-line [failure]
   (str "  failure: " (or (:file failure) (:name failure) (:source failure) "?")

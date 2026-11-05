@@ -619,6 +619,28 @@ deadline starts after it is taken, and `:dispose!` clears every environment. A
 broken library file is reported under `:failures` and skipped. The pure parse
 and address rules live in `kmet.app.eval.definitions`.
 
+Every library record carries its model-visible interface, parsed from the
+defining form without evaluation: `:doc` (the docstring, else an attr-map or
+symbol `:doc`) and `:arglists` (for `defn`/`defn-`/`defmacro`, and the
+parameter vector of a `defmethod`). `(eval/library)`, `(eval/help)` and
+`/eval list` show them, so an existing file gains its interface when its
+source has one. `(eval/describe 'name)` resolves a library definition, a
+source-provided key, or a live definition that was never written (a failed
+write or an errored call) and returns `{:name :kind :doc :arglists :file
+:scope :source}`; `(eval/describe 'name key)` returns one field. `:source` is
+the stored defining form for a written definition (no generated `(ns …)`
+header) or the retained in-memory form for an unwritten one, and a source
+verb's `:source` metadata when the source supplies it. `:file` is nil for
+source-provided and unwritten entries; a written definition in the current
+single library reports `:scope :global`. Source verbs carry the same keys as
+metadata on their values (`with-meta`), which `normalize-source` validates and
+`source-var` puts on the SCI var, so `(meta #'license/add!)` works; the plural
+`(eval/sources)` stays the registered-source listing and includes each verb's
+doc and arglists. A docstring is the save contract: an undocumented definition
+still saves, but its result line and listings say `(no docstring)` (or
+`(no docstring; see <file>)` when there is neither a docstring nor an
+arglist), and `(eval/describe 'name :doc)` is nil.
+
 Limits: a definition file is the defining form only — its `(ns …)` requires are
 not stored, so the standard aliases are replayed and anything else must be
 self-contained. A file's generated `(ns …)` form runs before the aliases.

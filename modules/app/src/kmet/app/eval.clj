@@ -19,6 +19,7 @@
             [kmet.app.config :as cfg]
             [kmet.app.eval.definitions :as defs]
             [kmet.app.eval.files :as eval-files]
+            [kmet.app.eval.format :as eval-format]
             [kmet.app.eval.patch :as patch]
             [kmet.app.eval.sources :as eval-sources]
             [kmet.app.extensions.core :as extensions]
@@ -145,16 +146,18 @@
      :info (mapv (fn [result]
                    (if-let [error (:error result)]
                      {:id (:id result) :error error}
-                     (select-keys result [:id :doc])))
+                     (select-keys result [:id :doc :verbs])))
                  results)
      :errors errors}))
 
 (defn- source-var
-  [ns-name name {:keys [value macro?]}]
+  [ns-name name {:keys [value macro? doc arglists]}]
   (let [ns (sci/create-ns ns-name)]
     (sci/new-var name value
                  (cond-> {:ns ns :name name}
-                   macro? (assoc :macro true)))))
+                   macro? (assoc :macro true)
+                   (some? doc) (assoc :doc doc)
+                   (some? arglists) (assoc :arglists arglists)))))
 
 (defn- source-namespaces
   "The SCI vars for VALUES not excluded by SKIP?. A source value and a fixed
@@ -229,7 +232,7 @@
 ;; ─── Library index ────────────────────────────────────────────────────────
 
 (defn- library-entry [record]
-  (select-keys record [:name :ns :kind :file]))
+  (select-keys record [:name :ns :kind :doc :arglists :file]))
 
 (defn- library-entries
   "The service's `(eval/library)` value: one entry per loaded definition."
@@ -242,11 +245,29 @@
 (defn- source-line [source]
   (if-let [error (:error source)]
     (str "- " (:id source) ": " error)
-    (str "- " (:id source) (when-let [doc (:doc source)] (str ": " doc)))))
+    (str "- " (:id source)
+         (when-let [doc (:doc source)] (str ": " doc))
+         (when (seq (:verbs source))
+           (str "\n" (str/join "\n" (map eval-format/verb-line (:verbs source))))))))
+
+(defn- definition-line
+  "One loaded definition's interface line: kind and arglists, the first
+   docstring line, or the file when there is no other interface."
+  [{:keys [kind doc arglists file] :as entry}]
+  (let [doc-line (eval-format/doc-line doc)]
+    (str "  - " (:name entry) " " (when kind (name kind))
+         (eval-format/arglists-text arglists)
+         " — "
+         (cond
+           doc-line doc-line
+           (seq arglists) "(no docstring)"
+           file (str "(no docstring; see " file ")")
+           :else "(no docstring)"))))
 
 (defn- environment-help
-  "The `(eval/help)` text: sources, the loaded library, the common script
-   surface, and the persistence/reporting rules."
+  "The `(eval/help)` text: sources and their verbs, the loaded library with
+   each definition's interface, the common script surface, and the
+   persistence/reporting rules."
   [env]
   (let [sources @(:source-info env)
         entries (library-entries env)]
@@ -256,7 +277,7 @@
            "  (none)")
          "\nLibrary definitions: " (count entries)
          (when (seq entries)
-           (str " (" (str/join ", " (map :name entries)) ")"))
+           (str "\n" (str/join "\n" (map definition-line entries))))
          "\nFailures: " (count @(:failures env))
          "\nSandbox: Clojure/SCI — " script/sandbox-summary
          "\nPersistence: top-level definitions are written to the library; "
@@ -264,11 +285,70 @@
          "this session's environment is a cache. A call that ends in a normal "
          "error writes nothing; its definitions stay live and can be forgotten."
          "\nDiscover: (all-ns) lists namespaces, (ns-publics 'ns) lists a "
-         "namespace's vars, and (eval/library) lists loaded definitions."
+         "namespace's vars, and (eval/library) lists loaded definitions. "
+         "(eval/sources) lists the registered sources and their verbs; "
+         "(eval/describe 'name) describes one definition or source verb "
+         "(kind, docstring, arglists, file, scope, source), and "
+         "(eval/describe 'name key) returns one field."
          "\nReporting: (emit value) or end on the final value; stdout and "
          "stderr are discarded."
-         "\nUse (eval/library), (eval/sources), (eval/forget 'name), "
-         "(eval/patch 'name old new), (eval/edit-form 'name new-source).")))
+         "\nUse (eval/library), (eval/sources), (eval/describe 'name), "
+         "(eval/forget 'name), (eval/patch 'name old new), "
+         "(eval/edit-form 'name new-source).")))
+
+(defn- describe-entry
+  "The interface and implementation of RAW-NAME, resolved against the same
+   names the rest of the eval vocabulary uses: a library definition, a
+   source-provided key, or a live definition that was never written (a failed
+   write or a call that ended in a normal error). A source key has no file and
+   no scope; an unwritten definition has no authoritative file."
+  [env raw-name]
+  (let [raw-name (->name raw-name)
+        name (when raw-name (qualify-name (env-ns env) raw-name))]
+    (when-not name
+      (bad-request! (str "describe needs a definition name, got "
+                         (pr-str raw-name))
+                    {:name raw-name}))
+    (let [unwritten? (contains? @(:unwritten env) name)
+          unwritten-record (get @(:unwritten-records env) name)
+          library-record (get @(:library env) name)
+          source-entry (get @(:source-values env) name)]
+      (cond
+        unwritten?
+        {:name name
+         :kind (:kind unwritten-record)
+         :doc (:doc unwritten-record)
+         :arglists (:arglists unwritten-record)
+         :file nil
+         :scope :global
+         :source (:source unwritten-record)}
+
+        library-record
+        {:name name
+         :kind (:kind library-record)
+         :doc (:doc library-record)
+         :arglists (:arglists library-record)
+         :file (:file library-record)
+         :scope (or (:scope library-record) :global)
+         :source (:source library-record)}
+
+        (contains? @(:active-source-keys env) name)
+        {:name name
+         :kind (if (:macro? source-entry) :macro :verb)
+         :doc (:doc source-entry)
+         :arglists (:arglists source-entry)
+         :file nil
+         :scope nil
+         :source (:source source-entry)}
+
+        :else
+        (bad-request! (str "no eval definition named " name) {:name name})))))
+
+(defn- describe
+  ([env name] (describe-entry env name))
+  ([env name key]
+   (let [entry (describe-entry env name)]
+     (if (nil? key) entry (get entry key)))))
 
 (defn- take-failures!
   "Failures are reported once: return the current list and clear the
@@ -516,6 +596,7 @@
              :change-lines (atom [])
              :parsed-names (atom #{})
              :unwritten (atom #{})
+             :unwritten-records (atom {})
              :forgotten (atom #{})
              :sticky-ns (atom nil)
              :lock (Object.)}
@@ -534,6 +615,9 @@
                                 'edit-form (fn [name new-source]
                                              (edit-form-definition! @env-ref cwd
                                                                     name new-source))
+                                'describe (fn
+                                            ([name] (describe @env-ref name))
+                                            ([name key] (describe @env-ref name key)))
                                 'sources sources-fn
                                 'help help-fn})
                   (script/interrupt-fn interrupt "eval")
@@ -654,7 +738,9 @@
           :when (interned? env record)]
     (if (contains? @(:source-keys env) (:name record))
       (swap! (:model-shadows env) conj (:name record))
-      (swap! (:unwritten env) conj (:name record)))))
+      (do
+        (swap! (:unwritten env) conj (:name record))
+        (swap! (:unwritten-records env) assoc (:name record) record)))))
 
 (defn- restore-source!
   "Seed NAME's active source value, if it has one, and return the seed error."
@@ -679,6 +765,7 @@
         restore-error (when source? (restore-source! env name))]
     (swap! (:library env) dissoc name)
     (swap! (:unwritten env) disj name)
+    (swap! (:unwritten-records env) dissoc name)
     (when source? (swap! (:model-shadows env) disj name))
     {:name name :file file :error (or unbind-error restore-error)}))
 
@@ -697,10 +784,13 @@
         (let [path (eval-files/write-definition! (:root env) record)]
           (swap! (:library env) assoc name (assoc record :file path))
           (swap! (:unwritten env) disj name)
-          {:line (str "[eval: defined " name " → " (eval-files/display-path cwd path) "]")
+          (swap! (:unwritten-records env) dissoc name)
+          {:line (str "[eval: defined " name " → " (eval-files/display-path cwd path)
+                      (when-not (:doc record) " (no docstring)") "]")
            :entry (library-entry (assoc record :file path))})
         (catch Throwable t
           (swap! (:unwritten env) conj name)
+          (swap! (:unwritten-records env) assoc name record)
           (record-failure! (:failures env) {:name name :error (ex-message t)})
           {:line (str "[eval: define failed " name ": " (ex-message t) "]")
            :error (ex-message t)})))))

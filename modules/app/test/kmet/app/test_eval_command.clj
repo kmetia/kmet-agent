@@ -82,6 +82,21 @@
       (t/is (str/includes? content "user/report"))
       (t/is (not (str/includes? content "demo/area"))))))
 
+(t/deftest list-shows-the-saved-interface
+  (let [env (eval-env)]
+    (write-def! env {:name "user/report"
+                     :source "(defn report \"Render.\" [x] x)"})
+    (write-def! env {:name "user/plain" :source "(def plain 1)"})
+    (let [[[level _ content]] (run env "list")]
+      (t/is (= :info level))
+      (t/is (str/includes? content "user/report  defn ([x])"))
+      (t/is (str/includes? content "Render."))
+      (t/is (str/includes? content "user/plain  def  (no docstring; see "))
+      (t/is (str/includes? content "eval/user/plain.clj")))
+    (let [[_ _ content] (first (run env "list report"))]
+      (t/is (str/includes? content "Render."))
+      (t/is (not (str/includes? content "user/plain"))))))
+
 (t/deftest search-matches-names-and-source
   (let [env (eval-env)
         _ (write-def! env {:name "user/report"
@@ -150,6 +165,23 @@
     (let [[level _ content] (first (run env "nonsense"))]
       (t/is (= :warning level))
       (t/is (str/includes? content "Unknown verb: nonsense")))))
+
+(t/deftest sources-list-contributed-verbs
+  (let [env (eval-env {:service-sources
+                       [{:id :license
+                         :doc "License helpers"
+                         :verbs [{:name "license/add!"
+                                  :kind :verb
+                                  :doc "Add a header."
+                                  :arglists '([path])}
+                                 {:name "license/bare"
+                                  :kind :verb
+                                  :doc "(no docstring)"}]}]})
+        [[level _ content]] (run env "sources")]
+    (t/is (= :info level))
+    (t/is (str/includes? content "- license: License helpers"))
+    (t/is (str/includes? content "license/add! ([path]) — Add a header."))
+    (t/is (str/includes? content "license/bare — (no docstring)"))))
 
 (t/deftest sources-reports-definitions-and-failures
   (let [env (eval-env {:service-failures [{:file "/tmp/broken.clj"

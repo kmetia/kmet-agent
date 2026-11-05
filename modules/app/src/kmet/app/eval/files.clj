@@ -114,7 +114,7 @@
                 (let [parsed (defs/parse content "user")]
                   (update acc :entries into
                           (map #(select-keys (assoc % :file file)
-                                             [:name :ns :kind :file])
+                                             [:name :ns :kind :doc :arglists :file])
                                (:defs parsed))))
                 (catch Throwable t
                   (update acc :failures conj {:file file :error (ex-message t)})))))

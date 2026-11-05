@@ -4,9 +4,11 @@
    namespace, sanitized file name).
 
    A definition's source is the verbatim rewrite-clj slice of the form that
-   defined it, so a library file shows the bytes the model wrote. Only
-   top-level defining forms count: a `def` inside `do`/`when`/`comment` has no
-   stable address and is deliberately not written."
+   defined it, so a library file shows the bytes the model wrote. Each record
+   also carries the form's model-visible interface — `:doc` and `:arglists` —
+   parsed without evaluation. Only top-level defining forms count: a `def`
+   inside `do`/`when`/`comment` has no stable address and is deliberately not
+   written."
   (:require [clojure.string :as str]
             [rewrite-clj.node :as n]
             [rewrite-clj.parser :as p]))
@@ -16,6 +18,19 @@
    addressed by multimethod + dispatch (see `method-address`)."
   #{"def" "defn" "defn-" "defonce" "defmulti" "defprotocol" "defrecord"
     "deftype" "defmacro" "declare" "defmethod"})
+
+(def ^:private docstring-heads
+  "Defining forms whose name may be followed by a docstring."
+  #{"def" "defn" "defn-" "defonce" "defmulti" "defmacro" "defprotocol"})
+
+(def ^:private attr-map-heads
+  "Defining forms that accept an attribute map before the body (and, for the
+   multi-arity forms, a trailing one)."
+  #{"defn" "defn-" "defmacro" "defmulti" "defprotocol"})
+
+(def ^:private arglist-heads
+  "Defining forms whose parameters are the interface's arglists."
+  #{"defn" "defn-" "defmacro"})
 
 (defn- form-head [form]
   (let [h (first form)]
@@ -32,6 +47,62 @@
   (let [n (second form)]
     (when (symbol? n) n)))
 
+(defn- name-doc [named]
+  (let [doc (:doc (meta named))]
+    (when (string? doc) doc)))
+
+(defn- split-docstring
+  "Split ARGS into `[docstring rest]`. A `def` docstring needs a following
+   init form, so `(def x \"value\")` is a value, not documentation."
+  [head args]
+  (if (and (contains? docstring-heads head)
+           (string? (first args))
+           (or (not (#{"def" "defonce"} head)) (next args)))
+    [(first args) (next args)]
+    [nil args]))
+
+(defn- split-attr-map
+  "Split a leading attribute map from ARGS for the forms that accept one."
+  [head args]
+  (if (and (contains? attr-map-heads head) (map? (first args)))
+    [(first args) (next args)]
+    [nil args]))
+
+(defn- arity-arglists [args]
+  (cond
+    (vector? (first args)) (list (first args))
+    (and (seq args)
+         (every? #(and (seq? %) (vector? (first %))) args))
+    (apply list (map first args))
+    :else nil))
+
+(defn- interface
+  "The model-visible interface of a defining FORM: `{:doc :arglists}`. The
+   docstring wins, then an attribute map, then the name's metadata. The
+   arglists cover `defn`/`defn-`/`defmacro` (single and multi-arity) and the
+   parameter vector of a `defmethod`; no evaluation is involved."
+  [form head]
+  (let [named (second form)
+        [docstring args] (split-docstring head (drop 2 form))
+        [attr args] (split-attr-map head args)
+        ;; only the defn family has a trailing attr-map after its arities;
+        ;; a defmulti option value can legitimately be a map
+        trailing (when (and (contains? arglist-heads head)
+                            (seq? (first args))
+                            (map? (last args)))
+                   (last args))
+        arglists (cond
+                   (= head "defmethod")
+                   (when (vector? (nth form 3 nil)) (list (nth form 3 nil)))
+
+                   (contains? arglist-heads head)
+                   (arity-arglists (if trailing (butlast args) args)))
+        doc (or docstring
+                (some #(when (string? (:doc %)) (:doc %)) [attr trailing])
+                (name-doc named))]
+    {:doc doc
+     :arglists arglists}))
+
 (defn- name-key
   "The definition address of NAMED in NS: a qualified name keeps its own
    namespace, an unqualified one is qualified by the current NS."
@@ -39,11 +110,14 @@
   (if (namespace named) (str named) (str ns "/" named)))
 
 (defn- def-record [node form ns kind]
-  (let [named (def-name form)]
+  (let [named (def-name form)
+        {:keys [doc arglists]} (interface form (form-head form))]
     (when named
       {:name (name-key named ns)
        :ns (or (namespace named) ns)
        :kind kind
+       :doc doc
+       :arglists arglists
        :source (n/string node)})))
 
 (defn- method-address
@@ -59,10 +133,13 @@
 
 (defn- method-record [node form ns]
   (when-let [address (method-address form ns)]
-    {:name address
-     :ns ns
-     :kind :defmethod
-     :source (n/string node)}))
+    (let [{:keys [arglists]} (interface form "defmethod")]
+      {:name address
+       :ns ns
+       :kind :defmethod
+       :doc nil
+       :arglists arglists
+       :source (n/string node)})))
 
 (defn- declare-records [node form ns]
   (keep (fn [named]
@@ -70,6 +147,8 @@
             {:name (name-key named ns)
              :ns (or (namespace named) ns)
              :kind :declare
+             :doc (name-doc named)
+             :arglists nil
              :source (n/string node)}))
         (rest form)))
 

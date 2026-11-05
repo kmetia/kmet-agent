@@ -25,9 +25,11 @@
     (t/is (str/includes? (slurp path) ";; kmet eval: written by the eval tool"))
     (t/is (str/includes? (slurp path) "(ns user)"))
     (t/is (str/includes? (slurp path) "(defn report [x] (str \"R\" x))"))
-    (t/is (= [{:name "user/report" :ns "user" :kind :defn :file path}]
+    (t/is (= [{:name "user/report" :ns "user" :kind :defn
+               :doc nil :arglists '([x]) :file path}]
              (support/eval-library env)))
-    (t/is (= [{:name "user/report" :ns "user" :kind :defn :file path}]
+    (t/is (= [{:name "user/report" :ns "user" :kind :defn
+               :doc nil :arglists '([x]) :file path}]
              (get-in result [:details :defined])))
     (t/is (str/includes? (:content (support/eval! env "(eval/library)"))
                          "user/report"))))

@@ -410,10 +410,14 @@ first call), so the contribution is current, not a snapshot:
   (fn [{:keys [cwd project-dir agent-dir signal verbs]}]
     (let [{:keys [edit]} verbs]
       {:doc "Add the SPDX header to a source file."
-       :ns {'license {'add! (fn [path]
-                              (edit (str (fs/path cwd path))
-                                    "(ns "
-                                    ";; SPDX-License-Identifier: MIT\n(ns "))}}
+       :ns {'license {'add! (with-meta
+                              (fn [path]
+                                (edit (str (fs/path cwd path))
+                                      "(ns "
+                                      ";; SPDX-License-Identifier: MIT\n(ns ")))
+                              {:doc "Add the SPDX header to a source file."
+                               :arglists '([path])
+                               :source "(fn [path] (edit (str (fs/path cwd path)) \"(ns \" \";; ...\"))"})}}
        :macros {}
        :commands {:license-lint
                   {:description "List files without an SPDX header"
@@ -427,9 +431,17 @@ first call), so the contribution is current, not a snapshot:
   `user/write-file`, built for that call.
 - `:ns` and `:macros` contribute values to the environment. `:macros` entries
   are host macro fns (they receive SCI's form and environment before their
-  arguments). `:commands` entries add verbs to `/eval`; a command's `:run`
-  receives `{:args :session :cwd :service}` and returns nil or a string, which
-  `/eval` prints when non-blank.
+  arguments). A value may carry `:doc`, `:arglists` and `:source` metadata (the
+  keys a var uses, plus the implementation text, since a source verb has no
+  library file). `normalize-source` keeps them, `(eval/sources)` and
+  `(eval/help)` list each verb with its doc and arglists, and
+  `(eval/describe 'license/add!)` returns its `:kind`, `:doc`, `:arglists`,
+  `:file` (nil), `:scope` (nil) and `:source`.
+  `(eval/describe 'license/add! :source)` returns the source text. A value
+  without metadata is still valid and lists as `(no docstring)`. `:commands`
+  entries add verbs to `/eval`; a command's `:run` receives
+  `{:args :session :cwd :service}` and returns nil or a string, which `/eval`
+  prints when non-blank.
 - **Use the verbs within the call.** They read that call's signal and cwd, so
   capturing one past the call that produced it is unsupported.
 - `user` and `clj` are reserved for the built-in sources, as are the eval
@@ -448,7 +460,9 @@ first call), so the contribution is current, not a snapshot:
   when the extension unloads.
 - There is no system-prompt section for eval sources (it would vary inside the
   cached prefix). If the model should know about the capability unprompted,
-  register a skill instead.
+  register a skill instead. Discovery is `(eval/sources)` for the source and
+  verb listing, `(eval/describe 'name)` for one verb's interface and
+  implementation, and `(eval/help)` for both plus the library.
 
 ### Tool execute contract
 

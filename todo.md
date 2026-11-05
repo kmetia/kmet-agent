@@ -2,10 +2,11 @@
 
 ## Task: eval library interface discovery (10a, 2026-11-05)
 
-Status: next. This is the interface half of persistent-eval step 10, pulled
-out and moved ahead of the cwd-scope task: it is independent of scopes and
-avoids a second update of the exact `(eval/library)` maps the scope work
-rewrites. The prompt-start manifest half (10b) stays after the scope task.
+Status: done (2026-11-05). This was the interface half of persistent-eval
+step 10, pulled out and moved ahead of the cwd-scope task: it is independent
+of scopes and avoids a second update of the exact `(eval/library)` maps the
+scope work rewrites. The prompt-start manifest half (10b) stays after the
+scope task.
 
 The model must see the interface, not just a name: a saved definition exposes
 its docstring and arglists, `(eval/describe 'name)` reads the interface and
@@ -80,9 +81,9 @@ the same metadata.
 ## Task: cwd-scoped eval library (2026-11-05)
 
 Status: in progress. Step 0 (the shared cwd key) is done; the eval scopes
-then use it in steps 1–9. Step 10a (interface discovery) is the task above and
-runs first. Supersedes the one-global-library decision below; that decision
-stays as the step-4R history.
+then use it in steps 1–9. Step 10a (interface discovery) is done and landed
+first. Supersedes the one-global-library decision below; that decision stays
+as the step-4R history.
 
 The eval environment keeps one durable visibility layer per session cwd, with
 the home library as an explicit global layer. One definition per address is
@@ -302,9 +303,9 @@ are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; 10a moved above; 10b (manifest) planned after the cwd-scope task; **cwd-scope task in progress** |
-| Eval library interface discovery (10a) | saved definitions and source-provided verbs expose an interface and implementation through `(eval/describe)`, not just names | **next** — runs before the cwd-scope task |
-| Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **in progress** — step 0 (shared cwd key) done; 10a runs first |
+| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; 10a done; 10b (manifest) planned after the cwd-scope task; **cwd-scope task in progress** |
+| Eval library interface discovery (10a) | saved definitions and source-provided verbs expose an interface and implementation through `(eval/describe)`, not just names | **done** (2026-11-05) |
+| Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **in progress** — step 0 (shared cwd key) done; 10a done; scopes next |
 | Clojure extension surface review | the extension's tools now overlap E17's core editing engine and its eval `clj/*` verbs; decide the remaining surface from usage | **measuring** — description and skill trimmed 2026-11-05; decision gate after the eval cwd-scope work |
 
 ## Persistent eval and eval sources
@@ -312,9 +313,9 @@ are dropped too — see § Deferred.
 Status: steps 1–9 done (the shared script layer, the file ops, the one-home
 library, the source registry and ABI, `eval/patch`, the shared Clojure editing
 engine with its core verbs, and the docs/catalog pass); step 10 is split: 10a
-(the interface and source-verb docs) is the task at the top of this file and
-runs before the cwd-scope task; 10b (the discovery manifest and first-eval
-report) is planned after it. The cwd-scope task is in progress. The scope
+(the interface and source-verb docs) is done; 10b (the discovery manifest and
+first-eval report) is planned after the cwd-scope task. The cwd-scope task is
+in progress. The scope
 material below is step-4R history; the cwd-scoped task
 above supersedes it, while the sandbox, source and editing material still
 applies. The tool is opt-in
@@ -560,11 +561,10 @@ changed; a source that needs the model to know something unprompted registers
 a skill, the existing seam.
 
 A name alone is not discoverability: it says something exists but not how to
-call it or what it does, so the model still has to open the file. The planned
-step 10 turns the listing into an interface listing. It is split: **10a**
-(records, source metadata, `(eval/describe)`, docs) is the task at the top of
-this file and runs before the cwd-scope task; **10b** (the prompt manifest and
-first-eval report) runs after it.
+call it or what it does, so the model still has to open the file. Step 10
+turns the listing into an interface listing. **10a** (records, source metadata,
+`(eval/describe)`, docs) is done; **10b** (the prompt manifest and first-eval
+report) runs after the cwd-scope task.
 
 - **Record the interface.** `kmet.app.eval.definitions` extracts `:doc` (the
   docstring, else attr-map or symbol metadata) and `:arglists` (for `defn`,
@@ -725,10 +725,9 @@ plus ~150 moved (step 2).
    the decision is unchanged); the tier table and the clojure extension's
    remaining surface (E17 and the post-track task).
 10. **Step 10b (planned, after the cwd-scope task): the discovery manifest
-    and first-eval report.** Step 10a is the task at the top of this file and
-    already supplies `:doc`/`:arglists`/`:source` through `(eval/describe)`
-    for library definitions and source verbs. Implement the manifest half
-    of the Discovery design:
+    and first-eval report.** Step 10a (done) supplies `:doc`/`:arglists`/
+    `:source` through `(eval/describe)` for library definitions and source
+    verbs. Implement the manifest half of the Discovery design:
     - `kmet.app.session.context`: the `:eval-library` custom type and the
       bounded, deterministic formatter.
     - `kmet.app.loop.state`/`loop`: `sync-eval-library-listing!` beside

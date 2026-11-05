@@ -612,11 +612,15 @@ calls, so it can expose current state instead of a snapshot:
   (fn [{:keys [cwd verbs]}]
     (let [{:keys [edit]} verbs]
       {:doc "Add the SPDX header to a source file."
-       :ns {'license {'add! (fn [path]
-                              (edit (str (fs/path cwd path))
-                                    "(ns "
-                                    ";; SPDX-License-Identifier: MIT
-(ns "))}}
+       :ns {'license {'add! (with-meta
+                              (fn [path]
+                                (edit (str (fs/path cwd path))
+                                      "(ns "
+                                      ";; SPDX-License-Identifier: MIT
+(ns ")))
+                              {:doc "Add the SPDX header to a source file."
+                               :arglists '([path])
+                               :source "(fn [path] (edit (str (fs/path cwd path)) \"(ns \" \";; ...\"))"})}}
        :macros {}
        :commands {:license-lint
                   {:description "List files without an SPDX header"
@@ -632,6 +636,13 @@ calls, so it can expose current state instead of a snapshot:
   `license/add!`, not `add!` or `user/add!`.
 - `:verbs` carries the call's `:edit` and `:write-file` operations. They read
   that call's cwd and cancel signal; use them within the call, never keep them.
+- A contributed value may carry `:doc`, `:arglists` and `:source` metadata
+  (the keys a var uses, plus the implementation text, since a source verb has
+  no library file). `(eval/sources)` and `(eval/help)` list each verb with its
+  doc and arglists; `(eval/describe 'license/add!)` returns its `:kind`,
+  `:doc`, `:arglists`, `:file` (nil), `:scope` (nil) and `:source`, and
+  `(eval/describe 'license/add! :source)` returns the source text. A value
+  without metadata is still valid and lists as `(no docstring)`.
 - `:commands` adds verbs to `/eval`; its built-in verbs (`list`, `search`,
   `drop`, `sources`, `help`) are reserved.
 - A source key is never written to the eval library. A model redefinition

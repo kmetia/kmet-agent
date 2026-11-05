@@ -79,9 +79,11 @@
    ["eval is the full script sandbox, not a bare REPL: fs, sh, slurp, tools and require work as in a babashka script; (eval/help) lists sources, loaded definitions and the surface."
     "Call the run's tools through the `tools` namespace: (tools/list) lists them, (tools/describe \"name\") shows one declaration, and (tools/call \"name\" args) returns a promise to deref — or use (tools/call! \"name\" args) to settle and throw on failure; a plain name is a var too, @(tools/name args)."
     "Define what should survive the call: every top-level definition is written to the agent's eval library, while let/fn bindings are scratch. Use local bindings for throwaway code."
+    "Give every saved definition a docstring: it is the interface later calls see, with its arglists. A missing docstring does not stop the save, but the result line and listings say (no docstring), and (eval/describe 'name :doc) is nil."
     "New sessions and a restart load the library; an already-running session is a cache and does not see another session's new files. A call that ends in a normal error writes nothing; its definitions stay live and can be forgotten."
     "A redefinition overwrites its file; drop or (eval/forget 'name) deletes the file and unbinds this session's live name. A code-less call may carry only drop."
     "Use (eval/patch 'name old new) to replace one subform in a named definition; it re-evaluates before writing, and the definition name must stay. Use (eval/edit-form 'name new-source) to replace the whole definition; edit files structurally with clj/edit-form, clj/replace-sexp and clj/paren-repair."
+    "Use (eval/describe 'name) for one definition's kind, docstring, arglists, file, scope and source; (eval/describe 'name key) returns one field. (eval/sources) stays the registered-source listing, including each contributed verb's interface."
     "Report with (emit value) or end on the value you want reported; stdout and stderr are discarded."]
    :parameters {:type "object"
                 :properties

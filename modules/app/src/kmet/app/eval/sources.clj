@@ -22,13 +22,20 @@
 (def reserved-source-keys
   "Built-in keys refused even when a namespace check would allow them. A
    source that contributes one is refused as a whole."
-  #{"eval/library" "eval/forget" "eval/sources" "eval/help"
+  #{"eval/library" "eval/forget" "eval/sources" "eval/help" "eval/describe"
     "user/edit" "user/write-file"
     "clj/edit-form" "clj/replace-sexp" "clj/paren-repair"})
 
 (def ^:private reserved-command-names
   "The unqualified `/eval` verbs a source may not replace."
   #{"list" "search" "drop" "sources" "help" "--help" "-h"})
+
+(defn- described
+  "Attach a verb's model-facing interface to its function value. The keys are
+   the ones a var uses; `:source` is the wrapper's implementation text, since
+   a source verb has no library file."
+  [f doc arglists source]
+  (with-meta f {:doc doc :arglists arglists :source source}))
 
 (defn core-source
   "The `:core` source's contribution: the two file verbs under `user` and the
@@ -39,11 +46,31 @@
     {:doc (str "Core file verbs: (edit path old new), (write-file path content); "
                "Clojure editing: (clj/edit-form args), (clj/replace-sexp args), "
                "(clj/paren-repair args).")
-     :ns {'user {'edit (:edit verbs)
-                 'write-file (:write-file verbs)}
-          'clj {'edit-form (fn [args] (clj-edit/edit-form (with-cwd args)))
-                'replace-sexp (fn [args] (clj-edit/replace-sexp (with-cwd args)))
-                'paren-repair (fn [args] (clj-edit/paren-repair (with-cwd args)))}}}))
+     :ns {'user {'edit (described
+                        (:edit verbs)
+                        "Replace OLD-TEXT with NEW-TEXT in PATH; returns the shared edit result."
+                        '([path old-text new-text])
+                        "(fn [path old-text new-text] (edit-tool/edit-file path [{:old-text (str old-text) :new-text (str new-text)}] signal))")
+                 'write-file (described
+                              (:write-file verbs)
+                              "Write CONTENT to PATH; returns the shared write result."
+                              '([path content])
+                              "(fn [path content] (write-tool/write-file path (str content) signal))")}
+          'clj {'edit-form (described
+                            (fn [args] (clj-edit/edit-form (with-cwd args)))
+                            "Apply a structured whole-form edit (same arguments as the clojure_edit tool)."
+                            '([args])
+                            "(fn [args] (clj-edit/edit-form (assoc args :cwd cwd)))")
+                'replace-sexp (described
+                               (fn [args] (clj-edit/replace-sexp (with-cwd args)))
+                               "Replace one form with another (same arguments as clojure_edit_replace_sexp)."
+                               '([args])
+                               "(fn [args] (clj-edit/replace-sexp (assoc args :cwd cwd)))")
+                'paren-repair (described
+                               (fn [args] (clj-edit/paren-repair (with-cwd args)))
+                               "Repair unbalanced delimiters (same arguments as clojure_paren_repair)."
+                               '([args])
+                               "(fn [args] (clj-edit/paren-repair (assoc args :cwd cwd)))")}}}))
 
 (defn source-key
   "The address of one contributed value — `user/edit`, `license/add!`."
@@ -150,14 +177,44 @@
       (bad-source! id (str "eval source " (pr-str id)
                            " may not contribute the built-in key " key)))))
 
+(defn- check-meta!
+  "Refuse an optional value-metadata field that is present but invalid."
+  [id key field valid? expected value]
+  (when (and (some? value) (not (valid? value)))
+    (bad-source! id (str "eval source " (pr-str id) " value " key
+                         " " field " metadata must be " expected))))
+
+(defn- value-interface
+  "Validate and keep a contributed value's optional `:doc`, `:arglists` and
+   `:source` metadata. Other metadata is ignored."
+  [id key value]
+  (let [{:keys [doc arglists source]} (meta value)]
+    (check-meta! id key ":doc" string? "a string" doc)
+    (check-meta! id key ":arglists" sequential? "sequential" arglists)
+    (check-meta! id key ":source" string? "a string" source)
+    (cond-> {}
+      (some? doc) (assoc :doc doc)
+      (some? arglists) (assoc :arglists arglists)
+      (some? source) (assoc :source source))))
+
+(defn- verb-info
+  "The listing entry for one contributed value: name, kind, doc and, when
+   supplied, arglists."
+  [[key entry]]
+  (cond-> {:name key
+           :kind (if (:macro? entry) :macro :verb)
+           :doc (or (not-empty (:doc entry)) "(no docstring)")}
+    (:arglists entry) (assoc :arglists (:arglists entry))))
+
 (defn- contribution-values
-  [ns-map macros]
+  [id ns-map macros]
   (into {}
-        (concat
-         (for [[ns vars] ns-map, [name value] vars]
-           [(source-key ns name) {:value value :macro? false}])
-         (for [[ns vars] macros, [name value] vars]
-           [(source-key ns name) {:value value :macro? true}]))))
+        (for [[source-maps macro?] [[ns-map false] [macros true]]
+              [ns vars] source-maps
+              [name value] vars
+              :let [key (source-key ns name)]]
+          [key (merge {:value value :macro? macro?}
+                      (value-interface id key value))])))
 
 (defn normalize-source
   "Validate one `sources-fn` return. Returns the source's values, commands
@@ -172,11 +229,12 @@
     (let [ns-map (normalize-namespaces id "ns" (or (:ns value) {}))
           macros (normalize-namespaces id "macros" (or (:macros value) {}))
           commands (normalize-commands id (or (:commands value) {}))
-          values (contribution-values ns-map macros)
+          values (contribution-values id ns-map macros)
           keys (set (keys values))]
       (check-reserved! id ns-map macros keys)
       {:id id
        :doc (source-doc (:doc value))
        :values values
        :keys keys
+       :verbs (mapv verb-info (sort-by key values))
        :commands commands})))
