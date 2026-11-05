@@ -402,7 +402,11 @@ bundled clojure and tree-sitter extensions are the shipped users of that: each
 declares its family's entry point directly (`clojure_edit`,
 `list_symbols`/`find_definition`) and contributes its refinements as one
 `:deferred` source, so a default composition declares 6 schemas fewer and
-announces the two sources instead. The
+announces the two sources instead. The clojure extension's tool records are
+schema/render wrappers over the shared `kmet.libs.clj-edit` engine; the same
+engine backs eval's core `clj/edit-form`, `clj/replace-sexp` and
+`clj/paren-repair` verbs, so structural editing does not require
+`:ext/clojure`. The
 advertised set is a session fact. The mutations (`set-active-tools!`,
 `apply-default-tools!`, `apply-enabled-tools!`) record the live selection with
 `sync-tool-declarations!`;
@@ -592,7 +596,10 @@ engine-portable builtins register `/eval` (`list`, `search`, `drop`, `sources`,
 `help`, plus verbs an eval source contributes), independent of the
 `:tool/eval` row, so removing the row leaves the command and its service. The
 row also registers the `:core` eval source (the shared `edit`/`write-file` ops
-under `user`), so removing it leaves the command without those verbs. `list` and `search` read the disk index, so they show the
+under `user`, and `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair` from
+the shared `kmet.libs.clj-edit` engine), so removing it leaves the command
+without those verbs. The clojure extension's tools wrap the same engine; the
+core Clojure verbs do not require the extension. `list` and `search` read the disk index, so they show the
 library rather than one session's cache; `drop` deletes the files directly and
 unbinds the live name only when that session already has an environment, so a
 drop never builds one. The environment build
@@ -621,7 +628,11 @@ re-evaluates the definition, and only then writes the file; the report line
 joins the call's result lines. An unknown old form, a changed definition name,
 or a failed re-evaluation leaves the file and the live definition untouched.
 A source-provided key or an unwritten live definition (whose file is not
-authoritative) is refused. A timed-out or aborted call is not tracked, because its interpreter
+authoritative) is refused. `(eval/edit-form 'name new-source)` replaces the
+whole definition through the same engine, re-evaluates it, and only then
+writes the file; a failed parse, changed name/namespace, failed re-evaluation,
+or failed write leaves the file and the live definition untouched. A timed-out
+or aborted call is not tracked, because its interpreter
 may still be running. A failed write is
 reported and the live definition remains until the process ends, with the old
 file authoritative for the next build. A failed delete or unbind is reported;

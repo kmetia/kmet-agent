@@ -7,8 +7,9 @@
    fresh-context, output-economy tool stays `run_code`.
 
    The row also registers the `:core` eval source, which puts the shared
-   `edit`/`write-file` operations under `user`; removing the row leaves the
-   `/eval` command and the service, but no core verbs."
+   `edit`/`write-file` operations under `user` and the Clojure editing verbs
+   under `clj`; removing the row leaves the `/eval` command and the service,
+   but no core verbs."
   (:require [clojure.string :as str]
             [kmet.app.eval.sources :as eval-sources]
             [kmet.app.tools.registry :as registry]

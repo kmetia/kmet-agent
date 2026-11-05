@@ -434,7 +434,9 @@ first call), so the contribution is current, not a snapshot:
   capturing one past the call that produced it is unsupported.
 - `user` and `clj` are reserved for the built-in sources, as are the eval
   layer's own namespaces (`eval`, `clojure.core`, `clojure`, `sandbox`,
-  `tools`, `babashka.process`, `kmet.libs.json`). Namespace what you contribute
+  `tools`, `babashka.process`, `kmet.libs.json`). The `:core` source ships
+  `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` from
+  `kmet.libs.clj-edit`; an extension source cannot replace them. Namespace what you contribute
   (`license/add!`); a source that contributes a reserved namespace, a built-in
   key, or a built-in `/eval` verb is refused as a whole.
 - A source-provided key is never written to the eval library. A model can

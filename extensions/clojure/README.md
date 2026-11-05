@@ -9,6 +9,11 @@ Clojure-aware tools for kmet, ported from [clojure-mcp](https://github.com/bhaum
 
 Structure-aware form editing. Finds Clojure definitions by type and name, then replaces or inserts around them.
 
+The same engine backs eval's core `clj/edit-form`, `clj/replace-sexp` and
+`clj/paren-repair` verbs, so structural editing does not require this
+extension; the tools here are the model-facing schemas and renderers over
+`kmet.libs.clj-edit`.
+
 ```
 clojure_edit:
   file_path: "src/my_app/core.clj"

@@ -47,14 +47,16 @@ are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–4R done; **step 5 next** |
+| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; **post-track task next** |
 
 ## Persistent eval and eval sources
 
-Status: steps 1–4R done (the shared script layer, the file ops, the
-memory-only service and the one-home library); step 5 next. The tool is opt-in
+Status: steps 1–9 done (the shared script layer, the file ops, the one-home
+library, the source registry and ABI, `eval/patch`, the shared Clojure editing
+engine with its core verbs, and the docs/catalog pass); the post-track task
+next. The tool is opt-in
 by default under S4.5; step 4R's tests exercise it directly rather than through
-the default declared set. E17 moves the Clojure editing engine and the edit
+the default declared set. E17 moved the Clojure editing engine and the edit
 verbs into core; the rest of the clojure extension is a post-track task at the
 end of this section.
 Decisions closed (E1–E18); independent.
@@ -375,7 +377,7 @@ plus ~150 moved (step 2).
    replacement through rewrite-clj, re-evaluate, write the library file).
    `(eval/forget 'name)` landed with step 4R. The structural editor gets its
    own review.
-8. **The Clojure editing engine and verbs.** Extract
+8. **Step 8 (done): the Clojure editing engine and verbs.** Extract
    `kmet.extensions.clojure.edit-util` to `kmet.libs.clj-edit` — the shared
    engine (`edit-pipeline`, `edit-source`, `replace-form`,
    `format-form-in-isolation`, `repair-delimiters`, parse and duplicate
@@ -391,7 +393,7 @@ plus ~150 moved (step 2).
    not added to `:bundle/minimal`. Resolve paths against the source `:cwd` in
    the verbs and `(:cwd ctx)` in the tools, which become `:contextual?`; no
    process-cwd assumption (E17).
-9. **Docs and catalog.** `docs/architecture.md` § Service catalog (`:eval`)
+9. **Step 9 (done): docs and catalog.** `docs/architecture.md` § Service catalog (`:eval`)
    and § Tools and the script sandbox (the eval tool, the extraction, the
    library and the scoping of "a `def` in one call is invisible to the next"
    to `run_code`); `bb generate-catalog`; `docs/pi-alignment.md` § codemode
@@ -642,7 +644,7 @@ scope for code.
 
 ## Post-track task: the rest of the clojure extension
 
-After the eval tool and E17's core verbs land, reconsider the remaining
+Now that the eval tool and E17's core verbs have landed, reconsider the remaining
 clojure extension surface: the `clojure_edit` and deferred
 `clojure_edit_replace_sexp`/`clojure_paren_repair` tools, the paren-check
 hooks, the `clojure-edit` skill, `clojure_eval` (nREPL), and the `:ext/clojure`
