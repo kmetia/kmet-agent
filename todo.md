@@ -1,10 +1,88 @@
 # Todo
 
+## Task: eval library interface discovery (10a, 2026-11-05)
+
+Status: next. This is the interface half of persistent-eval step 10, pulled
+out and moved ahead of the cwd-scope task: it is independent of scopes and
+avoids a second update of the exact `(eval/library)` maps the scope work
+rewrites. The prompt-start manifest half (10b) stays after the scope task.
+
+The model must see the interface, not just a name: a saved definition exposes
+its docstring and arglists, `(eval/describe 'name)` reads the interface and
+implementation without a file, and built-in and extension-provided verbs carry
+the same metadata.
+
+### Changes
+
+1. **Definition interface.** `kmet.app.eval.definitions` extracts `:doc` (the
+   docstring, else attr-map or symbol metadata) and `:arglists` (for `defn`,
+   `defn-`, `defmacro`, and the tail of `defmethod`) at parse time. Carry both
+   through `eval-files/index`, `kmet.app.eval/library-entry`,
+   `(eval/library)`, `(eval/help)` and `/eval list`. No evaluation and no
+   migration: existing files re-parse and gain docs when their source has
+   them.
+2. **Source verbs.** A value in a source's `:ns`/`:macros` map may carry
+   `:doc`, `:arglists` and `:source` metadata — the keys a var uses, plus the
+   implementation text for a verb that has no library file. `normalize-source`
+   keeps them, `source-var` puts `:doc`/`:arglists` on the SCI var, and
+   `(eval/sources)`/`(eval/help)` list each contributed verb with its doc and
+   arglists. Add the `:core` metadata for `user/edit`, `user/write-file`,
+   `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` (source for the
+   wrapper); update the extension example to show `:doc`, `:arglists` and
+   `:source`. A value without metadata still works and lists as
+   `(no docstring)`.
+3. **`(eval/describe 'name [key])`.** One lookup for the interface and the
+   implementation. With no key or `nil`, return
+   `{:name :kind :doc :arglists :file :scope :source}`; with a key return that
+   field's value, e.g. `(eval/describe 'name :source)`. Resolve library
+   definitions and source-provided keys, qualifying an unqualified name
+   against the sticky namespace; a `defmethod` address and each name of a
+   multi-name `declare` work as elsewhere. `:source` is the stored defining
+   form for a written definition (no generated `(ns …)` header), the source's
+   `:source` metadata for a source-provided key (nil when not supplied), and
+   the source from the retained in-memory record for an unwritten live
+   definition; `:file` is nil for source-provided and unwritten entries.
+   `:kind` is the defining form's kind or `:verb`/`:macro` for a
+   source-provided value. Keep the whole
+   record of an unwritten live definition (a failed write or a call that ended
+   in a normal error) in an `:unwritten-records` map beside `:unwritten`; a
+   successful write or drop clears it. The plural `(eval/sources)` keeps its
+   current meaning (the registered eval sources); document the distinction.
+   Reserve `eval/describe` in `kmet.app.eval.sources/reserved-source-keys`;
+   mention it in `(eval/help)`.
+4. **Save contract.** The eval guideline asks for a docstring; a saved
+   definition without one still succeeds, but its result line says
+   `(no docstring)`. An undocumented entry lists kind/arglists, or
+   `(no docstring; see <file>)` when neither exists.
+   `(eval/describe 'name :doc)` is nil.
+5. **Tests.** Extraction per form (docstring, attr-map, symbol metadata,
+   multi-arity, `defmethod`); `(eval/describe 'name)` with no key and with
+   `nil` returns the full map, each key returns its field, and an unknown
+   name errors; `:source` covers a loaded definition, a redefinition, a
+   `defmethod`, a multi-name `declare`, a source-provided key with `:source`
+   metadata, a source-provided name without it (nil), and an unwritten live
+   definition from a failed write/errored call (cleared by a successful
+   write or drop); source `:doc`/`:arglists` metadata on the SCI var and
+   `:source` on the contributed value; an undocumented value lists as
+   `(no docstring)`; exact `(eval/library)` maps updated once, ahead of the
+   cwd-scope step that rewrites them.
+6. **Docs.** `docs/architecture.md` eval section, the eval tool prompt/help,
+   `modules/app/src/kmet/extension.md` and `docs/extensions.md` (the per-verb
+   metadata example), and the Discovery note in the persistent-eval plan.
+
+### Non-goals
+
+- No prompt-start `:eval-library` custom message, sync, or first-eval loaded
+  report: 10b, after the cwd-scope task.
+- No scope labels in the listing; the cwd task adds `:scope`/active/shadowed
+  in its step 7, and 10b consumes them.
+
 ## Task: cwd-scoped eval library (2026-11-05)
 
 Status: in progress. Step 0 (the shared cwd key) is done; the eval scopes
-then use it in steps 1–9. Supersedes the one-global-library decision below;
-that decision stays as the step-4R history.
+then use it in steps 1–9. Step 10a (interface discovery) is the task above and
+runs first. Supersedes the one-global-library decision below; that decision
+stays as the step-4R history.
 
 The eval environment keeps one durable visibility layer per session cwd, with
 the home library as an explicit global layer. One definition per address is
@@ -128,8 +206,9 @@ fallback to global.
    to the service map and the architecture catalog. `(eval/help)` shows the
    pinned scope and the move verb. Add `scope` to the eval tool schema and
    validate it; a code-less call may carry only `drop` plus `scope`.
-8. Tests: update the existing eval suite (paths, exact `(eval/library)` maps,
-   one-arg `write-definition!`, command helpers). Add coverage for the shared
+8. Tests: update the existing eval suite (paths, exact `(eval/library)` maps
+   — now including 10a's `:doc`/`:arglists` — one-arg `write-definition!`,
+   command helpers). Add coverage for the shared
    encoder round-trip and collision cases, legacy session-dir fallback, new
    dir keys, default cwd for new names, existing-active scope retention,
    explicit global and `:scope` on a new name, cwd shadow load, library
@@ -223,15 +302,19 @@ are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; **cwd-scope task in progress** |
-| Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **in progress** — step 0 (shared cwd key) done |
+| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; 10a moved above; 10b (manifest) planned after the cwd-scope task; **cwd-scope task in progress** |
+| Eval library interface discovery (10a) | saved definitions and source-provided verbs expose an interface and implementation through `(eval/describe)`, not just names | **next** — runs before the cwd-scope task |
+| Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **in progress** — step 0 (shared cwd key) done; 10a runs first |
 
 ## Persistent eval and eval sources
 
 Status: steps 1–9 done (the shared script layer, the file ops, the one-home
 library, the source registry and ABI, `eval/patch`, the shared Clojure editing
-engine with its core verbs, and the docs/catalog pass); the cwd-scope task
-is next. The scope material below is step-4R history; the cwd-scoped task
+engine with its core verbs, and the docs/catalog pass); step 10 is split: 10a
+(the interface and source-verb docs) is the task at the top of this file and
+runs before the cwd-scope task; 10b (the discovery manifest and first-eval
+report) is planned after it. The cwd-scope task is in progress. The scope
+material below is step-4R history; the cwd-scoped task
 above supersedes it, while the sandbox, source and editing material still
 applies. The tool is opt-in
 by default under S4.5; step 4R's tests exercise it directly rather than through
@@ -299,7 +382,7 @@ Three tiers of what a script can call, and only the third is a source:
 | tier | provided by | examples | removable |
 |---|---|---|---|
 | primitives | `kmet.app.tools.script`, shared with `run_code` | `slurp`, `spit`, `sh`, `p/*`, `fs/*`, `json`, `emit`, `emit-image`, `tools/list`, `tools/describe`, `tools/call`, `(cwd)`, `(env k)`, `(now)`, `(sleep ms)`, `(spawn f)` | no |
-| eval vocabulary | the `:eval` service (it needs library state) | `(eval/library)`, `(eval/sources)`, `(eval/help)`, `(eval/forget …)`, `(eval/patch …)`, `(eval/edit-form …)` | no |
+| eval vocabulary | the `:eval` service (it needs library state) | `(eval/library)`, `(eval/sources)`, `(eval/help)`, `(eval/describe …)`, `(eval/forget …)`, `(eval/patch …)`, `(eval/edit-form …)` | no |
 | verbs | the `:core` eval source shipped by the eval tool (including the Clojure editing verbs after E17), and every mounted extension's own source | `edit`, `write-file`, `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair`; extension-specific verbs | yes (`{:core false}`) |
 
 **The service.** `:eval` is provided per agent by the agents factory
@@ -466,19 +549,78 @@ the process restarts.
   `:drop`/`(eval/forget …)` restores the source's value.
 
 **Discovery.** `(eval/sources)` and `(eval/library)` inside the environment
-(`(eval/help)` summarises all three tiers; `(eval/library)` lists the
-definitions this environment loaded), the `/eval <verb>` builtin command for
-the human — `list [pattern]`, `search <text>`, `drop <name>…`,
+(`(eval/help)` summarises all three tiers), the `/eval <verb>` builtin command
+for the human — `list [pattern]`, `search <text>`, `drop <name>…`,
 `sources`, `help`, plus verbs an eval source contributes through
-`:source-commands`. Built-in verb names are reserved;
-a source contributing one is refused. No system-prompt section: it would sit
-in the cached prefix and vary per session, so it would invalidate the whole
-prefix every time one changed; a source that needs the model to know
-something unprompted registers a skill, the existing seam.
+`:source-commands`. Built-in verb names are reserved; a source contributing
+one is refused. No system-prompt section: it would sit in the cached prefix
+and vary per session, so it would invalidate the whole prefix every time one
+changed; a source that needs the model to know something unprompted registers
+a skill, the existing seam.
+
+A name alone is not discoverability: it says something exists but not how to
+call it or what it does, so the model still has to open the file. The planned
+step 10 turns the listing into an interface listing. It is split: **10a**
+(records, source metadata, `(eval/describe)`, docs) is the task at the top of
+this file and runs before the cwd-scope task; **10b** (the prompt manifest and
+first-eval report) runs after it.
+
+- **Record the interface.** `kmet.app.eval.definitions` extracts `:doc` (the
+  docstring, else attr-map or symbol metadata) and `:arglists` (for `defn`,
+  `defn-`, `defmacro`, and the tail of `defmethod`) at parse time. No
+  evaluation and no migration: `eval-files/index`, `(eval/library)` and
+  `/eval list` carry both, so an existing file gains docs retroactively when
+  its source has them.
+- **One detail lookup, with optional fields.** `(eval/describe 'name)` with
+  no key or `nil` returns
+  `{:name :kind :doc :arglists :file :scope :source}`;
+  `(eval/describe 'name key)` returns that field, e.g. `:source`. It resolves
+  a library definition or a source-provided key. For a written definition,
+  `:source` is the stored defining form (no generated `(ns …)` header); for a
+  source-provided key, it is the source's `:source` metadata, nil when not
+  supplied; for an unwritten live definition, it is the source from the
+  retained in-memory record. `:file` is nil for source-provided and unwritten
+  entries; a nil `:source` means no source was provided. The plural
+  `(eval/sources)` keeps its current meaning.
+- **Source-provided verbs carry their own interface.** A value in a source's
+  `:ns`/`:macros` map may carry `:doc`, `:arglists` and `:source` metadata —
+  the keys a var uses, plus the implementation text. `normalize-source` keeps
+  them, `source-var` puts `:doc`/`:arglists` on the SCI var so
+  `(meta #'license/add!)` works, and `(eval/sources)` and `(eval/help)` list
+  each contributed verb with its one-line doc and arglists.
+  `(eval/describe 'name)` resolves a source key as well as a library
+  definition; `(eval/describe 'name :source)` returns the `:source` metadata
+  when supplied. The `:core` source gains metadata for `user/edit`,
+  `user/write-file`, `clj/edit-form`, `clj/replace-sexp` and
+  `clj/paren-repair`; extension sources declare theirs in the same place. A
+  source value without metadata is still valid and lists as
+  `(no docstring)`. The prompt manifest stays library-only because sources
+  are resolved per eval call and may have side effects; it points at
+  `(eval/help)` for the source verbs.
+- **A hidden append-only `:eval-library` custom message** is synced at prompt
+  start, mirroring `sync-tool-sources-listing!`: deterministic text, one line
+  per definition as `name [arglists] — first doc line`, bounded with
+  "… N more; (eval/library) lists them", appended only when the branch's last
+  listing changed, and only while the `eval` tool is selected. It never
+  rebuilds the system prompt.
+- **Loaded is not saved.** With an environment, list its loaded records (the
+  session's snapshot, with `:scope`/active state after the cwd-scope task);
+  without one, list the disk index as "saved; loads on first eval". Never
+  advertise a disk-only name as live in an already-built session, and never
+  build an environment just to produce the message. The first eval call
+  reports the loaded set and load failures, correcting any drift.
+- **Docstrings are the save contract.** The eval guideline asks for one; a
+  definition without one still saves, but its result line says
+  `(no docstring)`. An undocumented entry lists kind and arglists, or
+  `(no docstring; see <file>)` when neither exists. `(eval/describe 'name)`
+  returns kind, arglists, docstring, file, scope and source; a nil `:source`
+  means none.
 
 ### Steps
 
-Nine steps plus the cleanup step 4R. Steps 1–2 are behaviour-preserving and
+Nine implemented steps plus the cleanup step 4R. Step 10 is split: 10a is the
+interface task at the top of this file (before the cwd-scope task); 10b is the
+manifest follow-up below (after it). Steps 1–2 are behaviour-preserving and
 every later step is additive. Estimated ~2,000 new lines, ~1,000 moved (step 1)
 plus ~150 moved (step 2).
 
@@ -581,6 +723,29 @@ plus ~150 moved (step 2).
    line: a persistent context makes Jolt's `eval-in` more attractive later;
    the decision is unchanged); the tier table and the clojure extension's
    remaining surface (E17 and the post-track task).
+10. **Step 10b (planned, after the cwd-scope task): the discovery manifest
+    and first-eval report.** Step 10a is the task at the top of this file and
+    already supplies `:doc`/`:arglists`/`:source` through `(eval/describe)`
+    for library definitions and source verbs. Implement the manifest half
+    of the Discovery design:
+    - `kmet.app.session.context`: the `:eval-library` custom type and the
+      bounded, deterministic formatter.
+    - `kmet.app.loop.state`/`loop`: `sync-eval-library-listing!` beside
+      `sync-tool-sources-listing!`, with the loaded/saved split, change
+      comparison and selection gate.
+    - Loaded is not saved: with an environment list its records with
+      `:scope`/active state; without one list the disk index as
+      "saved; loads on first eval". Never advertise a disk-only name as live
+      in an already-built session and never build an environment just for the
+      message. The first environment build reports the loaded set and load
+      failures in its result.
+    - Source verbs stay out of the manifest (sources are resolved per eval
+      call and may have side effects); the message points at `(eval/help)`.
+    - Tests: manifest determinism, bounding, no duplicate, update and empty
+      correction; loaded vs saved before and after the first eval; a
+      cross-session save not advertised as live; selection gate; the manifest
+      never invokes a source fn.
+    - Docs: `docs/architecture.md` eval section and the eval tool prompt/help.
 
 ### Test plan
 
@@ -641,6 +806,26 @@ plus ~150 moved (step 2).
   writes only after a successful re-eval, and leaves the file/index untouched
   on failure; relative paths resolve under the source `:cwd` while the
   process cwd differs.
+- **Step 10a:** `:doc` and `:arglists` are extracted from docstrings,
+  attr-maps, symbol metadata, multi-arity forms and `defmethod` tails, and
+  survive the disk index and `(eval/library)`; `(eval/describe 'name)` with
+  no key and with `nil` returns the full map, each key returns its field, and
+  an unknown name errors; `:source` covers a written definition, a
+  redefinition, a `defmethod`, a multi-name `declare`, a source-provided key
+  with `:source` metadata, a source-provided name without it (nil), and the
+  retained record of an unwritten live definition (cleared by a successful
+  write/drop); it never reads a stale file; a source value's
+  `:doc`/`:arglists` metadata shows in `(eval/sources)`, `(eval/help)` and
+  `(meta #'license/add!)`, while a value without metadata lists as
+  `(no docstring)`; a library saved before this change re-parses with its
+  existing docstrings.
+- **Step 10b:** the `:eval-library` message is identical for an unchanged
+  library, updates once when a definition is added or dropped, is bounded, and
+  is silent when nothing was listed before; a session with an environment
+  lists only its loaded records while a new session lists the saved preview; a
+  sibling session's later save is not advertised as live; the first eval
+  reports the loaded set and failures; the message is absent when `eval` is
+  not selected; the manifest never invokes a source fn.
 - **Both hosts:** the eval tests run under babashka and Jolt's views
   (`bb test-changed` plus `jolt test` where the tree has it); `sci/init`
   once per session and the `swap!`-based `seed!` are the two host-sensitive
@@ -661,6 +846,21 @@ plus ~150 moved (step 2).
 - The library is unbounded (the model can define as much as it wants); a
   written file is the record, not a compaction fold. The capture and result
   budgets are the shared script layer's.
+- Discovery is a bounded preview, not a source dump: the prompt message
+  truncates long docs and stops after the budget; `(eval/library)` is the full
+  view. A definition with neither a docstring nor an arglist still has its
+  source available through `(eval/describe 'name :source)`.
+- A source-provided verb is documented or source-readable only when the
+  source attaches `:doc`/`:arglists`/`:source` metadata; there is no defining
+  form to parse. The source-level `:doc` describes the source, not each verb.
+  A value without metadata lists as `(no docstring)` and has `:source nil`.
+- `(eval/describe 'name :source)` returns a definition form, not a library
+  file: the generated `(ns …)` header is not stored source, carries no stored
+  requires, and is omitted. A source-provided verb returns its `:source`
+  metadata when supplied; without it, `(eval/describe 'name)` still has its
+  `:doc`/`:arglists`. A failed write or a call that ended in a normal error
+  can leave a live unwritten definition; its in-memory record is described,
+  while `:file` is nil (no authoritative file).
 
 ### Decisions
 
