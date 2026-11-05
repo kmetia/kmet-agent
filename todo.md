@@ -1,6 +1,182 @@
 # Todo
 
-## Decision: one global eval library (2026-11-05)
+## Task: cwd-scoped eval library (2026-11-05)
+
+Status: next. Step 0 fixes the shared cwd key; the eval scopes then use it.
+Supersedes the one-global-library decision below; that decision stays as the
+step-4R history.
+
+The eval environment keeps one durable visibility layer per session cwd, with
+the home library as an explicit global layer. One definition per address is
+live: cwd when present, else global. No project-root detection and no scratch
+scope.
+
+### Why
+
+The observed eval-library usage is ten analysis helpers created in a
+`kmet-agent` session. They were created for one session's analysis but went
+into the one home library; the model then treated them as scratch and deleted
+them. A single global library has no safe default for a helper that is useful
+for a few calls but should not follow every project. Cwd scope is the same key
+`.kmet/` and session storage already use, and it removes the non-project
+fallback to global.
+
+### Model
+
+```
+~/.kmet/agent/eval/                               ; global, explicit only
+~/.kmet/agent/eval-scopes/<shared-cwd-key>/       ; cwd, default for new names
+```
+
+- Every session has a cwd scope. A session without a project still writes to
+  its cwd scope; it never falls back to global.
+- Global is explicit for new names: `:scope :global` on an eval call, or
+  `eval/move`. Redefining an active global name keeps it global.
+- The cwd key is the normalized absolute cwd at environment build, produced
+  by the shared, unambiguous encoder from step 0. The same key names the
+  session directory and the eval scope; there is no second scheme.
+- Pin the scope when the session's eval environment is built. A later call's
+  cwd must not move the library root; `:cwd` still resolves the call's file
+  verbs and sources.
+- One live layer per name: cwd if present, else global. Shadowed records stay
+  addressable for drop/restore but are not live.
+- Storage stays under the agent home. `<cwd>/.kmet/eval` stays ignored:
+  project-supplied code is not loaded and there is no project-trust gate.
+- No scratch root or scratch namespace. Local `let`/`fn` bindings remain the
+  only throwaway scope; a top-level definition writes to the cwd scope.
+
+### Precedence and addresses
+
+- Load global first, then cwd; cwd shadows global by definition address.
+- `:library` is a per-name stack in precedence order `[global cwd]`; the last
+  record is active. Keep shadowed records with their source so a drop can
+  restore the next layer.
+- No scope-qualified name syntax. Names stay `ns/name` and
+  `ns/multi dispatch`; scope is an explicit `:scope` option.
+- Unqualified reads, redefinitions, drops and forgets resolve the active
+  layer (cwd first, then global). `:scope` targets a specific layer.
+- Writes: a new name defaults to cwd; redefining an existing active name
+  keeps its current scope. For an existing name, `:scope` is accepted only
+  when it names the active layer; a new name may choose either. Defining,
+  patching, editing or moving a non-active layer is refused.
+- Drop may target either layer. Dropping the active record deletes its file,
+  unbinds the live name, and re-evaluates the next record in the stack.
+  Dropping a non-active record deletes only its file, and the active
+  definition stays live. This holds with or without an environment; a
+  no-environment drop resolves the active file (cwd first), and `:scope`
+  selects the other.
+- `:failures`, `/eval list|search|drop|help`, `(eval/library)` and
+  `(eval/help)` report `:scope` and whether an entry is active or shadowed.
+- A broken cwd file is reported and skipped; the global record that loaded
+  first stays active. A broken global file is reported and leaves the cwd
+  layer, if any, active.
+- Load-order limits: global definitions cannot depend on cwd definitions;
+  shadowed globals still run their top-level side effects; moving a global
+  definition to cwd can break other global files. A shadowed `defmulti` is a
+  documented limit: dropping its shadow re-evaluates the next record for that
+  address, but methods from the other layer may need a rebuild.
+
+### Changes
+
+0. **Shared cwd key (prerequisite).** Make
+   `kmet.app.session.store/encode-cwd` injective and reversible for both
+   session dirs and eval scopes:
+   - normalize to an absolute path (`expand-home`, `absolutize`, `normalize`),
+     separators as `/`, strip the leading `/`;
+   - escape `~` to `~~`, `-` to `~-`, `:` to `~:`, then `/` to `-`;
+   - wrap as `--<encoded>--`; add `decode-cwd`.
+   The current encoder stays as `legacy-encode-cwd` for reading old session
+   dirs only. New sessions use the new key; `find-recent-session` checks the
+   new dir and the legacy dir and returns the newest match; `list-sessions`
+   and `list-sessions-info` already walk both. No automatic rename. Eval has
+   no legacy scopes. Update `test-encode-cwd`, the `session-dir-for-cwd`
+   expectations, and `docs/pi-alignment.md` (a named departure from pi's
+   `<--cwd-->` layout).
+1. Root resolution: `library-root` becomes both roots;
+   `kmet.app.eval/value` takes the session cwd/base input; `build-environment`
+   stores the pinned `:cwd`, roots and scope key; `ensure-environment!` keeps
+   the first build's pin. Use the shared encoder for `eval-scopes`.
+2. Data model: `:library` becomes a per-name stack; add an active resolver
+   and update `known-name?`, `definition-target!`, `drop-one!`,
+   `apply-definition!`, `commit-definition!`/patch/edit-form, `service-index`,
+   `eval-files/scan`/`index` and `library-entries`. Keep each record's source
+   and root.
+3. Writes: new name to cwd; existing active name to its current scope;
+   explicit `:scope` for a new name or the active layer; non-active
+   write/patch/edit-form is refused. `apply-definition!` selects the target
+   root and lock (not `(:root env)`) and reports the scope in lines and
+   `:details`.
+4. Drop/forget: unqualified means active; `:scope` is optional; a
+   no-environment drop searches both roots and resolves cwd-first instead of
+   refusing ambiguous names. Dropping the active record deletes the file,
+   unbinds the live name and re-evaluates the next record; dropping a
+   non-active record deletes only its file. Source and unwritten behavior is
+   unchanged.
+5. Patch/edit-form: active only; `:scope` is optional; non-active,
+   source-provided and unwritten targets are refused; write through the
+   record's root lock; keep the re-evaluate-then-write contract.
+6. New `eval/move` and `/eval move <name> global|cwd`: active only, no
+   `--force`. Add `eval-files/move-definition!`: take both root locks once in
+   fixed order (global then cwd), publish the target, delete the source, and
+   roll back the target if the delete fails. Update `:file`/`:scope` without
+   re-evaluating; refuse collisions, same-scope moves, source-provided and
+   unwritten definitions. `/eval move` must work without building an
+   environment. Add `eval/move` to the reserved source keys and `move` to the
+   reserved command names.
+7. Index and commands: `:index` takes `{:cwd …}`; list/search/sources pass
+   it and mark entries `(cwd)`/`(global)` and active/shadowed. Add `:move!`
+   to the service map and the architecture catalog. `(eval/help)` shows the
+   pinned scope and the move verb. Add `scope` to the eval tool schema and
+   validate it; a code-less call may carry only `drop` plus `scope`.
+8. Tests: update the existing eval suite (paths, exact `(eval/library)` maps,
+   one-arg `write-definition!`, command helpers). Add coverage for the shared
+   encoder round-trip and collision cases, legacy session-dir fallback, new
+   dir keys, default cwd for new names, existing-active scope retention,
+   explicit global and `:scope` on a new name, cwd shadow load, library
+   stack/scopes/active, drop active restoring the global, drop non-active
+   leaving the active live, no-environment list/drop across both roots, a
+   pinned cwd after a later call with another cwd, patch/edit-form non-active
+   refusal, source/unwritten refusal, broken cwd shadow versus global,
+   defmethod shadows, move success/collision/no-force/same-scope/source
+   refusal/delete-failure rollback/lock order, legacy global files, restart
+   loading both layers, and worktree/subdirectory separation. Run both host
+   views.
+9. Docs: `docs/architecture.md` (service catalog, eval section, session
+   layout), `modules/app/src/kmet/design.md`,
+   `modules/app/src/kmet/extension.md`, `docs/extensions.md`, the eval tool
+   prompt/help, `docs/pi-alignment.md` (session-dir departure), and this
+   file's E4/E18 notes. Replace the one-home library wording with the
+   global+cwd model; keep `KMET_CODING_AGENT_DIR` as whole-home isolation.
+
+### Migration
+
+No automatic eval move. Existing `~/.kmet/agent/eval/<ns>/<name>.clj` files
+stay the global layer; new definitions write cwd scopes, and redefining an
+active global name keeps it global. Promote a helper with `/eval move`.
+Session dirs use the step-0 key for new sessions; legacy dirs stay readable
+and are found by `find-recent-session`, with no automatic rename. Worktrees
+and subdirectories are separate cwd scopes by design; symlinks are separate
+because the key uses the normalized path, not `realpath`; helpers do not
+follow across them. `KMET_CODING_AGENT_DIR` still isolates the whole home.
+
+### Non-goals
+
+- No `:keep` metadata, no project-root detection (git common dir, manifest),
+  no `<cwd>/.kmet/eval`, no scratch root, no session-definition entries, no
+  snapshots or branch fingerprints.
+- No change to `run_code`, the source registry, or extension-provided verbs
+  beyond the reserved `move`/`eval/move` names.
+- No `--force` moves and no scope-qualified definition names.
+- No automatic session-dir rename or `/session migrate` in this task.
+- No automatic cleanup of `/tmp` or stale cwd scopes in this task.
+- No deeper `defmulti` method restoration across layers than re-evaluating
+  the matching record; document that limit.
+
+## Superseded decision: one global eval library (2026-11-05)
+
+> Superseded by [the cwd-scoped task](#task-cwd-scoped-eval-library-2026-11-05).
+> The bullets below describe step 4R as landed; they are no longer the target
+> model.
 
 The eval scope model is collapsed to **global only**. One library per agent
 home, auto-written:
@@ -25,7 +201,7 @@ home, auto-written:
 
 This supersedes the session/project scope rules of step 4 and the
 project/global material it replaced. It landed as **step 4R** (see § Steps);
-the test plan, limits and decisions below state the current model.
+the test plan, limits and decisions below state the step-4R model.
 
 Reference: nodecode keeps one layer per home (`~/.nodecode/cells/<identity>/`),
 one file per definition, and has no session or project scope for code; its
@@ -47,14 +223,17 @@ are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; **post-track task next** |
+| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; **cwd-scope task next** |
+| Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **next** |
 
 ## Persistent eval and eval sources
 
 Status: steps 1–9 done (the shared script layer, the file ops, the one-home
 library, the source registry and ABI, `eval/patch`, the shared Clojure editing
-engine with its core verbs, and the docs/catalog pass); the post-track task
-next. The tool is opt-in
+engine with its core verbs, and the docs/catalog pass); the cwd-scope task
+is next. The scope material below is step-4R history; the cwd-scoped task
+above supersedes it, while the sandbox, source and editing material still
+applies. The tool is opt-in
 by default under S4.5; step 4R's tests exercise it directly rather than through
 the default declared set. E17 moved the Clojure editing engine and the edit
 verbs into core; the rest of the clojure extension is a post-track task at the
@@ -517,7 +696,8 @@ next build. A call that ends in a normal error writes nothing; its evaluated
 definitions remain live and forgettable (a timed-out/aborted call is not
 tracked, because its interpreter may still be running). A code-less drop never
 builds an environment. A failed delete or unbind is reported; a failed unbind
-leaves the live definition until a restart.
+leaves the live definition until a restart. The cwd-scoped task above keeps
+the write/forget rules and replaces the no-scope part.
 
 **E5 — one address per definition, verbatim source.** The file is the address
 (`<ns>/<name>.clj`); lookup, deletion and review are address operations.
@@ -594,11 +774,11 @@ definition entries and compaction snapshots (superseded by E18).
 **E15 — names closed.** `/eval` is the human command: `list`, `search`,
 `drop`, `sources`, `help`, plus keyword-keyed verbs an eval source contributes
 through `:source-commands` (a `:run` returns nil or a string); the built-in
-names are reserved. `/eval sources` is the source report. `(eval/library)` is
-the listing (the old `(eval/kept)` name is retired with the scope model);
-`(eval/forget 'name)` is
-the in-environment delete; `clj/*` for the Clojure verbs (core-provided after
-E17; not the tool names `clojure_*`, and never bare).
+names are reserved; the cwd-scoped task adds `move`. `/eval sources` is the
+source report. `(eval/library)` is the listing (the old `(eval/kept)` name is
+retired with the scope model); `(eval/forget 'name)` is the in-environment
+delete; `clj/*` for the Clojure verbs (core-provided after E17; not the
+tool names `clojure_*`, and never bare).
 
 **E16 — the service is built-in; the verbs are the extension point.** `:eval`
 is provided by the agents factory and its engine lives in `kmet.app.eval` — an
@@ -640,7 +820,7 @@ scanning the library, sessions are runtime caches, and forget deletes the file
 and unbinds the live name. This supersedes E3, E4 and E6 and amends E5, E10,
 E12, E14 and E15; the landed step 4R is its implementation. The reference is
 nodecode: one layer per home, one file per definition, no session or project
-scope for code.
+scope for code. Superseded by § Task: cwd-scoped eval library (2026-11-05).
 
 ## Post-track task: the rest of the clojure extension
 
