@@ -70,6 +70,20 @@
       (fn []
         (t/is (= "deferred-a" (:name (get (tools/get-all-tools h) "deferred-a"))))))))
 
+(t/deftest test-deferred-sources-filter-by-the-selected-tools
+  (let [h (handle)]
+    (with-sources h [[::one (fn [] {"a" (tool-map "a") "b" (tool-map "b")})
+                      {:exposure :deferred :description "One"}]
+                     [::two (fn [] {"c" (tool-map "c")})
+                      {:exposure :deferred :description "Two"}]]
+      (fn []
+        (t/is (= [::one ::two] (mapv :id (tools/get-deferred-sources h))))
+        (t/is (= [::one]
+                 (mapv :id (tools/get-deferred-sources h {:selected #{"b"}}))))
+        (t/is (= [::two]
+                 (mapv :id (tools/get-deferred-sources h {:selected #{"c"}}))))
+        (t/is (empty? (tools/get-deferred-sources h {:selected #{"missing"}})))))))
+
 (t/deftest test-source-exposure-is-validated
   (let [h (handle)]
     (t/is (thrown-with-msg?
@@ -430,11 +444,15 @@
       (t/is (nil? (state/sync-tool-sources-listing! agent))
             "no deferred source, nothing to say — and no message")
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
-      (let [msg (state/sync-tool-sources-listing! agent)]
+      (let [msg (state/sync-tool-sources-listing! agent)
+            content (:content msg)]
         (t/is (some? msg))
-        (t/is (str/includes? (:content msg) "1 deferred tool source"))
-        (t/is (str/includes? (:content msg) "- catalog: A catalog"))
-        (t/is (str/includes? (:content msg) "tool_search"))
+        (t/is (str/includes? content "1 deferred tool source"))
+        (t/is (str/includes? content "- catalog: A catalog"))
+        (t/is (str/includes? content "tool_search"))
+        (t/is (not (str/includes? content "run_code or eval"))
+              "only tool_search is selected")
+        (t/is (not (str/includes? content "(tools/list)")))
         (t/is (false? (:display msg)) "the model reads it, not the chat"))
       (t/is (nil? (state/sync-tool-sources-listing! agent))
             "the same set is not announced twice")
@@ -442,6 +460,106 @@
       ;; a promotion is not a source change: nothing appended
       (state/promote-tools! agent ["deferred-a"])
       (t/is (nil? (state/sync-tool-sources-listing! agent)))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-a-script-tool-selects-the-script-intro
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session
+                                        :enabled-tool-entries ["run_code" "deferred-a"])]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (let [msg (state/sync-tool-sources-listing! agent)
+            content (:content msg)]
+        (t/is (some? msg))
+        (t/is (str/includes? content "run_code"))
+        (t/is (not (str/includes? content "eval")))
+        (t/is (str/includes? content "(tools/list)"))
+        (t/is (not (str/includes? content "tool_search"))))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-an-eval-only-tool-selects-the-eval-intro
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session
+                                        :enabled-tool-entries ["eval" "deferred-a"])]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (let [msg (state/sync-tool-sources-listing! agent)
+            content (:content msg)]
+        (t/is (some? msg))
+        (t/is (str/includes? content "eval"))
+        (t/is (not (str/includes? content "run_code")))
+        (t/is (str/includes? content "(tools/list)"))
+        (t/is (not (str/includes? content "tool_search"))))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-both-discovery-paths-are-announced
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state
+               :session session
+               :enabled-tool-entries ["run_code" "eval" "tool_search" "deferred-a"])]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (let [msg (state/sync-tool-sources-listing! agent)
+            content (:content msg)]
+        (t/is (some? msg))
+        (t/is (str/includes? content "run_code or eval"))
+        (t/is (str/includes? content "(tools/list)"))
+        (t/is (str/includes? content "tool_search")))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-no-discovery-path-keeps-the-listing-silent
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session
+                                        :enabled-tool-entries [])]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (t/is (nil? (state/sync-tool-sources-listing! agent)))
+      (t/is (empty? (listings session)))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-an-unselected-deferred-source-is-not-listed
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session
+                                        :enabled-tool-entries ["run_code"])]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (t/is (nil? (state/sync-tool-sources-listing! agent))
+            "a script tool without the deferred tool has nothing to announce")
+      (t/is (empty? (listings session)))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-a-stale-listing-is-corrected-when-nothing-can-reach-it
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        reachable (support/make-agent-state :session session)
+        unreachable (support/make-agent-state
+                     :session session
+                     :enabled-tool-entries ["deferred-a"])]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (t/is (some? (state/sync-tool-sources-listing! reachable)))
+      (let [msg (state/sync-tool-sources-listing! unreachable)
+            content (:content msg)]
+        (t/is (some? msg))
+        (t/is (str/includes? content "not reachable"))
+        (t/is (not (str/includes? content "callable"))))
       (finally
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))
@@ -507,8 +625,8 @@
         long-ids (mapv (fn [i] {:id (keyword (str "a-very-long-source-identifier-" i))
                                 :description "a description"})
                        (range 400))]
-    (t/is (= (str "1 deferred tool source. Their tools are callable from run_code now;"
-                  " tool_search loads one so you can call it directly.\n\n"
+    (t/is (= (str "1 deferred tool source. Their tools are callable from a script (run_code or eval);"
+                  " (tools/list) shows them, and tool_search loads one tool so you can call it directly.\n\n"
                   "- clojure: Clojure editing refinements")
              (listing small))
           "a small set is the uncapped text, byte for byte")
@@ -529,3 +647,29 @@
             "only when the head lines alone do not fit are the rest counted in one line")
       (t/is (= text (listing long-ids)) "and the text is deterministic"))
     (t/is (= (listing []) "No tool sources are deferred."))))
+
+(t/deftest test-every-discovery-path-combination
+  (let [source {:id :symbols :description "Symbols"}
+        listing (fn [opts] (session/deferred-sources-listing [source] opts))
+        cases [[{} nil false]
+               [{:run-code? true} "run_code" false]
+               [{:eval? true} "eval" false]
+               [{:tool-search? true} nil true]
+               [{:run-code? true :eval? true} "run_code or eval" false]
+               [{:run-code? true :tool-search? true} "run_code" true]
+               [{:eval? true :tool-search? true} "eval" true]
+               [{:run-code? true :eval? true :tool-search? true}
+                "run_code or eval" true]]]
+    (doseq [[opts label search?] cases]
+      (let [text (listing opts)]
+        (if label
+          (do
+            (t/is (str/includes? text (str "script (" label ")")))
+            (t/is (= search? (str/includes? text "tool_search")))
+            (when (= label "run_code")
+              (t/is (not (str/includes? text "eval"))))
+            (when (= label "eval")
+              (t/is (not (str/includes? text "run_code")))))
+          (if search?
+            (t/is (str/includes? text "tool_search"))
+            (t/is (nil? text))))))))

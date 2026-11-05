@@ -172,7 +172,10 @@
       (t/is (str/includes? sources "License helpers"))
       (t/is (str/includes? sources ":core"))
       (t/is (str/includes? help "Eval sources"))
-      (t/is (str/includes? help "Library definitions")))))
+      (t/is (str/includes? help "Library definitions"))
+      (t/is (str/includes? help "Sandbox:"))
+      (t/is (str/includes? help "Discover:"))
+      (t/is (str/includes? help "(emit value)")))))
 
 (t/deftest a-source-can-contribute-an-explicit-macro
   (let [env (support/eval-ctx)]

@@ -329,15 +329,13 @@ Execute a bash command in the current working directory. Returns stdout and stde
 
 Run a Clojure script to work over the environment and report a digest. Use it when the intermediate output would flood the context — scan or transform many files, run a search→read→verify chain, compute counts, matches or a summary — instead of chaining bash cat/head/rg. Use bash for one small command and read for one file.
 
-For definitions you want to reuse across calls, use eval; every run_code call starts from a fresh context.
+Every run_code call starts from a fresh context; definitions do not persist.
 
-Inside the script the local primitives are already there and return values, not rendered text: (slurp path), fs/* (babashka.fs), the bare (sh ...), p/*, json, and (cwd), (env k), (now), (sleep ms), (spawn f).
-
-Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. A plain name is also a var — @(tools/read {:path "x"}) — while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe "name") returns one tool's declaration.
+Inside the script the local primitives return values, not rendered text; prefer them over bash/read for local work. Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. A plain name is also a var — @(tools/read {:path "x"}) — while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe "name") returns one tool's declaration.
 
 Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image "shot.png") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.
 
-Sandbox: Clojure; on babashka a full babashka surface, on the JVM the java.lang/java.io/java.util subset. Require clojure.*/babashka.* namespaces or the bundled libs (rewrite-clj, cljfmt, edamame, parinferish); System/java.io.*/Throwable resolve on babashka (Jolt's SCI exposes no class table). Aliases: fs, str/set/edn/walk, json, p, sh, tools, sandbox. Discover the surface with (all-ns) and a namespace's vars with (ns-publics 'babashka.fs). :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB.
+Sandbox: Clojure/SCI — aliases fs, str, set, edn, walk, json and p; bare sh; cwd-resolving slurp, spit and file-seq; (cwd), (env k), (now), (sleep ms), (spawn f), (emit v) and (emit-image x); the tools and sandbox namespaces; clojure.*, babashka.* and the bundled libs (rewrite-clj, cljfmt, edamame, parinferish) are require-able. Discover the surface with (all-ns) and a namespace's vars with (ns-publics 'clojure.string). :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB.
 
 ---
 
@@ -349,7 +347,7 @@ Sandbox: Clojure; on babashka a full babashka surface, on the JVM the java.lang/
 
 **Description:**
 
-Evaluate Clojure forms in this session's persistent environment. Definitions persist across calls for the session and are written to the agent's eval library, so every session and a restart load them; use run_code for a fresh, throwaway script. A successful call's namespace is re-entered by the next. A redefinition overwrites its library file; drop deletes the file and unbinds the live name. Output is the emitted text (or the final value of a silent success); stdout and stderr are discarded.
+Evaluate Clojure in this session's persistent SCI script sandbox: aliases fs, str, set, edn, walk, json and p; bare sh; cwd-resolving slurp, spit and file-seq; (cwd), (env k), (now), (sleep ms), (spawn f), (emit v) and (emit-image x); the tools and sandbox namespaces; clojure.*, babashka.* and the bundled libs (rewrite-clj, cljfmt, edamame, parinferish) are require-able. Top-level definitions persist across calls and are written to the agent's eval library, so new sessions and a restart load them; local let/fn bindings are scratch, so a top-level definition is a library write. An already-running session is a cache and does not pick up another session's new files. A redefinition overwrites its file; drop deletes the file and unbinds this session's live name. A call that ends in a normal error writes nothing; its definitions stay live and can be forgotten. A successful call's namespace is re-entered by the next. Output is the emitted text (or the final value of a silent success); stdout and stderr are discarded. This is the sandbox, not the project's nREPL.
 
 ---
 

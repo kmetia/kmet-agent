@@ -42,20 +42,29 @@
     (if (str/blank? description) head (str head ": " description))))
 
 (defn- omitted-line
-  "The closing line standing for DROPPED sources (pi: the `… N more servers`
-   line)."
-  [dropped]
-  (str "- … " dropped " more source" (when (not= 1 dropped) "s")
-       "; find their tools with tool_search"))
+  "The closing line standing for DROPPED sources, naming the discovery paths
+   OPTS makes available (pi: the `… N more servers` line)."
+  [dropped {:keys [run-code? eval? tool-search?]}]
+  (let [script? (or run-code? eval?)]
+    (str "- … " dropped " more source" (when (not= 1 dropped) "s")
+         (cond
+           (and script? tool-search?)
+           "; find their tools with tool_search or (tools/list) in a script"
+
+           script?
+           "; (tools/list) in a script shows their tools"
+
+           tool-search?
+           "; find their tools with tool_search"))))
 
 (defn- listing-text
   "INTRO, the first KEPT sources' lines at DESCRIPTION-CHARS, and the omission
    line standing for the rest."
-  [intro sources kept description-chars]
+  [intro sources kept description-chars opts]
   (str intro
        (str/join "\n" (map #(source-line % description-chars) (take kept sources)))
        (when (< kept (count sources))
-         (str "\n" (omitted-line (- (count sources) kept))))))
+         (str "\n" (omitted-line (- (count sources) kept) opts)))))
 
 (defn- share
   "Characters one description may take when KEPT sources share ROOM — 2 of each
@@ -68,10 +77,11 @@
 (defn- listing-fit
   "The listing for KEPT sources with the descriptions sharing what the head
    lines leave of `max-listing-chars`."
-  [intro sources kept]
+  [intro sources kept opts]
   (listing-text intro sources kept
-                (share (- max-listing-chars (count (listing-text intro sources kept 0)))
-                       kept)))
+                (share (- max-listing-chars (count (listing-text intro sources kept 0 opts)))
+                       kept)
+                opts))
 
 (defn- compose-listing
   "INTRO plus one line per SOURCE within `max-listing-chars`. Descriptions shrink
@@ -82,16 +92,39 @@
    head lines alone overflow walks the count down and renders again per step,
    which is why the loop is only affordable while sources are the registered
    extensions of a process (tens), not an unbounded input."
-  [intro sources]
+  [intro sources opts]
   (loop [kept (count sources)]
-    (let [text (listing-fit intro sources kept)]
+    (let [text (listing-fit intro sources kept opts)]
       (if (or (<= (count text) max-listing-chars) (zero? kept))
         text
         (recur (dec kept))))))
 
+(defn- discovery-text
+  "The sentence naming how OPTS lets the model reach a deferred source's tools;
+   nil when no discovery path is selected. OPTS names the paths themselves, so
+   an eval-only or run_code-only selection never mentions the other tool."
+  [{:keys [run-code? eval? tool-search?]}]
+  (let [script (cond
+                 (and run-code? eval?) "run_code or eval"
+                 run-code? "run_code"
+                 eval? "eval")]
+    (cond
+      (and script tool-search?)
+      (str "Their tools are callable from a script (" script "); "
+           "(tools/list) shows them, and tool_search loads one tool so you can "
+           "call it directly.")
+
+      script
+      (str "Their tools are callable from a script (" script "); (tools/list) shows them.")
+
+      tool-search?
+      "tool_search loads one tool so you can call it directly.")))
+
 (defn deferred-sources-listing
   "The text that tells the model which deferred tool sources exist: one line per
-   source (its id and its one line), and what it can do about them. Once
+   source (its id and its one line), and what it can do about them. OPTS names
+   the available discovery paths (`:run-code?`, `:eval?`, `:tool-search?`); with
+   none, returns nil — there is nothing the model can do with the list. Once
    something was listed, an empty set says so rather than leaving the stale
    message standing. The text is bounded (`max-listing-chars`) and
    deterministic — a set that did not change produces the same bytes, which is
@@ -101,13 +134,18 @@
    one when it changes, so earlier messages stay cached; kmet has no
    mid-conversation system role, so this is appended as a custom message
    (`state/sync-tool-sources-listing!`) instead of rebuilding the leading one."
-  [sources]
-  (if (empty? sources)
-    "No tool sources are deferred."
-    (compose-listing
-     (str (count sources) " deferred tool source" (when (not= 1 (count sources)) "s")
-          ". Their tools are callable from run_code now; tool_search loads one so you can call it directly.\n\n")
-     sources)))
+  ([sources] (deferred-sources-listing sources {:run-code? true
+                                                :eval? true
+                                                :tool-search? true}))
+  ([sources opts]
+   (if (empty? sources)
+     "No tool sources are deferred."
+     (when-let [discovery (discovery-text opts)]
+       (compose-listing
+        (str (count sources) " deferred tool source"
+             (when (not= 1 (count sources)) "s")
+             ". " discovery "\n\n")
+        sources opts)))))
 
 (defn derive-context-settings
   "Derive {:thinking-level :model :provider} from the branch root→leaf (pi:

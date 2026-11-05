@@ -6,6 +6,7 @@
             [clojure.test :as t]
             [kmet.app.session.core :as session]
             [kmet.app.test-eval-support :as support]
+            [kmet.app.tools.eval :as eval-tool]
             [kmet.app.tools.registry :as tools]
             [kmet.app.tools.script :as script]
             [kmet.test-tmp :as test-tmp]
@@ -64,6 +65,28 @@
                                                          {:code "(def via-tool 9) via-tool"}))
                             "9"))
     (t/is (= "10" (:content (support/call-tool env "eval" {:code "(+ via-tool 1)"}))))))
+
+(t/deftest test-the-tool-prompt-stands-alone
+  (let [{:keys [description prompt-snippet prompt-guidelines]} eval-tool/definition
+        text (str description "\n" prompt-snippet "\n"
+                  (str/join "\n" prompt-guidelines))]
+    (t/is (str/includes? text "SCI"))
+    (t/is (str/includes? text "babashka"))
+    (t/is (str/includes? text "fs"))
+    (t/is (str/includes? text "top-level"))
+    (t/is (str/includes? text "let/fn"))
+    (t/is (str/includes? text "(eval/help)"))
+    (t/is (not (str/includes? text "run_code"))
+          "eval's prompt must stand alone when run_code is not selected")
+    (t/is (not (str/includes? text "Jolt")))
+    (t/is (not (str/includes? text "JVM")))))
+
+(t/deftest test-the-script-descriptions-share-the-sandbox-summary
+  (let [env (support/eval-ctx)
+        run-code (tools/get-tool (:tools env) "run_code")]
+    (t/is (str/includes? (:description run-code) script/sandbox-summary))
+    (t/is (str/includes? (:description eval-tool/definition)
+                         script/sandbox-summary))))
 
 (t/deftest test-the-tool-reports-a-missing-service
   (let [{:keys [tools]} (tu/tool-ctx)

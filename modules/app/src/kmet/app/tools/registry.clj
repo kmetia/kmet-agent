@@ -231,10 +231,18 @@
   "The `:deferred` tool sources REGISTRY holds, in registration order, as
    [{:id :description}] — what the model is told exists without being declared
    yet. The catalog is not part of the report: a listing names a source, one
-   line, never its tools."
-  [reg]
-  (mapv #(select-keys % [:id :description])
-        (sources-with-exposure reg :deferred)))
+   line, never its tools. OPTS `:selected` is a set or map of tool names; when
+   supplied, a source is kept only when it contributes at least one selected
+   tool. nil reports every source."
+  ([reg] (get-deferred-sources reg nil))
+  ([reg {:keys [selected]}]
+   (into []
+         (keep (fn [source]
+                 (when (or (nil? selected)
+                           (some #(contains? selected %)
+                                 (keys (source-tools source))))
+                   (select-keys source [:id :description]))))
+         (sources-with-exposure reg :deferred))))
 
 ;; ─── Eval sources ──────────────────────────────────────────────────────────
 ;; An eval source contributes live values to every eval environment: its

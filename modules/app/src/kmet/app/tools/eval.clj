@@ -60,15 +60,29 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description "Evaluate Clojure forms in this session's persistent environment. Definitions persist across calls for the session and are written to the agent's eval library, so every session and a restart load them; use run_code for a fresh, throwaway script. A successful call's namespace is re-entered by the next. A redefinition overwrites its library file; drop deletes the file and unbinds the live name. Output is the emitted text (or the final value of a silent success); stdout and stderr are discarded."
-   :prompt-snippet "Eval Clojure with definitions that persist across sessions"
+   :description (str "Evaluate Clojure in this session's persistent SCI script sandbox: "
+                     script/sandbox-summary
+                     " Top-level definitions persist across calls and are written "
+                     "to the agent's eval library, so new sessions and a restart "
+                     "load them; local let/fn bindings are scratch, so a top-level "
+                     "definition is a library write. An already-running session is "
+                     "a cache and does not pick up another session's new files. A "
+                     "redefinition overwrites its file; drop deletes the file and "
+                     "unbinds this session's live name. A call that ends in a "
+                     "normal error writes nothing; its definitions stay live and "
+                     "can be forgotten. A successful call's namespace is "
+                     "re-entered by the next. Output is the emitted text (or the "
+                     "final value of a silent success); stdout and stderr are "
+                     "discarded. This is the sandbox, not the project's nREPL.")
+   :prompt-snippet "Persistent Clojure/SCI sandbox (fs/sh/tools); top-level definitions are saved"
    :prompt-guidelines
-   ["Use eval when a definition should survive the call — a parser, a report fn, a scratch namespace — and run_code for a throwaway script."
-    "Every top-level definition is written to the agent's eval library and loaded by every session; a redefinition overwrites its file."
-    "drop removes a definition from the library and unbinds it here; a code-less call may carry only drop."
-    "Use (eval/patch 'name old new) to replace one subform in a named definition; it re-evaluates before writing, and the definition name must stay."
-    "Use (eval/edit-form 'name new-source) to replace the whole definition; new-source is a form or its source string. Edit files structurally with clj/edit-form, clj/replace-sexp and clj/paren-repair."
-    "Report with (emit value) or end on the value you want reported; discover the surface with (all-ns) and (ns-publics), and list loaded definitions with (eval/library)."]
+   ["eval is the full script sandbox, not a bare REPL: fs, sh, slurp, tools and require work as in a babashka script; (eval/help) lists sources, loaded definitions and the surface."
+    "Call the run's tools through the `tools` namespace: (tools/list) lists them, (tools/describe \"name\") shows one declaration, and (tools/call \"name\" args) returns a promise to deref — or use (tools/call! \"name\" args) to settle and throw on failure; a plain name is a var too, @(tools/name args)."
+    "Define what should survive the call: every top-level definition is written to the agent's eval library, while let/fn bindings are scratch. Use local bindings for throwaway code."
+    "New sessions and a restart load the library; an already-running session is a cache and does not see another session's new files. A call that ends in a normal error writes nothing; its definitions stay live and can be forgotten."
+    "A redefinition overwrites its file; drop or (eval/forget 'name) deletes the file and unbinds this session's live name. A code-less call may carry only drop."
+    "Use (eval/patch 'name old new) to replace one subform in a named definition; it re-evaluates before writing, and the definition name must stay. Use (eval/edit-form 'name new-source) to replace the whole definition; edit files structurally with clj/edit-form, clj/replace-sexp and clj/paren-repair."
+    "Report with (emit value) or end on the value you want reported; stdout and stderr are discarded."]
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"

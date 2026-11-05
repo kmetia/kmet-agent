@@ -245,8 +245,8 @@
     (str "- " (:id source) (when-let [doc (:doc source)] (str ": " doc)))))
 
 (defn- environment-help
-  "The `(eval/help)` text: sources, the loaded library, and the three lookup
-   forms. Source errors are part of the source list, not hidden."
+  "The `(eval/help)` text: sources, the loaded library, the common script
+   surface, and the persistence/reporting rules."
   [env]
   (let [sources @(:source-info env)
         entries (library-entries env)]
@@ -258,6 +258,15 @@
          (when (seq entries)
            (str " (" (str/join ", " (map :name entries)) ")"))
          "\nFailures: " (count @(:failures env))
+         "\nSandbox: Clojure/SCI — " script/sandbox-summary
+         "\nPersistence: top-level definitions are written to the library; "
+         "let/fn bindings are not. New sessions and restarts load the library; "
+         "this session's environment is a cache. A call that ends in a normal "
+         "error writes nothing; its definitions stay live and can be forgotten."
+         "\nDiscover: (all-ns) lists namespaces, (ns-publics 'ns) lists a "
+         "namespace's vars, and (eval/library) lists loaded definitions."
+         "\nReporting: (emit value) or end on the final value; stdout and "
+         "stderr are discarded."
          "\nUse (eval/library), (eval/sources), (eval/forget 'name), "
          "(eval/patch 'name old new), (eval/edit-form 'name new-source).")))
 

@@ -37,6 +37,8 @@
             [kmet.ai.models :as models]
             [kmet.srce.core :as srce]))
 
+(declare tool-table tool-selection)
+
 (defrecord AgentState [status        ;; :idle :thinking :executing :done :error
                        messages      ;; atom of conversation message vectors
                        session       ;; Session record or nil
@@ -455,15 +457,26 @@ Be precise and concise in your responses."}}]
    one-line descriptions changed since the branch's last listing. Appends one
    `:custom-message` (user-role, not displayed) and never rewrites the leading
    system prompt, which is a full prefix miss; a promotion appends nothing.
+   Selection-aware: a source is announced only when run_code/eval or
+   tool_search can reach it, and a stale listing is corrected when none can.
    Returns the message, or nil when there was nothing new to say."
   [agent]
   (when-let [sess (:session agent)]
-    (let [sources (tools/get-deferred-sources (srce/get (:ctx agent) :tools))
-          text (session/deferred-sources-listing sources)
-          previous (last-tool-sources-listing sess)]
+    (let [handle (srce/get (:ctx agent) :tools)
+          selected (tools/select-tools (tool-table agent) (tool-selection agent))
+          opts {:run-code? (contains? selected "run_code")
+                :eval? (contains? selected "eval")
+                :tool-search? (contains? selected search/tool-search-name)}
+          sources (tools/get-deferred-sources handle {:selected (set (keys selected))})
+          previous (last-tool-sources-listing sess)
+          text (or (session/deferred-sources-listing sources opts)
+                   (when (and previous (seq sources))
+                     (str "Deferred tool sources are registered but not reachable: "
+                          "no script tool or tool_search is selected.")))]
       ;; an empty set is only worth a message when something was listed before:
       ;; a session that never had a deferred source stays silent
-      (when (and (not= text previous)
+      (when (and (some? text)
+                 (not= text previous)
                  (or (seq sources) previous))
         (append-custom-message! agent {:role :custom
                                        :custom-type session/tool-sources-custom-type

@@ -86,6 +86,16 @@
    callable from inside a script."
   #{"run_code" "eval"})
 
+(def sandbox-summary
+  "The model-facing summary of the shared script sandbox surface. Both script
+   tools and `(eval/help)` label it; the summary itself stays host-neutral and
+   names only the common surface."
+  (str "aliases fs, str, set, edn, walk, json and p; bare sh; cwd-resolving "
+       "slurp, spit and file-seq; (cwd), (env k), (now), (sleep ms), (spawn f), "
+       "(emit v) and (emit-image x); the tools and sandbox namespaces; "
+       "clojure.*, babashka.* and the bundled libs (rewrite-clj, cljfmt, "
+       "edamame, parinferish) are require-able."))
+
 (def alias-prelude
   "The aliases every script gets without a require — the standard Clojure and
    babashka vocabulary. Evaluated once per fork, before the user code, as a

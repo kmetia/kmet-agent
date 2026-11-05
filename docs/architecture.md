@@ -463,7 +463,10 @@ promotion and never by rebuilding the leading system prompt (pi's appended
 description elides past 250 characters and the whole text at 4096, where the
 descriptions shrink to share the room — every source stays listed, because being
 listed is the point — and only the head lines outgrowing the room drops the last
-sources into one `… N more sources` line, as pi's section does.
+sources into one `… N more sources` line, as pi's section does. A source is
+announced only when at least one of its tools is selected, and the intro names
+only the discovery paths the selection actually has — run_code/eval
+(`tools/list`) and/or `tool_search`; with neither, nothing is appended.
 
 **One invocation pipeline.** `kmet.app.tools.invoke` is the only
 chain → check → execute path:
@@ -599,7 +602,12 @@ row also registers the `:core` eval source (the shared `edit`/`write-file` ops
 under `user`, and `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair` from
 the shared `kmet.libs.clj-edit` engine), so removing it leaves the command
 without those verbs. The clojure extension's tools wrap the same engine; the
-core Clojure verbs do not require the extension. `list` and `search` read the disk index, so they show the
+core Clojure verbs do not require the extension. The eval tool's description,
+guidelines and `(eval/help)` name the shared script surface (aliases, the
+`tools` namespace, require-able namespaces and bundled libs) without depending
+on `run_code`, since either row can be selected alone; host-specific sandbox
+differences stay in this section, not in the model-facing text. `list` and
+`search` read the disk index, so they show the
 library rather than one session's cache; `drop` deletes the files directly and
 unbinds the live name only when that session already has an environment, so a
 drop never builds one. The environment build
