@@ -1,124 +1,111 @@
 ---
 name: clojure-edit
-description: Guidelines for using the clojure_edit, clojure_edit_replace_sexp, clojure_paren_repair and clojure_eval tools. Use when editing Clojure files to ensure structure-aware editing, avoid paren errors, verify changes in a running REPL, and follow best practices for Clojure code generation.
+description: Choose the right Clojure editing surface — clojure_edit, clojure_edit_replace_sexp, clojure_paren_repair, clojure_eval, the generic edit tool, or the eval clj/* verbs. Use when editing Clojure files to keep edits structure-aware and avoid paren errors.
 ---
 
-# Use Clojure Structure-Aware Editing Tools
+# Editing Clojure Files
 
-ALWAYS use the specialized Clojure editing tools rather than generic text editing.
-These tools understand Clojure syntax and prevent common errors.
+## Pick the surface
 
-## Why Use These Tools?
-- Avoid exact whitespace matching problems
-- Get early validation for parenthesis balance
-- Eliminate retry loops from failed text edits
-- Target forms by name rather than trying to match exact text
+The form-editing tools (`clojure_edit`, `clojure_edit_replace_sexp`) match
+forms or expressions rather than exact text, validate delimiters, and refuse
+duplicate top-level definitions. The generic `edit` tool is better for small
+text changes and several disjoint hunks in one call; the eval `clj/*` verbs are
+better when the edit belongs in a script.
 
-## Core Tools to Use
-- `clojure_edit` — Replace entire top-level forms (an empty `content` deletes them)
-- `clojure_edit_replace_sexp` — Modify expressions within top-level forms (an empty `new_form` deletes them)
-- `clojure_paren_repair` — Fix unbalanced delimiters (parens/brackets/braces) in a file
-- `clojure_eval` — Evaluate code in a running nREPL server to verify your changes
+| Change | Surface |
+|---|---|
+| Replace, delete or insert a whole top-level form by name | `clojure_edit` |
+| Change an expression inside a form, or rename a symbol everywhere | `clojure_edit_replace_sexp` |
+| Fix unbalanced delimiters after a broken edit | `clojure_paren_repair` |
+| Small text changes, comments, several disjoint hunks | `edit` |
+| Edit as part of a script or batch | `eval` with `clj/edit-form`, `clj/replace-sexp` or `clj/paren-repair` |
+| Edit a definition already in the eval library | `eval` with `eval/edit-form` or `eval/patch` |
+| Verify a change in a running nREPL | `clojure_eval` |
 
-`clojure_edit` and `clojure_edit_replace_sexp` REJECT unbalanced delimiters in
-the content you pass (missing or extra parens are NOT auto-fixed) — you must
-pass complete, balanced forms. When a file's delimiters get broken, run
-`clojure_paren_repair` to fix them.
+`clojure_edit_replace_sexp`, `clojure_paren_repair` and `clojure_eval` are
+deferred: load them with `tool_search` when they are not declared. The eval
+verbs are reached through the `eval` tool; the editing tools above do not
+require it. When both are available, use the tool for a direct edit and the
+verb when the edit belongs in a script — do not apply the same edit twice.
 
-## CODE SIZE DIRECTLY IMPACTS EDIT SUCCESS
-- **SMALLER EDITS = HIGHER SUCCESS RATE**
-- **LONG FUNCTIONS ALMOST ALWAYS FAIL** — Break into multiple small functions
-- **NEVER ADD MULTIPLE FUNCTIONS AT ONCE** — Add one at a time
-- Each additional line exponentially increases failure probability
-- 5-10 line functions succeed, 20+ line functions usually fail
-- Break large changes into multiple small edits
+## clojure_edit
 
-## COMMENTS ARE PROBLEMATIC
-- Minimize comments in code generation
-- Comments increase edit complexity and failure rate
-- Use meaningful function and parameter names instead
-- If comments are needed, add them in separate edits
+- Edits a whole top-level form by `form_type` + `form_identifier`. Form types
+  are definition keywords (`defn`, `defn-`, `def`, `defmacro`, `defmethod`,
+  `deftest`, `ns`, `s/def`, …); alias-qualified heads such as `t/deftest` and
+  `s/def` match by their plain keyword.
+- `replace` substitutes the form (an empty `content` deletes it);
+  `insert_before`/`insert_after` add content beside it and take only the new
+  content, never the anchor form. Prefer inserts for adding forms; use
+  `replace` only to change an existing one.
+- `content` must be one complete, balanced form; unbalanced delimiters are
+  rejected, not auto-fixed.
+- The inserted form lands outside the anchor's line: a same-line trailing
+  comment stays with the anchor, and a comment on its own line stays with the
+  next form.
+- An edit that would leave two top-level definitions with the same name (or the
+  same `defmethod` dispatch) is refused and nothing is written. Fix it by
+  deleting or renaming the other definition; do not bypass the guard with text
+  editing unless the duplicate is intentional. The guard covers literal
+  top-level forms only, not `(comment …)` bodies or reader-conditional
+  branches.
+- `defmethod` identifiers: `area :rectangle`,
+  `convert-length [:feet :inches]`, `shape/area :square`.
 
-## insert_after / insert_before Semantics
-- Pass ONLY the new content — never repeat the anchor form inside `content`
-- The inserted form lands OUTSIDE the anchor's own line:
-  - a same-line trailing comment stays with the anchor form (`(defn a ...) ;; note` keeps its note)
-  - a comment on its own line leads the NEXT form and stays with it
-- The inserted form is blank-line separated from surrounding forms
+## clojure_edit_replace_sexp
 
-## Duplicate Definitions Are Refused
-- `clojure_edit` and `clojure_edit_replace_sexp` refuse an edit that would
-  leave two top-level definitions with the same name (or the same `defmethod`
-  dispatch), and write nothing.
-- Only a duplicate the edit introduces is refused; a pre-existing duplicate
-  elsewhere in the file does not block an unrelated edit.
-- Fix it by deleting or renaming the other definition — retrying the same
-  edit hits the same guard. Do not bypass it with generic text editing unless
-  the duplicate is intentional.
-- The guard covers literal top-level definitions only (not a `def` inside
-  `(comment …)` or the branches of a top-level reader conditional), so keep
-  the namespace `require` check after a successful edit.
+- Replaces expressions inside forms by structure; whitespace and formatting are
+  ignored.
+- `match_form` and `new_form` need complete, balanced expressions; include the
+  enclosing form for fragments such as `"...x]]"` or `:else [w j])`.
+- `replace_all: true` replaces every occurrence; it is forced to false for
+  insert operations.
+- An empty `new_form` with `operation: "replace"` deletes the matched
+  expression(s).
 
-## Alias-Qualified Forms
-- `(t/deftest my-test ...)` matches with plain `form_type: "deftest"`
-  (the qualified name `t/deftest` also works)
+## eval verbs
 
-## match_form Must Be Complete
-- `clojure_edit_replace_sexp` match_form/new_form need COMPLETE expressions with balanced parens
-- Unbalanced delimiters (a missing/extra paren, e.g. `"(+ x 1"`) are REJECTED with an error — pass the complete, balanced expression exactly as it appears in the file
-- Fragments that cannot form a complete expression (`...x]]`, `:else [w j])`) are also rejected — include the full enclosing form
+- `(clj/edit-form args)`, `(clj/replace-sexp args)` and `(clj/paren-repair args)`
+  take the same argument maps and return the same result shape as the tool
+  calls; relative paths resolve against the eval call's cwd.
+- `(eval/edit-form 'name new-source)` replaces a definition already in the eval
+  library and re-evaluates it; `(eval/patch 'name old new)` replaces the first
+  structurally equal subform. Both write only after a successful re-evaluation.
+- The tools and the eval verbs share `kmet.libs.clj-edit`; do not hand-edit
+  around either.
 
-## Handling Parenthesis Errors
-- Unbalanced parens in tool content are rejected with a clear error — fix the content yourself and retry
-- If a repair leaves the code wrong, break complex functions into smaller, focused ones
-- Start with minimal code and add incrementally
-- When facing persistent errors, verify in REPL first
-- Count parentheses in the content you're adding
-- For deep nesting, use threading macros (`->`, `->>`)
-- If a file is badly broken, run `clojure_paren_repair` on it
+## Edit hygiene
 
-## Creating New Files
-1. Start by writing only the namespace declaration using the `write` tool
-2. Then add each function one at a time with `clojure_edit` using the "insert_after" operation
-3. Test each function before adding the next
+- **Smaller edits succeed more often.** Long functions and batches of several
+  functions usually fail; add one form at a time.
+- Minimize comments; add them in separate edits when needed.
+- Rejected unbalanced content is not auto-fixed — fix it and retry. If a file
+  is badly broken, repair it with `clojure_paren_repair` (or
+  `(clj/paren-repair {:file_path "…"})`); for persistent errors, break the
+  function up and verify in a REPL first.
 
-## Verifying Changes in the REPL
+## New files
+
+1. Write only the namespace declaration with the `write` tool.
+2. Add each function one at a time with `clojure_edit` `insert_after`.
+3. Test each function before adding the next.
+
+## Verify in nREPL
+
 After editing a namespace, verify it in a running nREPL with `clojure_eval`:
+
 - Evaluate `(require '[my.ns :as ns] :reload)` and then call the changed function.
 - The session persists, so vars and namespaces loaded by one call are visible
   to later calls; return to the same port to keep that state.
-- Pass `ns` to evaluate in a target namespace (e.g. `ns: "my.app"`);
-  otherwise the session's current namespace is used.
+- Pass `ns` to evaluate in a target namespace (e.g. `ns: "my.app"`); otherwise
+  the session's current namespace is used.
 - Pass `port` when no project port file (`.nrepl-port`, shadow-cljs, CIDER)
-  identifies the server, or when more than one nREPL is running. Port files
-  are resolved from the session's working directory; when none identifies a
-  live server, the common nREPL ports (7801, 7802, 7803, 7888, 1667) are
-  probed.
-- To stop a long evaluation, cancel the run; the connection is closed and
-  the result says the evaluation was cancelled. Code already running on the
-  server may still complete.
+  identifies the server, or when more than one nREPL is running. Port files are
+  resolved from the session's working directory; when none identifies a live
+  server, the common nREPL ports (7801, 7802, 7803, 7888, 1667) are probed.
+- To stop a long evaluation, cancel the run; the connection is closed and the
+  result says the evaluation was cancelled. Code already running on the server
+  may still complete.
 - Unbalanced delimiters in the code are repaired before evaluation and the
   result says so — fix the code instead of relying on it.
-
-## Working with Defmethod
-Remember to include dispatch values:
-- Normal dispatch: `form_identifier: "area :rectangle"`
-- Vector dispatch: `form_identifier: "convert-length [:feet :inches]"`
-- Namespaced: `form_identifier: "tool-system/validate-inputs :clojure-eval"`
-
-## When to Use Which Tool
-| Use case | Tool |
-|---|---|
-| Replace a whole function | `clojure_edit` |
-| Delete a whole function/form | `clojure_edit` with `content: ""` (like edit's empty `newText`) |
-| Change one expression inside a function | `clojure_edit_replace_sexp` |
-| Delete an expression inside a function | `clojure_edit_replace_sexp` with `new_form: ""` (like edit's empty `newText`) |
-| Insert a new function before/after another | `clojure_edit` |
-| Rename a symbol everywhere in a file | `clojure_edit_replace_sexp` with `replace_all` |
-| Edit an ns declaration | `clojure_edit` |
-| Fix unbalanced delimiters after an errant edit | `clojure_paren_repair` |
-| Verify a change in a running nREPL | `clojure_eval` |
-
-**Rule of thumb:** prefer `insert_before`/`insert_after` for ADDING new forms
-(no need to reproduce the anchor's text); use `replace` only to MODIFY an
-existing form's body.

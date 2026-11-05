@@ -171,24 +171,28 @@ stays loadable in `jolt dist` builds.
 ### `clojure-edit`
 
 Editing guidelines pulled on demand when working with Clojure files. Covers:
-- Why use structure-aware tools
+- Choosing between the tools, generic `edit`, and the eval `clj/*` verbs
 - "Smaller edits = higher success rate"
 - Parenthesis error handling
 - Creating new files workflow
 - defmethod dispatch value examples
-- When to use which tool
 
 ## When to use which
 
-| Use case | Tool |
+| Use case | Surface |
 |---|---|
-| Replace a whole function | `clojure_edit` |
+| Replace, delete or insert a whole top-level form | `clojure_edit` |
 | Change one expression inside a function | `clojure_edit_replace_sexp` |
-| Insert a new function before/after another | `clojure_edit` |
 | Rename a symbol everywhere in a file | `clojure_edit_replace_sexp` with `replace_all` |
-| Edit an ns declaration | `clojure_edit` |
 | Fix unbalanced delimiters after an errant edit | `clojure_paren_repair` |
+| Small text changes or several disjoint hunks | `edit` |
+| Scripted or batch edits | `eval` with `clj/edit-form`, `clj/replace-sexp` or `clj/paren-repair` |
 | Verify a change in a running nREPL | `clojure_eval` |
+
+`clojure_edit_replace_sexp`, `clojure_paren_repair` and `clojure_eval` are
+deferred: when they are not declared, load them with `tool_search` first. The
+eval verbs share `kmet.libs.clj-edit` with the tools and are reached through
+the `eval` tool's environment.
 
 ## Dependencies
 

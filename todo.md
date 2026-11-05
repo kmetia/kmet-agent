@@ -305,6 +305,7 @@ are dropped too — see § Deferred.
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; 10a moved above; 10b (manifest) planned after the cwd-scope task; **cwd-scope task in progress** |
 | Eval library interface discovery (10a) | saved definitions and source-provided verbs expose an interface and implementation through `(eval/describe)`, not just names | **next** — runs before the cwd-scope task |
 | Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **in progress** — step 0 (shared cwd key) done; 10a runs first |
+| Clojure extension surface review | the extension's tools now overlap E17's core editing engine and its eval `clj/*` verbs; decide the remaining surface from usage | **measuring** — description and skill trimmed 2026-11-05; decision gate after the eval cwd-scope work |
 
 ## Persistent eval and eval sources
 
@@ -1024,22 +1025,55 @@ scope for code. Superseded by § Task: cwd-scoped eval library (2026-11-05).
 
 ## Post-track task: the rest of the clojure extension
 
-Now that the eval tool and E17's core verbs have landed, reconsider the remaining
-clojure extension surface: the `clojure_edit` and deferred
-`clojure_edit_replace_sexp`/`clojure_paren_repair` tools, the paren-check
-hooks, the `clojure-edit` skill, `clojure_eval` (nREPL), and the `:ext/clojure`
-row itself. Decide with usage data (tool calls vs. eval verb calls,
-schema/prompt cost, nREPL use), not in advance:
+Status: measuring (2026-11-05). Landed: the `clojure_edit` description and
+guidelines are cut from 4.3 KB to 1.7 KB (the description alone 3.1 KB →
+1.1 KB); the `clojure-edit` skill now states the real split — the tool for
+whole forms, generic `edit` for small or multi-hunk text, the `clj/*` eval
+verbs for scripted edits, `clojure_eval` for live verification — instead of
+"ALWAYS use the tools"; the extension README matches it; and the extension's
+own `bb.edn` test task is fixed (its classpath was missing the engine's test
+root after the E17 move). No tool was added, removed or promoted, and nothing
+joined a default bundle.
 
-- **Promote** the rest into core (or a `:bundle/clojure` recommended by
-  default) if the tools are expected everywhere and the eval verbs do not
-  cover direct tool calls.
-- **Drop** the extension if the eval verbs make the tools redundant and the
-  hooks/skill/nREPL do not justify a separate artifact; keep the shared
-  `kmet.libs.clj-edit` engine in core and move nREPL only if it has a home.
+Baseline from the session logs (432 session files, 2026-11-05):
 
-Do not duplicate the engine in either outcome. Record the decision here and
-update `docs/extensions.md`/`extension.md` with the chosen surface.
+| surface | calls / sessions |
+|---|---|
+| `clojure_edit` | 762 / 118 (Sep 410 → Oct 181 → Nov 171 on 2–4; 0 on Nov 5) |
+| `clojure_edit_replace_sexp` | 349 / 40 (264 → 81 → 4, already deferred) |
+| `clojure_paren_repair` | 75 / 21 (10 → 63 → 2) |
+| `clojure_eval` (nREPL) | 21 / 7, all in kmet's own development |
+| generic `edit` on `.clj`-family files | 3,684 / 174 (1,796 whole-form hunks) |
+| paren-check hooks | 37 blocked writes / 19 sessions |
+
+Caveat: eval is one day old, and its heavy sessions were subagents with an
+eval-only toolset. No normal session has yet run with both `clojure_edit` and
+the eval verbs mounted, so "the verbs replace the tool" is unproven.
+
+The options remain: keep the opt-in extension with the trimmed surface (the
+current lean), promote the rest into a core/bundle row, or drop the extension
+if the hooks/skill/nREPL no longer justify it. The measurement decides; the
+engine stays in core.
+
+Follow-ups:
+
+- After the cwd-scope and 10a/10b work, measure ~20 normal sessions (not
+  eval-only subagents) with both surfaces mounted: `clojure_edit` calls vs
+  `clj/edit-form`/`clj/replace-sexp`/`clj/paren-repair` calls, whole-form hunks
+  through generic `edit`, and `.clj` edit failures/retries.
+- Apply the gate: if `clojure_edit` stays below ~10% of whole-form edits and
+  ~5 calls/week, retire it from the tool surface (keep the engine, hooks,
+  skill and nREPL; point the skill at the eval verbs). At or above that, keep
+  the trimmed direct tool.
+- Retire `clojure_edit_replace_sexp` once `clj/replace-sexp` carries the use;
+  its calls have already collapsed.
+- If `clojure_paren_repair` is retired, update the `edit` warning hint in
+  `paren_repair.clj` and the skill's recovery line, which both name the tool.
+- Record the outcome here and update `docs/extensions.md`/`extension.md` with
+  the chosen surface. Keep `:ext/clojure` opt-in unless the measurement shows
+  the tools are expected everywhere: no core promotion and no default bundle
+  without that evidence.
+- Do not duplicate `kmet.libs.clj-edit` in any outcome.
 
 ## Deferred: context and token tracks
 
