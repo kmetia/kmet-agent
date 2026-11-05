@@ -42,7 +42,7 @@
 (defn list-sessions
   "List all session files under a session directory, newest first. When DIR
    is a base sessions dir, its cwd-encoded subdirectories are walked too
-   (pi: listAll — sessions/<--cwd-->/); when DIR is a single cwd-encoded
+   (pi: listAll — sessions/<encoded-cwd>/); when DIR is a single cwd-encoded
    dir, it is listed flat. Returns canonical absolute paths."
   [dir]
   (some->> (session-file-candidates dir) (mapv :path)))

@@ -29,7 +29,7 @@
 
 (defn ensure-cwd-session-dir
   "The sessions dir for a cwd — where new sessions are placed:
-   BASE/<--cwd-->/ (pi: getDefaultSessionDir — per-project isolation, G2).
+   BASE/<encode-cwd CWD>/ (pi: getDefaultSessionDir — per-project isolation, G2).
    CONFIG is the loaded or runtime config map and CWD is the directory the
    session belongs to."
   [config cwd]

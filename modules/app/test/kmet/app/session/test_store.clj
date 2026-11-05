@@ -198,17 +198,52 @@
   (t/is (thrown? Exception (s/load-session "nonexistent.ednl"))))
 
 (t/deftest test-encode-cwd
-  ;; G2: pi getDefaultSessionDirPath — `--` + cwd with leading slash stripped
-  ;; and / \ : replaced by -
+  ;; 2026-11-05: the shared cwd key is injective — ~, -, : and / are
+  ;; escaped before the -- wrapper, unlike the legacy pi layout
   (t/is (= "--home-user-proj--" (s/encode-cwd "/home/user/proj")))
-  (t/is (= "--home-user-proj--" (s/encode-cwd "\\home\\user\\proj")))
-  (t/is (= "--C--Users-dev--" (s/encode-cwd "C:\\Users\\dev")))
-  (t/is (= "--a-b--" (s/encode-cwd "a/b"))))
+  (t/is (= "--home-user-proj-a--" (s/encode-cwd "/home/user/proj/a")))
+  (t/is (= "--home-user-proj~-a--" (s/encode-cwd "/home/user/proj-a"))
+        "a hyphen is escaped, so it cannot collide with a slash")
+  (t/is (= "--home-user-~~x--" (s/encode-cwd "/home/user/~x")))
+  (t/is (= "--home-user-a~:b--" (s/encode-cwd "/home/user/a:b")))
+  (t/is (= "----" (s/encode-cwd "/")))
+  (t/is (= (s/encode-cwd (str (fs/absolutize "a/b"))) (s/encode-cwd "a/b"))
+        "a relative cwd is absolutized before encoding")
+  (t/is (= (s/encode-cwd (str (fs/expand-home "~/proj")))
+           (s/encode-cwd "~/proj"))
+        "~ is expanded before encoding")
+  (t/is (not= (s/encode-cwd "/home/user/proj-a")
+              (s/encode-cwd "/home/user/proj/a"))
+        "the collision the legacy encoder had is gone"))
+
+(t/deftest test-decode-cwd
+  (doseq [path ["/home/user/proj"
+                "/home/user/proj-a"
+                "/home/user/proj/a"
+                "/home/user/~x"
+                "/home/user/a:b"
+                "/"]]
+    (t/is (= path (s/decode-cwd (s/encode-cwd path)))
+          (str path " round-trips")))
+  (t/is (thrown? Exception (s/decode-cwd "home-user-proj"))
+        "a string without the -- wrapper is refused"))
+
+(t/deftest test-legacy-encode-cwd
+  (t/is (= "--home-user-proj--" (s/legacy-encode-cwd "/home/user/proj")))
+  (t/is (= "--home-user-proj-a--" (s/legacy-encode-cwd "/home/user/proj/a")))
+  (t/is (= (s/legacy-encode-cwd "/home/user/proj/a")
+           (s/legacy-encode-cwd "/home/user/proj-a"))
+        "the legacy encoder is non-injective; it is read-only compatibility"))
 
 (t/deftest test-session-dir-for-cwd-needs-a-base
   ;; a blank base makes the encoded name a relative path, so the directory would
   ;; be created under the process cwd instead of a sessions dir
   (t/is (= "/base/--home-proj--" (s/session-dir-for-cwd "/base" "/home/proj")))
+  (t/is (= "/base/--home-proj~-x--"
+           (s/session-dir-for-cwd "/base" "/home/proj-x")))
+  (t/is (= "/base/--home-proj-x--"
+           (s/legacy-session-dir-for-cwd "/base" "/home/proj-x"))
+        "the legacy dir keeps its non-injective spelling")
   (doseq [base [nil ""]]
     (t/is (thrown-with-msg? Exception #"base sessions dir"
                             (s/session-dir-for-cwd base "/home/proj")))))

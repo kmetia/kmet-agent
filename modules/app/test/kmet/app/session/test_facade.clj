@@ -18,11 +18,12 @@
      deferred-sources-listing
      create-session delete-session! delete-session-file
      derive-context-settings detect-cache-miss
-     encode-cwd find-most-recent-session fork-from fork-session
+     decode-cwd encode-cwd find-most-recent-session fork-from fork-session
      get-all-custom-entries get-branch get-custom-entries get-entry
      get-first-message get-label get-labels get-last-activity-ms
      get-last-assistant-text get-message-count get-prompt-history get-session-name
-     get-session-stats get-tree list-sessions list-sessions-info load-session
+     get-session-stats get-tree legacy-encode-cwd
+     legacy-session-dir-for-cwd list-sessions list-sessions-info load-session
      make-bash-entry plan-session-import project-context project-entries
      record-bash-result! replace-entries! reset-leaf! resolve-session-path
      sanitize-session-name session-cwd session-dir-for-cwd session-entry-text

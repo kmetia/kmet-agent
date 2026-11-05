@@ -28,7 +28,7 @@
       (t/is (str/ends-with? f ".ednl")))))
 
 (t/deftest test-session-list-cwd-dirs
-  ;; G2: sessions live in <base>/<--cwd-->/; list-sessions on the base walks
+  ;; G2: sessions live in <base>/<encoded-cwd>/; list-sessions on the base walks
   ;; the cwd subdirs (pi: listAll), a cwd dir lists flat, and legacy flat
   ;; files in the base stay visible (no regression on upgrade)
   (let [dir (test-tmp/temp-dir! "test-sess-cwd-")

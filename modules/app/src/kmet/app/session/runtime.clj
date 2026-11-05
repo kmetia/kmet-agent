@@ -94,9 +94,16 @@
 (defn find-recent-session
   "The most recent session file for CWD under BASE-DIR, or nil (pi:
    continueRecent → findMostRecentSession). Header-based discovery: legacy
-   headerless sessions and other-cwd files are excluded."
+   headerless sessions and other-cwd files are excluded. The injective
+   current key and the pre-2026-11-05 legacy key are both searched, and the
+   newest match wins, so a session created before the key change still
+   continues."
   [base-dir cwd]
-  (session/find-most-recent-session (ensure-cwd-session-dir base-dir cwd) cwd))
+  (->> [(ensure-cwd-session-dir base-dir cwd)
+        (session/legacy-session-dir-for-cwd base-dir cwd)]
+       (keep #(session/find-most-recent-session % cwd))
+       (sort-by #(.toMillis (fs/last-modified-time %)) >)
+       first))
 
 (defn config
   "The live process config (the engine holds it in an atom because /reload

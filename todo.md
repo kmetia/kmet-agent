@@ -2,9 +2,9 @@
 
 ## Task: cwd-scoped eval library (2026-11-05)
 
-Status: next. Step 0 fixes the shared cwd key; the eval scopes then use it.
-Supersedes the one-global-library decision below; that decision stays as the
-step-4R history.
+Status: in progress. Step 0 (the shared cwd key) is done; the eval scopes
+then use it in steps 1–9. Supersedes the one-global-library decision below;
+that decision stays as the step-4R history.
 
 The eval environment keeps one durable visibility layer per session cwd, with
 the home library as an explicit global layer. One definition per address is
@@ -223,8 +223,8 @@ are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; **cwd-scope task next** |
-| Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **next** |
+| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9 done; **cwd-scope task in progress** |
+| Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **in progress** — step 0 (shared cwd key) done |
 
 ## Persistent eval and eval sources
 

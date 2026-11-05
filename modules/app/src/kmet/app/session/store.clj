@@ -126,28 +126,98 @@
     (reset! (:entries session) entries)
     (reset! (:leaf-id session) (some-> entries last :id))))
 
-;; ─── Layout (pi: cwd-encoded session dirs) ───────────────────────────────
+;; ─── Layout (the injective shared cwd key) ──────────────────────────────────
+
+(defn- normalize-cwd
+  "The shared key's view of CWD: home-expanded, absolute, normalized, with
+   forward slashes."
+  [cwd]
+  (-> (str cwd)
+      fs/expand-home
+      fs/absolutize
+      fs/normalize
+      str
+      (str/replace "\\" "/")))
+
+(defn- escape-cwd
+  "Escape a normalized path body for the session/eval directory key."
+  [path]
+  (str/escape path {\~ "~~" \- "~-" \: "~:" \/ "-"}))
+
+(defn- unescape-cwd
+  "Inverse of escape-cwd: decode one escape sequence at a time so adjacent
+   escapes do not cascade, and turn an unescaped - back into /."
+  [encoded]
+  (loop [i 0 out []]
+    (if (>= i (count encoded))
+      (apply str out)
+      (let [ch (nth encoded i)
+            next-ch (when (< (inc i) (count encoded))
+                      (nth encoded (inc i)))]
+        (cond
+          (and (= ch \~) (contains? #{\~ \- \:} next-ch))
+          (recur (+ i 2) (conj out next-ch))
+          (= ch \-) (recur (inc i) (conj out \/))
+          :else (recur (inc i) (conj out ch)))))))
 
 (defn encode-cwd
-  "Encode a cwd path into a safe directory name: `--` + the cwd with its
-   leading slash stripped and / \\ : replaced by - + `--` (pi:
-   getDefaultSessionDirPath — sessions/<--cwd-->/)."
+  "Encode a cwd path into an injective, reversible directory name: `--` +
+   the normalized absolute path with its leading / stripped and ~, -, : and
+   / escaped as ~~, ~-, ~: and -, + `--`. /home/user/proj keeps the pi
+   spelling --home-user-proj--, while a hyphen or colon in a path no
+   longer collides with a separator (the legacy encoder's flaw)."
+  [cwd]
+  (str "--" (escape-cwd (str/replace (normalize-cwd cwd) #"^/" "")) "--"))
+
+(defn decode-cwd
+  "Inverse of `encode-cwd`: strip the `--` wrapper, unescape, and restore
+   the leading / (a Windows drive path keeps its own form). Throws for a
+   string that is not an encoded cwd."
+  [encoded]
+  (let [encoded (str encoded)]
+    (when-not (and (>= (count encoded) 4)
+                   (str/starts-with? encoded "--")
+                   (str/ends-with? encoded "--"))
+      (throw (ex-info (str "not an encoded cwd: " (pr-str encoded))
+                      {:type :kmet.app/bad-cwd-encoding
+                       :encoded encoded})))
+    (let [path (unescape-cwd (subs encoded 2 (- (count encoded) 2)))]
+      (if (and (fs/windows?) (re-find #"^[A-Za-z]:" path))
+        path
+        (str "/" path)))))
+
+(defn legacy-encode-cwd
+  "The pre-2026-11-05 encoder (pi getDefaultSessionDirPath): `--` + cwd
+   with its leading slash stripped and / \\ : replaced by -. Non-injective,
+   so it is read-only compatibility for existing session directories;
+   new sessions use `encode-cwd`."
   [cwd]
   (str "--" (-> (str cwd)
                 (str/replace #"^[/\\]" "")
                 (str/replace #"[/\\:]" "-"))
        "--"))
 
-(defn session-dir-for-cwd
-  "Session directory for a cwd under a base sessions dir: BASE/<--cwd-->/
-   (pi: default layout sessions/<--cwd-->/). A blank BASE is refused: the
-   encoded name would be a relative path, created under the process cwd
-   instead of a sessions dir."
-  [base-dir cwd]
+(defn- session-dir
+  [base-dir encoded cwd]
   (when (str/blank? (str base-dir))
     (throw (ex-info "a session directory needs a base sessions dir"
                     {:type :kmet.app/no-session-dir :cwd (str cwd)})))
-  (str (fs/path base-dir (encode-cwd cwd))))
+  (str (fs/path base-dir encoded)))
+
+(defn session-dir-for-cwd
+  "Session directory for a cwd under a base sessions dir:
+   BASE/<encode-cwd CWD>/. A blank BASE is refused: the encoded name would
+   be a relative path, created under the process cwd instead of a sessions
+   dir."
+  [base-dir cwd]
+  (session-dir base-dir (encode-cwd cwd) cwd))
+
+(defn legacy-session-dir-for-cwd
+  "The pre-2026-11-05 directory for CWD under BASE-DIR - read-only fallback
+   for sessions created before the injective key; new sessions use
+   `session-dir-for-cwd`."
+  [base-dir cwd]
+  (session-dir base-dir (legacy-encode-cwd cwd) cwd))
 
 ;; ─── CRUD ───────────────────────────────────────────────────────────────────
 

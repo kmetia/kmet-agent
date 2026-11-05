@@ -452,6 +452,28 @@
             "the most recent session for the cwd is found"))
       (finally (fs/delete-tree dir)))))
 
+(deftest test-find-recent-session-searches-new-and-legacy-dirs
+  (let [dir (test-tmp/temp-dir! "test-session-runtime-legacy-")
+        cwd (str (fs/cwd))
+        legacy-dir (session/legacy-session-dir-for-cwd dir cwd)
+        new-dir (rt/ensure-cwd-session-dir dir cwd)
+        legacy (session/create-session legacy-dir {:cwd cwd})
+        _ (session/append-entry legacy {:role :assistant :content "legacy"})
+        current (session/create-session new-dir {:cwd cwd})
+        _ (session/append-entry current {:role :assistant :content "current"})
+        now (System/currentTimeMillis)]
+    (try
+      (fs/set-last-modified-time (:file legacy) (- now 2000))
+      (fs/set-last-modified-time (:file current) (- now 1000))
+      (is (= (str (fs/canonicalize (:file current)))
+             (str (fs/canonicalize (rt/find-recent-session dir cwd))))
+          "the newer current-key session wins")
+      (fs/set-last-modified-time (:file legacy) now)
+      (is (= (str (fs/canonicalize (:file legacy)))
+             (str (fs/canonicalize (rt/find-recent-session dir cwd))))
+          "the newer legacy-key session also wins")
+      (finally (fs/delete-tree dir)))))
+
 (deftest test-two-handles-do-not-cross-contaminate
   (let [h1 (support/create-agent-handle!)
         h2 (support/create-agent-handle!)

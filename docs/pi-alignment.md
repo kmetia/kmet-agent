@@ -107,9 +107,16 @@ headerless files still load with `:header nil`.
   `:type`, `:version`, `:id`, `:created-at`, `:cwd`, and optional
   `:parent-session`; later entries carry `:id`, `:parent-id`, `:role`,
   `:content`, `:timestamp`, and role-specific fields.
-- Files live under `~/.kmet/sessions/<--cwd-->/` with timestamped `.ednl`
-  names. Creation is lazy: no file is written until the first assistant
-  message.
+- Files live under `~/.kmet/sessions/--<escaped-cwd>--/` with timestamped
+  `.ednl` names. The key is injective and reversible: the normalized absolute
+  cwd loses its leading `/`, then `~`, `-`, `:` and `/` are escaped as `~~`,
+  `~-`, `~:` and `-` before the `--` wrapper (`decode-cwd` reverses it).
+  `/home/user/proj` still encodes to `--home-user-proj--`, but a hyphen or
+  colon no longer collides with a separator — a named departure from pi's
+  non-injective `<--cwd-->` layout. Discovery also reads the legacy encoding
+  for existing session dirs, and `find-recent-session` takes the newest match
+  from either key; no directory is renamed automatically. Creation is lazy:
+  no file is written until the first assistant message.
 - Branching changes the in-memory leaf; subsequent appends create a new
   branch while the existing entries remain in the file and tree. Fork and
   clone retain entry ids, record `:parent-session`, and re-chain labels.
