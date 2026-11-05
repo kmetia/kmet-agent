@@ -813,20 +813,25 @@
                           {:zloc (z/replace target new-node)})))]
       (edit-source source file-path find-edit))))
 
+(defn- write-edited!
+  "Write RESULT's formatted content to FILE-PATH and return the tool result,
+   or pass an error result through unchanged."
+  [file-path result]
+  (if (:is-error result)
+    result
+    (do
+      (spit-utf8 file-path (:content result))
+      {:content "Edit applied."
+       :details (when-let [diff-str (:diff result)] {:diff diff-str})})))
+
 (defn edit-pipeline
   "Read FILE-PATH, apply FIND-EDIT-FN through `edit-source`, and write the
    formatted result. Returns the tool result map; `:content` is \"Edit
    applied.\" on success and the error report otherwise."
   [file-path find-edit-fn]
   (try
-    (let [original (slurp-utf8 file-path)
-          result (edit-source original file-path find-edit-fn)]
-      (if (:is-error result)
-        result
-        (do
-          (spit-utf8 file-path (:content result))
-          {:content "Edit applied."
-           :details (when-let [diff-str (:diff result)] {:diff diff-str})})))
+    (let [original (slurp-utf8 file-path)]
+      (write-edited! file-path (edit-source original file-path find-edit-fn)))
     (catch Exception e
       {:content (str "Error editing " file-path ": " (ex-message e))
        :is-error true})))
@@ -1122,14 +1127,8 @@
         {:keys [op-kw missing-content? blank-insert?]} (edit-args args)]
     (or (guard-args args op-kw missing-content? blank-insert? true)
         (try
-          (let [result (edit-form-source (slurp-utf8 file_path) args)]
-            (if (:is-error result)
-              result
-              (do
-                (spit-utf8 file_path (:content result))
-                {:content "Edit applied."
-                 :details (when-let [diff-str (:diff result)]
-                            {:diff diff-str})})))
+          (write-edited! file_path
+                         (edit-form-source (slurp-utf8 file_path) args))
           (catch Exception e
             {:content (str "Error editing " file_path ": " (ex-message e))
              :is-error true})))))
@@ -1352,6 +1351,81 @@
 ;; Main execute
 ;; ═══════════════════════════════════════════════════════════════════════════════
 
+(defn- sexp-op [operation]
+  (case operation
+    "replace"       :replace
+    "insert_before" :insert-before
+    "insert_after"  :insert-after
+    :replace))
+
+(defn- sexp-file-error [file_path]
+  (cond
+    (str/blank? file_path)
+    {:content "Missing required parameter: file_path" :is-error true}
+
+    (not (clojure-file? file_path))
+    {:content (not-clojure-file-msg "clojure_edit_replace_sexp" file_path)
+     :is-error true}
+
+    (not (fs/exists? file_path))
+    {:content (str "File not found: " file_path) :is-error true}))
+
+(defn- sexp-match-error [match_form]
+  (if (str/blank? match_form)
+    {:content "Missing required parameter: match_form" :is-error true}
+    (or (when-let [problem (parse-problem "match_form" match_form)]
+          {:content (str "match_form must be complete and balanced"
+                         " (unbalanced delimiters are rejected, not auto-repaired):\n"
+                         (:report problem)
+                         "\nPass the complete S-expression(s), e.g. \"(+ x 1)\".")
+           :is-error true})
+        (let [parsed (try (p/parse-string-all match_form)
+                          (catch Exception _ nil))]
+          (when (or (nil? parsed)
+                    (zero? (count (n/child-sexprs parsed))))
+            {:content "match_form must contain at least one valid S-expression (not just comments or whitespace)"
+             :is-error true})))))
+
+(def ^:private sexp-definition-head-pattern
+  #"^\((defn|defn-|defmacro|defmacro-|def|deftest|deftest-|defmethod|defprotocol|defrecord|ns)([ )])")
+
+(defn- sexp-new-missing-error [new_form op-kw]
+  (when (nil? new_form)
+    {:content (str "Missing required parameter: new_form"
+                   (if (= op-kw :replace)
+                     " — pass \"\" (empty string) to delete the matched expression(s)."
+                     " — insert_before/insert_after need the content to insert."))
+     :is-error true}))
+
+(defn- sexp-new-blank-error [new_form operation op-kw]
+  (when (and (some? new_form) (str/blank? new_form) (not= op-kw :replace))
+    {:content (str "new_form cannot be empty for operation \"" operation
+                   "\" — insert_before/insert_after need the content to insert. "
+                   "An empty new_form deletes only with operation \"replace\".")
+     :is-error true}))
+
+(defn- sexp-new-shape-error [content]
+  (when content
+    (let [head (second (re-find sexp-definition-head-pattern (str/trim content)))]
+      (when head
+        (when-let [shape-error (validate-form-shape head content)]
+          {:content (str "Invalid new_form — not a well-formed Clojure definition:\n"
+                         shape-error
+                         "\nPass a complete, valid expression.")
+           :is-error true})))))
+
+(defn- sexp-new-error [new_form operation op-kw]
+  (let [content (when-not (or (nil? new_form) (str/blank? new_form)) new_form)]
+    (or (sexp-new-missing-error new_form op-kw)
+        (sexp-new-blank-error new_form operation op-kw)
+        (when-let [problem (when content (parse-problem "new_form" content))]
+          {:content (str "new_form must be complete and balanced"
+                         " (unbalanced delimiters are rejected, not auto-repaired):\n"
+                         (:report problem)
+                         "\nPass the complete S-expression(s), e.g. \"(* x 2)\".")
+           :is-error true})
+        (sexp-new-shape-error content))))
+
 (defn replace-sexp
   "The clojure_edit_replace_sexp operation as a plain function: ARGS is its
    map, including `:file_path`; returns the tool result map and writes the
@@ -1359,98 +1433,21 @@
   [raw-args]
   (let [{:keys [file_path match_form new_form replace_all operation]}
         (resolved-args raw-args)
-        op-kw (case operation
-                "replace"       :replace
-                "insert_before" :insert-before
-                "insert_after"  :insert-after
-                :replace)
-        ;; Original: replace_all forced false for insert operations
+        op-kw (sexp-op operation)
+        ;; insert operations never fan out
         replace-all? (and (boolean replace_all)
-                          (not= op-kw :insert-before)
-                          (not= op-kw :insert-after))
-        ;; Deletion follows the edit tool's convention: new_form stays
-        ;; required, and an empty (blank) value with operation "replace"
-        ;; removes the matched expression(s) — zero complete expressions.
-        missing-new? (nil? new_form)
-        blank-new?   (and (not missing-new?) (str/blank? new_form))
-        content-form (when-not (or missing-new? blank-new?) new_form)
-        ;; Parse problems are detected once, up front, so every rejection
-        ;; below can state the actual error (kind + line/col report).
-        match-problem (when match_form (parse-problem "match_form" match_form))
-        new-problem   (when content-form (parse-problem "new_form" content-form))
-        shape-error   (when content-form
-                        (let [head (second (re-find #"^\((defn|defn-|defmacro|defmacro-|def|deftest|deftest-|defmethod|defprotocol|defrecord|ns)([ )])"
-                                                    (str/trim content-form)))]
-                          (when head
-                            (validate-form-shape head content-form))))]
-    (cond
-      (str/blank? file_path)
-      {:content "Missing required parameter: file_path" :is-error true}
-
-      (not (clojure-file? file_path))
-      {:content (not-clojure-file-msg "clojure_edit_replace_sexp" file_path)
-       :is-error true}
-
-      (not (fs/exists? file_path))
-      {:content (str "File not found: " file_path) :is-error true}
-
-      (str/blank? match_form)
-      {:content "Missing required parameter: match_form" :is-error true}
-
-;; Any parse problem in match_form is rejected outright — no auto-repair.
-;; The report states what is wrong and where (kind, line/col).
-      match-problem
-      {:content (str "match_form must be complete and balanced"
-                     " (unbalanced delimiters are rejected, not auto-repaired):\n"
-                     (:report match-problem)
-                     "\nPass the complete S-expression(s), e.g. \"(+ x 1)\".")
-       :is-error true}
-
-;; match_form must be at least one real S-expression (not comments/whitespace)
-      (let [parsed (try (p/parse-string-all match_form) (catch Exception _ nil))]
-        (or (nil? parsed)
-            (zero? (count (n/child-sexprs parsed)))))
-      {:content "match_form must contain at least one valid S-expression (not just comments or whitespace)"
-       :is-error true}
-
-;; new_form stays required (edit tool convention): an empty string deletes
-;; with "replace"; insertion has nothing to insert with an empty value.
-      missing-new?
-      {:content (str "Missing required parameter: new_form"
-                     (if (= op-kw :replace)
-                       " — pass \"\" (empty string) to delete the matched expression(s)."
-                       " — insert_before/insert_after need the content to insert."))
-       :is-error true}
-
-      (and blank-new? (not= op-kw :replace))
-      {:content (str "new_form cannot be empty for operation \"" operation
-                     "\" — insert_before/insert_after need the content to insert. "
-                     "An empty new_form deletes only with operation \"replace\".")
-       :is-error true}
-
-;; Any parse problem in new_form is rejected outright — no auto-repair.
-      new-problem
-      {:content (str "new_form must be complete and balanced"
-                     " (unbalanced delimiters are rejected, not auto-repaired):\n"
-                     (:report new-problem)
-                     "\nPass the complete S-expression(s), e.g. \"(* x 2)\".")
-       :is-error true}
-
-;; Balanced-but-broken definition forms are also rejected (e.g. "(def foo)"
-;; with no value, or "(defn- f)" with no arg vector) — with the validator's
-;; actual reason spelled out instead of a generic rejection.
-      shape-error
-      {:content (str "Invalid new_form — not a well-formed Clojure definition:\n"
-                     shape-error
-                     "\nPass a complete, valid expression.")
-       :is-error true}
-
-      :else
-      (let [find-edit (fn [zloc]
-                        (find-and-edit-multi-sexp
-                         zloc match_form content-form
-                         {:operation op-kw :all? replace-all?}))]
-        (edit-pipeline file_path find-edit)))))
+                          (not (contains? #{:insert-before :insert-after} op-kw)))
+        content-form (when-not (or (nil? new_form) (str/blank? new_form))
+                       new_form)]
+    (or (sexp-file-error file_path)
+        (sexp-match-error match_form)
+        (sexp-new-error new_form operation op-kw)
+        (edit-pipeline
+         file_path
+         (fn [zloc]
+           (find-and-edit-multi-sexp
+            zloc match_form content-form
+            {:operation op-kw :all? replace-all?}))))))
 
 ;; ─── Delimiter repair (clojure_paren_repair and clj/paren-repair) ──────────
 
