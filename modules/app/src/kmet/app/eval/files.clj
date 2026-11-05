@@ -145,6 +145,25 @@
     {:entries (vec (sort-by (juxt :name #(if (= :cwd (:scope %)) 0 1)) entries))
      :failures (into (vec global-failures) cwd-failures)}))
 
+(defn fingerprint
+  "A cheap change fingerprint for ROOTS (`{:global root :cwd root}`): each
+   definition file's scope, path, size and modification time, sorted. The
+   prompt manifest cache compares it without reading or parsing file content."
+  [roots]
+  (vec
+   (mapcat (fn [scope]
+             (let [root (get roots scope)]
+               (when (fs/exists? root)
+                 (map (fn [file]
+                        (let [path (str file)]
+                          (try
+                            [scope path (fs/size file)
+                             (str (fs/last-modified-time file))]
+                            (catch Throwable _
+                              [scope path :unreadable]))))
+                      (sort (map str (fs/glob root "**/*.clj")))))))
+           [:global :cwd])))
+
 (defn- with-move-locks
   "Hold both library locks in the fixed global-then-cwd order, so opposite
    moves cannot deadlock."

@@ -159,6 +159,33 @@
       (t/is (= 12 (count (get-in result [:details :failures]))))
       (t/is (str/includes? (:content result) "2 more load failures")))))
 
+(t/deftest the-first-eval-bounds-the-loaded-preview
+  (let [env (support/eval-ctx)]
+    (dotimes [i 13]
+      (write-definition! env :cwd (str "user/a" i)
+                         (str "(defn a" i " [] 1)")))
+    (let [result (support/eval! env "(+ 1 2)")]
+      (t/is (= 12 (count (get-in result [:details :loaded]))))
+      (t/is (= 13 (get-in result [:details :loaded-count])))
+      (t/is (str/includes? (:content result)
+                           "1 more; (eval/library) lists them")))))
+
+(t/deftest the-saved-manifest-cache-tracks-the-files
+  (let [env (support/eval-ctx)
+        agent (agent-for env)
+        calls (atom 0)
+        original eval-files/index]
+    (write-definition! env :cwd "user/a" "(defn a [] 1)")
+    (with-redefs [eval-files/index (fn [roots]
+                                     (swap! calls inc)
+                                     (original roots))]
+      (t/is (some? (state/sync-eval-library-listing! agent)))
+      (t/is (nil? (state/sync-eval-library-listing! agent)))
+      (t/is (= 1 @calls) "an unchanged library is not re-parsed")
+      (write-definition! env :cwd "user/b" "(defn b [] 2)")
+      (t/is (some? (state/sync-eval-library-listing! agent)))
+      (t/is (= 2 @calls) "a changed library is re-read"))))
+
 (t/deftest an-errored-first-eval-still-reports-the-loaded-set
   (let [env (support/eval-ctx)]
     (write-definition! env :cwd "user/saved" "(defn saved [] 1)")

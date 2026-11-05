@@ -677,8 +677,9 @@ active state, while one without lists the disk index as saved and says it
 loads on the first eval. The sync never builds an environment and never
 invokes an eval source; source verbs stay out of the manifest, which points at
 `(eval/help)`. The first call that builds an environment reports a non-empty
-loaded set and every load failure in its result (`:details :loaded` and
-`:failures`; the result lines bound long lists), correcting any drift. A
+loaded set and every load failure in its result: `:details :loaded` is a
+bounded preview with the full `:loaded-count`, `:failures` carries every
+failure, and the result lines bound long lists, correcting any drift. A
 library that has always been empty is silent; when a previously listed set
 empties, the next prompt gets one correction.
 

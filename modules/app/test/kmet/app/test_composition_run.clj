@@ -27,6 +27,14 @@
    :model "deepseek-v4-flash"
    :session-dir sessions-dir})
 
+(defn- next-settled
+  "Subscribe to the next `:agent-settled` event on CTX. Returns
+   `[unsubscribe promise]`; the promise delivers the event."
+  [ctx]
+  (let [settled (promise)
+        unsubscribe (events/on! ctx :agent-settled (fn [ev] (deliver settled ev)))]
+    [unsubscribe settled]))
+
 (deftest a-composed-agent-runs-a-turn
   (fs/create-dirs sessions-dir)
   (let [boot (runtime/boot (core/compose-config {:profile :tui}) {})]
@@ -155,11 +163,16 @@
                                              (done :stop))))]
           (let [handle ((:create! agents) (:ctx boot) {:config config})
                 turn! (fn [text]
-                        (let [n (count @offered)]
-                          ((:send! agents) handle text {:target :next-turn})
-                          (is (support/wait-until #(> (count @offered) n) 20000)
-                              "the turn reached the model")
-                          (last @offered)))]
+                        (let [n (count @offered)
+                              [unsubscribe settled] (next-settled (:ctx boot))]
+                          (try
+                            ((:send! agents) handle text {:target :next-turn})
+                            (is (support/wait-until #(> (count @offered) n) 20000)
+                                "the turn reached the model")
+                            (is (= :completed (:outcome (deref settled 20000 ::timeout)))
+                                "the turn settled before the next one")
+                            (last @offered)
+                            (finally (unsubscribe)))))]
             (is (not (contains? (turn! "one") "custom-echo")))
             (tools/register-tool! (srce/get (:ctx boot) :tools) echo)
             (is (contains? (turn! "two") "custom-echo")

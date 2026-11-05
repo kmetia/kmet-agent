@@ -424,15 +424,22 @@
        [(str "[eval: … " more " more load failure"
              (when (not= 1 more) "s") "]")]))))
 
+(defn- report-details
+  "The first-eval report's machine-readable half: a bounded loaded preview and
+   the full count."
+  [{:keys [loaded loaded-count]}]
+  {:loaded loaded :loaded-count loaded-count})
+
 (defn- take-build-report!
-  "The first call after an environment build consumes the pending report — the
-   loaded records and their result lines. Nil when the build loaded nothing and
-   had no failures, and for every later call."
+  "The first call after an environment build consumes the pending report — a
+   bounded loaded preview, its full count, and the result lines. Nil when the
+   build loaded nothing and had no failures, and for every later call."
   [env]
   (when-let [{:keys [entries failures]} @(:build-report env)]
     (reset! (:build-report env) nil)
     (when (or (seq entries) (seq failures))
-      {:entries entries
+      {:loaded (vec (take build-report-name-limit entries))
+       :loaded-count (count entries)
        :lines (vec (build-report-lines entries failures))})))
 
 (defn- source-line [source]
@@ -1300,7 +1307,7 @@
             :is-error true
             :details (cond-> (merge (:details base)
                                     {:defined [] :forgotten []})
-                       report (assoc :loaded (:entries report))
+                       report (merge (report-details report))
                        (seq failures) (assoc :failures failures))))))
 
 (defn- scoped-records
@@ -1332,7 +1339,7 @@
             :is-error (boolean failed?)
             :details (cond-> (merge (:details base)
                                     (select-keys changes [:defined :forgotten])
-                                    (when report {:loaded (:entries report)}))
+                                    (when report (report-details report)))
                        (seq failures) (assoc :failures failures)
                        failed? (assoc :error
                                       (cond
@@ -1511,16 +1518,25 @@
 (defn- service-manifest
   "The prompt manifest for SESSION: the built environment's loaded records when
    it has one, else the disk index described as saved. Never builds an
-   environment and never invokes a source."
+   environment and never invokes a source. The disk view is cached per cwd
+   until the files' paths, sizes or modification times change."
   [service {:keys [session cwd]}]
   (let [session (or session (extensions/get-session))
         env (when session (get @(:envs service) (:id session)))]
     (if env
       {:loaded? true
        :entries (library-entries env)}
-      (let [{:keys [entries]}
-            (eval-files/index (roots-for service (or cwd (tool-util/cwd))))]
-        {:loaded? false :entries entries}))))
+      (let [cwd (or cwd (tool-util/cwd))
+            roots (roots-for service cwd)
+            fingerprint (eval-files/fingerprint roots)
+            cached (get @(:manifest-cache service) cwd)]
+        (if (= fingerprint (:fingerprint cached))
+          (:manifest cached)
+          (let [{:keys [entries]} (eval-files/index roots)
+                manifest {:loaded? false :entries entries}]
+            (swap! (:manifest-cache service) assoc cwd
+                   {:fingerprint fingerprint :manifest manifest})
+            manifest))))))
 
 (defn- move-request*
   [service {:keys [name scope cwd]} session]
@@ -1622,12 +1638,14 @@
    (let [envs (atom {})
          failures (atom [])
          session-locks (atom {})
+         manifest-cache (atom {})
          disposed? (atom false)
          service {:agent-ctx agent-ctx
                   :agent-dir (or agent-dir (cfg/get-agent-dir))
                   :envs envs
                   :service-failures failures
                   :session-locks session-locks
+                  :manifest-cache manifest-cache
                   :disposed? disposed?}]
      {:eval! #(eval-call! service %)
       :drop! (fn [{:keys [session drop cwd scope]}]
@@ -1649,5 +1667,6 @@
                   (reset! disposed? true)
                   (reset! envs {})
                   (reset! session-locks {})
+                  (reset! manifest-cache {})
                   (reset! failures [])
                   nil)})))
