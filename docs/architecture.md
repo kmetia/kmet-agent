@@ -255,7 +255,7 @@ schema-validated at load).
 | `:permissions` | `{:policy :remember!}` — the tool-call decision | `kmet.app.permissions/permissions`, per agent |
 | `:approvals` | `{:ask!}` — the one `:ask` delivery seam | `kmet.app.permissions/approvals` at the root; the TUI and server rows supply their own |
 | `:shell` `:sandbox` | the agent's shell options; the realm names a script's tool calls are blocked from | provided per agent by the agents factory; a preset row that mounts first wins |
-| `:eval` | `{:eval! :drop! :move! :library :index :describe :manifest :sources :source-commands :failures :dispose!}` — the agent's persistent script environment over the global and cwd eval libraries, one per session; `:manifest` is the prompt listing that never builds an environment | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
+| `:eval` | `{:eval! :drop! :move! :library :live :index :describe :manifest :sources :source-commands :failures :dispose!}` — the agent's persistent script environment over the global and cwd eval libraries, one per session; `:manifest` is the prompt listing that never builds an environment | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
 | `:ui` | the capability service (`kmet.app.ui`) | `kmet.ui.headless/plugin`, `kmet.ui.tui/provider-plugin` |
 | `:extensions` | no service: the row binds the host's services (registry handle, ctx, resource ops, owner sweep) and publishes `process-handle` | `kmet.app.extensions/plugin` |
 
@@ -631,7 +631,9 @@ and roll back the target if the source delete fails. The engine-portable
 builtins register `/eval` (`list`, `search`, `describe`, `drop`, `move`,
 `sources`, `help`, plus verbs an eval source contributes), independent of the
 `:tool/eval` row,
-so removing the row leaves the command and its service. The row also
+so removing the row leaves the command and its service. An unknown leading
+name that resolves to a definition or source verb is a `describe` shorthand;
+an unresolvable one keeps the unknown-verb hint. The row also
 registers the `:core` eval source (the shared
 `read-file`/`edit`/`write-file` ops under `user`, and `clj/edit-form`,
 `clj/replace-sexp`, `clj/paren-repair` from the shared `kmet.libs.clj-edit`
@@ -645,9 +647,11 @@ differences stay in this section, not in the model-facing text. `list` and
 `search` read the disk index across both roots (the built environment's pinned
 roots when the session has one, else the command cwd), so they show the
 library rather than one session's cache and mark each entry `(cwd)` or
-`(global)` and shadowed. `drop` deletes the files directly and unbinds the
-live name only when that session already has an environment, so a drop never
-builds one. The environment build
+`(global)` and shadowed. `list` then appends the session's live-only
+definitions after the saved entries, in the order global, cwd, live, when that
+session already has a built environment. `drop` deletes the files directly
+and unbinds the live name only when that session already has an environment,
+so a drop never builds one. The environment build
 seeds the call vocabulary and the standard aliases before evaluating the
 library, and each definition's per-call primitives (`emit`, `cwd`, the process
 wrappers and the tool bridge) read the current call's state rather than the

@@ -1781,10 +1781,22 @@
     @(:failures env)
     []))
 
+(defn- service-live
+  "The current environment's live-only definitions. Empty when the session
+   has no built environment."
+  ([service] (service-live service nil))
+  ([service opts]
+   (if-let [session (or (:session opts) (extensions/get-session))]
+     (if-let [env (get @(:envs service) (:id session))]
+       (session-only-entries env)
+       [])
+     [])))
+
 (defn- service-index
-  "The library on disk, read without evaluating anything — what `/eval` lists
-   and searches. OPTS may carry `:session` (use its built environment's pinned
-   roots) and `:cwd` (the scope for a session without an environment)."
+  "The library on disk, read without evaluating anything — the saved half of
+   what `/eval` lists and searches. OPTS may carry `:session` (use its built
+   environment's pinned roots) and `:cwd` (the scope for a session without an
+   environment)."
   ([service] (service-index service nil))
   ([service opts]
    (let [env (when-let [session (:session opts)]
@@ -1978,6 +1990,9 @@
                (drop-request! service session drop cwd scope))
       :move! #(move-request! service %)
       :library #(service-library service)
+      :live (fn
+              ([] (service-live service))
+              ([opts] (service-live service opts)))
       :describe #(describe-request service %)
       :index (fn
                ([] (service-index service))

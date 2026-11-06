@@ -125,6 +125,38 @@
       (t/is (= :warning level))
       (t/is (str/includes? content "Usage: /eval describe")))))
 
+(t/deftest a-defined-name-shorthand-describes
+  (let [env (support/eval-ctx)
+        _ (support/eval! env "(defn saved-answer \"Saved answer.\" [x] x)")
+        _ (support/eval! env "(defn live-answer [x] x)")
+        env (assoc env :engine {:agent-state (atom {:ctx (:ctx env)})
+                                :session (atom (:session env))
+                                :cwd (atom (:cwd env))})]
+    (let [[[level label content]] (run env "saved-answer")]
+      (t/is (= :info level))
+      (t/is (= "Eval" label))
+      (t/is (str/includes? content "user/saved-answer  defn ([x])  (cwd)"))
+      (t/is (str/includes? content "Saved answer.")))
+    (let [[[level _ content]] (run env "live-answer")]
+      (t/is (= :info level))
+      (t/is (str/includes? content "user/live-answer  defn ([x])  (cwd)"))
+      (t/is (str/includes? content "file: (no file)")))
+    (let [[[level content]] (run env "not-a-definition")]
+      (t/is (= :warning level))
+      (t/is (str/includes? content "Unknown verb: not-a-definition")))))
+
+(t/deftest a-saved-name-shorthand-describes-without-building
+  (let [env (eval-env)
+        _ (write-def! env {:name "user/report"
+                           :source "(defn report \"Render.\" [x] x)"})]
+    (with-redefs-fn {#'eval-service/build-environment
+                     (fn [& _]
+                       (throw (ex-info "must not build" {:type :test})))}
+      #(let [[[level _ content]] (run env "user/report")]
+         (t/is (= :info level))
+         (t/is (str/includes? content "user/report  defn ([x])  (cwd)"))
+         (t/is (str/includes? content "Render."))))))
+
 (t/deftest describe-a-source-verb-from-the-built-environment
   (let [env (support/eval-ctx)
         _ (tools/register-eval-source!
@@ -203,11 +235,41 @@
     (eval-files/write-definition! (:library-root env)
                                   {:name "user/f" :ns "user" :kind :defn
                                    :source "(defn f [] :global)"})
-    (let [[[level _ content]] (run env "list")]
+    (let [[[level _ content]] (run env "list")
+          at (fn [text] (str/index-of content text))]
       (t/is (= :info level))
       (t/is (str/includes? content "2 definitions"))
       (t/is (str/includes? content "user/f  defn ([])  (cwd)"))
-      (t/is (str/includes? content "user/f  defn ([])  (global, shadowed)")))))
+      (t/is (str/includes? content "user/f  defn ([])  (global, shadowed)"))
+      (t/is (< (at "user/f  defn ([])  (global, shadowed)")
+               (at "user/f  defn ([])  (cwd)"))))))
+
+(t/deftest list-orders-global-cwd-then-live
+  (let [env (support/eval-ctx)
+        _ (eval-files/write-definition! (support/global-root env)
+                                        {:name "user/alpha-global" :ns "user"
+                                         :kind :defn
+                                         :source "(defn alpha-global [] :global)"})
+        _ (eval-files/write-definition! (support/cwd-root env)
+                                        {:name "user/beta-cwd" :ns "user"
+                                         :kind :defn
+                                         :source "(defn beta-cwd [] :cwd)"})
+        _ (support/eval! env "(defn live-tool [x] x)")
+        env (assoc env :engine {:agent-state (atom {:ctx (:ctx env)})
+                                :session (atom (:session env))
+                                :cwd (atom (:cwd env))})]
+    (let [[[level _ content]] (run env "list")
+          at (fn [text] (or (str/index-of content text) -1))
+          global-pos (at "user/alpha-global")
+          cwd-pos (at "user/beta-cwd")
+          live-pos (at "user/live-tool")]
+      (t/is (= :info level))
+      (t/is (< global-pos cwd-pos live-pos))
+      (t/is (str/includes? content "user/live-tool  defn ([x])  (live)"))
+      (t/is (str/includes? content "3 definitions")))
+    (let [[_ _ content] (first (run env "list live"))]
+      (t/is (str/includes? content "user/live-tool"))
+      (t/is (not (str/includes? content "user/alpha-global"))))))
 
 (t/deftest move-command-moves-without-building-an-environment
   (let [env (eval-env)
@@ -259,6 +321,7 @@
       (t/is (str/includes? help "/eval drop <name>"))
       (t/is (str/includes? help "/eval move <name> global|cwd"))
       (t/is (str/includes? help "/eval describe <name>"))
+      (t/is (str/includes? help "/eval <name>"))
       (t/is (str/includes? help "/eval sources"))
       (t/is (str/includes? help "/eval help")))
     (let [[level content] (first (run env "nonsense"))]

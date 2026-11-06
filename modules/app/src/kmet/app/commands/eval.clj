@@ -1,12 +1,14 @@
 (ns kmet.app.commands.eval
-  "The `/eval` slash command: the human-facing view of the eval library.
+  "The `/eval` slash command: the human-facing view of the eval library and
+   the session's live-only definitions.
 
    Verbs: `list [pattern]`, `search <text>`, `describe <name>`,
    `drop <name>…`, `move <name> global|cwd`, `sources` and `help`; entries
-   show their cwd/global scope and whether an entry is shadowed. An eval
-   source may contribute a verb through
-   the service's `:source-commands` map; built-in names are reserved. The command is
-   registered with the engine-portable builtins, independent of the
+   show their cwd/global scope (or `live`) and whether an entry is shadowed.
+   `/eval <name>` is a `describe` shorthand when the name is defined and is
+   not a known verb. An eval source may contribute a verb through the
+   service's `:source-commands` map; built-in names are reserved. The command
+   is registered with the engine-portable builtins, independent of the
    `:tool/eval` row."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
@@ -81,6 +83,21 @@
          "\n  doc: " (or doc "(no docstring)")
          "\n  source:\n" (indented source))))
 
+(defn- describe-outcome
+  "Resolve NAME for `/eval`: `{:text ...}` when it is defined, `{:not-found
+   message}` when it is unknown, `{:error message}` for another failure, and
+   `{:unavailable true}` when the service cannot describe."
+  [svc sess cwd name]
+  (if-let [describe (:describe svc)]
+    (try
+      {:text (describe-text cwd (describe {:session sess :cwd cwd :name name}))}
+      (catch Exception e
+        (let [message (or (ex-message e) (str e))]
+          (if (= :eval/bad-request (:type (ex-data e)))
+            {:not-found message}
+            {:error message}))))
+    {:unavailable true}))
+
 (defn- name-match? [{:keys [name ns]} p]
   (or (str/includes? (str/lower-case (str name)) p)
       (str/includes? (str/lower-case (str ns)) p)))
@@ -90,6 +107,13 @@
     entries
     (let [p (str/lower-case pattern)]
       (filter #(name-match? % p) entries))))
+
+(defn- list-order
+  "The user-facing order: saved global definitions, saved cwd definitions,
+   then the session's live-only definitions."
+  [entries live]
+  (concat (sort-by (juxt #(if (= :global (:scope %)) 0 1) :name) entries)
+          (sort-by :name (map #(assoc % :scope :live) live))))
 
 (defn- failure-note [failures]
   (when-let [n (seq failures)]
@@ -191,9 +215,10 @@
     (name verb)))
 
 (defn- help-text [svc cwd]
-  (let [verbs ["/eval list [pattern]     List library definitions"
+  (let [verbs ["/eval list [pattern]     List global, cwd, then live definitions"
                "/eval search <text>     Search names and source"
                "/eval describe <name>   Describe one definition or source verb"
+               "/eval <name>            Describe a definition (describe shorthand)"
                "/eval drop <name>…      Delete actual files and unbind the live names"
                "/eval drop names sharing a file together; a partial file is refused"
                "/eval move <name> global|cwd  Move a definition to the other scope"
@@ -217,8 +242,12 @@
       (out ui :warning "The eval service is not available.")
 
       (= verb "list")
-      (let [{:keys [entries failures]} ((:index svc) {:cwd cwd :session sess})]
-        (out ui :info "Eval" (list-text (filter-entries entries arg) failures)))
+      (let [{:keys [entries failures]} ((:index svc) {:cwd cwd :session sess})
+            live (if-let [live-fn (:live svc)]
+                   (live-fn {:cwd cwd :session sess})
+                   [])]
+        (out ui :info "Eval" (list-text (filter-entries (list-order entries live) arg)
+                                        failures)))
 
       (= verb "search")
       (out ui :info "Eval" (search-text (:entries ((:index svc) {:cwd cwd :session sess}))
@@ -227,13 +256,14 @@
       (= verb "describe")
       (if (str/blank? arg)
         (out ui :warning "Usage: /eval describe <name>")
-        (if-let [describe (:describe svc)]
-          (try
-            (out ui :info "Eval"
-                 (describe-text cwd (describe {:session sess :cwd cwd :name arg})))
-            (catch Exception e
-              (out ui :warning (or (ex-message e) (str e)))))
-          (out ui :warning "This eval service cannot describe definitions.")))
+        (let [{:keys [text not-found error unavailable]}
+              (describe-outcome svc sess cwd arg)]
+          (cond
+            text (out ui :info "Eval" text)
+            unavailable (out ui :warning
+                             "This eval service cannot describe definitions.")
+            error (out ui :warning error)
+            not-found (out ui :warning not-found))))
 
       (= verb "drop")
       (let [names (names-arg arg)]
@@ -275,11 +305,17 @@
           (catch Throwable t
             (out ui :warning (str "eval verb failed: "
                                   (or (ex-message t) (str t))))))
-        (out ui :warning (str "Unknown verb: " verb ". Try /eval help."))))))
+        (let [name (str/trim (str verb (when (seq arg) (str " " arg))))
+              {:keys [text error]} (describe-outcome svc sess cwd name)]
+          (cond
+            text (out ui :info "Eval" text)
+            error (out ui :warning error)
+            :else (out ui :warning
+                       (str "Unknown verb: " verb ". Try /eval help."))))))))
 
 (def command
   "The `/eval` command record, registered with the engine-portable builtins."
   {:name "eval"
-   :description "List, search, describe, move or drop eval library definitions"
-   :argument-hint "<list|search|describe|move|drop|sources|help> [args]"
+   :description "List, search, describe, move or drop eval definitions"
+   :argument-hint "<list|search|describe|move|drop|sources|help> [args], or <name>"
    :handler handle})
