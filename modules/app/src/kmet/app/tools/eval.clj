@@ -65,9 +65,15 @@
    :label "Eval"
    :description (str "Evaluate Clojure in this session's persistent SCI script sandbox: "
                      script/sandbox-summary
-                     " Top-level definitions persist across calls and are written "
-                     "to the agent's eval library, so new sessions and a restart "
-                     "load them; local let/fn bindings are scratch, so a top-level "
+                     " Eval creates verbs: a top-level definition with a non-blank docstring is "
+                     "written to the agent's eval library, so it persists across "
+                     "calls and new sessions and a restart load it. A new definition "
+                     "without a docstring stays live for this session only and is not "
+                     "saved; add a docstring and re-evaluate to keep it. A defmethod is "
+                     "saved with its loaded multimethod. A saved "
+                     "definition redefined without a docstring is not written; the saved "
+                     "file is unchanged. Local "
+                     "let/fn bindings are scratch; only a documented top-level "
                      "definition is a library write. An already-running session is "
                      "a cache and does not pick up another session's new files. New "
                      "definitions are saved in the cwd scope unless scope is global; "
@@ -87,23 +93,23 @@
                      "(tools/call …) and deref them to join — and separate calls "
                      "from a session serialize, so pack a multi-step task into "
                      "one call. This is the sandbox, not the project's nREPL.")
-   :prompt-snippet "Persistent Clojure/SCI sandbox (fs/sh/tools); pack multi-step work in one call; top-level definitions are saved"
+   :prompt-snippet "Persistent Clojure/SCI sandbox (fs/sh/tools); eval creates saved verbs from documented top-level definitions; pack multi-step work in one call"
    :prompt-guidelines
    ["eval is the full script sandbox, not a bare REPL: fs, sh, slurp, tools and require work as in a babashka script; (eval/help) lists sources, loaded definitions and the surface."
     "Read files with (user/read-file path) or (user/read-file path offset limit); it shares the read tool's 1-indexed offset/limit and truncation. For images use (emit-image path)."
     "Call the run's tools through the `tools` namespace: (tools/list) lists them, (tools/describe \"name\") shows one declaration, and (tools/call \"name\" args) returns a promise to deref — or use (tools/call! \"name\" args) to settle and throw on failure; a plain name is a var too, @(tools/name args)."
     "Pack independent work into one eval call: forms run in order and independent work overlaps — `(sandbox/spawn f)` for local work, and starting several `(tools/call …)` promises before dereferencing any of them. Separate eval calls from a session serialize, so a second call buys no concurrency; use one call for a multi-step task instead of one call per operation."
-    "Define what should survive the call: every top-level definition is written to the agent's eval library, while let/fn bindings are scratch. Use local bindings for throwaway code."
-    "Give every saved definition a docstring: it is the interface later calls see, with its arglists. A missing docstring does not stop the save, but the result line and listings say (no docstring), and (eval/describe 'name :doc) is nil."
+    "Define what should survive the call: a documented top-level definition is written to the agent's eval library as a verb, while an undocumented one stays live for this session only. Use local bindings for throwaway code."
+    "Eval creates verbs: give a top-level defn/defmacro/def/etc. a non-blank docstring to save it to the library, where later calls and sessions can use it; a new definition without one is live-only and not saved. Add a docstring and re-evaluate to keep it; a defmethod is saved with its loaded multimethod. A saved definition redefined without a docstring is not written; the saved documented file is unchanged. The docstring is the interface later calls see, with its arglists; (eval/describe 'name) reads it; a patch or edit-form result cannot remove it."
     "New sessions and a restart load the library; an already-running session is a cache and does not see another session's new files. The prompt previews the saved or loaded definitions; the first eval reports any loaded definitions and files that failed. A call that ends in a normal error writes nothing; its definitions stay live and can be forgotten."
     "A redefinition keeps its file; drop or (eval/forget 'name) deletes the definition's actual file and unbinds this session's live name, resolving unqualified names in the namespace the call ends in. A file that also defines other names must be dropped with all of them. A code-less call may carry only drop (plus scope)."
-    "New definitions default to the cwd scope; pass scope global to save a new name globally. An existing active name keeps its scope, and the scope option may only name its active layer. Move a definition with (eval/move 'name :global|:cwd) or /eval move; a move does not re-evaluate. Use (eval/patch 'name old new) to replace one subform in a named definition; it re-evaluates before writing, and the definition name must stay. Use (eval/edit-form 'name new-source) to replace the whole definition; edit files structurally with clj/edit-form, clj/replace-sexp and clj/paren-repair."
+    "New definitions default to the cwd scope; pass scope global to save a new name globally. An existing active name keeps its scope, and the scope option may only name its active layer. Move a definition with (eval/move 'name :global|:cwd) or /eval move; a move does not re-evaluate. Use (eval/patch 'name old new) to replace one subform in a named definition; it re-evaluates before writing, and the definition name and docstring must stay (a defmethod is covered by its multimethod). Use (eval/edit-form 'name new-source) to replace the whole definition; edit files structurally with clj/edit-form, clj/replace-sexp and clj/paren-repair."
     "Use (eval/describe 'name) for one definition's kind, docstring, arglists, file, scope and source; (eval/describe 'name key) returns one field. (eval/sources) stays the registered-source listing, including each contributed verb's interface."
     "Report with (emit value) or end on the value you want reported; stdout and stderr are discarded."]
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"
-                         :description "Clojure forms. Top-level definitions are written to the agent's eval library. Omit when only drop acts."}
+                         :description "Clojure forms. A top-level definition with a non-blank docstring is written to the agent's eval library; an undocumented one stays live for this session only. Omit when only drop acts."}
                  "timeout" {:type "number"
                             :description (str "Timeout in seconds — like bash's :timeout: omit or 0 "
                                               "= no deadline; fractional ok, capped at a day")}

@@ -282,11 +282,82 @@
     (t/is (str/includes? (:content (support/eval! env "(eval/help)"))
                          "user/read-file ([path] [path offset] [path offset limit])"))))
 
-(t/deftest test-an-undocumented-save-says-no-docstring
+(t/deftest test-an-undocumented-definition-stays-live-only
   (let [env (support/eval-ctx)
+        path (support/library-file env :cwd "user" "undocumented.clj")
         result (support/eval! env "(defn undocumented [] 1)")]
+    (t/is (not (:is-error result)) (:content result))
     (t/is (str/includes? (:content result)
-                         "[eval: defined user/undocumented (cwd) → "))
-    (t/is (str/includes? (:content result) "(no docstring)"))
+                         "[eval: defined user/undocumented (cwd; live only, not saved:"))
+    (t/is (str/includes? (:content result) "no docstring"))
+    (t/is (not (fs/exists? path)))
+    (t/is (= "1" (:content (support/eval! env "(undocumented)")))
+          "the definition stays live in the session")
+    (let [help (:content (support/eval! env "(eval/help)"))]
+      (t/is (str/includes? help "Session-only definitions (live, not saved): 1"))
+      (t/is (str/includes? help "user/undocumented defn ([]) (cwd) — (no docstring)")))
+    (t/is (= "true"
+             (:content (support/eval! env
+                                      "(emit (nil? (eval/describe 'undocumented :file)))"))))
     (let [documented (support/eval! env "(defn documented \"Doc.\" [] 1)")]
-      (t/is (not (str/includes? (:content documented) "(no docstring)"))))))
+      (t/is (not (str/includes? (:content documented) "live only")))
+      (t/is (fs/exists? (support/library-file env :cwd "user" "documented.clj"))))))
+
+(t/deftest test-an-undocumented-redefinition-keeps-its-saved-file
+  (let [env (support/eval-ctx)
+        path (support/library-file env :cwd "user" "kept.clj")
+        _ (support/eval! env "(defn kept \"Old.\" [] :old)")
+        result (support/eval! env "(defn kept [] :new)")]
+    (t/is (not (:is-error result)) (:content result))
+    (t/is (str/includes? (:content result) "live only, not saved"))
+    (t/is (str/includes? (:content result) "the saved file is unchanged"))
+    (t/is (= ":new" (:content (support/eval! env "(kept)")))
+          "the redefinition is live")
+    (t/is (fs/exists? path))
+    (t/is (str/includes? (slurp path) ":old"))
+    (t/is (str/includes? (slurp path) "Old."))
+    (t/is (not (str/includes? (slurp path) ":new")))
+    (t/is (= "true"
+             (:content (support/eval! env
+                                      "(emit (nil? (eval/describe 'kept :doc)))")))
+          "describe shows the live undocumented record")
+    (t/is (= "Old."
+             (:doc (first (filter #(= "user/kept" (:name %))
+                                  (support/eval-library env)))))
+          "the saved record keeps its docstring")
+    (let [restarted (support/restart-service env)]
+      (t/is (= ":old"
+               (support/script-content
+                (support/eval-in! restarted (:session env) (:cwd env) "(kept)")))
+            "a restart loads the saved documented version"))
+    (let [saved (support/eval! env "(defn kept \"New.\" [] :newer)")]
+      (t/is (not (str/includes? (:content saved) "live only")))
+      (t/is (str/includes? (slurp path) ":newer"))
+      (t/is (str/includes? (slurp path) "New.")))))
+
+(t/deftest test-a-defmethod-is-saved-with-its-documented-multimethod
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(defmulti area :shape)")
+    (support/eval! env "(defmethod area :rect [m] :rect)")
+    (t/is (not (fs/exists? (support/library-file env :cwd "user" "area.clj")))
+          "an undocumented multimethod stays live-only")
+    (t/is (nil? (some #(= "user/area :rect" (:name %)) (support/eval-library env)))
+          "its method stays live-only too")
+    (let [result (support/eval! env "(defmulti shape \"Shape area.\" :shape)")
+          method (support/eval! env "(defmethod shape :rect [m] :rect)")
+          entry (first (filter #(= "user/shape :rect" (:name %))
+                               (support/eval-library env)))]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (not (:is-error method)) (:content method))
+      (t/is (str/includes? (:content result) "user/shape (cwd) → "))
+      (t/is (str/includes? (:content method) "(method)"))
+      (t/is (fs/exists? (:file entry)))
+      (t/is (= "Shape area." (:doc (first (filter #(= "user/shape" (:name %))
+                                                  (support/eval-library env)))))))))
+
+(t/deftest test-a-blank-docstring-is-not-documentation
+  (let [env (support/eval-ctx)
+        path (support/library-file env :cwd "user" "blank.clj")
+        result (support/eval! env "(defn blank \"  \" [] 1)")]
+    (t/is (str/includes? (:content result) "live only, not saved"))
+    (t/is (not (fs/exists? path)))))

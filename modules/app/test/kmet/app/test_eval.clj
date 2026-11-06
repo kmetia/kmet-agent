@@ -15,7 +15,7 @@
 
 (t/deftest test-a-definition-survives-a-later-call
   (let [env (support/eval-ctx)
-        result (support/eval! env "(def kept 42) kept")]
+        result (support/eval! env "(def kept \"Kept.\" 42) kept")]
     (t/is (str/starts-with? (:content result) "42"))
     (t/is (str/includes? (:content result) "[eval: defined user/kept"))
     (t/is (= "43" (:content (support/eval! env "(+ kept 1)"))))))
@@ -23,7 +23,7 @@
 (t/deftest test-two-services-are-two-agents
   (let [a (support/eval-ctx)
         b (support/eval-ctx)]
-    (t/is (str/starts-with? (:content (support/eval! a "(def only-a 1) only-a"))
+    (t/is (str/starts-with? (:content (support/eval! a "(def only-a \"Only A.\" 1) only-a"))
                             "1"))
     (t/is (str/includes? (:content (support/eval! a "only-a")) "1"))
     (t/is (= "1" (:content (support/eval! a "only-a"))))
@@ -35,7 +35,7 @@
   (let [env (support/eval-ctx)
         other (session/create-session (test-tmp/temp-dir! "eval-other-")
                                       {:cwd (:cwd env)})]
-    (t/is (str/starts-with? (:content (support/eval! env "(def session-only 1) session-only"))
+    (t/is (str/starts-with? (:content (support/eval! env "(def session-only \"Session.\" 1) session-only"))
                             "1"))
     (t/is (= "2"
              (support/script-content
@@ -48,7 +48,7 @@
 
 (t/deftest test-a-definition-is-not-visible-to-run-code
   (let [env (support/eval-ctx)]
-    (support/eval! env "(def library-only 1)")
+    (support/eval! env "(def library-only \"Library only.\" 1)")
     (let [r (support/call-tool env "run_code" {:code "(emit (some? (resolve 'library-only)))"})]
       (t/is (not (:is-error r)) (:content r))
       (t/is (= "false" (:content r))
@@ -56,7 +56,7 @@
 
 (t/deftest test-the-sticky-namespace-is-re-entered
   (let [env (support/eval-ctx)]
-    (t/is (str/starts-with? (:content (support/eval! env "(ns demo) (def x 41) x"))
+    (t/is (str/starts-with? (:content (support/eval! env "(ns demo) (def x \"X.\" 41) x"))
                             "41"))
     (t/is (= "42" (:content (support/eval! env "(+ x 1)")))
           "the next call starts in the namespace the previous call ended in")))
@@ -64,7 +64,7 @@
 (t/deftest test-the-tool-uses-the-agents-service
   (let [env (support/eval-ctx)]
     (t/is (str/starts-with? (:content (support/call-tool env "eval"
-                                                         {:code "(def via-tool 9) via-tool"}))
+                                                         {:code "(def via-tool \"Via tool.\" 9) via-tool"}))
                             "9"))
     (t/is (= "10" (:content (support/call-tool env "eval" {:code "(+ via-tool 1)"}))))))
 
@@ -76,6 +76,9 @@
     (t/is (str/includes? text "babashka"))
     (t/is (str/includes? text "fs"))
     (t/is (str/includes? text "top-level"))
+    (t/is (str/includes? text "Eval creates verbs"))
+    (t/is (str/includes? text "docstring"))
+    (t/is (str/includes? text "live-only"))
     (t/is (str/includes? text "let/fn"))
     (t/is (str/includes? text "(eval/help)"))
     (t/is (str/includes? text "serialize"))
@@ -92,7 +95,7 @@
 (t/deftest test-the-tool-passes-scope-to-a-definition
   (let [env (support/eval-ctx)]
     (t/is (not (:is-error (support/call-tool env "eval"
-                                             {:code "(defn g [] :g)"
+                                             {:code "(defn g \"Global g.\" [] :g)"
                                               :scope "global"}))))
     (t/is (fs/exists? (support/library-file env :global "user" "g.clj")))
     (t/is (not (fs/exists? (support/library-file env :cwd "user" "g.clj"))))))

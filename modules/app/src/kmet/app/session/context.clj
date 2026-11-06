@@ -163,14 +163,16 @@
 
 (defn- eval-listing-line
   "One manifest line: `- name [arglists] (scope[, shadowed]) — first doc
-   line`."
+   line`, or `(no docstring)` for a legacy undocumented entry."
   [entry]
   (str "- " (:name entry)
        (eval-format/arglists-text (:arglists entry))
        " (" (name (or (:scope entry) :global))
        (when (false? (:active entry)) ", shadowed") ")"
-       (when-let [line (eval-format/doc-line (:doc entry))]
-         (str " — " (truncate line max-eval-doc-chars)))))
+       " — "
+       (if-let [line (eval-format/doc-line (:doc entry))]
+         (truncate line max-eval-doc-chars)
+         "(no docstring)")))
 
 (defn- eval-listing-text
   "INTRO plus definition LINES, dropping whole lines from the end until the
@@ -190,26 +192,32 @@
           text
           (recur (dec kept)))))))
 
+(def ^:private eval-library-rule
+  "The one-sentence rule the prompt manifest states: eval creates verbs, and
+   only a documented top-level definition is saved."
+  "Eval creates verbs: a documented top-level definition is saved here; a new undocumented one stays session-only.\n")
+
 (defn eval-library-listing
   "The `:eval-library` manifest text for MANIFEST (`{:loaded? :entries}`):
-   one line per definition with its arglists, scope and first doc line, or an
-   empty-library correction. LOADED? distinguishes this session's built
-   environment from the files a first eval will load; the text says which.
-   Bounded and deterministic, so `sync-eval-library-listing!` can compare it
-   with the branch's previous manifest byte for byte."
+   the save rule, then one line per definition with its arglists, scope and
+   first doc line, or an empty-library correction. LOADED? distinguishes this
+   session's built environment from the files a first eval will load; the text
+   says which. Bounded and deterministic, so `sync-eval-library-listing!` can
+   compare it with the branch's previous manifest byte for byte."
   [{:keys [loaded? entries]}]
   (let [entries (vec entries)
         n (count entries)]
     (if (empty? entries)
-      "The eval library is empty."
+      (str eval-library-rule "The eval library is empty.")
       (eval-listing-text
-       (if loaded?
-         (str "Eval library loaded in this session: " n
-              " definition" (when (not= 1 n) "s") ".\n")
-         (str "Eval library: " n " definition"
-              (when (not= 1 n) "s")
-              " saved; " (if (= 1 n) "it loads" "they load")
-              " on this session's first eval.\n"))
+       (str eval-library-rule
+            (if loaded?
+              (str "Eval library loaded in this session: " n
+                   " definition" (when (not= 1 n) "s") ".\n")
+              (str "Eval library: " n " definition"
+                   (when (not= 1 n) "s")
+                   " saved; " (if (= 1 n) "it loads" "they load")
+                   " on this session's first eval.\n")))
        (mapv eval-listing-line entries)))))
 
 (defn derive-context-settings

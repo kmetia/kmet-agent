@@ -180,7 +180,7 @@ file) and it applies on the next start.
 | `/scoped-models` | Enable/disable/reorder the models Ctrl+P cycles through (Ctrl+S saves to settings) |
 | `/settings` | Settings menu — thinking, display, tool display, steering/follow-up mode, HTTP transport + timeouts, auto-compact, retry, repeat guard, images, skill commands, terminal progress, clear on shrink, theme (single or automatic light/dark) |
 | `/tools` | List available tools with parameters |
-| `/eval <list\|search\|describe\|drop\|move\|sources\|help> [args]` | List, search, describe or drop eval library definitions, list eval sources, or show the command's verbs; eval sources may contribute verbs |
+| `/eval <list\|search\|describe\|drop\|move\|sources\|help> [args]` | List, search, describe or drop eval library definitions, list eval sources, or show the command's verbs; eval creates verbs from documented top-level definitions, while an undocumented one stays session-only; eval sources may contribute verbs |
 | `/units` | List the process's unit tree — one flat line per ctx and per mounted plugin fiber, with its state, what it injects and provides, its effect labels, and what a pending fiber waits for or why a failed one failed |
 | `/login [provider\|base#label]` | Configure provider auth — API key, or OAuth: Copilot device-code, Codex browser/device, Anthropic & OpenRouter browser PKCE. A `base#label` reference creates a second account alias when needed (see [Providers](providers.md#multiple-accounts)) |
 | `/logout [provider]` | Remove stored provider credentials |

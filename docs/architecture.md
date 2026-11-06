@@ -591,11 +591,15 @@ and call lock. `seed!` installs the call's namespaces into that context each
 time, so the tool surface follows the agent's registry while definitions stay.
 A definition from one call is visible to the next in the same session, and the
 last namespace a successful call ended in is re-entered at the start of the
-next. Every successful top-level definition is written immediately to one of
-two durable layers: the global `<agent-dir>/eval/<ns>/<name>.clj`, or the
-session cwd's `<agent-dir>/eval-scopes/<shared-cwd-key>/<ns>/<name>.clj` (one
-verbatim source slice per generated definition; a hand-written file can hold
-several; `kmet.app.eval.files`). Existing `<agent-dir>/eval`
+next. Eval creates verbs: a successful top-level definition with a non-blank
+docstring is written immediately to one of two durable layers: the global
+`<agent-dir>/eval/<ns>/<name>.clj`, or the session cwd's
+`<agent-dir>/eval-scopes/<shared-cwd-key>/<ns>/<name>.clj` (one verbatim
+source slice per generated definition; a hand-written file can hold several;
+`kmet.app.eval.files`). A new definition without a docstring stays live in
+the session and is not written; `(eval/help)` lists it as session-only. A
+`defmethod` is written with its loaded multimethod, since a method has no
+docstring slot. Existing `<agent-dir>/eval`
 files are the global layer; nothing is moved automatically. The key is the
 shared injective session-dir encoder, pinned when the environment is built: a
 later
@@ -673,17 +677,23 @@ unbind failures carry `:scope` too. Source verbs carry the same keys as
 metadata on their values (`with-meta`), which `normalize-source` validates and
 `source-var` puts on the SCI var, so `(meta #'license/add!)` works; the plural
 `(eval/sources)` stays the registered-source listing and includes each verb's
-doc and arglists. A docstring is the save contract: an undocumented definition
-still saves, but its result line and listings say `(no docstring)`, and
-`(eval/describe 'name :doc)` is nil.
+doc and arglists. A non-blank docstring is the save contract: an undocumented new
+definition stays live for the session and is not written; its result line
+says `live only, not saved`, `(eval/help)` lists it under session-only
+definitions, and `(eval/describe 'name :doc)` is nil. A redefinition of a
+saved name without a docstring is not written; the saved file keeps its
+documented version. A `defmethod` is covered by its multimethod.
 
 Prompt discovery. Prompt start appends one hidden `:eval-library` custom
 message (`kmet.app.session.context/eval-library-listing`,
 `kmet.app.loop.state/sync-eval-library-listing!`) only when its text changed
 since the branch's last one and only while the `eval` tool is selected. The
-message is a bounded, deterministic preview — `name [arglists] (scope[,
-shadowed]) — first doc line`, with whole definitions dropped behind `… N more;
-(eval/library) lists them` — never a source dump and never a system-prompt
+message starts with the save rule (`Eval creates verbs: a documented top-level
+definition is saved here; a new undocumented one stays session-only.`) and is a
+bounded, deterministic preview — `name [arglists] (scope[, shadowed]) — first
+doc line` (or `(no docstring)` for a legacy entry), with whole definitions
+dropped behind `… N more; (eval/library)
+lists them` — never a source dump and never a system-prompt
 rebuild, so listing a definition costs no prefix miss. Loaded is not saved: a
 session with a built environment lists its loaded records with scope and
 active state, while one without lists the disk index as saved and says it
@@ -716,18 +726,22 @@ until all of them are requested, and a redefinition edits the named form in
 place so the siblings survive. Distinct addresses never share a file: a
 spelling that the readable sanitizer would collapse (`a?`/`a!`) gains a short
 address digest. A source-provided key may be redefined live but is never
-written. A
+written. A definition without a docstring is live-only: it has no library
+file, so patch/edit-form/move refuse it, and drop/forget unbinds it as
+unwritten. A
 call that ends in a normal error writes nothing; definitions it evaluated
 before the error stay live and are forgettable. `(eval/patch 'name old new)`
 replaces the first structurally equal subform inside the named definition,
 re-evaluates the definition, and only then writes the file; the report line
 joins the call's result lines. An unknown old form, a changed definition name,
-or a failed re-evaluation leaves the file and the live definition untouched.
+a result without a docstring, or a failed re-evaluation leaves the file and
+the live definition untouched.
 A source-provided key or an unwritten live definition (whose file is not
 authoritative) is refused. `(eval/edit-form 'name new-source)` replaces the
 whole definition through the same engine, re-evaluates it, and only then
-writes the file; a failed parse, changed name/namespace, failed re-evaluation,
-or failed write leaves the file and the live definition untouched. A timed-out
+writes the file; a failed parse, changed name/namespace, result without a
+docstring, failed re-evaluation, or failed write leaves the file and the live
+definition untouched. A timed-out
 or aborted call is not tracked, because its interpreter
 may still be running. A failed write is
 reported and the live definition remains until the process ends, with the old

@@ -56,6 +56,9 @@
         manifest {:loaded? true :entries [entry]}
         text (session/eval-library-listing manifest)]
     (t/is (= text (session/eval-library-listing manifest)))
+    (t/is (= 1 (count (re-seq #"Eval creates verbs" text)))
+          "the rule is stated once")
+    (t/is (str/includes? text "undocumented one stays session-only"))
     (t/is (str/includes? text "- user/report ([x]) (cwd) — Render x."))
     (t/is (not (str/includes? text "More detail."))
           "only the first doc line is previewed")
@@ -65,18 +68,26 @@
                {:loaded? false
                 :entries [{:name "user/a" :scope :global :active true
                            :arglists '([]) :doc "Saved."}]})]
+    (t/is (= 1 (count (re-seq #"Eval creates verbs" saved))))
     (t/is (str/includes? saved "1 definition saved"))
     (t/is (str/includes? saved "it loads on this session's first eval"))
     (t/is (not (str/includes? saved "loaded in this session")))
-    (t/is (str/includes? saved "- user/a ([]) (global) — Saved.")))
+    (t/is (str/includes? saved "- user/a ([]) (global) — Saved."))
+    (t/is (str/includes?
+           (session/eval-library-listing
+            {:loaded? true
+             :entries [{:name "user/plain" :scope :cwd :active true}]})
+           "- user/plain (cwd) — (no docstring)"))
+    (t/is (str/includes? saved "saved")))
   (t/is (str/includes?
          (session/eval-library-listing
           {:loaded? true
            :entries [{:name "user/shadowed" :scope :global :active false
                       :arglists '([x]) :doc "Old."}]})
          "- user/shadowed ([x]) (global, shadowed) — Old."))
-  (t/is (= "The eval library is empty."
-           (session/eval-library-listing {:loaded? true :entries []})))
+  (let [empty-text (session/eval-library-listing {:loaded? true :entries []})]
+    (t/is (str/includes? empty-text "Eval creates verbs"))
+    (t/is (str/includes? empty-text "The eval library is empty.")))
   (let [entries (mapv (fn [i]
                         {:name (str "user/definition-" i)
                          :scope :cwd

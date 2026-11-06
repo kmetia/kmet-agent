@@ -43,37 +43,37 @@
   (let [env (support/eval-ctx)
         cwd-file (support/library-file env :cwd "user" "f.clj")
         global-file (support/library-file env :global "user" "g.clj")]
-    (support/eval! env "(defn f [] :one)")
+    (support/eval! env "(defn f \"F.\" [] :one)")
     (t/is (fs/exists? cwd-file))
     (t/is (not (fs/exists? (support/library-file env :global "user" "f.clj"))))
     (t/is (= :cwd (:scope (first (entries-for env "user/f")))))
-    (support/eval! env "(defn g [] :g)" :scope :global)
+    (support/eval! env "(defn g \"G.\" [] :g)" :scope :global)
     (t/is (fs/exists? global-file))
     (t/is (= :global (:scope (first (entries-for env "user/g")))))
-    (support/eval! env "(defn f [] :two)")
+    (support/eval! env "(defn f \"F.\" [] :two)")
     (t/is (str/includes? (slurp cwd-file) ":two"))
-    (support/eval! env "(defn g [] :gg)")
+    (support/eval! env "(defn g \"G.\" [] :gg)")
     (t/is (str/includes? (slurp global-file) ":gg"))
     (t/is (not (fs/exists? (support/library-file env :cwd "user" "g.clj"))))
     (t/is (= :global (:scope (first (entries-for env "user/g")))))
-    (support/eval! env "(defn c [] :c)" :scope :cwd)
+    (support/eval! env "(defn c \"C.\" [] :c)" :scope :cwd)
     (t/is (fs/exists? (support/library-file env :cwd "user" "c.clj")))
     (t/is (not (fs/exists? (support/library-file env :global "user" "c.clj"))))
     (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"active in the cwd scope"
-                            (support/eval! env "(defn f [] :three)"
+                            (support/eval! env "(defn f \"F.\" [] :three)"
                                            :scope :global)))
     (t/is (str/includes? (slurp cwd-file) ":two"))
     (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"scope must be cwd or global"
-                            (support/eval! env "(defn nope [] 1)" :scope :project)))))
+                            (support/eval! env "(defn nope \"Nope.\" [] 1)" :scope :project)))))
 
 (t/deftest cwd-shadows-global-and-the-library-reports-the-stack
   (let [env (support/eval-ctx)]
-    (write-scoped! env :global "user/f" "(defn f [] :global)")
-    (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
+    (write-scoped! env :global "user/f" "(defn f \"F.\" [] :global)")
+    (write-scoped! env :cwd "user/f" "(defn f \"F.\" [] :cwd)")
     (t/is (= ":cwd" (support/script-content (support/eval! env "(f)"))))
-    (support/eval! env "(defn f [] :cwd-two)")
+    (support/eval! env "(defn f \"F.\" [] :cwd-two)")
     (t/is (= ":cwd-two" (support/script-content (support/eval! env "(f)"))))
     (let [entries (entries-for env "user/f")
           by-scope (into {} (map (juxt :scope identity)) entries)]
@@ -97,8 +97,8 @@
 
 (t/deftest dropping-the-active-layer-restores-the-global-record
   (let [env (support/eval-ctx)]
-    (write-scoped! env :global "user/f" "(defn f [] :global)")
-    (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
+    (write-scoped! env :global "user/f" "(defn f \"F.\" [] :global)")
+    (write-scoped! env :cwd "user/f" "(defn f \"F.\" [] :cwd)")
     (t/is (= ":cwd" (support/script-content
                      (support/eval! env "(emit (f))"))))
     (let [result (support/eval! env nil :drop ["user/f"])]
@@ -107,15 +107,15 @@
     (t/is (not (fs/exists? (support/library-file env :cwd "user" "f.clj"))))
     (t/is (fs/exists? (support/library-file env :global "user" "f.clj")))
     (t/is (= ":global" (:content (support/eval! env "(f)"))))
-    (t/is (= [{:name "user/f" :ns "user" :kind :defn :doc nil :arglists '([])
+    (t/is (= [{:name "user/f" :ns "user" :kind :defn :doc "F." :arglists '([])
                :file (support/library-file env :global "user" "f.clj")
                :scope :global :active true}]
              (support/eval-library env)))))
 
 (t/deftest a-scoped-drop-of-the-active-layer-restores-the-next
   (let [env (support/eval-ctx)]
-    (write-scoped! env :global "user/f" "(defn f [] :global)")
-    (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
+    (write-scoped! env :global "user/f" "(defn f \"F.\" [] :global)")
+    (write-scoped! env :cwd "user/f" "(defn f \"F.\" [] :cwd)")
     (t/is (= ":cwd" (support/script-content
                      (support/eval! env "(emit (f))"))))
     (let [result (support/eval! env nil :drop ["user/f"] :scope :cwd)]
@@ -126,8 +126,8 @@
 
 (t/deftest a-scoped-forget-of-a-shadowed-layer-leaves-the-active-live
   (let [env (support/eval-ctx)]
-    (write-scoped! env :global "user/f" "(defn f [] :global)")
-    (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
+    (write-scoped! env :global "user/f" "(defn f \"F.\" [] :global)")
+    (write-scoped! env :cwd "user/f" "(defn f \"F.\" [] :cwd)")
     (t/is (= ":cwd" (support/script-content
                      (support/eval! env "(emit (f))"))))
     (let [result (support/eval! env "(eval/forget 'user/f)" :scope :global)]
@@ -139,8 +139,8 @@
 
 (t/deftest dropping-a-shadowed-layer-leaves-the-active-definition-live
   (let [env (support/eval-ctx)]
-    (write-scoped! env :global "user/f" "(defn f [] :global)")
-    (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
+    (write-scoped! env :global "user/f" "(defn f \"F.\" [] :global)")
+    (write-scoped! env :cwd "user/f" "(defn f \"F.\" [] :cwd)")
     (t/is (= ":cwd" (support/script-content
                      (support/eval! env "(emit (f))"))))
     (let [result (support/eval! env nil :drop ["user/f"] :scope :global)]
@@ -155,9 +155,9 @@
   (let [env (support/eval-ctx)
         global (support/library-file env :global "user" "f.clj")
         cwd (support/library-file env :cwd "user" "f.clj")]
-    (write-global! env "user/f" "(defn f [] :global)")
+    (write-global! env "user/f" "(defn f \"F.\" [] :global)")
     (fs/create-dirs (fs/parent cwd))
-    (spit cwd "(ns user)\n(defn f [] :cwd)\n")
+    (spit cwd "(ns user)\n(defn f \"F.\" [] :cwd)\n")
     (let [result (with-redefs-fn {#'eval-service/build-environment
                                   (fn [& _]
                                     (throw (ex-info "must not build" {:type :test})))}
@@ -169,9 +169,9 @@
   (let [env (support/eval-ctx)
         global (support/library-file env :global "user" "f.clj")
         cwd (support/library-file env :cwd "user" "f.clj")]
-    (write-global! env "user/f" "(defn f [] :global)")
+    (write-global! env "user/f" "(defn f \"F.\" [] :global)")
     (fs/create-dirs (fs/parent cwd))
-    (spit cwd "(ns user)\n(defn f [] :cwd)\n")
+    (spit cwd "(ns user)\n(defn f \"F.\" [] :cwd)\n")
     (let [result (support/eval! env nil :drop ["user/f"] :scope :global)]
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result) "[eval: forgot user/f (global)]")))
@@ -182,8 +182,8 @@
   (let [env (support/eval-ctx)
         global (support/library-file env :global "user" "f.clj")
         cwd (support/library-file env :cwd "user" "f.clj")]
-    (write-scoped! env :global "user/f" "(defn f [] :global)")
-    (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
+    (write-scoped! env :global "user/f" "(defn f \"F.\" [] :global)")
+    (write-scoped! env :cwd "user/f" "(defn f \"F.\" [] :cwd)")
     (let [result (support/call-tool env "eval"
                                     {:drop ["user/f"] :scope "global"})]
       (t/is (not (:is-error result)) (:content result))
@@ -203,9 +203,9 @@
   (let [env (support/eval-ctx)
         cwd-a (:cwd env)
         cwd-b (test-tmp/temp-dir! "eval-pinned-other-")
-        result (do (support/eval! env "(def pinned 1)")
+        result (do (support/eval! env "(def pinned \"Pinned.\" 1)")
                    (support/eval-in! (:service env) (:session env) cwd-b
-                                     "(spit \"marker.txt\" \"b\") (def later 2) (sandbox/cwd)"))
+                                     "(spit \"marker.txt\" \"b\") (def later \"Later.\" 2) (sandbox/cwd)"))
         a-root (cwd-root-for env cwd-a)
         b-root (cwd-root-for env cwd-b)]
     (t/is (str/starts-with? (:content result) cwd-b))
@@ -226,7 +226,7 @@
 (t/deftest a-broken-cwd-shadow-leaves-the-global-record-active
   (let [env (support/eval-ctx)
         cwd (support/library-file env :cwd "user" "f.clj")]
-    (write-global! env "user/f" "(defn f [] :global)")
+    (write-global! env "user/f" "(defn f \"F.\" [] :global)")
     (fs/create-dirs (fs/parent cwd))
     (spit cwd "(ns user)\n(throw (ex-info \"boom\" {}))\n")
     (let [result (support/eval! env "(emit (f))")]
@@ -240,7 +240,7 @@
 (t/deftest a-broken-global-file-leaves-the-cwd-record-active
   (let [env (support/eval-ctx)
         global (support/library-file env :global "user" "f.clj")]
-    (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
+    (write-scoped! env :cwd "user/f" "(defn f \"F.\" [] :cwd)")
     (fs/create-dirs (fs/parent global))
     (spit global "(ns user)\n(throw (ex-info \"boom\" {}))\n")
     (let [result (support/eval! env "(emit (f))")
@@ -268,8 +268,8 @@
 
 (t/deftest patch-and-edit-form-refuse-a-non-active-layer
   (let [env (support/eval-ctx)]
-    (write-scoped! env :global "user/f" "(defn f [] :global)")
-    (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
+    (write-scoped! env :global "user/f" "(defn f \"F.\" [] :global)")
+    (write-scoped! env :cwd "user/f" "(defn f \"F.\" [] :cwd)")
     (t/is (= ":cwd" (support/script-content
                      (support/eval! env "(emit (f))"))))
     (let [patch (support/eval! env "(eval/patch 'user/f :cwd :other)" :scope :global)]
@@ -278,7 +278,7 @@
       (t/is (str/includes? (slurp (support/library-file env :global "user" "f.clj"))
                            ":global")))
     (let [edit (support/eval! env
-                              "(eval/edit-form 'user/f '(defn f [] :edited))"
+                              "(eval/edit-form 'user/f '(defn f \"F.\" [] :edited))"
                               :scope :global)]
       (t/is (:is-error edit))
       (t/is (str/includes? (:content edit) "active in the cwd scope")))
@@ -288,7 +288,7 @@
 
 (t/deftest move-flips-the-layer-without-re-evaluating
   (let [env (support/eval-ctx)]
-    (support/eval! env "(defn f [] :one)")
+    (support/eval! env "(defn f \"F.\" [] :one)")
     (let [result (support/eval! env "(eval/move 'user/f :global)")]
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result) "[eval: moved user/f (cwd → global)]")))
@@ -315,7 +315,7 @@
 
 (t/deftest the-move-service-works-on-a-built-environment
   (let [env (support/eval-ctx)]
-    (support/eval! env "(defn f [] :one)")
+    (support/eval! env "(defn f \"F.\" [] :one)")
     (let [result ((:move! (:service env)) {:session (:session env)
                                            :name "user/f"
                                            :scope "global"
@@ -352,7 +352,7 @@
   (let [env (support/eval-ctx)]
     (with-redefs [eval-files/write-definition!
                   (fn [& _] (throw (ex-info "disk full" {})))]
-      (support/eval! env "(defn lost [] 1)"))
+      (support/eval! env "(defn lost \"Lost.\" [] 1)"))
     (let [result (support/eval! env "(eval/move 'user/lost :global)")]
       (t/is (:is-error result))
       (t/is (str/includes? (:content result) "not written")))))
@@ -360,7 +360,7 @@
 (t/deftest a-no-environment-drop-of-a-global-only-file-reports-global
   (let [env (support/eval-ctx)
         global (support/library-file env :global "user" "f.clj")]
-    (write-scoped! env :global "user/f" "(defn f [] :global)")
+    (write-scoped! env :global "user/f" "(defn f \"F.\" [] :global)")
     (let [result (support/eval! env nil :drop ["user/f"])]
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result) "[eval: forgot user/f (global)]")))
@@ -369,7 +369,7 @@
 (t/deftest a-scoped-drop-can-remove-a-broken-file
   (let [env (support/eval-ctx)
         global (support/library-file env :global "user" "f.clj")]
-    (write-scoped! env :cwd "user/f" "(defn f [] :cwd)")
+    (write-scoped! env :cwd "user/f" "(defn f \"F.\" [] :cwd)")
     (fs/create-dirs (fs/parent global))
     (spit global "(ns user)\n(throw (ex-info \"boom\" {}))\n")
     (t/is (= ":cwd" (support/script-content (support/eval! env "(f)"))))
@@ -382,9 +382,9 @@
 (t/deftest move-refuses-a-target-file-that-was-not-loaded
   (let [env (support/eval-ctx)
         global (support/library-file env :global "user" "f.clj")]
-    (support/eval! env "(defn f [] :cwd)")
+    (support/eval! env "(defn f \"F.\" [] :cwd)")
     (fs/create-dirs (fs/parent global))
-    (spit global "(ns user)\n(defn f [] :global)\n")
+    (spit global "(ns user)\n(defn f \"F.\" [] :global)\n")
     (let [result (support/eval! env "(eval/move 'user/f :global)")]
       (t/is (:is-error result))
       (t/is (str/includes? (:content result) "already exists")))
@@ -394,7 +394,7 @@
 (t/deftest patch-writes-the-active-global-layer
   (let [env (support/eval-ctx)
         global (support/library-file env :global "user" "f.clj")]
-    (support/eval! env "(defn f [] :global)" :scope :global)
+    (support/eval! env "(defn f \"F.\" [] :global)" :scope :global)
     (t/is (not (:is-error (support/eval! env "(eval/patch 'user/f :global :patched)"))))
     (t/is (str/includes? (slurp global) ":patched"))
     (t/is (not (fs/exists? (support/library-file env :cwd "user" "f.clj"))))
@@ -428,7 +428,7 @@
 
 (t/deftest move-refuses-a-multi-name-declaration
   (let [env (support/eval-ctx)]
-    (support/eval! env "(declare early late)")
+    (support/eval! env "(declare ^{:doc \"Early.\"} early ^{:doc \"Late.\"} late)")
     (let [result (support/eval! env "(eval/move 'user/early :global)")]
       (t/is (:is-error result))
       (t/is (str/includes? (:content result) "also defines user/late")))
@@ -440,9 +440,9 @@
         roots {:global (support/global-root env) :cwd (support/cwd-root env)}
         cwd (support/library-file env :cwd "user" "f.clj")
         global (support/library-file env :global "user" "f.clj")]
-    (write-global! env "user/f" "(defn f [] :global)")
+    (write-global! env "user/f" "(defn f \"F.\" [] :global)")
     (fs/create-dirs (fs/parent cwd))
-    (spit cwd "(ns user)\n(defn f [] :cwd)\n")
+    (spit cwd "(ns user)\n(defn f \"F.\" [] :cwd)\n")
     (let [index (eval-files/index roots)
           by-scope (into {} (map (juxt :scope identity) (:entries index)))]
       (t/is (= 2 (count (:entries index))))
@@ -459,8 +459,8 @@
         session-a (:session env)
         session-b (session/create-session (test-tmp/temp-dir! "eval-worktree-session-")
                                           {:cwd cwd-b})]
-    (support/eval-in! service session-a cwd-a "(def only-a 1)")
-    (support/eval-in! service session-b cwd-b "(def only-b 2)")
+    (support/eval-in! service session-a cwd-a "(def only-a \"Only A.\" 1)")
+    (support/eval-in! service session-b cwd-b "(def only-b \"Only B.\" 2)")
     (t/is (fs/exists? (str (fs/path (cwd-root-for env cwd-a) "user" "only-a.clj"))))
     (t/is (fs/exists? (str (fs/path (cwd-root-for env cwd-b) "user" "only-b.clj"))))
     (t/is (= "false"

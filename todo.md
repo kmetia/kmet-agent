@@ -1,5 +1,16 @@
 # Todo
 
+## Task: docstring-gated eval saves (2026-11-06)
+
+Status: done (2026-11-06). Supersedes the save-contract note in the persistent
+eval plan: a new top-level definition is written only when it carries a
+non-blank docstring; an undocumented one stays live for the session and is listed as
+session-only. A `defmethod` is written with its loaded multimethod, since a
+method has no docstring slot. A redefinition of a saved name without a
+docstring is not written, so the saved file keeps its documented version.
+The tool description, prompt guidelines, `(eval/help)` and the `:eval-library`
+manifest state the rule; `docs/architecture.md` is authoritative.
+
 ## Task: eval library interface discovery (10a, 2026-11-05)
 
 Status: done (2026-11-05). This was the interface half of persistent-eval

@@ -592,37 +592,58 @@
          " (" (scope-label scope) shadow ") — "
          (or doc-line "(no docstring)"))))
 
+(defn- session-only-entries
+  "The session's unwritten live definitions as listing entries: they have no
+   library file, so they are discoverable through (eval/help) and
+   (eval/describe) but not through (eval/library)."
+  [env]
+  (->> @(:unwritten-records env)
+       (map (fn [[name record]]
+              (assoc (library-entry record) :name name :active true)))
+       (sort-by :name)
+       vec))
+
 (defn- environment-help
   "The `(eval/help)` text: sources and their verbs, the loaded library with
-   each definition's interface, the common script surface, and the
-   persistence/reporting rules."
+   each definition's interface, the session-only live definitions, the common
+   script surface, and the persistence/reporting rules."
   [env]
   (let [sources @(:source-info env)
-        entries (library-entries env)]
+        entries (library-entries env)
+        session-only (session-only-entries env)]
     (str "Eval sources:\n"
          (if (seq sources)
            (str/join "\n" (map #(eval-format/source-line % :keyword) sources))
            "  (none)")
          "\nLibrary definitions: " (count entries)
+         (when (seq entries)
+           (str "\n" (str/join "\n" (map definition-line entries))))
+         "\nSession-only definitions (live, not saved): " (count session-only)
+         (when (seq session-only)
+           (str "\n" (str/join "\n" (map definition-line session-only))))
          "\nScope: cwd " (get-in env [:roots :cwd])
          " (shadows the global layer)"
          "\n       global " (get-in env [:roots :global])
          "\nNew definitions write to cwd; pass :scope :global for a new global "
          "name. A redefinition keeps the active layer."
-         (when (seq entries)
-           (str "\n" (str/join "\n" (map definition-line entries))))
          "\nFailures: " (count @(:failures env))
          "\nSandbox: Clojure/SCI — " script/sandbox-summary
-         "\nPersistence: top-level definitions are written to the library; "
-         "let/fn bindings are not. New sessions and restarts load the library; "
-         "this session's environment is a cache. A call that ends in a normal "
-         "error writes nothing; its definitions stay live and can be forgotten. "
-         "Drop/forget resolve unqualified names in the namespace the call ends "
-         "in; a file that also defines other addresses must be dropped with "
-         "all of them. The prompt previews the saved or loaded definitions; the first eval "
-         "reports any loaded definitions and files that failed."
+         "\nPersistence: eval creates verbs. A top-level definition with a "
+         "non-blank docstring is written to the library and loads in later sessions; a "
+         "new definition without one stays live for this session only and is "
+         "not saved. Add a docstring and re-evaluate to keep it; a defmethod is "
+         "saved with its loaded multimethod. A saved "
+         "definition redefined without a docstring is not written; the saved "
+         "file is unchanged. A call that "
+         "ends in a normal error writes nothing; its definitions stay live and "
+         "can be forgotten. Drop/forget resolve unqualified names in the "
+         "namespace the call ends in; a file that also defines other addresses "
+         "must be dropped with all of them. The prompt previews the saved or "
+         "loaded definitions; the first eval reports any loaded definitions "
+         "and files that failed."
          "\nDiscover: (all-ns) lists namespaces, (ns-publics 'ns) lists a "
-         "namespace's vars, and (eval/library) lists loaded definitions. "
+         "namespace's vars (including session-only definitions), and "
+         "(eval/library) lists saved definitions. "
          "(eval/sources) lists the registered sources and their verbs; "
          "(eval/describe 'name) describes one definition or source verb "
          "(kind, docstring, arglists, file, scope, source), and "
@@ -632,7 +653,8 @@
          "\nUse (eval/library), (eval/sources), (eval/describe 'name), "
          "(eval/forget 'name), (eval/patch 'name old new), "
          "(eval/edit-form 'name new-source), "
-         "(eval/move 'name :global|:cwd).")))
+         "(eval/move 'name :global|:cwd). A patch or edit-form result must keep a "
+         "docstring.")))
 
 (defn- describe-entry
   "The interface and implementation of RAW-NAME, resolved against the same
@@ -812,6 +834,10 @@
                     {:name name}))
     (when-not (= (:ns record) (:ns patched))
       (bad-request! (str label " changed the namespace of " name)
+                    {:name name}))
+    (when-not (or (not (str/blank? (:doc patched)))
+                  (= :defmethod (:kind patched)))
+      (bad-request! (str label " left " name " without a docstring; add one to keep the library documented")
                     {:name name}))
     (assoc patched
            :scope (record-scope record)
@@ -1369,11 +1395,50 @@
         [(eval-files/write-definition! root record path) record])
       [(eval-files/write-definition! root record) record])))
 
+(defn- defmethod-multimethod
+  "The multimethod address of a defmethod record name: the part before the
+   printed dispatch."
+  [name]
+  (let [i (str/index-of name " ")]
+    (if i (subs name 0 i) name)))
+
+(defn- documented?
+  "A record may be written when it carries a non-blank docstring, or when it
+   is a defmethod of a loaded multimethod. A method has no docstring slot; it
+   belongs to its documented multimethod."
+  [env record]
+  (or (not (str/blank? (:doc record)))
+      (and (= :defmethod (:kind record))
+           (some? (active-record env (defmethod-multimethod (:name record)))))))
+
+(defn- doc-note
+  "The result-line note for a written definition: a method is covered by its
+   multimethod."
+  [record]
+  (if (= :defmethod (:kind record)) " (method)" ""))
+
+(defn- live-only-line
+  "The result line for a definition that stays live without a library file:
+   an undocumented definition (new or redefining a saved name), or a method
+   whose multimethod is not saved."
+  [record scope saved?]
+  (str "[eval: defined " (:name record) " (" (scope-label scope)
+       "; live only, not saved: "
+       (cond
+         (= :defmethod (:kind record)) "its multimethod is not saved"
+         saved? "no docstring — the saved file is unchanged; add one and re-evaluate to update it"
+         :else "no docstring — add one and re-evaluate to keep it")
+       "]"))
+
 (defn- apply-definition!
   "Write RECORD to its scope's library and index it. A source-provided key
    stays live but is never written, and is remembered as a model shadow so
-   later source reads do not overwrite it. A redefinition keeps its file. A
-   failed write is recorded and reported; the live definition remains."
+   later source reads do not overwrite it. An undocumented definition stays
+   live for the session and is not written, so a saved definition redefined
+   without a docstring keeps its saved file unchanged. A defmethod of a loaded
+   multimethod is
+   written with it. A failed write is recorded and reported; the live
+   definition remains."
   [env cwd record]
   (let [name (:name record)
         scope (or (:scope record) :cwd)
@@ -1382,24 +1447,30 @@
       (do
         (swap! (:model-shadows env) conj name)
         {:line (str "[eval: redefined " name " (source; not stored)]")})
-      (try
-        (let [root (root-for env scope)
-              [path record] (write-redefinition! env root record)
-              record (assoc record :file path :root root)]
-          (add-record! env record)
-          (clear-unwritten! env name)
-          {:line (str "[eval: defined " name " (" (scope-label scope) ") → "
-                      (eval-files/display-path cwd path)
-                      (when-not (:doc record) " (no docstring)") "]")
-           :entry (assoc (library-entry record) :active true)})
-        (catch Throwable t
+      (if (not (documented? env record))
+        (let [saved? (some? (existing-record env name scope))]
           (swap! (:unwritten env) conj name)
           (swap! (:unwritten-records env) assoc name record)
-          (record-failure! (:failures env) {:name name :error (ex-message t)
-                                            :scope scope})
-          {:line (str "[eval: define failed " name " (" (scope-label scope) "): "
-                      (ex-message t) "]")
-           :error (ex-message t)})))))
+          {:line (live-only-line record scope saved?)
+           :entry (assoc (library-entry record) :active true)})
+        (try
+          (let [root (root-for env scope)
+                [path record] (write-redefinition! env root record)
+                record (assoc record :file path :root root)]
+            (add-record! env record)
+            (clear-unwritten! env name)
+            {:line (str "[eval: defined " name " (" (scope-label scope) ") → "
+                        (eval-files/display-path cwd path)
+                        (doc-note record) "]")
+             :entry (assoc (library-entry record) :active true)})
+          (catch Throwable t
+            (swap! (:unwritten env) conj name)
+            (swap! (:unwritten-records env) assoc name record)
+            (record-failure! (:failures env) {:name name :error (ex-message t)
+                                              :scope scope})
+            {:line (str "[eval: define failed " name " (" (scope-label scope) "): "
+                        (ex-message t) "]")
+             :error (ex-message t)}))))))
 
 (defn- drop-report-line
   "One drop result line. A restored source value is named as such; a record
