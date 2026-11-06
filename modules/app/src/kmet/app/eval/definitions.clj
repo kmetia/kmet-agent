@@ -193,6 +193,15 @@
                        (into defs (form-records node form current)))))
             {:ns current :defs defs}))))))
 
+(defn defines?
+  "True when CODE has at least one top-level defining form, including a
+   live-only definition without a docstring — the forms eval turns into verbs.
+   A later call can read what such a call defines, so a batch carrying one must
+   run in source order. Throws when CODE cannot be read; the batch classifier
+   treats that as best-effort and leaves the call on the parallel path."
+  [code]
+  (boolean (seq (:defs (parse code nil)))))
+
 (defn split-ns
   "Split CONTENT into its first top-level `(ns …)` form string and the rest
    of the file. A generated library file has one ns form; the evaluation

@@ -562,9 +562,10 @@ Other pi tool fields:
    ;; pi prepareArguments — rewrite the raw tool args before schema
    ;; validation/execution; a throwing shim surfaces as a tool error.
    :execution-mode :parallel
-   ;; pi executionMode — :sequential (default) or :parallel; the agent
-   ;; loop runs parallel-capable tools concurrently with a sequential
-   ;; fallback when a tool doesn't declare it.
+   ;; pi executionMode — :parallel (the default in kmet) or :sequential; an
+   ;; omitted mode runs in the parallel batch. Eval is the one code tool whose
+   ;; calls are examined: a batch containing an eval call with a top-level
+   ;; definition (persisted or live-only) runs in source order.
    :status true
    ;; opt into the transcript's tail state line (pending/success/error +
    ;; Elapsed/Took) and its 1s ticker; default nil = no status line.

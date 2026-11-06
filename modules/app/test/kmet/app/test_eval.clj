@@ -69,14 +69,32 @@
                             "9"))
     (t/is (= "10" (:content (support/call-tool env "eval" {:code "(+ via-tool 1)"}))))))
 
-(t/deftest test-an-eval-batch-runs-sequentially
-  ;; Regression: parallel eval calls race for the session lock, and the lock
-  ;; does not preserve source order. A batch containing eval must take the
-  ;; sequential path, so a later call sees an earlier call's definition.
-  (t/is (= :sequential (:execution-mode eval-tool/definition)))
+(t/deftest test-an-eval-batch-runs-sequentially-when-it-defines
+  ;; Regression: a later call can read a definition an earlier call made —
+  ;; persisted or live-only — so a batch containing a definition must take the
+  ;; sequential path. A definition-free call keeps the default parallel path.
+  (t/is (nil? (:execution-mode eval-tool/definition))
+        "eval keeps the loop's default execution mode")
   (t/is (tool-exec/has-sequential-tool-call?
-         [{:name "eval"}] {"eval" eval-tool/definition})
-        "one eval call makes the whole batch sequential"))
+         [{:name "eval" :arguments {"code" "(defn f \"F.\" [] 1)"}}]
+         {"eval" eval-tool/definition})
+        "a documented verb definition makes the whole batch sequential")
+  (t/is (tool-exec/has-sequential-tool-call?
+         [{:name "eval" :arguments {"code" "(def live-only 1)"}}]
+         {"eval" eval-tool/definition})
+        "a live-only definition makes the whole batch sequential too")
+  (t/is (not (tool-exec/has-sequential-tool-call?
+              [{:name "eval" :arguments {"code" "(+ 1 2)"}}]
+              {"eval" eval-tool/definition}))
+        "a definition-free eval call stays parallel")
+  (t/is (not (tool-exec/has-sequential-tool-call?
+              [{:name "eval" :arguments {"code" "(defn broken"}}]
+              {"eval" eval-tool/definition}))
+        "unreadable code stays parallel and fails when the tool runs")
+  (t/is (not (tool-exec/has-sequential-tool-call?
+              [{:name "eval" :arguments {"code" "(def x 1)"}}]
+              {}))
+        "an undeclared call cannot change the batch mode"))
 
 (t/deftest test-the-tool-prompt-stands-alone
   (let [{:keys [description prompt-snippet prompt-guidelines]} eval-tool/definition

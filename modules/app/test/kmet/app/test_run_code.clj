@@ -50,14 +50,20 @@
     (try (binding [tool-util/*cwd* dir] (f dir))
          (finally (fs/delete-tree dir)))))
 
-(t/deftest test-a-run-code-batch-runs-sequentially
-  ;; Regression: run_code calls can share the workspace (files, shell), and
-  ;; the batch must run them one at a time in source order.
+(t/deftest test-a-run-code-batch-stays-parallel-with-a-definition
+  ;; run_code has no cross-call state: a script's local definition must not
+  ;; serialize the batch. Only eval's definitions are examined.
   (let [definition (tools/get-tool reg "run_code")]
-    (t/is (= :sequential (:execution-mode definition)))
-    (t/is (tool-exec/has-sequential-tool-call?
-           [{:name "run_code"}] {"run_code" definition})
-          "one run_code call makes the whole batch sequential")))
+    (t/is (nil? (:execution-mode definition))
+          "run_code keeps the loop's default execution mode")
+    (t/is (not (tool-exec/has-sequential-tool-call?
+                [{:name "run_code" :arguments {"code" "(def x 1)"}}]
+                {"run_code" definition}))
+          "a run_code definition does not make the batch sequential")
+    (t/is (not (tool-exec/has-sequential-tool-call?
+                [{:name "run_code" :arguments {"code" "(emit 1)"}}]
+                {"run_code" definition}))
+          "a definition-free script stays parallel")))
 
 (t/deftest test-run-code-emit-image
   ;; images travel beside the emitted text as the result's :images, from a

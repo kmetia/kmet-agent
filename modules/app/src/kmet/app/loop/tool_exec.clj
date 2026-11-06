@@ -13,25 +13,42 @@
    rather than blocking the batch's preparation.
 
    Tool execution mode (pi: toolExecution): tools default to :parallel; if
-   any tool call targets a :sequential tool the whole batch runs
-   sequentially (see :execution-mode on the Tool record)."
-  (:require [kmet.app.permissions :as permissions]
+   any tool call targets a :sequential tool the whole batch runs sequentially
+   (see :execution-mode on the Tool record). Eval is the one code tool whose
+   definitions are examined: a batch containing an eval call with a top-level
+   definition (persisted or live-only) runs sequentially too."
+  (:require [kmet.app.eval.definitions :as eval-defs]
+            [kmet.app.permissions :as permissions]
             [kmet.app.loop.state :as state]
             [kmet.app.loop.message :as message]
             [kmet.app.tools.invoke :as invoke]
             [kmet.app.tools.script :as script]
             [kmet.app.extensions.core :as extensions]))
 
+(defn- eval-definition-call?
+  "True when TC is an eval call whose code defines a top-level verb — persisted
+   or live-only. Unreadable code stays parallel and reports its own error."
+  [tc]
+  (and (= "eval" (:name tc))
+       (let [code (or (get-in tc [:arguments "code"])
+                      (get-in tc [:arguments :code]))]
+         (and (string? code)
+              (try (eval-defs/defines? code)
+                   (catch Exception _ false))))))
+
 (defn has-sequential-tool-call?
-  "True if any tool call targets a :sequential tool — the whole batch then runs
-   sequentially (pi: hasSequentialToolCall). Public for the batch-mode test;
-   execute-tool-calls! is the only production caller. Resolved against the
-   request's
-   captured tool map, like the dispatch, so a tool unloaded between the request
-   and the batch keeps its mode; an unregistered call defaults to :parallel
-   (pi default)."
+  "True if any tool call targets a :sequential tool, or an eval call carries a
+   verb definition — the whole batch then runs sequentially (pi:
+   hasSequentialToolCall). Public for the batch-mode test; execute-tool-calls!
+   is the only production caller. Resolved against the request's captured tool
+   map, like the dispatch, so a tool unloaded between the request and the batch
+   keeps its mode; an unregistered call never executes, so it cannot affect the
+   batch mode."
   [tool-calls declared-tools]
-  (boolean (some #(= :sequential (:execution-mode (get declared-tools (:name %))))
+  (boolean (some (fn [tc]
+                   (when-let [tool (get declared-tools (:name tc))]
+                     (or (= :sequential (:execution-mode tool))
+                         (eval-definition-call? tc))))
                  tool-calls)))
 
 (defn- await-all-tool-results!
@@ -233,8 +250,9 @@
                      (every? #(true? (:terminate %)) @tool-results))}))
 
 (defn execute-tool-calls!
-  "Execute tool calls. If any target tool is :sequential the whole batch runs
-   sequentially; otherwise tools run in parallel (pi: toolExecution mode).
+  "Execute tool calls. If any target tool is :sequential, or an eval call
+   carries a top-level definition, the whole batch runs sequentially; otherwise
+   tools run in parallel (pi: toolExecution mode).
    Runs the tool point for every call and returns results in source order.
    Calls outside the declared (active) tool set settle as errors without
    executing — pi: prepareToolCall resolves against the request's tools.
