@@ -643,7 +643,9 @@ seeds the call vocabulary and the standard aliases before evaluating the
 library, and each definition's per-call primitives (`emit`, `cwd`, the process
 wrappers and the tool bridge) read the current call's state rather than the
 call that compiled them. Parallel calls serialize on a per-session lock, the
-deadline starts after it is taken, and `:dispose!` clears every environment. A
+deadline starts after it is taken, and `:dispose!` clears every environment;
+the tool's guidelines therefore steer a multi-step task into one call, where
+inner tool calls fan out as promises and local work can use `spawn`. A
 broken library file is reported under `:failures` and skipped. The pure parse
 and address rules live in `kmet.app.eval.definitions`.
 
