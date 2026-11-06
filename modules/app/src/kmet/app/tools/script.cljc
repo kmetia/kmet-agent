@@ -78,6 +78,7 @@
 (def ^:private update-throttle-ms 100)
 
 (def ^:private capture-poll-ms 25)
+(def ^:private cancel-poll-ms 100)
 (def ^:private interrupt-grace-ms 1500)
 (def ^:private error-preview-chars 300)
 (def ^:private error-preview-lines 3)
@@ -412,11 +413,13 @@
    'file-seq (fn [dir] (file-seq (fs/file (path-in-cwd (call-cwd) dir))))})
 
 (defn- process-fns
-  "babashka.process with the current call's cwd as the default :dir and pid
-   tracking for `process` (kmet's shutdown kills tracked children).
-   babashka.process takes opts FIRST for token commands and LAST for a
-   command vector — the wrapper normalizes both shapes. The default dir is
-   read at call time, so a kept definition follows the current call."
+  "babashka.process with the current call's cwd as the default :dir, pid
+   tracking (kmet's shutdown kills tracked children) and cancel-signal
+   killing for `process`, `sh` and `shell` (Escape stops a bare shell command;
+   host code is otherwise past SCI's interrupt). babashka.process takes opts
+   FIRST for token commands and LAST for a command vector — the wrapper
+   normalizes both shapes. The default dir is read at call time, so a kept
+   definition follows the current call."
   []
   (let [fns (shared-fns 'babashka.process)
         with-dir (fn [f]
@@ -445,29 +448,56 @@
                            (if (map? last-arg)
                              (apply f (merge {:dir cwd} last-arg) (butlast args))
                              (apply f {:dir cwd} args)))))))
+        alive? (get fns 'alive?)
+        track! (fn [p]
+                 ;; the signal is captured here, not read in the future: a
+                 ;; future does not convey the call's dynamic bindings on Jolt
+                 (let [signal (:cancelled *call-state*)]
+                   (try
+                     (when-let [pid (kprocess/process-pid p)]
+                       (kprocess/track-pid! pid)
+                       ;; one watcher per process: untrack on exit and kill the
+                       ;; tree on cancel/abort; a spawned command would
+                       ;; otherwise outlive Escape, which SCI cannot reach
+                       (when alive?
+                         (future
+                           (loop []
+                             (cond
+                               (and signal @signal)
+                               (kprocess/kill-process-tree! pid)
+                               (try (alive? p) (catch Throwable _ false))
+                               (do (Thread/sleep 100)
+                                   (recur))
+                               :else nil))
+                           (kprocess/untrack-pid! pid))))
+                     (catch Throwable _ nil))
+                   p))
         tracked (fn [f]
-                  (fn [& args]
-                    (let [p (apply f args)
-                          alive? (get fns 'alive?)]
-                      (try
-                        (when-let [pid (kprocess/process-pid p)]
-                          (kprocess/track-pid! pid)
-                          ;; untrack when the process exits — a tracked pid
-                          ;; left behind could be reused by an unrelated
-                          ;; process and killed at kmet shutdown (bash-executor
-                          ;; untracks the same way)
-                          (when alive?
-                            (future
-                              (loop []
-                                (when (try (alive? p) (catch Throwable _ false))
-                                  (Thread/sleep 100)
-                                  (recur)))
-                              (kprocess/untrack-pid! pid))))
-                        (catch Throwable _ nil))
-                      p)))]
+                  (fn [& args] (track! (apply f args))))
+        process* (get fns 'process*)
+        parse-args (get fns 'parse-args)
+        check (get fns 'check)
+        destroy-tree (get fns 'destroy-tree)
+        start (fn [{:keys [opts] :as parsed} defaults]
+                (track! (process* (assoc parsed :opts (merge defaults opts)))))
+        ;; `sh` and `shell` block inside babashka.process, so their pid is not
+        ;; visible to a wrapper around the call; start with process*, watch,
+        ;; then block. `sh` mirrors its :out/:err defaults; `shell` mirrors
+        ;; inherited I/O, destroy-tree, and throw-on-exit unless :continue.
+        sh* (when (and process* parse-args)
+              (fn [& args]
+                @(start (parse-args args) {:out :string :err :string})))
+        shell* (when (and process* parse-args check)
+                 (fn [& args]
+                   (let [{:keys [opts] :as parsed} (parse-args args)
+                         proc @(start parsed {:in :inherit
+                                              :out :inherit
+                                              :err :inherit
+                                              :shutdown destroy-tree})]
+                     (if (:continue opts) proc (check proc)))))]
     (cond-> fns
-      (contains? fns 'sh) (update 'sh with-dir)
-      (contains? fns 'shell) (update 'shell with-dir)
+      (contains? fns 'sh) (assoc 'sh (with-dir (or sh* (get fns 'sh))))
+      (contains? fns 'shell) (assoc 'shell (with-dir (or shell* (get fns 'shell))))
       (contains? fns 'process) (update 'process #(tracked (with-dir %))))))
 
 (defn- format-value
@@ -1222,6 +1252,29 @@
     (.start thread)
     {:done done :result result}))
 
+(defn- await-script
+  "Wait for DONE, the call's cancel signal, or DEADLINE. DEADLINE nil waits
+   for DONE or cancellation. Polls in cancel-poll-ms slices so Escape ends a
+   host-blocked script (which SCI's interrupt cannot reach) instead of waiting
+   for the model's timeout. A signal that fired by the time DONE resolves
+   reports :cancelled even when the script finished. Returns :done,
+   :cancelled, or :timeout."
+  [done cancelled deadline]
+  (loop []
+    (let [slice (if deadline
+                  (max 1 (min cancel-poll-ms
+                              (- deadline (concurrent/monotonic-ms))))
+                  cancel-poll-ms)]
+      (cond
+        (not= ::pending (deref done slice ::pending))
+        (if @cancelled :cancelled :done)
+
+        @cancelled :cancelled
+
+        (and deadline (>= (concurrent/monotonic-ms) deadline)) :timeout
+
+        :else (recur)))))
+
 (defn- assemble-result
   "Build the tool result from the eval outcome and the emitted output. `emit`
    is the curated text channel; when a successful script emitted nothing its
@@ -1394,21 +1447,14 @@
                                    (:abort state)
                                    (:capture-bytes (:limits state)))
             _ (reset! (:writers state) capture)
-            {:keys [done result]} (start-eval-thread! sci-ctx code prelude capture ns-atom state)]
-        (if deadline
-          (when-not (deref done timeout-ms false)
-            (compare-and-set! (:abort state) nil :timeout)
-            ;; the interpreter notices the abort on its next step; a host-blocked
-            ;; script does not, and is abandoned here
-            (deref done interrupt-grace-ms false))
-          ;; no deadline (bash's nil/0): wait for the script — but Escape must
-          ;; still end the call, so a host-blocked script (which the interrupt
-          ;; cannot reach) is abandoned after the same grace the deadline uses
-          (loop []
-            (when (= ::pending (deref done interrupt-grace-ms ::pending))
-              (if @(:cancelled state)
-                (compare-and-set! (:abort state) nil :aborted)
-                (recur)))))
+            {:keys [done result]} (start-eval-thread! sci-ctx code prelude capture ns-atom state)
+            ;; Escape must end the call whether or not the model set a
+            ;; deadline; the grace lets interpreted code unwind.
+            outcome (await-script done (:cancelled state) deadline)]
+        (when-not (= :done outcome)
+          (compare-and-set! (:abort state) nil
+                            (if (= :cancelled outcome) :aborted :timeout))
+          (deref done interrupt-grace-ms false))
         (let [res (or @result {:status (or @(:abort state) :timeout)})]
           (assemble-result {:tool tool
                             :res res

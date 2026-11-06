@@ -11,6 +11,16 @@ docstring is not written, so the saved file keeps its documented version.
 The tool description, prompt guidelines, `(eval/help)` and the `:eval-library`
 manifest state the rule; `docs/architecture.md` is authoritative.
 
+## Task: Windows process-cancel tests (2026-11-06)
+
+Status: todo. The sandbox's process-cancel tests (`sh`, `shell`, background
+`process`) skip Windows via `when-not kprocess/windows-os?`, so the
+`taskkill /T` branch of `kmet.libs.process/kill-process-tree!` and the
+watcher's cancel-kill are untested there. Add a Windows-safe child-process
+fixture (e.g. `cmd /c ...` with a delayed marker file) covering `sh`,
+`shell`, a background `process`, and a timed host-blocked `run_code`/`eval`
+call ending on Escape rather than at its timeout.
+
 ## Task: eval library interface discovery (10a, 2026-11-05)
 
 Status: done (2026-11-05). This was the interface half of persistent-eval

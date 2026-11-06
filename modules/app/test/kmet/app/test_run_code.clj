@@ -12,6 +12,7 @@
             [kmet.app.tools.registry :as tools]
             [kmet.app.tools.script :as script]
             [kmet.app.tools.util :as tool-util]
+            [kmet.libs.concurrent :as concurrent]
             [kmet.libs.host :as host]
             [kmet.test-utils :as tu]
             [kmet.test-tmp :as test-tmp]))
@@ -185,6 +186,25 @@
       (t/is (some? r))
       (t/is (:is-error r))
       (t/is (str/includes? (:content r) "aborted"))
+      (t/is (= :aborted (get-in r [:details :error]))))))
+
+(t/deftest ^:slow test-run-code-cancel-ends-a-host-blocked-call-with-a-deadline
+  ;; Regression: with :timeout set, the wait only watched the clock, so Escape
+  ;; during host-blocked code ran until the model's timeout while the tool's
+  ;; Elapsed counter kept ticking. run_code shares kmet.app.tools.script with
+  ;; eval, so the fix is the shared wait; this covers the tool's plumbing.
+  (let [signal (atom false)
+        started (concurrent/monotonic-ms)
+        f (future (tools/execute-tool reg "run_code"
+                                      {:code "(sandbox/sleep 5000)"
+                                       :timeout 10}
+                                      {:signal signal}))]
+    (Thread/sleep 100)
+    (reset! signal true)
+    (let [r (deref f 7000 ::timeout)]
+      (t/is (not= ::timeout r) "the call returns on Escape, not at the deadline")
+      (t/is (< (- (concurrent/monotonic-ms) started) 4000)
+            "abandoned after the grace, well before the 10s deadline")
       (t/is (= :aborted (get-in r [:details :error]))))))
 
 (t/deftest ^:slow test-run-code-caught-interrupt-still-aborts

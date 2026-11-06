@@ -573,12 +573,15 @@ probe and no real use, and is gone;
   bash's semantics); Escape and the script's own abort (timeout/output-limit)
   both feed the bridge's signal, which is the read-only OR of the run's and the
   script's (`kmet.libs.concurrent/or-signal`), so an inner call is cancelled by
-  either. A pool task checks that signal before the call starts and again
+  either. The caller polls the signal whether or not a deadline is set, so
+  Escape returns the call after the grace rather than after the model's
+  timeout. A pool task checks that signal before the call starts and again
   inside the execute step, so a slow hook cannot start a call past the abort.
-  Per-tool coverage stays cooperative (bash kills its process tree; MCP calls
-  have no signal plumbing), and a host-blocked script is abandoned after a
-  1.5 s interrupt grace rather than killed — the one accepted limitation of an
-  in-process sandbox, with the process-isolation tier recorded in
+  Per-tool coverage stays cooperative (bash and the sandbox's
+  `sh`/`shell`/`process` kill their process tree; MCP calls have no signal
+  plumbing), and other host-blocked script code is abandoned after a 1.5 s
+  interrupt grace rather than killed — the in-process sandbox's accepted
+  limitation; process isolation stays a recorded open seam in
   [`design.md`](../modules/app/src/kmet/design.md) § Open at HEAD.
 - **Result shape.** `:details` carries the effective `:timeout`, the measured
   `:elapsed-ms` (wall clock for the whole call, including the grace and the
