@@ -1039,8 +1039,9 @@ scope for code. Superseded and replaced by § Task: cwd-scoped eval library
 
 ## Post-track task: the rest of the clojure extension
 
-Status: measuring (2026-11-05). Landed: the `clojure_edit` description and
-guidelines are cut from 4.3 KB to 1.7 KB (the description alone 3.1 KB →
+Status: measuring (2026-11-05; measured again 2026-11-06). Landed: the
+`clojure_edit` description and guidelines are cut from 4.3 KB to 1.7 KB (the
+description alone 3.1 KB →
 1.1 KB); the `clojure-edit` skill now states the real split — the tool for
 whole forms, generic `edit` for small or multi-hunk text, the `clj/*` eval
 verbs for scripted edits, `clojure_eval` for live verification — instead of
@@ -1060,9 +1061,23 @@ Baseline from the session logs (432 session files, 2026-11-05):
 | generic `edit` on `.clj`-family files | 3,684 / 174 (1,796 whole-form hunks) |
 | paren-check hooks | 37 blocked writes / 19 sessions |
 
-Caveat: eval is one day old, and its heavy sessions were subagents with an
-eval-only toolset. No normal session has yet run with both `clojure_edit` and
-the eval verbs mounted, so "the verbs replace the tool" is unproven.
+Interim measurement (2026-11-06; EDNL logs 2026-11-04..06): 20 normal
+sessions (not eval-only subagents), of which 6 had both `eval` and
+`clojure_edit` mounted; none of the 6 started after 10b. In those 6:
+`clojure_edit` 2 calls (0 errors), `clj/edit-form`/`clj/replace-sexp`/
+`clj/paren-repair` 0 calls, generic `edit` on Clojure-family files 21 calls /
+46 hunks / 6 whole-form hunks (4 unique after retries), 2 exact-match
+failures, both retried. Across all 20 normal sessions: `clojure_edit` 74
+calls (7 errors, 4 retried), eval verbs 0, generic whole-form definition
+hunks 36. The eval verbs were used only in the 24 eval-only subagents (66
+`clj/edit-form`, 27 `clj/replace-sexp`, 0 `clj/paren-repair`, 22
+`user/edit`). The retirement gate is not met: the `clojure_edit` share is 25%
+of whole-form edits in the both-mounted sample and 67% across all normal
+sessions (both above ~10%), and the weekly rate is not below ~5. Keep the
+trimmed direct tool; the both-mounted sample is still short of ~20 sessions,
+so continue measuring and re-check after 10b accrues normal sessions.
+`clojure_edit_replace_sexp` had 0 calls and `clojure_paren_repair` 2; keep
+both pending normal-session usage.
 
 The options remain: keep the opt-in extension with the trimmed surface (the
 current lean), promote the rest into a core/bundle row, or drop the extension
