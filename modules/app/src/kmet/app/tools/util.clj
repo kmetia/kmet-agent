@@ -15,9 +15,9 @@
 ;; ─── Tool-selection vocabulary ────────────────────────────────────────────
 
 (defn tool-selection-modifier?
-  "True when a :default-tools entry is a +name/-name modifier (pi:
-   isToolModifier). Shared by the settings merge (kmet.app.config) and the
-   resolver (kmet.app.tools.registry) so the vocabulary has one home."
+  "True when a selection entry is a +name/-name modifier (pi:
+   isToolModifier). Shared by the settings merge, the tool resolver and the
+   resource resolver, so the entry grammar has one home."
   [entry]
   (and (string? entry)
        (or (str/starts-with? entry "+")

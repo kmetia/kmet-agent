@@ -48,6 +48,7 @@ its layers; this page is what the build ships.
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
+| `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
 | `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
@@ -87,6 +88,7 @@ its layers; this page is what the build ships.
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
+| `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
 | `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
@@ -120,6 +122,7 @@ its layers; this page is what the build ships.
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
+| `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
 | `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
@@ -153,6 +156,7 @@ its layers; this page is what the build ships.
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
+| `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
 | `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
@@ -187,6 +191,7 @@ its layers; this page is what the build ships.
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
+| `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
 | `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
@@ -220,6 +225,7 @@ its layers; this page is what the build ships.
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
+| `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
 | `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
@@ -252,6 +258,7 @@ its layers; this page is what the build ships.
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
+| `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
 | `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |

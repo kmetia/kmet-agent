@@ -490,13 +490,14 @@
   (tool-util/tool-selection-modifier? entry))
 
 (defn resolve-selection
-  "Resolve a merged tool-selection entry list over BASE-NAMES (pi:
+  "Resolve a `+name`/`-name` selection entry list over BASE-NAMES (pi:
    SettingsManager.resolveDefaultTools). Plain names replace the base set;
-   +name adds and -name removes in list order; a list of only +name/-name
-   entries modifies the base set; an empty list selects nothing. Unknown names
-   pass through — they select nothing; callers match against the live
-   registry. A non-list value resolves empty and non-string entries are
-   dropped. nil when ENTRIES is nil: no setting, every tool stays active."
+   +name adds and -name removes in list order; a list of only modifiers
+   modifies the base set; an empty list selects nothing. Unknown names pass
+   through — they select nothing; callers match against the live registry. A
+   non-list value resolves empty and non-string entries are dropped. nil when
+   ENTRIES is nil: no setting, every base name stays selected. Shared by the
+   tool and resource selection paths."
   [entries base-names]
   (when entries
     ;; a non-array value is treated as [] before resolving; settings files are

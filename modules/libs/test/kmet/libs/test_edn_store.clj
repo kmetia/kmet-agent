@@ -152,6 +152,36 @@
       (is (= {:thinking-mode :hidden} (edn/read-string (slurp f))))
       (finally (fs/delete-tree tmp)))))
 
+(deftest remove-edn-setting-removes-and-prunes
+  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-edn-settings-remove-" (System/currentTimeMillis)))))
+        f (str tmp "/settings.edn")]
+    (fs/create-dirs tmp)
+    (try
+      (spit f "{:provider :openai\n :resources {:tools [\"-bash\"] :skills [\"+review\"]}\n}\n")
+      (eds/remove-edn-setting! f [:resources :tools])
+      (is (= {:provider :openai
+              :resources {:skills ["+review"]}}
+             (edn/read-string (slurp f)))
+          "the sibling type survives")
+      (eds/remove-edn-setting! f [:resources :skills])
+      (is (= {:provider :openai} (edn/read-string (slurp f)))
+          "the emptied :resources map is pruned")
+      (finally (fs/delete-tree tmp)))))
+
+(deftest remove-edn-setting-missing-is-a-no-op
+  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-edn-settings-remove-missing-" (System/currentTimeMillis)))))
+        f (str tmp "/settings.edn")]
+    (fs/create-dirs tmp)
+    (try
+      (spit f "{:provider :openai}\n")
+      (eds/remove-edn-setting! f [:resources :tools])
+      (is (= "{:provider :openai}\n" (slurp f))
+          "an absent path writes nothing")
+      (eds/remove-edn-setting! (str tmp "/absent.edn") [:resources :tools])
+      (is (not (fs/exists? (str tmp "/absent.edn")))
+          "a missing file stays missing")
+      (finally (fs/delete-tree tmp)))))
+
 ;; ─── File lock bounded retry (regression) ──────────────────────────────────
 
 (deftest file-lock-fresh-lock-times-out-bounded

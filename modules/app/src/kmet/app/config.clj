@@ -158,6 +158,18 @@
    environment (babashka cannot set env vars)."
   (fn [k] (System/getenv k)))
 
+(defn- warn-bad-resource-settings!
+  "Warn (debug-only) about a malformed `:resources` map in SCOPE's raw
+   settings. The selection service reads these maps directly, so the merged
+   config's shape check cannot see them."
+  [scope config]
+  (let [resources (:resources config)]
+    (when (and (debug/enabled?)
+               (not (config-schema/validate-resource-settings? resources)))
+      (binding [*out* *err*]
+        (println "Warning: Wrong-shape" scope ":resources settings"
+                 (pr-str (config-schema/explain-resource-settings resources)))))))
+
 (defn- load-edn-file
   "Load an EDN file, returning nil if it doesn't exist or is invalid."
   [path]
@@ -240,6 +252,8 @@
    dir for the global settings file, auth.edn, and models.edn
    (KMET_CODING_AGENT_DIR sandboxing); nil resolves via get-agent-dir.
    Warns once per retired :*-dir key present in a settings file.
+   The merged map carries no :resources key: selection is scoped, and
+   `read-resource-settings` hands `kmet.app.resources` both raw scope maps.
    Returns merged map."
   [& {:keys [no-env? no-settings? agent-dir]}]
   (let [agent-dir (or agent-dir (get-agent-dir))
@@ -247,6 +261,8 @@
         project-config (when-not no-settings? (load-edn-file ".kmet/settings.edn"))
         _ (auth/load-auth! agent-dir)
         _ (warn-retired-dir-keys! user-config project-config)
+        _ (warn-bad-resource-settings! "global" user-config)
+        _ (warn-bad-resource-settings! "project" project-config)
         global-dir agent-dir
         project-dir (str (fs/absolutize ".kmet"))
         ;; Only KMET_PROVIDER may override the settings provider; the
@@ -255,9 +271,15 @@
         env-provider (when-not no-env?
                        (some-> (getenv "KMET_PROVIDER") keyword))
         env-model (getenv "KMET_MODEL")
-        base (deep-merge (resolve-scope-paths default-config global-dir)
-                         (resolve-scope-paths user-config global-dir)
-                         (resolve-scope-paths project-config project-dir))
+        ;; :resources is scoped selection, not a mergeable value: the project
+        ;; list is a delta over the global list, so a deep merge would replace
+        ;; one type's list instead of layering it. The resources service reads
+        ;; both raw scope maps (`read-resource-settings`); the merged config
+        ;; carries no :resources key.
+        base (dissoc (deep-merge (resolve-scope-paths default-config global-dir)
+                                 (resolve-scope-paths user-config global-dir)
+                                 (resolve-scope-paths project-config project-dir))
+                     :resources)
         ;; :default-tools / :enabled-tools — pi merges the scopes' entry
         ;; lists instead of letting a project list replace the user one: a
         ;; project list of only +name/-name entries modifies the user
@@ -401,6 +423,18 @@
   [path value]
   (eds/save-edn-setting! (project-settings-path) path value))
 
+(defn remove-setting!
+  "Remove PATH's leaf from the global settings.edn, pruning maps left empty;
+   a missing file or path is a no-op. Unrelated settings survive."
+  [path]
+  (eds/remove-edn-setting! (global-settings-path) path))
+
+(defn remove-project-setting!
+  "Remove PATH's leaf from the project settings.edn, pruning maps left empty;
+   a missing file or path is a no-op. Unrelated settings survive."
+  [path]
+  (eds/remove-edn-setting! (project-settings-path) path))
+
 (defn read-global-settings-map
   "The parsed global settings map (~/.kmet/agent/settings.edn), or nil when
    the file is missing, unreadable, or not a map."
@@ -412,6 +446,15 @@
    file is missing, unreadable, or not a map."
   []
   (read-settings-file (project-settings-path)))
+
+(defn read-resource-settings
+  "The raw `:resources` selection maps from both scopes as
+   `{:global <map-or-nil> :project <map-or-nil>}`. They stay unmerged on
+   purpose: the project map is a delta over the global one, so merging the two
+   maps here would lose the scope each entry came from."
+  []
+  {:global (:resources (read-global-settings-map))
+   :project (:resources (read-project-settings-map))})
 
 (defn get-http-transport
   "Outbound HTTP transport mode (see kmet.libs.http/set-transport!):

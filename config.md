@@ -1,7 +1,8 @@
 # Resource selection
 
-Status: agreed design and implementation plan; not implemented. Replaces the
-earlier per-extension resource-toggle proposal. This file stays at the
+Status: step 1 implemented (`kmet.app.resources`, the per-type settings
+merge, the `:resources` row and settings-schema validation); migration steps
+2–8 remain. This file stays at the
 repository root as the working design and plan until the migration lands;
 moving it beside the source and design record is a separate cleanup task.
 

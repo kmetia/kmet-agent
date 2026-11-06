@@ -145,6 +145,34 @@
               (spit file-path
                     (pretty-edn (assoc-in base path value))))))))))
 
+(defn- dissoc-in
+  "Remove PATH's leaf from M, pruning maps left empty by the removal."
+  [m [k & ks]]
+  (if ks
+    (let [child (get m k)]
+      (if (map? child)
+        (let [child' (dissoc-in child ks)]
+          (if (empty? child')
+            (dissoc m k)
+            (assoc m k child')))
+        m))
+    (dissoc m k)))
+
+(defn remove-edn-setting!
+  "Remove PATH's leaf from FILE-PATH, pruning maps left empty by the removal;
+   a missing file or path is a no-op. Unrelated keys survive, but a nested
+   path rewrites the file in canonical pretty format (the same fallback
+   `save-edn-setting!` uses for nested paths). File is locked during write."
+  [file-path path]
+  (let [path (if (vector? path) path [path])]
+    (when (fs/exists? file-path)
+      (with-file-lock (str file-path ".lock")
+        (fn []
+          (let [base (or (safe-parse-edn-map (slurp file-path)) {})
+                updated (dissoc-in base path)]
+            (when (not= base updated)
+              (spit file-path (pretty-edn updated)))))))))
+
 ;; ─── EDN map store (read/write/update under lock) ─────────────────────────
 
 (defn read-edn-map

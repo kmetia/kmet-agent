@@ -58,6 +58,11 @@
           {:id :commands :plugin kmet.app.registries/commands}
           {:id :prompts :plugin kmet.app.registries/prompts}
           {:id :skills :plugin kmet.app.registries/skills}
+          ;; Resource selection over the three registries above: availability
+          ;; from what this composition and its extensions mounted, selection
+          ;; from the scoped :resources settings. Consumers read
+          ;; `enabled-names`; the service never mounts or prunes a provider.
+          {:id :resources :plugin kmet.app.resources/plugin}
           ;; The prompt builder a driver hands its state (7a): the app's pure
           ;; builder over the skills registry above. What a prompt is *about*
           ;; stays the caller's — only it knows which agent it is building for.
