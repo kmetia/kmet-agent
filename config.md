@@ -1,108 +1,241 @@
-# Open design: per-resource toggles for extension-provided resources
+# Resource selection
 
-Status: discussed, not implemented. This section records the design gap and
-constraints for a later pass; the current behavior is described first.
+Status: agreed design, not implemented. Replaces the earlier per-extension
+resource-toggle proposal.
 
-### Current behavior
+## Goal
 
-- An extension artifact is one plugin and one composition row. Disabling the
-  row unloads the extension and therefore all its resources.
-- A directory/jar manifest's `:meta {:tools [{:name "…"}]}` is read by
-  `kmet config` as a static projection; those tool rows toggle the global
-  `:enabled-tools` selection without loading the plugin
-  (`kmet.app.tools.config`, `kmet.ui.tui.resource-config`).
-- No other extension contribution is projected from the manifest. Skills,
-  commands, prompts, themes and eval verbs/commands are registered by the
-  extension at load (`kmet.extension/register-skill!`, `register-command!`,
-  `register-eval-source!`, …) and are all-or-nothing with the extension.
-- Single-file extensions have no manifest, so they cannot declare resource
-  granularity; they stay atomic.
+One enablement model for tools and every other selectable asset. Composition
+decides what exists in a run; one settings selection decides what that run
+uses. Extension resources are ordinary resources with names, not a separate
+selection system.
 
-### Desired behavior
+## Model
 
-- When an extension row is enabled, `kmet config` lists every resource the
-  extension declares in its manifest, without loading the extension.
-- Each declared resource can be enabled/disabled independently while the
-  extension itself stays mounted.
-- Disabling the extension row disables all its resources; re-enabling it does
-  not silently re-enable resources the user turned off.
-- Toggles apply live in a running session, not only on the next start.
+- Resource identity is `[type name]`: `[:tool "bash"]`, `[:skill "clojure-edit"]`.
+- Selectable types: `:tools`, `:commands`, `:skills`, `:prompts`, `:themes`,
+  `:eval`.
+- Composition and discovery make resources **available**: plugin rows,
+  packages, settings paths, auto dirs and `:resources-discover`.
+- Selection makes available resources **enabled**: one settings key per scope.
+- Mounting stays composition-only. There are no per-resource mounts.
 
-### Constraints
+The words:
 
-- `:config` is composition data, not live state. It is resolved at boot and
-  passed to the plugin's `:apply` as `(:config api)`; changing it after mount
-  does nothing.
-- `/reload` re-reads settings and remounts extension rows, but
-  `kmet.app.extensions.rows/reload-all!` reuses the entry and config captured
-  when the row mounted. It does not re-read the patch layers, so a change to a
-  row's `:config` is not picked up by `/reload`.
-- `kmet config` is a standalone process. Its writes are visible to the next
-  kmet start; it cannot update a running kmet process. Live toggling therefore
-  needs an in-session surface (for example a real `/config` command reusing the
-  resource-config component) or “live” must mean “after `/reload`”.
-- Live toggles need read-time filtering in the registries
-  (`get-commands`/`find-command`, `get-skills`, prompt/template lookup, eval
-  sources), not only a skip at registration time; otherwise a toggle is
-  cosmetic until the extension reloads.
+- **available** — the run has the resource (registered, installed or
+  discovered).
+- **selected** — the user wants it used.
+- **mounted** — a plugin row actually loaded the provider.
 
-### Proposed shape
+A resource can be available but not selected, or selected but unavailable
+(provider disabled). Its stored selection survives either state.
 
-Manifest catalog (static; read without loading; same validation rule as
-`:tools` — a sequential list of maps with a non-empty string `:name`):
+## Store
+
+One settings key, one entry grammar for every type:
 
 ```edn
-:meta {:resources
-       {:tools    [{:name "clojure_edit"}]
-        :commands [{:name "clojure"}]
-        :skills   [{:name "clojure-edit"}]
-        :prompts  [{:name "review"}]
-        :themes   [{:name "my-theme"}]
-        :eval     [{:name "clj/edit-form"}]}}
+;; ~/.kmet/agent/settings.edn
+{:resources {:tools  ["-bash"]
+             :skills ["-clojure-edit"]}}
+
+;; .kmet/settings.edn
+{:resources {:tools ["+bash" "+run_code"]}}
 ```
 
-`:meta {:tools …}` stays as the legacy top-level spelling during migration.
+- A missing key or type inherits the next scope, then the type's defaults.
+- A list with plain names starts from those names; a modifier-only list
+  starts from the type's defaults.
+- `+name` adds and `-name` removes, in list order.
+- A modifier-only project list appends to the global list; a project list
+  with any plain name replaces it.
+- An empty list selects nothing.
+- Entries for absent resources are inert and remain stored.
 
-Resource classes:
+Effective precedence:
 
-| Class | Individually toggleable |
-|-------|--------------------------|
-| tools, commands, skills, prompts, themes, eval sources/verbs | yes |
-| hooks, renderers, flags, keybindings/shortcuts, UI ports, services | no — extension-level only |
+```
+session tool selection  >  merged project+global entries  >  defaults
+```
 
-Selection and persistence:
+The session override exists only for tools (`/tools`, `set-active-tools!`).
+Other resource types are file-selected only.
 
-- Prefer persisting the selection in settings, keyed by extension id, rather
-  than in the extension row's `:config`; `/reload` re-reads settings but not
-  composition layers.
-- Runtime state should be a live selection service the registries read on
-  every access. Tools already have live selection through `:enabled-tools`;
-  the other resource types need the equivalent filter.
-- Decide whether tools keep their existing `:enabled-tools` path or join the
-  unified per-extension selection. Keeping both would give one tool two
-  independent disable switches.
-- Resource rows group with the extension that declares them; a disabled
-  extension row shows its resources off, and their stored selection survives
-  so re-enabling does not reset it.
+This is pi's `defaultTools` for `:tools`, extended to every resource type.
+`:default-tools` and `:enabled-tools` are retired; there is one tool list.
 
-### Open questions
+## Service
 
-1. Live surface: add an in-session `/config` (recommended for “apply live”), or
-   accept that toggles apply after `/reload`/next start?
-2. Selection schema: one settings key keyed by extension id and resource type,
-   or per-type keys? Define global/project merge semantics either way.
-3. How to handle resources an extension registers dynamically but does not
-   declare in `:meta`: remain invisible/untoggleable until declared, or list
-   them from a live registry when the extension is mounted?
-4. Extend `:meta` to a general `:resources` map, or keep top-level keys
-   (`:tools`, `:skills`, …)?
-5. Should `/reload` learn to re-read composition layers and remount changed
-   extension rows, independent of this feature?
+`kmet.app.resources` is the only owner of selection state:
 
-Relevant code: `modules/app/src/kmet/app/extensions/context.cljc`
-(`manifest-info`, `:meta`), `modules/app/src/kmet/app/extensions/rows.clj`
-(`item-meta`, `card`, `load-entry!`), `modules/app/src/kmet/app/extensions/core.cljc`
-(`mount-plugin!`, `create-extension-api`),
-`modules/app/src/kmet/app/tools/config.clj` (static `:meta :tools` projection),
-`modules/app/src/kmet/ui/tui/resource_config.clj` (config rows/toggles), and
-`modules/app/src/kmet/extension.clj` (registration wrappers).
+```clojure
+(snapshot kind opts)       ; grouped rows for kmet config / /config
+(enabled? kind name)       ; consumer read
+(set! kind name on? opts)  ; global/project write
+(merge-entries user project)
+(resolve-entries entries available defaults)
+```
+
+A kind table replaces per-type conditionals:
+
+```clojure
+{:tool    {:default-on default-tool? :reserved #{}      :available tools/available}
+ :command {:default-on all?          :reserved core?    :available commands/available}
+ :skill   {:default-on all?          :reserved #{}      :available skills/available}
+ :prompt  {:default-on all?          :reserved #{}      :available prompts/available}
+ :theme   {:default-on all?          :reserved #{}      :available themes/available}
+ :eval    {:default-on all?          :reserved builtin? :available eval/available}}
+```
+
+Registries keep their current responsibilities; they only report availability.
+They do not own enablement.
+
+### Consumer reads
+
+Each consumer filters at read time; management APIs keep returning everything,
+so a disabled resource can always be re-enabled:
+
+- tools: declared schema, execution, `run_code` surface, `tool_search`
+- commands: dispatch, autocomplete, help
+- skills: prompt block, `/skill:` expansion
+- prompts: template lookup and expansion
+- themes: picker; disabling the active theme falls back to the default
+- eval: environment values and `/eval` verbs
+
+`get-all-*` and the selection snapshot read the unfiltered set.
+
+## UI
+
+One row shape for every type:
+
+```clojure
+{:type :skill
+ :name "clojure-edit"
+ :provider {:kind :extension :id :ext/clojure}
+ :available? true
+ :selected? true
+ :reason nil}
+```
+
+The screen groups rows by `:provider` (bundled, package, file source,
+extension). Grouping is display only; selection stays keyed by `[type name]`.
+
+A selection row writes `resources/set!`. An extension row writes the
+composition layer. `kmet config` owns both writes for the next start. `/config`
+shows composition rows read-only with a restart-required hint; it writes only
+selection.
+
+### Disabled extensions
+
+Disabling an extension row removes it from composition. It does **not** edit
+`:resources`, and it does not unregister the extension's selection entries.
+
+Its declared resources stay grouped in the UI, marked unavailable:
+
+```
+Extension: clojure (disabled)
+  [x] skill clojure-edit      unavailable: extension disabled
+  [ ] command clojure
+```
+
+Stored selection survives disable, re-enable and `/reload`. Re-enabling the
+extension restores exactly the user's prior choices. No automatic pruning on
+disable. An uninstalled extension loses its declared rows; its inert selection
+entries remain harmless.
+
+## Manifest catalog
+
+An extension may declare its resources for the standalone `kmet config`
+process, which must list them without loading the extension:
+
+```edn
+:meta {:resources [{:type :tool  :name "my_tool"}
+                   {:type :skill :name "my-skill"}]}
+```
+
+The catalog lives under `:meta`. There is no top-level `:resources` manifest
+key: top-level manifest keys are the runtime contract (`:name`, `:plugin`,
+`:loader`), while the catalog is host metadata read only by `kmet config`.
+The settings selection key is also `:resources`; nesting the catalog under
+`:meta` keeps the two shapes distinct.
+
+- A flat list is the one declaration shape.
+- Each entry needs a valid `:type` and a non-empty string `:name`.
+- Invalid entries are skipped with a warning; they never fail an extension
+  load.
+- The declaration is a catalog, not the authority. In-session, live
+  registrations are authoritative; dynamically registered resources are
+  visible to `/config` without a declaration.
+- `:meta {:tools ...}` is removed in the same change. Update bundled
+  extensions, docs and tests; no legacy alias.
+
+## Per-type rules
+
+| Type | Defaults | Reserved |
+|---|---|---|
+| tools | on, except `:default-enabled? false` | none; `tool_search`/deferred rules still apply |
+| commands | on | core commands the UI needs to recover (`/reload`, `/quit`, `/config`) |
+| skills | on | none |
+| prompts | on | none |
+| themes | on | active theme falls back if disabled |
+| eval | on | built-in `user` and `clj` sources |
+
+Selected resources are read-time filtered; disabling never unregisters a
+resource. Tool selection keeps its existing `:tool-change` session recording
+and declaration replay as a tool-only adapter.
+
+## Surfaces
+
+- `kmet config` — standalone, edits files for the next start. Lists declared
+  extension resources, file resources and package resources.
+- `/config` — in-session, live selection over the live registries. Composition
+  changes remain restart-required.
+- `/tools` — a `:tools` view over the same store; the session toggle stays a
+  tool-only runtime scope.
+- `/reload` — re-reads settings and selection, reloads extensions/resources.
+  It does not re-read composition layers.
+
+Discovery paths and package filters are installation, not per-item
+enablement. Per-item checkboxes write `:resources` for every type; package
+patterns remain bulk/advanced discovery filters.
+
+## Remove
+
+- `:default-tools` and `:enabled-tools`
+- `kmet.app.tools.config` selection and both writers
+- per-item path writers in `kmet.app.packages`
+- per-type toggle branches in `kmet.ui.tui.resource-config`
+- `:meta {:tools ...}`
+
+Keep the separate registries: they have different consumers. Only selection is
+shared.
+
+## Migration
+
+1. Add `kmet.app.resources` (`resolve-entries`, merge, kind table, snapshot,
+   set!) with tests; adapt the existing tool settings behind it.
+2. Switch `kmet config` and `/tools` to the service; delete the duplicate tool
+   writers.
+3. Replace `:default-tools`/`:enabled-tools` with `:resources :tools`; update
+   examples, docs and tests.
+4. Add the other kinds and their read-time filters; retire per-item path
+   writers.
+5. Add `:meta :resources`, remove `:meta :tools`, update bundled extensions and
+   docs.
+6. Add the live `/config` surface; keep `kmet config` as the next-start editor.
+
+Replace extension API `set-tool-enabled!`/`tool-selection` with generic
+`set-resource-enabled!`/`resource-selection` and update in-repo consumers in
+the same change. `set-active-tools!` remains the tool session override.
+
+Tests: resolution and scope merge per type; disable/re-enable and `/reload`
+preserve selection; reserved commands/sources cannot be disabled; unavailable
+rows are distinct from unselected rows; manifest validation; changed-file
+gates.
+
+## Out of scope
+
+- Live composition recomposition (`design.md` § Open at HEAD 1).
+- Per-eval-verb toggles; selection is at source granularity.
+- MCP server enablement; that stays with the MCP adapter.
+- A per-extension selection key.
