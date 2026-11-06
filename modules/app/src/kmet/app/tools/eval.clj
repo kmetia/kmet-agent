@@ -83,7 +83,7 @@
                      "re-entered by the next. Output is the emitted text (or the "
                      "final value of a silent success); stdout and stderr are "
                      "discarded. One call runs a whole script: forms run in order, "
-                     "independent work can overlap — start (spawn f) or "
+                     "independent work can overlap — start (sandbox/spawn f) or "
                      "(tools/call …) and deref them to join — and separate calls "
                      "from a session serialize, so pack a multi-step task into "
                      "one call. This is the sandbox, not the project's nREPL.")
@@ -92,7 +92,7 @@
    ["eval is the full script sandbox, not a bare REPL: fs, sh, slurp, tools and require work as in a babashka script; (eval/help) lists sources, loaded definitions and the surface."
     "Read files with (user/read-file path) or (user/read-file path offset limit); it shares the read tool's 1-indexed offset/limit and truncation. For images use (emit-image path)."
     "Call the run's tools through the `tools` namespace: (tools/list) lists them, (tools/describe \"name\") shows one declaration, and (tools/call \"name\" args) returns a promise to deref — or use (tools/call! \"name\" args) to settle and throw on failure; a plain name is a var too, @(tools/name args)."
-    "Pack independent work into one eval call: forms run in order and independent work overlaps — `(spawn f)` for local work, and starting several `(tools/call …)` promises before dereferencing any of them. Separate eval calls from a session serialize, so a second call buys no concurrency; use one call for a multi-step task instead of one call per operation."
+    "Pack independent work into one eval call: forms run in order and independent work overlaps — `(sandbox/spawn f)` for local work, and starting several `(tools/call …)` promises before dereferencing any of them. Separate eval calls from a session serialize, so a second call buys no concurrency; use one call for a multi-step task instead of one call per operation."
     "Define what should survive the call: every top-level definition is written to the agent's eval library, while let/fn bindings are scratch. Use local bindings for throwaway code."
     "Give every saved definition a docstring: it is the interface later calls see, with its arglists. A missing docstring does not stop the save, but the result line and listings say (no docstring), and (eval/describe 'name :doc) is nil."
     "New sessions and a restart load the library; an already-running session is a cache and does not see another session's new files. The prompt previews the saved or loaded definitions; the first eval reports any loaded definitions and files that failed. A call that ends in a normal error writes nothing; its definitions stay live and can be forgotten."

@@ -1,6 +1,6 @@
 (ns kmet.app.test-eval-command
-  "The `/eval` command: list, search, move, drop, sources, help, source verbs
-   and registration lifetime."
+  "The `/eval` command: list, search, describe, move, drop, sources, help,
+   source verbs and registration lifetime."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
@@ -79,8 +79,8 @@
       (t/is (str/includes? content "demo/area"))
       (t/is (str/includes? content "2 definitions"))
       (t/is (str/includes? content "(cwd)"))
-      (t/is (str/includes? content "report.clj"))
-      (t/is (str/includes? content "area.clj")))
+      (t/is (not (str/includes? content "report.clj")))
+      (t/is (not (str/includes? content "area.clj"))))
     (let [[_ _ content] (first (run env "list report"))]
       (t/is (str/includes? content "user/report"))
       (t/is (not (str/includes? content "demo/area"))))))
@@ -94,11 +94,57 @@
       (t/is (= :info level))
       (t/is (str/includes? content "user/report  defn ([x])  (cwd)"))
       (t/is (str/includes? content "Render."))
-      (t/is (str/includes? content "user/plain  def  (cwd)  (no docstring; see "))
-      (t/is (str/includes? content "plain.clj")))
+      (t/is (str/includes? content "user/plain  def  (cwd)  (no docstring)"))
+      (t/is (not (str/includes? content "plain.clj"))))
     (let [[_ _ content] (first (run env "list report"))]
       (t/is (str/includes? content "Render."))
       (t/is (not (str/includes? content "user/plain"))))))
+
+(t/deftest describe-shows-the-saved-interface-without-building
+  (let [env (eval-env)
+        source "(defn report \"Render a report.\" [x] (str \"R\" x))"
+        path (write-def! env {:name "user/report" :source source})]
+    (let [[[level label content]]
+          (with-redefs-fn {#'eval-service/build-environment
+                           (fn [& _]
+                             (throw (ex-info "must not build" {:type :test})))}
+            #(run env "describe user/report"))]
+      (t/is (= :info level))
+      (t/is (= "Eval" label))
+      (t/is (str/includes? content "user/report  defn ([x])  (cwd)"))
+      (t/is (str/includes? content
+                           (str "file: " (eval-files/display-path (:cwd env) path))))
+      (t/is (str/includes? content "doc: Render a report."))
+      (t/is (str/includes? content source)))
+    (let [[level content] (first (run env "describe user/nope"))]
+      (t/is (= :warning level))
+      (t/is (str/includes? content "no eval definition named user/nope")))
+    (let [[level content] (first (run env "describe"))]
+      (t/is (= :warning level))
+      (t/is (str/includes? content "Usage: /eval describe")))))
+
+(t/deftest describe-a-source-verb-from-the-built-environment
+  (let [env (support/eval-ctx)
+        _ (tools/register-eval-source!
+           (:tools env) :license
+           (fn [_]
+             {:ns {'license {'add! (with-meta
+                                     (fn [_] :added)
+                                     {:doc "Add a header."
+                                      :arglists '([path])
+                                      :source "(fn [path] ...)"})}}}))
+        _ (support/eval! env "(emit :built)")
+        engine {:agent-state (atom {:ctx (:ctx env)})
+                :session (atom (:session env))
+                :cwd (atom (:cwd env))}
+        [[level label content]]
+        (run (assoc env :engine engine) "describe license/add!")]
+    (t/is (= :info level))
+    (t/is (= "Eval" label))
+    (t/is (str/includes? content "license/add!  verb ([path])  (source)"))
+    (t/is (str/includes? content "file: (no file)"))
+    (t/is (str/includes? content "doc: Add a header."))
+    (t/is (str/includes? content "(fn [path] ...)"))))
 
 (t/deftest search-matches-names-and-source
   (let [env (eval-env)
@@ -210,6 +256,7 @@
       (t/is (str/includes? help "/eval search <text>"))
       (t/is (str/includes? help "/eval drop <name>"))
       (t/is (str/includes? help "/eval move <name> global|cwd"))
+      (t/is (str/includes? help "/eval describe <name>"))
       (t/is (str/includes? help "/eval sources"))
       (t/is (str/includes? help "/eval help")))
     (let [[level content] (first (run env "nonsense"))]

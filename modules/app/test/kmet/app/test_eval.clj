@@ -79,7 +79,7 @@
     (t/is (str/includes? text "let/fn"))
     (t/is (str/includes? text "(eval/help)"))
     (t/is (str/includes? text "serialize"))
-    (t/is (str/includes? text "(spawn f)"))
+    (t/is (str/includes? text "(sandbox/spawn f)"))
     (t/is (not (str/includes? text "run_code"))
           "eval's prompt must stand alone when run_code is not selected")
     (t/is (not (str/includes? text "Jolt")))

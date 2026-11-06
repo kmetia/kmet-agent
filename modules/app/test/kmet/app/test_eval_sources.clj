@@ -101,12 +101,15 @@
     (register! env :bad-http (fn [_] {:ns {'kmet.libs.http {'get 1}}}))
     (register! env :bad-command (fn [_] {:commands {:list {:run (fn [_] nil)}}}))
     (register! env :bad-move (fn [_] {:commands {:move {:run (fn [_] nil)}}}))
+    (register! env :bad-describe
+               (fn [_] {:commands {:describe {:run (fn [_] nil)}}}))
     (let [result (support/eval! env "(+ 1 2)")
           errors (source-errors (:service env))
           ids (set (map :id errors))]
       (t/is (= "3" (:content result)))
       (t/is (= #{:boom :bad-user :bad-clj :bad-macro :bad-key
-                 :bad-fixed :bad-http :bad-command :bad-move} ids))
+                 :bad-fixed :bad-http :bad-command :bad-move :bad-describe}
+               ids))
       (t/is (seq (get-in result [:details :source-errors])))
       (t/is (str/includes? (pr-str (:details result)) "may not contribute to clj"))
       (t/is (str/includes? (pr-str (:details result)) "may not contribute to eval"))

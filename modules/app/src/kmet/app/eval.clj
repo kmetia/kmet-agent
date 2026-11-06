@@ -581,20 +581,16 @@
        :lines (vec (build-report-lines entries failures))})))
 
 (defn- definition-line
-  "One loaded definition's interface line: scope, kind and arglists, the
-   first docstring line, or the file when there is no other interface."
-  [{:keys [kind doc arglists file] :as entry}]
+  "One loaded definition's interface line: scope, kind and arglists, and the
+   first docstring line (or `(no docstring)`)."
+  [{:keys [kind doc arglists] :as entry}]
   (let [doc-line (eval-format/doc-line doc)
         scope (or (:scope entry) :global)
         shadow (when (false? (:active entry)) ", shadowed")]
     (str "  - " (:name entry) " " (when kind (name kind))
          (eval-format/arglists-text arglists)
          " (" (scope-label scope) shadow ") — "
-         (cond
-           doc-line doc-line
-           (seq arglists) "(no docstring)"
-           file (str "(no docstring; see " file ")")
-           :else "(no docstring)"))))
+         (or doc-line "(no docstring)"))))
 
 (defn- environment-help
   "The `(eval/help)` text: sources and their verbs, the loaded library with
@@ -691,6 +687,15 @@
   ([env name key]
    (let [entry (describe-entry env name)]
      (if (nil? key) entry (get entry key)))))
+
+(defn- file-source
+  "The stored defining form of ADDRESS in FILE, or nil when the file is gone
+   or does not define it."
+  [file address]
+  (when file
+    (some (fn [record]
+            (when (= address (:name record)) (:source record)))
+          (:defs (eval-files/file-defs file)))))
 
 (defn- take-failures!
   "Failures are reported once: return the current list and clear the
@@ -1717,6 +1722,56 @@
       (or (:roots env)
           (roots-for service (or (:cwd opts) (tool-util/cwd))))))))
 
+(defn- describe-indexed
+  "The disk view of NAME for `/eval describe`: the active saved record with
+   its source read from the file. Nil when NAME is not saved."
+  [service session cwd name]
+  (let [entries (:entries (service-index service {:session session :cwd cwd}))
+        entry (first (filter #(and (= name (:name %)) (:active %)) entries))]
+    (when entry
+      (-> (select-keys entry [:name :kind :doc :arglists :file :scope])
+          (assoc :source (file-source (:file entry) name))))))
+
+(defn- describe-source
+  "A mounted source's view of NAME, read without an environment. Nil when no
+   active source contributes it."
+  [service cwd name]
+  (when-let [entry (get (:values (resolve-sources service (or cwd (tool-util/cwd))
+                                                  nil))
+                        name)]
+    {:name name
+     :kind (if (:macro? entry) :macro :verb)
+     :doc (:doc entry)
+     :arglists (:arglists entry)
+     :file nil
+     :scope nil
+     :source (:source entry)}))
+
+(defn- describe-request
+  "The service's `:describe` reader: NAME as `(eval/describe)` resolves it in
+   the session's built environment, else the saved disk index, else a mounted
+   source's verb. Never builds an environment."
+  [service {:keys [session cwd name]}]
+  (let [session (resolve-session session)
+        env (when session (get @(:envs service) (:id session)))
+        raw-name (->name name)
+        _ (when-not raw-name
+            (bad-request! (str "describe needs a definition name, got "
+                               (pr-str name))
+                          {:name name}))
+        env-entry (when env
+                    (try
+                      (describe-entry env raw-name)
+                      (catch clojure.lang.ExceptionInfo e
+                        (if (= :eval/bad-request (:type (ex-data e)))
+                          nil
+                          (throw e)))))]
+    (or env-entry
+        (describe-indexed service session cwd raw-name)
+        (describe-source service cwd raw-name)
+        (bad-request! (str "no eval definition named " raw-name)
+                      {:name raw-name}))))
+
 (defn- service-manifest
   "The prompt manifest for SESSION: the built environment's loaded records when
    it has one, else the disk index described as saved. Never builds an
@@ -1852,6 +1907,7 @@
                (drop-request! service session drop cwd scope))
       :move! #(move-request! service %)
       :library #(service-library service)
+      :describe #(describe-request service %)
       :index (fn
                ([] (service-index service))
                ([opts] (service-index service opts)))

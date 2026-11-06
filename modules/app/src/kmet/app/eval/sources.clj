@@ -30,7 +30,8 @@
 
 (def ^:private reserved-command-names
   "The unqualified `/eval` verbs a source may not replace."
-  #{"list" "search" "drop" "move" "sources" "help" "--help" "-h"})
+  #{"list" "search" "describe" "drop" "move" "sources" "help"
+    "--help" "-h"})
 
 (defn- described
   "Attach a verb's model-facing interface to its function value. The keys are

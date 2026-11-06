@@ -91,11 +91,12 @@
    tools and `(eval/help)` label it; the summary itself stays host-neutral and
    names only the common surface."
   (str "aliases fs, str, set, edn, walk, json and p; bare sh; cwd-resolving "
-       "slurp, spit and file-seq; (cwd), (env k), (now), (sleep ms), (spawn f), "
-       "(emit v) and (emit-image x); the tools and sandbox namespaces; "
-       "clojure.*, babashka.*, the bundled libs (rewrite-clj, cljfmt, "
-       "edamame, parinferish) and the kmet.libs ports (json, http, yaml, "
-       "markdown) are require-able."))
+       "slurp, spit and file-seq; sandbox helpers (sandbox/cwd), "
+       "(sandbox/env k), (sandbox/now), (sandbox/sleep ms) and "
+       "(sandbox/spawn f); bare (emit v) and (emit-image x); the tools and "
+       "sandbox namespaces; clojure.*, babashka.*, the bundled libs "
+       "(rewrite-clj, cljfmt, edamame, parinferish) and the kmet.libs ports "
+       "(json, http, yaml, markdown) are require-able."))
 
 (def alias-prelude
   "The aliases every script gets without a require — the standard Clojure and

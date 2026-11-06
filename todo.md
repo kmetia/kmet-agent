@@ -54,7 +54,7 @@ the same metadata.
 4. **Save contract.** The eval guideline asks for a docstring; a saved
    definition without one still succeeds, but its result line says
    `(no docstring)`. An undocumented entry lists kind/arglists, or
-   `(no docstring; see <file>)` when neither exists.
+   `(no docstring)` when neither exists.
    `(eval/describe 'name :doc)` is nil.
 5. **Tests.** Extraction per form (docstring, attr-map, symbol metadata,
    multi-arity, `defmethod`); `(eval/describe 'name)` with no key and with
@@ -381,7 +381,7 @@ Three tiers of what a script can call, and only the third is a source:
 
 | tier | provided by | examples | removable |
 |---|---|---|---|
-| primitives | `kmet.app.tools.script`, shared with `run_code` | `slurp`, `spit`, `sh`, `p/*`, `fs/*`, `json`, `emit`, `emit-image`, `tools/list`, `tools/describe`, `tools/call`, `(cwd)`, `(env k)`, `(now)`, `(sleep ms)`, `(spawn f)` | no |
+| primitives | `kmet.app.tools.script`, shared with `run_code` | `slurp`, `spit`, `sh`, `p/*`, `fs/*`, `json`, `emit`, `emit-image`, `tools/list`, `tools/describe`, `tools/call`, `(sandbox/cwd)`, `(sandbox/env k)`, `(sandbox/now)`, `(sandbox/sleep ms)`, `(sandbox/spawn f)` | no |
 | eval vocabulary | the `:eval` service (it needs library state) | `(eval/library)`, `(eval/sources)`, `(eval/help)`, `(eval/describe …)`, `(eval/forget …)`, `(eval/patch …)`, `(eval/edit-form …)` | no |
 | verbs | the `:core` eval source shipped by the eval tool (including the Clojure editing verbs after E17), and every mounted extension's own source | `edit`, `write-file`, `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair`; extension-specific verbs | yes (`{:core false}`) |
 
@@ -611,7 +611,7 @@ and the cwd-scope task are done.
 - **Docstrings are the save contract.** The eval guideline asks for one; a
   definition without one still saves, but its result line says
   `(no docstring)`. An undocumented entry lists kind and arglists, or
-  `(no docstring; see <file>)` when neither exists. `(eval/describe 'name)`
+  `(no docstring)` when neither exists. `(eval/describe 'name)`
   returns kind, arglists, docstring, file, scope and source; a nil `:source`
   means none.
 

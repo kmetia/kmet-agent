@@ -163,6 +163,13 @@
                (:content (support/eval! env
                                         "(emit (nil? (eval/describe 'undocumented :doc)))")))))))
 
+(t/deftest test-help-omits-the-definition-file
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(def plain 1)")
+    (let [help (:content (support/eval! env "(eval/help)"))]
+      (t/is (str/includes? help "user/plain def (cwd) — (no docstring)"))
+      (t/is (not (str/includes? help "plain.clj"))))))
+
 (t/deftest test-an-unwritten-definition-is-described
   (let [env (support/eval-ctx)
         path (support/library-file env :cwd "user" "lost.clj")

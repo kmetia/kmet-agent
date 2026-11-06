@@ -255,7 +255,7 @@ schema-validated at load).
 | `:permissions` | `{:policy :remember!}` — the tool-call decision | `kmet.app.permissions/permissions`, per agent |
 | `:approvals` | `{:ask!}` — the one `:ask` delivery seam | `kmet.app.permissions/approvals` at the root; the TUI and server rows supply their own |
 | `:shell` `:sandbox` | the agent's shell options; the realm names a script's tool calls are blocked from | provided per agent by the agents factory; a preset row that mounts first wins |
-| `:eval` | `{:eval! :drop! :move! :library :index :manifest :sources :source-commands :failures :dispose!}` — the agent's persistent script environment over the global and cwd eval libraries, one per session; `:manifest` is the prompt listing that never builds an environment | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
+| `:eval` | `{:eval! :drop! :move! :library :index :describe :manifest :sources :source-commands :failures :dispose!}` — the agent's persistent script environment over the global and cwd eval libraries, one per session; `:manifest` is the prompt listing that never builds an environment | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
 | `:ui` | the capability service (`kmet.app.ui`) | `kmet.ui.headless/plugin`, `kmet.ui.tui/provider-plugin` |
 | `:extensions` | no service: the row binds the host's services (registry handle, ctx, resource ops, owner sweep) and publishes `process-handle` | `kmet.app.extensions/plugin` |
 
@@ -624,8 +624,9 @@ active definition without
 re-evaluating; they refuse collisions, same-scope moves, and source-provided
 or unwritten targets, take both root locks in the fixed global-then-cwd order,
 and roll back the target if the source delete fails. The engine-portable
-builtins register `/eval` (`list`, `search`, `drop`, `move`, `sources`, `help`,
-plus verbs an eval source contributes), independent of the `:tool/eval` row,
+builtins register `/eval` (`list`, `search`, `describe`, `drop`, `move`,
+`sources`, `help`, plus verbs an eval source contributes), independent of the
+`:tool/eval` row,
 so removing the row leaves the command and its service. The row also
 registers the `:core` eval source (the shared
 `read-file`/`edit`/`write-file` ops under `user`, and `clj/edit-form`,
@@ -673,9 +674,8 @@ metadata on their values (`with-meta`), which `normalize-source` validates and
 `source-var` puts on the SCI var, so `(meta #'license/add!)` works; the plural
 `(eval/sources)` stays the registered-source listing and includes each verb's
 doc and arglists. A docstring is the save contract: an undocumented definition
-still saves, but its result line and listings say `(no docstring)` (or
-`(no docstring; see <file>)` when there is neither a docstring nor an
-arglist), and `(eval/describe 'name :doc)` is nil.
+still saves, but its result line and listings say `(no docstring)`, and
+`(eval/describe 'name :doc)` is nil.
 
 Prompt discovery. Prompt start appends one hidden `:eval-library` custom
 message (`kmet.app.session.context/eval-library-listing`,

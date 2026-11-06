@@ -1,9 +1,10 @@
 (ns kmet.app.commands.eval
   "The `/eval` slash command: the human-facing view of the eval library.
 
-   Verbs: `list [pattern]`, `search <text>`, `drop <name>…`, `move <name>
-   global|cwd`, `sources` and `help`; entries show their cwd/global scope and
-   whether an entry is shadowed. An eval source may contribute a verb through
+   Verbs: `list [pattern]`, `search <text>`, `describe <name>`,
+   `drop <name>…`, `move <name> global|cwd`, `sources` and `help`; entries
+   show their cwd/global scope and whether an entry is shadowed. An eval
+   source may contribute a verb through
    the service's `:source-commands` map; built-in names are reserved. The command is
    registered with the engine-portable builtins, independent of the
    `:tool/eval` row."
@@ -50,16 +51,35 @@
   (str "(" (name (or scope :global))
        (when (false? active) ", shadowed") ")"))
 
-(defn- entry-line [cwd {:keys [name kind file arglists doc] :as entry}]
-  (let [path (entry-path cwd file)
-        arg (eval-format/arglists-text arglists)
+(defn- entry-line
+  "One definition listing line: name, kind, arglists, scope and the first
+   docstring line. The file is omitted — the scope names its root."
+  [{:keys [name kind arglists doc] :as entry}]
+  (let [arg (eval-format/arglists-text arglists)
         doc-line (eval-format/doc-line doc)]
     (str name "  " (kind-name kind) (or arg "")
          "  " (scope-tag entry)
-         (if (and (nil? doc-line) (nil? arg))
-           (str "  (no docstring; see " path ")")
-           (str "  " path))
+         (when (and (nil? doc-line) (nil? arg)) "  (no docstring)")
          (when doc-line (str "  — " doc-line)))))
+
+(defn- indented
+  "TEXT with every line indented four spaces."
+  [text]
+  (str/join "\n" (map #(str "    " %) (str/split-lines (str text)))))
+
+(defn- describe-text
+  "The human view of one `(eval/describe)` entry: its interface, file, full
+   docstring and source."
+  [cwd {:keys [name kind doc arglists file scope source]}]
+  (let [arg (eval-format/arglists-text arglists)
+        scope (if (some? scope)
+                (str "(" (clojure.core/name scope) ")")
+                "(source)")
+        source (if (str/blank? (str source)) "(not recorded)" source)]
+    (str name "  " (kind-name kind) (or arg "") "  " scope
+         "\n  file: " (entry-path cwd file)
+         "\n  doc: " (or doc "(no docstring)")
+         "\n  source:\n" (indented source))))
 
 (defn- name-match? [{:keys [name ns]} p]
   (or (str/includes? (str/lower-case (str name)) p)
@@ -76,8 +96,8 @@
     (let [n (count n)]
       (str n " file" (when (not= 1 n) "s") " failed to load"))))
 
-(defn- list-text [entries failures cwd]
-  (let [lines (map #(entry-line cwd %) entries)
+(defn- list-text [entries failures]
+  (let [lines (map entry-line entries)
         n (count lines)
         note (failure-note failures)]
     (if (zero? n)
@@ -159,7 +179,7 @@
                  (map eval-format/source-line sources)
                  ["No eval sources."])
                [(str n " definition" (when (not= 1 n) "s") " loaded")]
-               (map #(entry-line cwd %) entries)
+               (map entry-line entries)
                (map failure-line failures)))))
 
 (defn- source-commands [svc cwd]
@@ -173,6 +193,7 @@
 (defn- help-text [svc cwd]
   (let [verbs ["/eval list [pattern]     List library definitions"
                "/eval search <text>     Search names and source"
+               "/eval describe <name>   Describe one definition or source verb"
                "/eval drop <name>…      Delete actual files and unbind the live names"
                "/eval drop names sharing a file together; a partial file is refused"
                "/eval move <name> global|cwd  Move a definition to the other scope"
@@ -197,11 +218,22 @@
 
       (= verb "list")
       (let [{:keys [entries failures]} ((:index svc) {:cwd cwd :session sess})]
-        (out ui :info "Eval" (list-text (filter-entries entries arg) failures cwd)))
+        (out ui :info "Eval" (list-text (filter-entries entries arg) failures)))
 
       (= verb "search")
       (out ui :info "Eval" (search-text (:entries ((:index svc) {:cwd cwd :session sess}))
                                         cwd arg))
+
+      (= verb "describe")
+      (if (str/blank? arg)
+        (out ui :warning "Usage: /eval describe <name>")
+        (if-let [describe (:describe svc)]
+          (try
+            (out ui :info "Eval"
+                 (describe-text cwd (describe {:session sess :cwd cwd :name arg})))
+            (catch Exception e
+              (out ui :warning (or (ex-message e) (str e)))))
+          (out ui :warning "This eval service cannot describe definitions.")))
 
       (= verb "drop")
       (let [names (names-arg arg)]
@@ -248,6 +280,6 @@
 (def command
   "The `/eval` command record, registered with the engine-portable builtins."
   {:name "eval"
-   :description "List, search, move or drop eval library definitions"
-   :argument-hint "<list|search|move|drop|sources|help> [args]"
+   :description "List, search, describe, move or drop eval library definitions"
+   :argument-hint "<list|search|describe|move|drop|sources|help> [args]"
    :handler handle})
