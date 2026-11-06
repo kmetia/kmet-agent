@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [clojure.test :as t]
             [kmet.app.test-eval-support :as support]
+            [kmet.app.tools.read :as read-tool]
             [kmet.app.tools.registry :as tools]))
 
 (defn- register!
@@ -26,7 +27,8 @@
                                  'agent-home (fn [] agent-dir)
                                  'signalled? (fn [] (some? signal))
                                  'has-verbs? (fn [] (and (fn? (:edit verbs))
-                                                         (fn? (:write-file verbs))))}}}))
+                                                         (fn? (:write-file verbs))
+                                                         (fn? (:read-file verbs))))}}}))
     (t/is (= (:cwd env)
              (:content (support/eval! env "(license/where)"))))
     (t/is (= (str (fs/path (:cwd env) ".kmet"))
@@ -53,6 +55,29 @@
     (t/is (= "beta" (slurp (str (:cwd env) "/source.txt"))))
     (t/is (= (slurp (str (:cwd env) "/source.txt"))
              (slurp (str (:cwd env) "/tool.txt"))))))
+
+(t/deftest read-file-shares-the-read-tool
+  (let [env (support/eval-ctx)
+        calls (atom [])]
+    (with-redefs [read-tool/execute
+                  (fn [args _on-update _signal _ctx]
+                    (swap! calls conj args)
+                    {:content "stub"})]
+      (t/is (= "stub" (:content (support/eval! env "(user/read-file \"x\" 2 3)")))))
+    (t/is (= [{:path "x" :offset 2 :limit 3}] @calls))
+    (spit (str (fs/path (:cwd env) "lines.txt")) "alpha\nbeta\ngamma")
+    (t/is (= "beta\ngamma"
+             (:content (support/eval! env "(user/read-file \"lines.txt\" 2 2)"))))
+    (let [missing (support/eval! env "(user/read-file \"nope.txt\")")]
+      (t/is (:is-error missing))
+      (t/is (str/includes? (:content missing) "File not found")))
+    (with-redefs [read-tool/execute
+                  (fn [_ _ _ _]
+                    {:content "Read image file [image/png]"
+                     :images [{:data "x" :mime-type "image/png"}]})]
+      (let [image (support/eval! env "(user/read-file \"x.png\")")]
+        (t/is (:is-error image))
+        (t/is (str/includes? (:content image) "read-file reads text"))))))
 
 (t/deftest unloading-removes-source-names-and-keeps-model-definitions
   (let [env (support/eval-ctx)

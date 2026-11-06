@@ -23,7 +23,7 @@
   "Built-in keys refused even when a namespace check would allow them. A
    source that contributes one is refused as a whole."
   #{"eval/library" "eval/forget" "eval/sources" "eval/help" "eval/describe"
-    "eval/move" "user/edit" "user/write-file"
+    "eval/move" "user/edit" "user/write-file" "user/read-file"
     "clj/edit-form" "clj/replace-sexp" "clj/paren-repair"})
 
 (def ^:private reserved-command-names
@@ -38,12 +38,13 @@
   (with-meta f {:doc doc :arglists arglists :source source}))
 
 (defn core-source
-  "The `:core` source's contribution: the two file verbs under `user` and the
+  "The `:core` source's contribution: the shared file verbs under `user` and the
    Clojure editing verbs under `clj`. CWD is the call's source cwd, so a
    relative path in a verb resolves like the tool it mirrors."
   [{:keys [verbs cwd]}]
   (let [with-cwd #(assoc % :cwd cwd)]
-    {:doc (str "Core file verbs: (edit path old new), (write-file path content); "
+    {:doc (str "Core file verbs: (read-file path [offset limit]), "
+               "(edit path old new), (write-file path content); "
                "Clojure editing: (clj/edit-form args), (clj/replace-sexp args), "
                "(clj/paren-repair args).")
      :ns {'user {'edit (described
@@ -51,6 +52,11 @@
                         "Replace OLD-TEXT with NEW-TEXT in PATH; returns the shared edit result."
                         '([path old-text new-text])
                         "(fn [path old-text new-text] (edit-tool/edit-file path [{:old-text (str old-text) :new-text (str new-text)}] signal))")
+                 'read-file (described
+                             (:read-file verbs)
+                             "Read PATH as text with the read tool's 1-indexed OFFSET and LIMIT; returns the selected text, truncated like the read tool. Throws on a read error; use (emit-image ...) for images."
+                             '([path] [path offset] [path offset limit])
+                             "(fn [path offset limit] (read-tool/execute {:path (str path) :offset offset :limit limit} nil signal nil))")
                  'write-file (described
                               (:write-file verbs)
                               "Write CONTENT to PATH; returns the shared write result."

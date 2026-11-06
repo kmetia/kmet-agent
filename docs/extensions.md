@@ -631,11 +631,12 @@ calls, so it can expose current state instead of a snapshot:
 - Values live under the namespace you return; `user`, `clj`, `eval` and the
   sandbox's fixed namespaces (`clojure.core`, `clojure`, `sandbox`, `tools`,
   `babashka.process`, `kmet.libs.json`) are reserved for the built-in sources.
-  The `:core` source ships `clj/edit-form`, `clj/replace-sexp` and
-  `clj/paren-repair` from the shared `kmet.libs.clj-edit` engine; use
-  `license/add!`, not `add!` or `user/add!`.
-- `:verbs` carries the call's `:edit` and `:write-file` operations. They read
-  that call's cwd and cancel signal; use them within the call, never keep them.
+  The `:core` source ships `user/read-file` (backed by the read tool),
+  `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` from the shared
+  `kmet.libs.clj-edit` engine; use `license/add!`, not `add!` or `user/add!`.
+- `:verbs` carries the call's `:read-file`, `:edit` and `:write-file`
+  operations. They read that call's cwd and cancel signal; use them within
+  the call, never keep them.
 - A contributed value may carry `:doc`, `:arglists` and `:source` metadata
   (the keys a var uses, plus the implementation text, since a source verb has
   no library file). `(eval/sources)` and `(eval/help)` list each verb with its

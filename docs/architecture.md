@@ -624,9 +624,10 @@ and roll back the target if the source delete fails. The engine-portable
 builtins register `/eval` (`list`, `search`, `drop`, `move`, `sources`, `help`,
 plus verbs an eval source contributes), independent of the `:tool/eval` row,
 so removing the row leaves the command and its service. The row also
-registers the `:core` eval source (the shared `edit`/`write-file` ops
-under `user`, and `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair` from
-the shared `kmet.libs.clj-edit` engine), so removing it leaves the command
+registers the `:core` eval source (the shared
+`read-file`/`edit`/`write-file` ops under `user`, and `clj/edit-form`,
+`clj/replace-sexp`, `clj/paren-repair` from the shared `kmet.libs.clj-edit`
+engine), so removing it leaves the command
 without those verbs. The clojure extension's tools wrap the same engine; the
 core Clojure verbs do not require the extension. The eval tool's description,
 guidelines and `(eval/help)` name the shared script surface (aliases, the

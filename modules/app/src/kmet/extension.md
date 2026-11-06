@@ -426,9 +426,10 @@ first call), so the contribution is current, not a snapshot:
 ```
 
 - The fn receives the call's `:cwd`, `:project-dir`, `:agent-dir`, the cancel
-  `:signal`, and `:verbs` — keyword-keyed (`{:edit f :write-file g}`) values
-  of the same file operations the environment exposes as `user/edit` and
-  `user/write-file`, built for that call.
+  `:signal`, and `:verbs` — keyword-keyed (`{:read-file f :edit g
+  :write-file h}`) values of the same file operations the environment
+  exposes as `user/read-file`, `user/edit` and `user/write-file`, built for
+  that call.
 - `:ns` and `:macros` contribute values to the environment. `:macros` entries
   are host macro fns (they receive SCI's form and environment before their
   arguments). A value may carry `:doc`, `:arglists` and `:source` metadata (the
@@ -449,8 +450,9 @@ first call), so the contribution is current, not a snapshot:
 - `user` and `clj` are reserved for the built-in sources, as are the eval
   layer's own namespaces (`eval`, `clojure.core`, `clojure`, `sandbox`,
   `tools`, `babashka.process`, `kmet.libs.json`). The `:core` source ships
-  `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` from
-  `kmet.libs.clj-edit`; an extension source cannot replace them. Namespace what you contribute
+  `user/read-file` (backed by the read tool), `clj/edit-form`,
+  `clj/replace-sexp` and `clj/paren-repair` from `kmet.libs.clj-edit`; an
+  extension source cannot replace them. Namespace what you contribute
   (`license/add!`); a source that contributes a reserved namespace, a built-in
   key, or a built-in `/eval` verb is refused as a whole.
 - A source-provided key is never written to the eval library. A model can

@@ -8,9 +8,9 @@
    fresh-context, output-economy tool stays `run_code`.
 
    The row also registers the `:core` eval source, which puts the shared
-   `edit`/`write-file` operations under `user` and the Clojure editing verbs
-   under `clj`; removing the row leaves the `/eval` command and the service,
-   but no core verbs."
+   `read-file`, `edit` and `write-file` operations under `user` and the
+   Clojure editing verbs under `clj`; removing the row leaves the `/eval`
+   command and the service, but no core verbs."
   (:require [clojure.string :as str]
             [kmet.app.eval.sources :as eval-sources]
             [kmet.app.tools.registry :as registry]
@@ -90,6 +90,7 @@
    :prompt-snippet "Persistent Clojure/SCI sandbox (fs/sh/tools); pack multi-step work in one call; top-level definitions are saved"
    :prompt-guidelines
    ["eval is the full script sandbox, not a bare REPL: fs, sh, slurp, tools and require work as in a babashka script; (eval/help) lists sources, loaded definitions and the surface."
+    "Read files with (user/read-file path) or (user/read-file path offset limit); it shares the read tool's 1-indexed offset/limit and truncation. For images use (emit-image path)."
     "Call the run's tools through the `tools` namespace: (tools/list) lists them, (tools/describe \"name\") shows one declaration, and (tools/call \"name\" args) returns a promise to deref — or use (tools/call! \"name\" args) to settle and throw on failure; a plain name is a var too, @(tools/name args)."
     "Pack independent work into one eval call: forms run in order and independent work overlaps — `(spawn f)` for local work, and starting several `(tools/call …)` promises before dereferencing any of them. Separate eval calls from a session serialize, so a second call buys no concurrency; use one call for a multi-step task instead of one call per operation."
     "Define what should survive the call: every top-level definition is written to the agent's eval library, while let/fn bindings are scratch. Use local bindings for throwaway code."

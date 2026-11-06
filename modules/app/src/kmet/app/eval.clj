@@ -334,17 +334,36 @@
     (registry/get-eval-sources handle)
     []))
 
+(defn- read-file-verb
+  "Read PATH as text through the read tool, with its 1-indexed OFFSET and
+   LIMIT. An image read is refused because a source verb cannot attach
+   :images."
+  [path offset limit signal]
+  (let [{:keys [content is-error images]}
+        (read-tool/execute {:path (str path) :offset offset :limit limit} nil signal nil)]
+    (cond
+      (seq images)
+      (throw (ex-info (str "read-file reads text; use (emit-image "
+                           (pr-str (str path)) ") for images")
+                      {:type :eval/read-file-image :path (str path)}))
+      is-error
+      (throw (ex-info (str content) {:type :eval/read-file-error :path (str path)}))
+      :else content)))
+
 (defn- source-verbs
   "The per-call verb table a `sources-fn` receives. The functions are the
    shared file operations; cwd resolution comes from the dynamic bindings
    around the eval thread (and around the source call itself)."
   [signal]
   {:edit (fn [path old-text new-text]
-           (edit-tool/edit-file path [{:old-text (str old-text)
-                                       :new-text (str new-text)}]
+           (edit-tool/edit-file path [{:old-text (str old-text) :new-text (str new-text)}]
                                 signal))
    :write-file (fn [path content]
-                 (write-tool/write-file path (str content) signal))})
+                 (write-tool/write-file path (str content) signal))
+   :read-file (fn
+                ([path] (read-file-verb path nil nil signal))
+                ([path offset] (read-file-verb path offset nil signal))
+                ([path offset limit] (read-file-verb path offset limit signal)))})
 
 (defn- call-source
   [service source cwd signal]

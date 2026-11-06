@@ -265,6 +265,16 @@
     (t/is (str/includes? (:content (support/eval! env "(eval/describe 'user/edit :source)"))
                          "edit-file"))))
 
+(t/deftest test-core-ships-read-file
+  (let [env (support/eval-ctx)]
+    (t/is (= "([path] [path offset] [path offset limit])"
+             (:content (support/eval! env "(emit (eval/describe 'user/read-file :arglists))"))))
+    (t/is (str/includes?
+           (:content (support/eval! env "(eval/describe 'user/read-file :source)"))
+           "read-tool/execute"))
+    (t/is (str/includes? (:content (support/eval! env "(eval/help)"))
+                         "user/read-file ([path] [path offset] [path offset limit])"))))
+
 (t/deftest test-an-undocumented-save-says-no-docstring
   (let [env (support/eval-ctx)
         result (support/eval! env "(defn undocumented [] 1)")]
