@@ -9,7 +9,6 @@
             [kmet.ai.auth :as auth]
             [kmet.app.config-schema :as config-schema]
             [kmet.app.debug :as debug]
-            [kmet.app.tools.util :as tool-util]
             [kmet.libs.http :as http]
             [kmet.libs.edn-store :as eds]))
 
@@ -109,24 +108,7 @@
 
 (def deep-merge eds/deep-merge)
 
-;; ─── tool selection scope merge (pi: SettingsManager.mergeDefaultTools) ────
-
-(defn merge-tool-entries
-  "Merge the user and project entry lists of a tool selection key (pi:
-   SettingsManager.mergeDefaultTools): a project list of only +name/-name
-   entries appends to the user list — it modifies the inherited selection —
-   while a list with any plain name (or a malformed value) replaces it.
-   Returns USER when PROJECT is nil. One rule for :default-tools and
-   :enabled-tools; exposed for the `kmet config` screen
-   (kmet.app.tools.config) and used by load-config for the runtime merge."
-  [user project]
-  (cond
-    (nil? project) user
-    (not (and (sequential? user)
-              (every? tool-util/tool-selection-modifier? project))) project
-    :else (into (vec user) project)))
-
-;; load-config (above) applies the merged :http-transport and the shell
+;; load-config (below) applies the merged :http-transport and the shell
 ;; settings to their runtime knobs; the accessors live with the others below.
 (declare get-agent-dir get-http-transport get-shell-path get-shell-command-prefix)
 
@@ -254,6 +236,8 @@
    Warns once per retired :*-dir key present in a settings file.
    The merged map carries no :resources key: selection is scoped, and
    `read-resource-settings` hands `kmet.app.resources` both raw scope maps.
+   The retired :default-tools and :enabled-tools keys do not reach the merged
+   map either; the runtime reads the resources selection.
    Returns merged map."
   [& {:keys [no-env? no-settings? agent-dir]}]
   (let [agent-dir (or agent-dir (get-agent-dir))
@@ -275,27 +259,15 @@
         ;; list is a delta over the global list, so a deep merge would replace
         ;; one type's list instead of layering it. The resources service reads
         ;; both raw scope maps (`read-resource-settings`); the merged config
-        ;; carries no :resources key.
+        ;; carries no :resources key. The retired :default-tools /
+        ;; :enabled-tools selection keys are dropped too: the runtime reads
+        ;; kmet.app.resources, and only the `kmet config` screen still reads
+        ;; the raw maps until it is replaced.
         base (dissoc (deep-merge (resolve-scope-paths default-config global-dir)
                                  (resolve-scope-paths user-config global-dir)
                                  (resolve-scope-paths project-config project-dir))
-                     :resources)
-        ;; :default-tools / :enabled-tools — pi merges the scopes' entry
-        ;; lists instead of letting a project list replace the user one: a
-        ;; project list of only +name/-name entries modifies the user
-        ;; selection, any plain name replaces it (SettingsManager's tool
-        ;; merge). The tool-name resolution happens at startup
-        ;; (kmet.app.tools.registry/resolve-selection).
-        with-tool-entries (reduce (fn [cfg k]
-                                    (if (or (contains? (or user-config {}) k)
-                                            (contains? (or project-config {}) k))
-                                      (assoc cfg k
-                                             (merge-tool-entries (get user-config k)
-                                                                 (get project-config k)))
-                                      cfg))
-                                  base
-                                  [:default-tools :enabled-tools])
-        with-env (cond-> with-tool-entries
+                     :resources :default-tools :enabled-tools)
+        with-env (cond-> base
                    env-provider (assoc :provider env-provider)
                    env-model (assoc :model env-model))]
     ;; Runtime knobs from the merged config (precedent: auth/load-auth!
@@ -517,22 +489,6 @@
    enabledModels — same format as the --models flag). nil = all enabled."
   [config]
   (:enabled-models config))
-
-(defn get-default-tools
-  "The merged :default-tools entry list (pi: SettingsManager.getDefaultTools)
-   — plain built-in tool names and +name/-name modifiers, or nil when no
-   settings scope sets the key. Resolve it with
-   kmet.app.tools.registry/resolve-default-tools before use."
-  [config]
-  (:default-tools config))
-
-(defn get-enabled-tools
-  "The merged :enabled-tools entry list — plain live tool names and +name/-name
-   modifiers, or nil when no settings scope sets the key. Resolve it with
-   kmet.app.tools.registry/resolve-enabled-tools over the live tool names
-   before use; it wins over :default-tools."
-  [config]
-  (:enabled-tools config))
 
 (defn get-setting-live
   "Live top-level KEY from the global settings file, falling back to the

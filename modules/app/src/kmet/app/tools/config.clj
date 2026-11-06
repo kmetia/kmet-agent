@@ -4,8 +4,8 @@
    defaultTools setting is edited by hand).
 
    A built-in tool is a composition row (`:tool/read`, `:tool/bash`, …), so
-   the group has two inputs: the `:default-tools` setting (the runtime
-   selection, which is what a built-in toggle writes) and the ambient
+   the group has two inputs: the retired `:default-tools` setting (the legacy
+   screen's view, which is what a built-in toggle writes) and the ambient
    composition layers (`mounted-tool-names` — a layer can remove a tool row,
    and a screen that offered a removed tool would be describing a run nobody
    gets).
@@ -19,9 +19,9 @@
    :resource-type :tools, a `:setting` in metadata (`:default-tools` or
    `:enabled-tools`), display-name the tool name and row-id the row it is.
 
-   Built-in state resolves the :default-tools entry list the same way startup
-   does (kmet.app.config/merge-tool-entries +
-   kmet.app.tools.registry/resolve-default-tools), and is false for a tool the
+   Built-in state resolves the :default-tools entry list for the legacy screen
+   (merge-scope-entries + kmet.app.tools.registry/resolve-default-tools), and is
+   false for a tool the
    layers do not mount. An unset setting resolves to `default-tool-names`, so
    a row marked `:default-enabled? false` (run_code, eval) shows off until
    selected. Extension rows resolve :enabled-tools over the names the static
@@ -49,6 +49,19 @@
           modifier (case prefix "+" :add "-" :remove nil)]
       {:name (if modifier (subs entry 1) entry)
        :modifier modifier})))
+
+(defn- merge-scope-entries
+  "Merge USER and PROJECT entry lists for the config screen's view of the
+   retired tool-selection keys (pi: SettingsManager.mergeDefaultTools): a
+   project list of only +name/-name entries appends to the user list; a list
+   with any plain name (or a malformed value) replaces it. This screen goes
+   away with the `kmet config` command; runtime selection is `kmet.app.resources`."
+  [user project]
+  (cond
+    (nil? project) user
+    (not (and (sequential? user)
+              (every? registry/tool-selection-modifier? project))) project
+    :else (into (vec user) project)))
 
 (defn- entry-target
   "The tool name ENTRY targets, modifier prefix stripped; nil when ENTRY is
@@ -169,15 +182,15 @@
   ([user-settings project-settings mounted extension-tools]
    (let [builtin-names (vec registry/builtin-tool-names)
          builtin-set (set builtin-names)
-         entries (cfg/merge-tool-entries (:default-tools user-settings)
-                                         (:default-tools project-settings))
+         entries (merge-scope-entries (:default-tools user-settings)
+                                      (:default-tools project-settings))
          selection (if entries
                      (set (registry/resolve-default-tools entries))
                      (set registry/default-tool-names))
          mounted (when mounted (set mounted))
          meta-rows (meta-tool-rows extension-tools)
-         enabled-entries (cfg/merge-tool-entries (:enabled-tools user-settings)
-                                                 (:enabled-tools project-settings))
+         enabled-entries (merge-scope-entries (:enabled-tools user-settings)
+                                              (:enabled-tools project-settings))
          named (entry-targets enabled-entries)
          extra-names (vec (sort (into (set (remove builtin-set named))
                                       (remove builtin-set (keys meta-rows)))))
@@ -335,7 +348,7 @@
   "Set NAME's STATE (:load → +name, :unload → -name, :inherit → remove) in
    SETTING-KEY's project list, replacing any entry targeting NAME. An empty
    list clears the key — read-equivalent to absent
-   (kmet.app.config/merge-tool-entries appends a project modifier-only list to
+   (merge-scope-entries appends a project modifier-only list to
    the user list). One writer serves both settings."
   [setting-key name state]
   (when-not (contains? #{:load :unload :inherit} state)
@@ -387,5 +400,5 @@
                                         (enabled->state enabled))
       (throw (ex-info "scope must be :global or :project"
                       {:type ::bad-scope :name name :scope scope}))))
-  (cfg/merge-tool-entries (:enabled-tools (cfg/read-global-settings-map))
-                          (:enabled-tools (cfg/read-project-settings-map))))
+  (merge-scope-entries (:enabled-tools (cfg/read-global-settings-map))
+                       (:enabled-tools (cfg/read-project-settings-map))))

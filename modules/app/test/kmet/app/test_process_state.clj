@@ -79,6 +79,10 @@
    {'tails
     "The per-path mutation tails (key → the promise the last section holding it delivers). Defonce because a reload must not empty the map while a lock is held: the next caller of that path would run alongside the holder. The paths are a process's, not a run's — two runs' tools can name one file."}
 
+   "modules/app/src/kmet/app/resources.clj"
+   {'warned-project-lists
+    "The once-per-(type, entries) guard for the invalid-project-:resources warning. It is a process-wide read diagnostic: every agent and the terminal read the same settings files, so one warning per input is the contract."}
+
    "modules/app/src/kmet/app/debug.clj"
    {'write-lock
     "The one lock every diagnostics write takes: the debug and error files are written from the loop's thread, tool threads and the TUI, and a line must never interleave with a rotation."
@@ -133,7 +137,7 @@
 (deftest the-guard-sees-the-trees-it-guards
   (is (every? fs/directory? source-root)
       "every scanned tree exists — the guard cannot silently narrow")
-  (is (= 23 (count (mapcat (fn [[file cells]] (map (fn [n] [file n]) (keys cells)))
+  (is (= 24 (count (mapcat (fn [[file cells]] (map (fn [n] [file n]) (keys cells)))
                            process-cells)))
       "the ledger's own size; a cell added or removed updates the map")
   (testing "the scan finds the cells the ledger lists"

@@ -35,7 +35,7 @@
 (def ^:dynamic *run*
   "The run's tool-set view, bound by `kmet.app.loop` for the whole prompt:
    {:declared  (fn [] → the declared name set)
-    :selection (fn [] → {:enabled … :exclude …} — the run's tool selection,
+    :selection (fn [] → {:enabled …} — the run's tool selection,
                        see `kmet.app.loop.state/tool-selection`)
     :load!     (fn [names] → record the promotion)}
    `tool_search` reads `:declared` to skip what the model already has, narrows

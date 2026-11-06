@@ -147,10 +147,10 @@
       (t/is (keyword? (tool/exposure tool)) name))))
 
 (t/deftest test-promotable-tools-are-the-selection-over-deferred-and-contributed
-  ;; one answer to "what can a search reach": the `:deferred` table tools plus
-  ;; the contributed `:sandbox` catalog, under the same selection the declared
-  ;; surface uses — a direct tool is never a candidate, and a contributed name
-  ;; the table holds keeps the table's record
+  ;; one answer to "what can a search reach": the `:deferred` table tools
+  ;; narrowed by the selection, plus the contributed `:sandbox` catalog, which
+  ;; is not selectable — a direct tool is never a candidate, and a contributed
+  ;; name the table holds keeps the table's record
   (let [h (handle)
         promotable (fn [selection]
                      (tools/promotable-tools (tools/get-all-tools h)
@@ -165,14 +165,11 @@
         (t/is (= #{"deferred" "shared" "contributed"}
                  (set (keys (promotable nil))))
               "a direct tool is never a candidate")
-        (t/is (= #{"deferred"}
+        (t/is (= #{"deferred" "contributed"}
                  (set (keys (promotable {:enabled #{"deferred"}}))))
-              "the enabled allowlist narrows the catalog")
-        (t/is (empty? (promotable {:enabled #{}}))
-              "an empty selection reaches nothing")
-        (t/is (= #{"shared" "contributed"}
-                 (set (keys (promotable {:exclude #{"deferred"}}))))
-              "an exclusion removes a candidate too")
+              "the enabled allowlist narrows deferred tools; sandbox catalog stays")
+        (t/is (= #{"contributed"} (set (keys (promotable {:enabled #{}}))))
+              "an empty selection still reaches the sandbox catalog")
         (t/is (= "shared" (:description (get (promotable nil) "shared")))
               "a contributed name the table holds keeps the table's record")))))
 
@@ -271,10 +268,10 @@
     (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
     (try
       (t/is (contains? (names (state/active-tools agent)) search/tool-search-name))
-      (reset! (:enabled-tools agent) #{search/tool-search-name "read"})
+      (reset! (:active-tools agent) #{search/tool-search-name "read"})
       (t/is (not (contains? (names (state/active-tools agent)) search/tool-search-name))
             "the selection can reach no promotable tool")
-      (reset! (:enabled-tools agent) #{search/tool-search-name "deferred-a"})
+      (reset! (:active-tools agent) #{search/tool-search-name "deferred-a"})
       (t/is (contains? (names (state/active-tools agent)) search/tool-search-name)
             "the deferred tool is selectable again")
       (finally
@@ -291,9 +288,9 @@
                                  (fn [] {"sb-a" {:description "sandbox a"}}))
     (try
       (t/is (contains? (names (state/active-tools agent)) search/tool-search-name))
-      (reset! (:enabled-tools agent) #{search/tool-search-name})
-      (t/is (not (contains? (names (state/active-tools agent)) search/tool-search-name))
-            "a sandbox tool the selection leaves out is not promotable either")
+      (reset! (:active-tools agent) #{search/tool-search-name})
+      (t/is (contains? (names (state/active-tools agent)) search/tool-search-name)
+            "a sandbox tool is not selectable, so a session selection cannot starve the search")
       (finally
         (tools/unregister-tool-source! h ::sandbox)
         (tools/unregister-tool! h search/tool-search-name)))))
@@ -362,9 +359,9 @@
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))
 
-(t/deftest test-an-explicit-selection-hides-a-loaded-sandbox-tool
-  ;; a sandbox tool is not in the table, so the enabled set is the only way to
-  ;; say "not this one" — it must hide, like a disabled deferred tool does
+(t/deftest test-an-explicit-selection-does-not-hide-a-loaded-sandbox-tool
+  ;; a sandbox tool is not in the table and is not selectable: a session
+  ;; selection that excludes everything still leaves sandbox tools callable
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session)]
@@ -372,11 +369,30 @@
       (tools/register-tool-source! h ::sandbox (fn [] {"sb-a" {:description "sandbox a"}}))
       (state/promote-tools! agent ["sb-a"])
       (state/set-active-tools! agent #{"read"})
-      (t/is (not (contains? (names (state/active-tools agent)) "sb-a")))
-      (state/set-active-tools! agent #{"read" "sb-a"})
-      (t/is (contains? (names (state/active-tools agent)) "sb-a"))
+      (t/is (contains? (names (state/active-tools agent)) "sb-a")
+            "sandbox tools stay callable under an explicit selection")
       (finally
         (tools/unregister-tool-source! h ::sandbox)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-a-recorded-collision-keeps-the-table-selection
+  ;; a sandbox source may contribute a name the table already holds; the table
+  ;; record is the one used, so a model-facing exclusion still hides it
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (tools/register-tool! h (tool-map "shared"))
+      (tools/register-tool-source! h ::sandbox
+                                   (fn [] {"shared" {:description "sandbox"}}))
+      (state/sync-tool-declarations! agent)
+      (t/is (contains? (names (state/active-tools agent)) "shared"))
+      (state/set-active-tools! agent #{})
+      (t/is (not (contains? (names (state/active-tools agent)) "shared"))
+            "the table tool's exclusion wins over the sandbox collision")
+      (finally
+        (tools/unregister-tool-source! h ::sandbox)
+        (tools/unregister-tool! h "shared")
         (fs/delete-tree dir)))))
 
 (t/deftest test-a-search-promotes-a-tool-into-the-next-request
@@ -468,7 +484,7 @@
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session
-                                        :enabled-tool-entries ["run_code" "deferred-a"])]
+                                        :enabled-tool-names (support/tool-names ["run_code" "deferred-a"]))]
     (try
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
       (let [msg (state/sync-tool-sources-listing! agent)
@@ -486,7 +502,7 @@
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session
-                                        :enabled-tool-entries ["eval" "deferred-a"])]
+                                        :enabled-tool-names (support/tool-names ["eval" "deferred-a"]))]
     (try
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
       (let [msg (state/sync-tool-sources-listing! agent)
@@ -505,7 +521,7 @@
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state
                :session session
-               :enabled-tool-entries ["run_code" "eval" "tool_search" "deferred-a"])]
+               :enabled-tool-names (support/tool-names ["run_code" "eval" "tool_search" "deferred-a"]))]
     (try
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
       (let [msg (state/sync-tool-sources-listing! agent)
@@ -522,7 +538,7 @@
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session
-                                        :enabled-tool-entries [])]
+                                        :enabled-tool-names (support/tool-names []))]
     (try
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
       (t/is (nil? (state/sync-tool-sources-listing! agent)))
@@ -535,7 +551,7 @@
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session
-                                        :enabled-tool-entries ["run_code"])]
+                                        :enabled-tool-names (support/tool-names ["run_code"]))]
     (try
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
       (t/is (nil? (state/sync-tool-sources-listing! agent))
@@ -551,7 +567,7 @@
         reachable (support/make-agent-state :session session)
         unreachable (support/make-agent-state
                      :session session
-                     :enabled-tool-entries ["deferred-a"])]
+                     :enabled-tool-names (support/tool-names ["deferred-a"]))]
     (try
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
       (t/is (some? (state/sync-tool-sources-listing! reachable)))

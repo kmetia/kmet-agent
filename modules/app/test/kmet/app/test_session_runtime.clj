@@ -274,19 +274,22 @@
         (is (= "custom prompt" (rt/system-prompt handle)))
         (is (= opts @(:system-prompt-opts ag)))))))
 
-(deftest test-active-tools-follow-the-default-selection
+(deftest test-active-tools-follow-the-resources-selection
   (with-handle
     (fn [handle _]
-      (is (contains? (set (map :name (rt/active-tools handle))) "read")
-          "the bootstrap default set is active")
-      (is (= ["read" "bash"]
-             (rt/apply-default-tools! handle ["read" "bash"]))
-          "the applied selection is returned")
-      (let [names (set (map :name (rt/active-tools handle)))]
-        (is (contains? names "read"))
-        (is (contains? names "bash"))
-        (is (not (contains? names "write"))
-            "built-ins outside the selection are inactive")))))
+      (let [ag (rt/agent-state handle)
+            configured (set (map :name (rt/active-tools handle)))]
+        (is (contains? configured "read")
+            "the bootstrap resources selection is active")
+        (is (nil? @(:active-tools ag))
+            "no session override at startup")
+        (loop-state/set-active-tools! ag ["read" "bash"])
+        (is (= #{"read" "bash"}
+               (set (map :name (rt/active-tools handle))))
+            "the session override restricts the active set")
+        (loop-state/set-active-tools! ag nil)
+        (is (= configured (set (map :name (rt/active-tools handle))))
+            "nil restores the resources selection")))))
 
 (deftest test-add-context-message-and-bash-result
   (with-handle

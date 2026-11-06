@@ -32,7 +32,6 @@
             [kmet.app.session.runtime :as runtime]
             [kmet.app.session.submission :as submission]
             [kmet.app.tools.config :as tools-config]
-            [kmet.app.tools.registry :as tools]
             [kmet.app.tools.shell :as shell]
             [kmet.ai.models :as models]
             [kmet.srce.core :as srce]))
@@ -58,7 +57,7 @@
    cwd, the project context files, and the DECLARED tools the state will
    resolve through its ctx — the same derivation the wire uses, so the prompt's
    Available-tools list cannot offer what no request declares."
-  [config ctx {:keys [cwd default-tools enabled-tool-entries session]}]
+  [config ctx {:keys [cwd enabled-tool-names session]}]
   {:custom-prompt (cfg/get-custom-prompt config)
    :append-prompt (cfg/get-append-system-prompt config)
    :cwd cwd
@@ -66,8 +65,7 @@
                    (cfg/get-agent-dir) (str (fs/cwd)))
    :tools (loop-state/declared-tools-for-session
            ctx session
-           {:default-tools default-tools
-            :enabled-tool-entries enabled-tool-entries
+           {:enabled-tool-names enabled-tool-names
             ;; a resumed session keeps the tools it was sent
             :loaded (when session
                       (loop-state/session-loaded-tools session))})})
@@ -98,15 +96,14 @@
   (let [provider (or provider (cfg/get-provider config))
         model (or model (models/resolve-config-model config))
         model-rec (models/get-model provider model)
-        default-tools (tools/resolve-default-tools (cfg/get-default-tools config))
-        enabled-tool-entries (cfg/get-enabled-tools config)
+        enabled-tool-names (when-let [resources (srce/get ctx :resources)]
+                             (fn [] ((:enabled-names resources) :tool)))
         ;; the prompt's cwd line is the runtime cwd (the resumed session's,
         ;; or a subagent's), but everything project-scoped — context files
         ;; included — stays with the launch dir
         runtime-cwd (or cwd (session/session-cwd session) (str (fs/cwd)))
         prompt-opts (prompt-options config ctx {:cwd runtime-cwd
-                                                :default-tools default-tools
-                                                :enabled-tool-entries enabled-tool-entries
+                                                :enabled-tool-names enabled-tool-names
                                                 :session session})
         system-prompt (apply system-prompt-fn (mapcat identity prompt-opts))
         thinking (let [raw (:thinking config :off)]
@@ -127,8 +124,7 @@
                                :system-prompt-opts prompt-opts
                                :system-prompt-fn system-prompt-fn
                                :session session
-                               :default-tools default-tools
-                               :enabled-tool-entries enabled-tool-entries
+                               :enabled-tool-names enabled-tool-names
                                :context-window (or (:context-window model-rec)
                                                    (:context-window config))
                                :compact-reserve-tokens (or (:compact-reserve-tokens config)
@@ -171,7 +167,7 @@
     (when-let [names (loop-state/orphaned-deferred-tools state)]
       (binding [*out* *err*]
         (println "Warning: no active discovery tool can promote deferred tools;"
-                 "add tool_search to :enabled-tools/:default-tools:"
+                 "add tool_search to the enabled tool selection:"
                  (str/join ", " names))))
     {:state state :cwd runtime-cwd}))
 
@@ -423,15 +419,13 @@
                                  (tools-config/tool-selection
                                   (keys (loop-state/tool-table @live))
                                   (loop-state/enabled-tool-names @live)
-                                  {:session @(:enabled-tools @live)}))
+                                  {:session @(:active-tools @live)}))
                :set-tool-enabled! (fn [name enabled opts]
-                                    (let [entries (tools-config/set-tool-enabled!
-                                                   name enabled
-                                                   (assoc opts :live-names
-                                                          (keys (loop-state/tool-table @live))))]
-                                      (swap! (:config engine) assoc :enabled-tools entries)
-                                      (loop-state/apply-enabled-tools! @live entries)
-                                      nil))})
+                                    (tools-config/set-tool-enabled!
+                                     name enabled
+                                     (assoc opts :live-names
+                                            (keys (loop-state/tool-table @live))))
+                                    nil)})
             ;; the ExtensionContext keys a run owns — the live agent's model,
             ;; scoped set, thinking level, cwd and pending state, and the
             ;; controls that act on this agent. Everything else (:mode,
@@ -547,8 +541,6 @@
                         :set-follow-up-mode! runtime/set-follow-up-mode!
                         :set-block-images! runtime/set-block-images!
                         :set-system-prompt! runtime/set-system-prompt!
-                        :apply-default-tools! runtime/apply-default-tools!
-                        :apply-enabled-tools! runtime/apply-enabled-tools!
                         :set-config! runtime/set-config!
                         :set-run-options! runtime/set-run-options!
                         :set-http-idle-timeout-ms! runtime/set-http-idle-timeout-ms!

@@ -170,71 +170,23 @@
       (t/is (= {:model "x"} (resolve-paths {:model "x"} "/base")))
       (t/is (= {:session-dir nil} (resolve-paths {:session-dir nil} "/base"))))))
 
-;; ─── tool selection scope merge (pi: defaultTools) ─────────────────────────
+;; ─── retired tool selection keys ──────────────────────────────────────────
 
-(t/deftest test-merge-tool-entries
-  (let [merge-tools cfg/merge-tool-entries]
-    (t/testing "a user list alone passes through"
-      (t/is (= ["read"] (merge-tools ["read"] nil))))
-    (t/testing "project +name/-name entries append to the user list"
-      (t/is (= ["read" "+bash" "-read"] (merge-tools ["read"] ["+bash" "-read"]))))
-    (t/testing "a project list with a plain name replaces the user list"
-      (t/is (= ["write"] (merge-tools ["read"] ["write"]))))
-    (t/testing "an empty project list is modifier-only: it keeps the user list"
-      (t/is (= ["read"] (merge-tools ["read"] []))))
-    (t/testing "a project-only list stands alone (resolved elsewhere)"
-      (t/is (= ["+grep"] (merge-tools nil ["+grep"])))
-      (t/is (= [] (merge-tools nil []))))
-    (t/testing "a malformed project value replaces the user list"
-      (t/is (= "+bash" (merge-tools ["read"] "+bash"))))))
-
-(t/deftest test-load-config-default-tools-scope-merge
-  (let [tmp (str (fs/create-temp-dir {:dir "target" :prefix "default-tools-test-"}))
+(t/deftest test-load-config-drops-retired-tool-selection
+  (let [tmp (str (fs/create-temp-dir {:dir "target" :prefix "retired-tools-test-"}))
         load (fn [user project]
                (with-redefs [cfg/load-edn-file
                              (fn [path]
                                (if (str/starts-with? (str path) tmp)
                                  user
                                  (or project {})))]
-                 (cfg/get-default-tools (cfg/load-config :no-env? true :agent-dir tmp))))]
+                 (cfg/load-config :no-env? true :agent-dir tmp)))]
     (try
-      (t/testing "project modifiers append to the user selection"
-        (t/is (= ["read" "+bash" "-read"] (load {:default-tools ["read"]}
-                                                {:default-tools ["+bash" "-read"]}))))
-      (t/testing "a plain project list replaces the user selection"
-        (t/is (= ["write"] (load {:default-tools ["read"]}
-                                 {:default-tools ["write"]}))))
-      (t/testing "no scope setting → nil (every built-in active)"
-        (t/is (nil? (load nil nil))))
-      (finally (fs/delete-tree tmp)))))
-
-(t/deftest test-load-config-enabled-tools-scope-merge
-  (let [tmp (str (fs/create-temp-dir {:dir "target" :prefix "enabled-tools-test-"}))
-        load (fn [user project]
-               (with-redefs [cfg/load-edn-file
-                             (fn [path]
-                               (if (str/starts-with? (str path) tmp)
-                                 user
-                                 (or project {})))]
-                 (cfg/get-enabled-tools (cfg/load-config :no-env? true :agent-dir tmp))))]
-    (try
-      (t/testing "project modifiers append to the user selection"
-        (t/is (= ["-bash" "+grep"] (load {:enabled-tools ["-bash"]}
-                                         {:enabled-tools ["+grep"]}))))
-      (t/testing "a plain project list replaces the user selection"
-        (t/is (= ["read"] (load {:enabled-tools ["-bash"]}
-                                {:enabled-tools ["read"]}))))
-      (t/testing "the two keys merge independently"
-        (with-redefs [cfg/load-edn-file
-                      (fn [path]
-                        (if (str/starts-with? (str path) tmp)
-                          {:default-tools ["read"] :enabled-tools ["+grep"]}
-                          {:default-tools ["+bash"] :enabled-tools ["-bash"]}))]
-          (let [config (cfg/load-config :no-env? true :agent-dir tmp)]
-            (t/is (= ["read" "+bash"] (cfg/get-default-tools config)))
-            (t/is (= ["+grep" "-bash"] (cfg/get-enabled-tools config))))))
-      (t/testing "no scope setting → nil"
-        (t/is (nil? (load nil nil))))
+      (let [config (load {:default-tools ["read"] :enabled-tools ["-bash"]}
+                         {:default-tools ["+bash"] :enabled-tools ["+grep"]})]
+        (t/is (not (contains? config :default-tools))
+              "the retired keys do not reach the merged config")
+        (t/is (not (contains? config :enabled-tools))))
       (finally (fs/delete-tree tmp)))))
 
 ;; ─── Provider config ───────────────────────────────────────────────────────

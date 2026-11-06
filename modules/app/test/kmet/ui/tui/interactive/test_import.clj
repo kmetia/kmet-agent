@@ -23,7 +23,6 @@
             [kmet.ai.models :as m]
             [kmet.ai.auth :as auth]
             [kmet.app.loop.state :as loop-state]
-            [kmet.app.tools.registry :as tools]
             [kmet.libs.http :as http]
             [kmet.libs.terminal-image :as timg]
             [kmet.app.session.core :as session]
@@ -225,8 +224,11 @@
                                   (into #{}
                                         (map :name)
                                         (get-in @(:system-prompt-opts (ag)) [:tools])))]
-          ;; the config-resolved surface at startup (-bash in settings.edn)
-          (reset! (:default-tools (ag)) (tools/resolve-default-tools ["-bash"]))
+          ;; the configured surface at startup (all live tools but bash)
+          (let [initial (active-names)]
+            (swap! (:agent-state (:engine cs))
+                   assoc :enabled-tool-names
+                   (constantly (disj (set initial) "bash"))))
           (t/is (not (contains? (active-names) "bash"))
                 "the configured surface excludes bash")
           (testing "a /tools selection in the outgoing session enables bash"
@@ -237,7 +239,7 @@
           (with-redefs [tui/tui-request-render (fn [_])
                         tui/tui-set-focus (fn [_ _])]
             (session-admin/restore-session! cs incoming true))
-          (t/is (nil? @(:enabled-tools (ag)))
+          (t/is (nil? @(:active-tools (ag)))
                 "the runtime allowlist does not carry over")
           (t/is (not (contains? (active-names) "bash"))
                 "the configured surface governs the resumed session")

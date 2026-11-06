@@ -372,22 +372,10 @@
   @(:cfg (agent-state engine)))
 
 (defn active-tools
-  "The LLM-visible active tool set (registry maps filtered by the enabled
-   and default-tool selections)."
+  "The LLM-visible active tool set (registry maps filtered by the resources
+   selection or the session override)."
   [engine]
   (loop-state/active-tools (agent-state engine)))
-
-(defn apply-enabled-tools!
-  "Re-apply the :enabled-tools setting after a settings reload; returns the
-   entries."
-  [engine entries]
-  (loop-state/apply-enabled-tools! (agent-state engine) entries))
-
-(defn apply-default-tools!
-  "Re-apply a :default-tools selection after a settings reload; returns the
-   new selection."
-  [engine selection]
-  (loop-state/apply-default-tools! (agent-state engine) selection))
 
 (defn add-context-message!
   "Append a context-only message (not persisted to the session) to the

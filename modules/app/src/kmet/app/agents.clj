@@ -87,7 +87,7 @@
   [:set-model! :cycle-model! :set-thinking-level! :cycle-thinking-level!
    :set-scoped-models! :set-auto-compaction! :set-steering-mode!
    :set-follow-up-mode! :set-block-images! :set-system-prompt!
-   :apply-default-tools! :set-config! :set-run-options!
+   :set-config! :set-run-options!
    :set-http-idle-timeout-ms! :set-http-total-timeout-ms! :clear-queues!
    :request-compaction! :abort-compaction! :queue-compaction-message!
    :clear-compaction-queue!])

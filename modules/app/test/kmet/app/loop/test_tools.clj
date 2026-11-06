@@ -265,8 +265,8 @@
         executed (atom [])
         agent (support/make-agent-state
                :on-event (fn [e] (swap! events conj e))
-               ;; bash is left out of the built-in selection
-               :default-tools ["read" "write" "edit" "run_code"])]
+               ;; bash is left out of the selection
+               :enabled-tool-names (support/tool-names ["read" "write" "edit" "run_code"]))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (support/stub-llm-tool-then-text (atom 0))
                   state/execute-tool-for (fn [_ name _ _] (swap! executed conj name)
@@ -288,7 +288,7 @@
         calls (atom 0)
         agent (support/make-agent-state
                :on-event (fn [e] (swap! events conj e))
-               :default-tools ["read"])]
+               :enabled-tool-names (support/tool-names ["read"]))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   ;; force the sequential executor for this batch
                   tool-exec/has-sequential-tool-call? (constantly true)
@@ -327,7 +327,7 @@
         executed (atom [])
         agent (support/make-agent-state
                :on-event (fn [e] (swap! events conj e))
-               :default-tools ["bash"])]
+               :enabled-tool-names (support/tool-names ["bash"]))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (support/stub-llm-tool-then-text (atom 0))
                   state/execute-tool-for (fn [_ name _ _] (swap! executed conj name)
@@ -474,8 +474,9 @@
   (let [hook-calls (atom [])
         calls (atom 0)
         agent (support/make-agent-state
-               :default-tools (conj (vec tools-registry/default-tool-names)
-                                    "run_code"))]
+               :enabled-tool-names (support/tool-names
+                                    (conj (vec tools-registry/default-tool-names)
+                                          "run_code")))]
     (reset! (:tool-hook agent)
             (support/tool-hook (fn [op next] (swap! hook-calls conj op) (next op))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
@@ -808,37 +809,38 @@
 (t/deftest test-active-tools
   (t/testing "nil = all tools; set restricts; nil restores"
     (let [ag (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")]
-      (t/is (nil? @(:enabled-tools ag)))
+      (t/is (nil? @(:active-tools ag)))
       (state/set-active-tools! ag ["read" "write"])
-      (t/is (= #{"read" "write"} @(:enabled-tools ag)))
+      (t/is (= #{"read" "write"} @(:active-tools ag)))
       (state/set-active-tools! ag nil)
-      (t/is (nil? @(:enabled-tools ag))))))
+      (t/is (nil? @(:active-tools ag))))))
 
-(t/deftest test-active-tools-default-tools
-  (t/testing "a :default-tools selection filters built-ins; extension tools
-              stay enabled; a runtime selection wins; nil restores the default"
+(t/deftest test-active-tools-resources-selection
+  (t/testing "a resources selection filters the live tools; a runtime
+              selection wins; nil restores the current selection"
     (let [;; tool_search is a built-in row the run declares only while a
           ;; deferred tool exists to find, so this table (no sources) has none
           builtins (disj (set tools-registry/builtin-tool-names) "tool_search")
           builtin-names (fn [ag] (into #{} (filter builtins) (map :name (state/active-tools ag))))
           all-names (fn [ag] (set (map :name (state/active-tools ag))))
           ag (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
-                                       :default-tools ["read"])]
-      (t/is (= #{"read"} (builtin-names ag)))
-      (t/testing "extension tools registered later stay active"
+                                       :enabled-tool-names (support/tool-names ["-bash"]))]
+      (t/is (not (contains? (builtin-names ag) "bash")))
+      (t/is (contains? (builtin-names ag) "read"))
+      (t/testing "extension tools are on under a modifier-only selection"
         (try
-          (tools-registry/register-tool! (support/tool-table) {:name "default-tools-ext"
+          (tools-registry/register-tool! (support/tool-table) {:name "resources-ext"
                                                                :description "d"
                                                                :execute (fn [_] {:content ""})})
-          (t/is (contains? (all-names ag) "default-tools-ext"))
-          (finally (tools-registry/unregister-tool! (support/tool-table) "default-tools-ext"))))
-      (t/testing "an explicit set-active-tools! selection replaces the default"
+          (t/is (contains? (all-names ag) "resources-ext"))
+          (finally (tools-registry/unregister-tool! (support/tool-table) "resources-ext"))))
+      (t/testing "an explicit set-active-tools! selection replaces the selection"
         (state/set-active-tools! ag ["bash"])
         (t/is (= #{"bash"} (all-names ag))))
-      (t/testing "nil restores the configured default surface"
+      (t/testing "nil restores the configured selection"
         (state/set-active-tools! ag nil)
-        (t/is (= #{"read"} (builtin-names ag))))
-      (t/testing "no setting → the default built-in set, opt-ins off"
+        (t/is (= (disj builtins "bash") (builtin-names ag))))
+      (t/testing "no source → the default built-in set, opt-ins off"
         (let [fal (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")
               all (tools-registry/get-all-tools (support/tool-table))]
           (t/is (= (disj (set tools-registry/default-tool-names) "tool_search")
@@ -849,33 +851,30 @@
                 "the opt-ins are mounted but absent from the active set")
           (t/is (not (contains? (all-names fal) "eval"))))))))
 
-(t/deftest test-apply-default-tools-reload
-  (t/testing "reload replaces the selection: tools newly in
-              :default-tools become active; tools removed from it
-              go inactive (pi: defaultTools controls the built-in
-              surface)"
-    (let [;; tool_search is declared only while a deferred tool exists (see
-          ;; test-active-tools-default-tools)
+(t/deftest test-resources-selection-updates-live
+  (t/testing "a settings change reaches the selection without a reload call"
+    (let [enabled (atom #{"read"})
           builtins (disj (set tools-registry/builtin-tool-names) "tool_search")
           builtin-names (fn [ag] (into #{} (filter builtins) (map :name (state/active-tools ag))))
           ag (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
-                                       :default-tools ["read"])]
+                                       :enabled-tool-names (fn [] @enabled))]
       (t/is (= #{"read"} (builtin-names ag)))
-      (state/apply-default-tools! ag ["read" "bash"])
+      (reset! enabled #{"read" "bash"})
       (t/is (= #{"read" "bash"} (builtin-names ag)))
-      (state/apply-default-tools! ag ["read"])
+      (reset! enabled #{"read"})
       (t/is (= #{"read"} (builtin-names ag))
-            "a tool removed from the setting goes inactive")
-      (state/apply-default-tools! ag nil)
-      (t/is (= (disj (set tools-registry/default-tool-names) "tool_search")
-               (builtin-names ag))
-            "a removed setting (nil) restores the default set, opt-ins off"))))
+            "a tool removed from the selection goes inactive")
+      (state/set-active-tools! ag ["write"])
+      (t/is (= #{"write"} (builtin-names ag)))
+      (state/set-active-tools! ag nil)
+      (t/is (= #{"read"} (builtin-names ag))
+            "nil restores the current selection"))))
 
-(t/deftest test-enabled-tools-live-base-overrides-the-opt-in-default
-  ;; once :enabled-tools is set it is the absolute live-set selection and wins
-  ;; over :default-tools, so a modifier-only list turns the mounted opt-ins on
+(t/deftest test-resource-selection-live-base-overrides-the-opt-in-default
+  ;; a modifier-only resources list starts from the live set, so the mounted
+  ;; opt-ins stay on
   (let [ag (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
-                                     :enabled-tool-entries ["-bash"])
+                                     :enabled-tool-names (support/tool-names ["-bash"]))
         names (set (map :name (state/active-tools ag)))]
     (t/is (contains? names "run_code"))
     (t/is (contains? names "eval"))

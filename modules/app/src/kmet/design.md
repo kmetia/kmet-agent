@@ -38,13 +38,12 @@ These are load-bearing and not obvious from the code:
 - **The code tools are opt-in.** pi's `defaultToolNames` ships every built-in
   on. kmet marks `run_code` and `eval` `:default-enabled? false`: both stay
   mounted rows (`/config` and `/tools` enable them live), but an unset or
-  modifier-only `:default-tools` resolves over `registry/default-tool-names`
-  and never turns them on — only a plain or `+name` entry does. The departure
-  is deliberate: they are the two tools that execute model-written code in the
-  agent's context (one per call, one persistent), and kmet has no project-trust
-  gate, so the baseline cannot depend on where a settings file came from.
-  `:enabled-tools` is still absolute over the live set, so an explicit choice
-  wins.
+  modifier-only `:resources` list never turns them on — only a plain or
+  `+name` entry does. The departure is deliberate: they are the two tools that
+  execute model-written code in the agent's context (one per call, one
+  persistent), and kmet has no project-trust gate, so the baseline cannot
+  depend on where a settings file came from. The runtime reads the resources
+  selection; `:default-tools` and `:enabled-tools` are retired.
 - **`resume!`'s record is the session header.** The log is the durable record;
   an agent store would be a second one, and the server's own rule is "sessions
   are already EDN files; the server adds no new store".

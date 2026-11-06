@@ -30,7 +30,6 @@
             [kmet.app.prompts :as prompts]
             [kmet.app.root :as root]
             [kmet.app.skills :as skills]
-            [kmet.app.tools.registry :as tools]
             [kmet.app.tools.shell :as shell]
             [kmet.ui.tui.theme-controller :as theme-ctrl]
             [kmet.ui.tui.chat-history :as chat-history]
@@ -675,14 +674,8 @@
               ;; pi: _rebuildSystemPrompt with new sources — the prompt is
               ;; built over the CURRENTLY active tool set (pi:
               ;; getActiveToolNames), so a pre-reload set-active-tools
-              ;; restriction survives the reload. The selection settings are
-              ;; re-resolved first (pi: AgentSession.reload — tools newly
-              ;; added to a setting become active; removed ones stay).
-              _ (runtime/apply-enabled-tools! (:engine cs)
-                                              (cfg/get-enabled-tools config))
-              _ (runtime/apply-default-tools! (:engine cs)
-                                              (tools/resolve-default-tools
-                                               (cfg/get-default-tools config)))
+              ;; restriction survives the reload. The resources service reads
+              ;; settings live, so the selection is current without an apply.
               active-tools (runtime/active-tools (:engine cs))
               system-prompt-opts {:custom-prompt (cfg/get-custom-prompt config)
                                   :append-prompt (cfg/get-append-system-prompt config)

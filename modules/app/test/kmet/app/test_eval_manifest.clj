@@ -21,7 +21,7 @@
    (loop-support/make-agent-state
     :ctx (:ctx env)
     :session (:session env)
-    :enabled-tool-entries entries)))
+    :enabled-tool-names (loop-support/tool-names entries))))
 
 (defn- listings [sess]
   (filter #(and (= :custom-message (:role %))
@@ -226,7 +226,7 @@
           other-agent (loop-support/make-agent-state
                        :ctx (:ctx env)
                        :session other
-                       :enabled-tool-entries ["eval"])
+                       :enabled-tool-names (loop-support/tool-names ["eval"]))
           saved (state/sync-eval-library-listing! other-agent)]
       (t/is (some? saved))
       (t/is (str/includes? (:content saved) "saved"))
@@ -263,7 +263,7 @@
             other-agent (loop-support/make-agent-state
                          :ctx (:ctx env)
                          :session other
-                         :enabled-tool-entries ["eval"])]
+                         :enabled-tool-names (loop-support/tool-names ["eval"]))]
         (write-definition! env :cwd "user/saved" "(defn saved [] 1)")
         (let [message (without-building #(state/sync-eval-library-listing! other-agent))]
           (t/is (some? message) "the saved view reads the disk index")

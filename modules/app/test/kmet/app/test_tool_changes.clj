@@ -105,13 +105,13 @@
 (t/deftest test-a-resumed-session-honors-a-persisted-selection
   (let [{:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session
-                                        :enabled-tool-entries ["read"])]
+                                        :enabled-tool-names (support/tool-names ["read"]))]
     (try
       (state/sync-tool-declarations! agent)
       (t/is (= #{"read"} (names (state/active-tools agent)))
             "the configured selection is the live loadout")
       (let [resumed (support/make-agent-state :session session
-                                              :enabled-tool-entries ["read"])]
+                                              :enabled-tool-names (support/tool-names ["read"]))]
         (state/sync-resumed-declarations! resumed)
         (t/is (= #{"read"} (names (state/active-tools resumed)))
               "the persisted selection survives resume")
@@ -126,7 +126,7 @@
     (try
       (state/sync-tool-declarations! agent)
       (let [resumed (support/make-agent-state :session session
-                                              :enabled-tool-entries ["read"])]
+                                              :enabled-tool-names (support/tool-names ["read"]))]
         (t/is (= #{"read"} (names (state/active-tools resumed)))
               "the recorded set is filtered before the first request")
         (state/restore-session-context! resumed)
@@ -154,7 +154,7 @@
               "a seen-and-live tool returns after a remount"))
       ;; a persisted exclusion still wins
       (let [disabled (support/make-agent-state :session session
-                                               :enabled-tool-entries ["-flappy"])]
+                                               :enabled-tool-names (support/tool-names ["-flappy"]))]
         (state/restore-session-context! disabled)
         (state/sync-resumed-declarations! disabled)
         (t/is (not (contains? (names (state/active-tools disabled)) "flappy"))))
@@ -213,7 +213,7 @@
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session
-                                        :enabled-tool-entries ["-bash" "-edit" "-write" "-run_code" "-eval"])]
+                                        :enabled-tool-names (support/tool-names ["-bash" "-edit" "-write" "-run_code" "-eval"]))]
     (try
       (state/sync-tool-declarations! agent)
       ;; the persisted selection keeps the unrelated built-ins out; the
@@ -222,7 +222,7 @@
                                    (fn [] {"deferred-a" (tool-map "deferred-a")})
                                    {:exposure :deferred :description "A catalog"})
       (let [resumed (support/make-agent-state :session session
-                                              :enabled-tool-entries ["-bash" "-edit" "-write" "-run_code" "-eval"])]
+                                              :enabled-tool-names (support/tool-names ["-bash" "-edit" "-write" "-run_code" "-eval"]))]
         (state/sync-resumed-declarations! resumed)
         (t/is (= #{"read" "tool_search"}
                  (names (state/active-tools resumed)))
@@ -241,11 +241,11 @@
     (try
       (t/is (= ["deferred-a"]
                (state/orphaned-deferred-tools
-                (support/make-agent-state :enabled-tool-entries ["-tool_search"])))
+                (support/make-agent-state :enabled-tool-names (support/tool-names ["-tool_search"]))))
             "a selected deferred tool with no discovery tool is orphaned")
       (t/is (nil? (state/orphaned-deferred-tools
                    (support/make-agent-state
-                    :enabled-tool-entries ["-tool_search" "-deferred-a"])))
+                    :enabled-tool-names (support/tool-names ["-tool_search" "-deferred-a"]))))
             "excluding the deferred tool too loses nothing")
       (finally
         (tools/unregister-tool-source! h ::catalog)))))
@@ -255,11 +255,11 @@
     (try
       (t/is (= #{"read"}
                (names (state/declared-tools-for-session
-                       ctx session {:enabled-tool-entries ["read"]}))))
+                       ctx session {:enabled-tool-names (support/tool-names ["read"])}))))
       (state/sync-tool-declarations! (support/make-agent-state :session session))
       (t/is (= #{"read"}
                (names (state/declared-tools-for-session
-                       ctx session {:enabled-tool-entries ["read"]})))
+                       ctx session {:enabled-tool-names (support/tool-names ["read"])})))
             "a recorded declaration is filtered for the prompt")
       (finally (fs/delete-tree dir)))))
 
@@ -395,7 +395,7 @@
       (state/promote-tools! agent ["deferred-a"])
       ;; a persisted exclusion removes the promoted tool on resume
       (let [resumed (support/make-agent-state :session session
-                                              :enabled-tool-entries ["-deferred-a"])
+                                              :enabled-tool-names (support/tool-names ["-deferred-a"]))
             promotable (tools/promotable-tools (state/tool-table resumed)
                                                (state/ctx-contributed-tools (:ctx resumed))
                                                (state/tool-selection resumed))]

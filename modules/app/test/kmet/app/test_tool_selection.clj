@@ -1,24 +1,9 @@
 (ns kmet.app.test-tool-selection
-  "S1: the tool-selection keys merge by scope and resolve over a base set —
-   built-ins for :default-tools, the live names for :enabled-tools."
+  "The shared selection grammar: entry lists resolve over a base set (the
+   built-ins for the retired :default-tools path, the live names for
+   :resources)."
   (:require [clojure.test :as t]
-            [kmet.app.config :as cfg]
             [kmet.app.tools.registry :as tools]))
-
-(t/deftest test-merge-tool-entries
-  (t/is (= ["read"] (cfg/merge-tool-entries ["read"] nil))
-        "a user list alone passes through")
-  (t/is (= ["read" "+bash" "-read"]
-           (cfg/merge-tool-entries ["read"] ["+bash" "-read"]))
-        "project modifiers amend the inherited list")
-  (t/is (= ["write"] (cfg/merge-tool-entries ["read"] ["write"]))
-        "a plain project name replaces the inherited list")
-  (t/is (= ["read"] (cfg/merge-tool-entries ["read"] []))
-        "an empty project list is modifier-only")
-  (t/is (= ["+grep"] (cfg/merge-tool-entries nil ["+grep"])))
-  (t/is (= [] (cfg/merge-tool-entries nil [])))
-  (t/is (= "+bash" (cfg/merge-tool-entries ["read"] "+bash"))
-        "a malformed project value replaces the inherited list"))
 
 (t/deftest test-resolve-selection
   (t/is (nil? (tools/resolve-selection nil ["a" "b"]))
@@ -73,10 +58,3 @@
   (t/is (= ["run_code"] (tools/resolve-default-tools ["run_code"]))
         "a plain list names the opt-in absolutely")
   (t/is (nil? (tools/resolve-default-tools nil))))
-
-(t/deftest test-default-tool-exclusions-include-the-opt-ins
-  (t/is (= #{"run_code" "eval"} (tools/default-tool-exclusions nil))
-        "an unset selection excludes the opt-ins")
-  (t/is (= #{"bash" "run_code" "eval"}
-           (tools/default-tool-exclusions (tools/resolve-default-tools ["-bash"])))
-        "and a modifier-only list keeps them excluded while dropping its target"))

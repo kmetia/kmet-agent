@@ -381,10 +381,10 @@ things are worth knowing before changing a tool.
 are declared while selected; `:deferred` is callable but declared only once
 `tool_search` loads it; `:sandbox` (a contributed source's catalog) is callable
 and never declared. `kmet.app.loop.state/declared-tools-for` builds the live
-candidate set from the selection (`:enabled-tools` / `:default-tools`) and the
-loaded set; the `:enabled-tools` entry list is re-resolved over the live names
-on each read, so a tool that mounts later defaults on, while a plain list is
-absolute. `sync-tool-declarations!` records an explicit selection change and
+candidate set from the resources selection (`kmet.app.resources/enabled-names
+:tool`, read live) and the loaded set; the selection is re-resolved on each read,
+so a tool that mounts later defaults on under a modifier-only list, while a
+plain list is absolute. `sync-tool-declarations!` records an explicit selection change and
 `sync-resumed-declarations!` reconciles the recorded loadout before each
 request; both append a `:tool-change` entry and its wire marker to the live
 context. The request-time reconcile folds the context's markers, not the whole
@@ -395,10 +395,11 @@ boundary — never between a call and its result.
 past array-map size a map's order is hash order and a replay of the recorded
 names must reproduce the array. A
 `tool_search`-named tool is declared only while the selection can promote
-something — a `:deferred` tool or a contributed `:sandbox` tool
+something — a selected `:deferred` tool or any contributed `:sandbox` tool
 (`kmet.app.tools.registry/promotable-tools`, the same derivation the search
 itself ranks) — so a direct-only setup pays no schema for it and a selection
-that excludes every promotable tool declares none. The
+that excludes every selected deferred tool declares none; sandbox tools are not
+selectable and cannot be excluded. The
 bundled clojure and tree-sitter extensions are the shipped users of that: each
 declares its family's entry point directly (`clojure_edit`,
 `list_symbols`/`find_definition`) and contributes its refinements as one
@@ -408,9 +409,8 @@ schema/render wrappers over the shared `kmet.libs.clj-edit` engine; the same
 engine backs eval's core `clj/edit-form`, `clj/replace-sexp` and
 `clj/paren-repair` verbs, so structural editing does not require
 `:ext/clojure`. The
-advertised set is a session fact. The mutations (`set-active-tools!`,
-`apply-default-tools!`, `apply-enabled-tools!`) record the live selection with
-`sync-tool-declarations!`;
+advertised set is a session fact. The selection mutation (`set-active-tools!`)
+records the live selection with `sync-tool-declarations!`;
 the loop reconciles the recorded loadout before every request with
 `sync-resumed-declarations!`; a promotion uses the same resumed reconcile. Both
 write the delta by value — name, description, parameters and constrained

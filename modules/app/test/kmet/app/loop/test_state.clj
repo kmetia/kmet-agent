@@ -41,16 +41,16 @@
     (t/is (nil? (:session agent)))
     (t/is (= :off @(:thinking agent)))))
 
-(t/deftest test-loop-make-agent-state-enabled-tool-entries
-  (let [agent (support/make-agent-state :enabled-tool-entries ["read"])]
+(t/deftest test-loop-make-agent-state-enabled-tool-names
+  (let [agent (support/make-agent-state :enabled-tool-names (support/tool-names ["read"]))]
     (t/is (= #{"read"} (state/callable-tool-names agent))
           "a plain enabled list is the absolute callable selection"))
-  (let [agent (support/make-agent-state :enabled-tool-entries ["-bash"])]
+  (let [agent (support/make-agent-state :enabled-tool-names (support/tool-names ["-bash"]))]
     (t/is (contains? (state/callable-tool-names agent) "read"))
     (t/is (not (contains? (state/callable-tool-names agent) "bash"))
           "a modifier-only enabled list excludes over the live names"))
   (let [h (support/tool-table)
-        agent (support/make-agent-state :enabled-tool-entries ["-bash"])]
+        agent (support/make-agent-state :enabled-tool-names (support/tool-names ["-bash"]))]
     (tools-registry/register-tool! h {:name "late-tool"
                                       :description "late"
                                       :parameters {:type "object" :properties {}}
@@ -60,18 +60,22 @@
             "a tool mounted after the setting defaults on")
       (finally (tools-registry/unregister-tool! h "late-tool")))))
 
-(t/deftest test-loop-apply-enabled-tools-replaces-the-setting
-  (let [agent (support/make-agent-state :enabled-tool-entries ["read"])]
+(t/deftest test-loop-active-tools-override-and-restore
+  (let [enabled (atom #{"read"})
+        agent (support/make-agent-state :enabled-tool-names (fn [] @enabled))]
     (t/is (= #{"read"} (state/callable-tool-names agent)))
-    (state/apply-enabled-tools! agent ["-bash"])
-    (t/is (contains? (state/callable-tool-names agent) "read"))
-    (t/is (not (contains? (state/callable-tool-names agent) "bash")))
-    (state/apply-enabled-tools! agent nil)
-    (t/is (contains? (state/callable-tool-names agent) "bash")
-          "nil clears the setting back to the default surface")))
+    (state/set-active-tools! agent #{"bash"})
+    (t/is (= #{"bash"} (state/callable-tool-names agent))
+          "the session override is absolute")
+    (reset! enabled #{"write"})
+    (t/is (= #{"bash"} (state/callable-tool-names agent))
+          "the override wins over a changed resources selection")
+    (state/set-active-tools! agent nil)
+    (t/is (= #{"write"} (state/callable-tool-names agent))
+          "nil restores the current resources selection")))
 
 (t/deftest test-loop-enabled-tool-names
-  (let [agent (support/make-agent-state :enabled-tool-entries ["-bash"])]
+  (let [agent (support/make-agent-state :enabled-tool-names (support/tool-names ["-bash"]))]
     (t/is (contains? (state/enabled-tool-names agent) "read"))
     (t/is (not (contains? (state/enabled-tool-names agent) "bash"))))
   (let [agent (support/make-agent-state)]
@@ -108,7 +112,7 @@
     ;; disable bash
     (state/set-active-tools! agent (mapv :name (remove #(= "bash" (:name %)) all-tools)))
     (t/is (= (set (map :name (remove #(= "bash" (:name %)) all-tools)))
-             @(:enabled-tools agent)))
+             @(:active-tools agent)))
     (t/is (not (str/includes? @(:system agent) "- bash:")))
     (t/is (not (str/includes? @(:system agent) "Use bash for file operations")))
     ;; a dedicated search tool in the active set suppresses the shell rule
@@ -125,17 +129,17 @@
         (tools-registry/unregister-tool! (support/tool-table) "grep")))
     ;; restore all
     (state/set-active-tools! agent nil)
-    (t/is (nil? @(:enabled-tools agent)))
+    (t/is (nil? @(:active-tools agent)))
     (t/is (str/includes? @(:system agent) "- bash:"))
     (t/is (str/includes? @(:system agent) "Use bash for file operations"))
     ;; unknown tool names are filtered out of the enabled set (pi)
     (state/set-active-tools! agent ["read" "nonexistent-tool"])
-    (t/is (= #{"read"} @(:enabled-tools agent)))
+    (t/is (= #{"read"} @(:active-tools agent)))
     (t/is (str/includes? @(:system agent) "- read:"))
     (t/is (not (str/includes? @(:system agent) "nonexistent-tool")))
     ;; a bare string is treated as a single tool name (untyped extensions)
     (state/set-active-tools! agent "write")
-    (t/is (= #{"write"} @(:enabled-tools agent)))
+    (t/is (= #{"write"} @(:active-tools agent)))
     (t/is (str/includes? @(:system agent) "- write:"))))
 
 (t/deftest test-loop-reload-keeps-tools-reenableable
@@ -151,7 +155,7 @@
                :system-prompt-opts opts)]
     ;; restrict to read (as an extension would)
     (state/set-active-tools! agent ["read"])
-    (t/is (= #{"read"} @(:enabled-tools agent)))
+    (t/is (= #{"read"} @(:active-tools agent)))
     ;; reload: prompt rebuilt over active set, opts updated
     (let [read-tool (first (filter #(= "read" (:name %)) all-tools))]
       (reset! (:system-prompt-opts agent) (assoc opts :tools [read-tool]))
@@ -160,7 +164,7 @@
       (t/is (not (str/includes? @(:system agent) "- bash:"))))
     ;; re-enable bash after the reload — must work (sources = full registry)
     (state/set-active-tools! agent ["read" "bash"])
-    (t/is (= #{"read" "bash"} @(:enabled-tools agent)))
+    (t/is (= #{"read" "bash"} @(:active-tools agent)))
     (t/is (str/includes? @(:system agent) "- bash:"))))
 
 ;; ─── State helpers ───────────────────────────────────────────────────────

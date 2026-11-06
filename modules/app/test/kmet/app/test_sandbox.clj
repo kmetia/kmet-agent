@@ -109,7 +109,7 @@
   (let [seen (atom nil)
         ;; run_code is opt-in (S4.5); the script tests select it
         agent (support/make-agent-state
-               :default-tools (conj (vec tools/default-tool-names) "run_code"))]
+               :enabled-tool-names (support/tool-names ["+run_code"]))]
     (tools/register-tool! (support/tool-table) (probe seen))
     (try
       (with-redefs [cfg/get-api-key (fn [_] "test-key")

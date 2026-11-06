@@ -685,7 +685,7 @@
 
 (t/deftest test-screen-builtin-tools-merged-state
   ;; the global view resolves the user list only; the project view resolves
-  ;; the scope-merged entries (kmet.app.config/merge-tool-entries)
+  ;; the scope-merged entries (kmet.app.tools.config's merge-scope-entries)
   (with-settings
     (fn [_]
       (let [rows-of (fn [screen]

@@ -312,9 +312,9 @@
    leaves the tool it shadowed.
 
    A deferred source's tools are here (tagged `:exposure :deferred`) because
-   they are model-facing: `:enabled-tools` and `:default-tools` select over
-   them like any registered tool, and `tool_search` promotes one from deferred
-   to declared. A `:sandbox` source's tools are deliberately not here
+   they are model-facing: the resources selection applies to them like any
+   registered tool, and `tool_search` promotes one from deferred to declared.
+   A `:sandbox` source's tools are deliberately not here
    (`get-contributed-tools`), so no selection can declare them."
   [reg]
   (merge (deferred-source-tools reg) (registered-tools reg)))
@@ -331,11 +331,12 @@
   "Filter ALL (a name → Tool map, e.g. get-all-tools) to a caller's surface:
    ENABLED names (nil = every tool in ALL), plus CONTRIBUTED tools (a
    `:sandbox` source's catalog — not in ALL, so exposure is not consulted here;
-   a colliding name keeps ALL's record), minus EXCLUDE names (a sandbox must
-   not expose itself). The result is a map with ALL's keys (its order is the
-   map's — a table past array-map size does not keep insertion order). The
-   loop's schema and the run_code bridge's callable set both resolve through
-   this, so what a caller lists and what it can dispatch cannot drift."
+   a colliding name keeps ALL's record), minus EXCLUDE names (the script
+   surface hides its own tools). The result is a map with ALL's keys (its
+   order is the map's — a table past array-map size does not keep insertion
+   order). The loop's schema and the run_code bridge's callable set both
+   resolve through this, so what a caller lists and what it can dispatch
+   cannot drift."
   [all {:keys [enabled contributed exclude]}]
   (let [enabled (or enabled (set (keys all)))
         contributed (apply dissoc (or contributed {}) (keys all))
@@ -349,9 +350,9 @@
 
 (defn promotable-tools
   "The tools a search can promote: ALL's `:deferred` tools plus CONTRIBUTED (a
-   `:sandbox` source's catalog), filtered by the same selection the declared
-   surface uses — ENABLED names (nil = everything) and EXCLUDE names (a
-   `:default-tools` exclusion). A deferred tool the selection leaves out is not
+   `:sandbox` source's catalog). Deferred tools are filtered by the selection
+   (ENABLED names, nil = everything); contributed tools are not selectable and
+   are never filtered by it. A deferred tool the selection leaves out is not
    promotable: loading it could not declare it. A contributed name that ALL
    holds too keeps ALL's record and is not promotable either.
 
@@ -360,13 +361,16 @@
    and `tool_search` ranks its own candidate list through it, so a request
    cannot carry a search for nothing and a search cannot promise a tool the
    wire would never declare. Returns name → Tool."
-  [all contributed {:keys [enabled exclude]}]
+  [all contributed {:keys [enabled]}]
   (let [contributed (apply dissoc (or contributed {}) (keys all))
         deferred (into {} (filter (fn [[_ t]] (= :deferred (tool/exposure t))) all))
         kept? (fn [name]
-                (and (not (contains? (or exclude #{}) name))
-                     (or (nil? enabled) (contains? enabled name))))]
-    (into {} (filter (comp kept? key) (merge deferred contributed)))))
+                (or (nil? enabled) (contains? enabled name)))]
+    (into {}
+          (filter (fn [[name t]]
+                    (or (not= :deferred (tool/exposure t))
+                        (kept? name)))
+                  (merge deferred contributed)))))
 
 ;; ─── Execution ─────────────────────────────────────────────────────────────
 
@@ -466,12 +470,10 @@
   (bundle-tool-names minimal-bundle))
 
 (def default-tool-names
-  "The built-in tools active when no :default-tools selection says otherwise:
-   `:bundle/minimal`'s tool rows without `:default-enabled? false` (run_code and
-   eval opt out). The base a modifier-only :default-tools list modifies and the
-   set an unset setting resolves to — so an opt-in tool is never re-enabled by
-   an unset or modifier-only value. A plain or +name selection can still name
-   it explicitly."
+  "The default built-in tool names: `:bundle/minimal`'s tool rows without
+   `:default-enabled? false` (run_code and eval opt out). Used by the legacy
+   config screen's retired :default-tools view and `resolve-default-tools`;
+   the resources default is `default-off-tool?`."
   (bundle-default-tool-names minimal-bundle))
 
 (defn default-off-tool?
@@ -483,7 +485,7 @@
        (not (contains? (set default-tool-names) name))))
 
 (defn tool-selection-modifier?
-  "True when a :default-tools entry is a +name/-name modifier (pi:
+  "True when a selection entry is a +name/-name modifier (pi:
    isToolModifier). The definition is kmet.app.tools.util's, re-exported
    for callers of the registry."
   [entry]
@@ -521,8 +523,10 @@
 (defn resolve-default-tools
   "Resolve a merged :default-tools entry list to the initial built-in tool
    selection, over `default-tool-names` (the bundle rows without
-   :default-enabled? false). An unset or modifier-only value therefore never
-   turns an opt-in tool on; a plain or +name entry can still name one."
+   :default-enabled? false). The legacy config screen reads this view; the
+   runtime selection is `kmet.app.resources`. An unset or modifier-only value
+   therefore never turns an opt-in tool on; a plain or +name entry can still
+   name one."
   [entries]
   (resolve-selection entries default-tool-names))
 
@@ -530,15 +534,7 @@
   "Resolve a merged :enabled-tools entry list over LIVE-NAMES — the tools the
    app can currently see (a get-all-tools key set). The same entry rules as
    `resolve-selection`; modifier-only lists modify the live set, so a tool
-   mounted later defaults on."
+   mounted later defaults on. The legacy config screen reads this view; the
+   runtime selection is `kmet.app.resources`."
   [entries live-names]
   (resolve-selection entries live-names))
-
-(defn default-tool-exclusions
-  "Built-in tool names a resolved :default-tools SELECTION leaves out — the
-   :exclude list a caller passes to select-tools. nil means no setting, whose
-   selection is `default-tool-names`: the exclusion is then the opt-in built-ins
-   (`:default-enabled? false`), never an empty set."
-  [selection]
-  (let [selected (set (or selection default-tool-names))]
-    (into #{} (remove selected) builtin-tool-names)))

@@ -125,7 +125,8 @@
         agent (support/make-agent-state
                ;; run_code is opt-in (S4.5); select it and the default-on set,
                ;; so the script may call read
-               :default-tools (conj (vec tools-registry/default-tool-names) "run_code")
+               :enabled-tool-names (support/tool-names
+                                    (conj (vec tools-registry/default-tool-names) "run_code"))
                :ctx (agent-ctx :agent/script (fn [_ request]
                                                (swap! seen conj (:tool-name request))
                                                :allow)))]

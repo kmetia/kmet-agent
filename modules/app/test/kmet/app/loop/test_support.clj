@@ -13,6 +13,7 @@
             [kmet.app.loop.stages :as loop-stages]
             [kmet.app.test-support :as app-support]
             [kmet.app.config :as cfg]
+            [kmet.app.tools.registry :as tools]
             [kmet.srce.core :as srce]
             [kmet.test-utils :as tu]
             [kmet.test-tmp :as test-tmp]))
@@ -55,6 +56,17 @@
    registry handle (a fresh one under `with-registry`)."
   []
   (srce/get (process-ctx) :tools))
+
+(defn tool-names
+  "A live enabled-name source for tests: resolve ENTRIES as the resource
+   entry grammar over the test tool table, read on every selection so a tool
+   mounted later is seen. ENTRIES nil returns nil, which leaves the state's
+   own default surface in charge."
+  [entries]
+  (fn []
+    (when (some? entries)
+      (set (tools/resolve-selection entries
+                                    (keys (tools/get-all-tools (tool-table))))))))
 
 (defn make-agent-state
   "`kmet.app.loop/make-agent-state` on the test process's ctx (`process-ctx`):

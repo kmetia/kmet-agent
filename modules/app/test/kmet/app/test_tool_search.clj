@@ -135,9 +135,10 @@
       (finally (tools/unregister-tool-source! h ::catalog)))))
 
 (t/deftest test-the-selection-narrows-the-candidates
-  ;; a search may only promise what the wire would declare: a deferred or
-  ;; contributed sandbox tool the run's selection leaves out is not a
-  ;; candidate — the same `registry/promotable-tools` the discovery gate reads
+  ;; a search may only promise what the wire would declare: a deferred tool
+  ;; the run's selection leaves out is not a candidate — the same
+  ;; `registry/promotable-tools` the discovery gate reads. Sandbox tools are
+  ;; not selectable, so they stay candidates.
   (let [h (handle)
         declared (atom #{})]
     (deferred-source! h ::catalog "Widget tools" ["widget_a" "widget_b"])
@@ -151,8 +152,8 @@
         (t/is (= #{"widget_a"} @declared)))
       (let [r (with-run declared {:enabled #{"widget_a"}}
                 #(run-search h {:query "screenshot"}))]
-        (t/is (= "No matching tools found." (:content r))
-              "a sandbox tool outside the selection is not a candidate"))
+        (t/is (= ["browser_shot"] (:loaded (:details r)))
+              "a sandbox tool outside the selection is still a candidate"))
       (finally
         (tools/unregister-tool-source! h ::catalog)
         (tools/unregister-tool-source! h ::sandbox)))))
