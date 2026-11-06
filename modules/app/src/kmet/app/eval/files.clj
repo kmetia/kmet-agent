@@ -4,9 +4,11 @@
    (`<agent-dir>/eval-scopes/<shared-cwd-key>`).
 
    The file is the address and stays reviewable text. Every successful
-   top-level definition writes its file; loading scans each root. Writes and
-   deletes take the EDN store's directory lock, because two sessions in one
-   home can save at once; a move takes both locks in fixed order."
+   top-level definition writes its file; loading scans each root. A loaded
+   record's `:file` is authoritative for edit/delete; `path-for-name` is only
+   the new-definition and broken-file fallback. Writes and deletes take the
+   EDN store's directory lock, because two sessions in one home can save at
+   once; a move takes both locks in fixed order."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.eval.definitions :as defs]
@@ -22,11 +24,21 @@
   [root record]
   (str (fs/path root
                 (defs/ns-dir (:ns record))
-                (str (defs/sanitize (defs/name-part record)) ".clj"))))
+                (str (defs/file-base (:name record) (:ns record)) ".clj"))))
 
 (defn path-for-name
-  "The file a definition address NAME would occupy under ROOT — the delete
-   path for a drop, independent of the record that named it."
+  "The file a new definition address NAME would occupy under ROOT. A loaded
+   record carries the authoritative `:file`; this is the fallback for an
+   address with no record and a broken canonical file."
+  [root name]
+  (let [i (str/index-of name "/")
+        ns (if i (subs name 0 i) "user")]
+    (str (fs/path root (defs/ns-dir ns)
+                  (str (defs/file-base name ns) ".clj")))))
+
+(defn legacy-path-for-name
+  "The pre-digest canonical path for NAME under ROOT, so a broken file written
+   before the collision fix is still deletable."
   [root name]
   (let [i (str/index-of name "/")
         ns (if i (subs name 0 i) "user")
@@ -57,13 +69,24 @@
   `(with-root-lock* ~root (fn [] ~@body)))
 
 (defn write-definition!
-  "Write RECORD to ROOT and return the path. A failed write leaves the old
-   file in place (atomic publication)."
-  [root record]
-  (with-root-lock root
-    (let [path (definition-path root record)]
-      (kfs/publish! path (file-content record))
-      path)))
+  "Write RECORD to ROOT and return the path. A PATH names the record's
+   existing file (a redefinition keeps its file); nil uses the canonical
+   path. A failed write leaves the old file in place (atomic publication)."
+  ([root record] (write-definition! root record nil))
+  ([root record path]
+   (with-root-lock root
+     (let [path (or path (definition-path root record))]
+       (kfs/publish! path (file-content record))
+       path))))
+
+(defn file-defs
+  "Parse FILE without evaluating it. Returns `{:defs [...]}` or `{:error msg}`;
+   a broken/unreadable file is the caller's data, never an exception."
+  [file]
+  (try
+    {:defs (:defs (defs/parse (slurp file) "user"))}
+    (catch Throwable t
+      {:error (ex-message t)})))
 
 (defn write-content!
   "Write CONTENT to PATH under ROOT's file lock, atomically publishing it.
@@ -74,12 +97,12 @@
     (kfs/publish! path content)
     path))
 
-(defn delete-name!
-  "Remove NAME's file under ROOT, returning the deleted path or nil."
-  [root name]
-  (let [path (path-for-name root name)]
-    (with-root-lock root
-      (when (fs/delete-if-exists path) path))))
+(defn delete-file!
+  "Delete PATH under ROOT's file lock. Returns the deleted path or nil when
+   it was already absent."
+  [root path]
+  (with-root-lock root
+    (when (fs/delete-if-exists path) path)))
 
 (defn scan
   "Read every definition file under ROOT. Returns `[{:file :content}]`,

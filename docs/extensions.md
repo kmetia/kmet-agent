@@ -647,7 +647,10 @@ calls, so it can expose current state instead of a snapshot:
   `drop`, `move`, `sources`, `help`) are reserved.
 - A source key is never written to the eval library. A model redefinition
   shadows it live, and dropping the name restores the source value while the
-  source is mounted. The key stays non-storable after the source unloads.
+  source is mounted (the result line says `restored`, not `forgot`). The key
+  stays non-storable after the source unloads.
+- A source fn runs synchronously on the eval build/call thread and has no
+  timeout; keep it fast because it is read on every eval call.
 - A throwing or malformed source contributes nothing and is reported; it never
   fails the eval call. The source is removed automatically when the extension
   unloads.

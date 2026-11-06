@@ -591,24 +591,31 @@ last namespace a successful call ended in is re-entered at the start of the
 next. Every successful top-level definition is written immediately to one of
 two durable layers: the global `<agent-dir>/eval/<ns>/<name>.clj`, or the
 session cwd's `<agent-dir>/eval-scopes/<shared-cwd-key>/<ns>/<name>.clj` (one
-verbatim source slice each; `kmet.app.eval.files`). Existing `<agent-dir>/eval`
+verbatim source slice per generated definition; a hand-written file can hold
+several; `kmet.app.eval.files`). Existing `<agent-dir>/eval`
 files are the global layer; nothing is moved automatically. The key is the
 shared injective session-dir encoder, pinned when the environment is built: a
 later
 call's `:cwd` still resolves file verbs and sources, but never moves the
 library root. Global loads first, then cwd; a name's stack is `[global cwd]`
 and the last record is live, so cwd shadows global. New names default to cwd;
-redefining an active name keeps its layer. `:scope :global` or `:cwd` chooses
+redefining an active name keeps its layer and its file. `:scope :global` or `:cwd` chooses
 a new name's layer and is accepted for an existing name only when it names
 the active layer. A session's first eval scans and evaluates both layers; a
 new session or a restarted process loads them, while an already-built
 environment is a runtime cache and never refreshes. Sessions share the files
 but not the environment. `:drop` and `(eval/forget 'name)` target the active
-record by default; a scoped drop targets either layer. Dropping the active
-record deletes its file, unbinds the live name, and re-evaluates the next
-record (restoring a shadowed global); dropping a non-active record deletes
-only its file and leaves the live definition. A code-less drop needs no
-environment and resolves cwd first, or `:scope`.
+record by default; a scoped drop targets either layer. Drop/forget resolve an
+unqualified name in the namespace the call ends in. Dropping a record deletes
+its actual `:file`, unbinds the live name, and re-evaluates the next record
+(restoring a shadowed global); dropping a non-active record deletes only its
+file and leaves the live definition. All targets resolve before anything is
+deleted, and a file that also defines other addresses must be requested with
+all of them (a partial file is refused). A mounted source's shadow is
+reported as `restored`, not `forgot`. A rejected drop leaves the call's
+definitions live but unwritten, like any other change failure. A code-less
+drop needs no environment: it reads the disk index and resolves cwd first, or
+`:scope`.
 `(eval/move 'name :global|:cwd)` and `/eval move <name> global|cwd` move an
 active definition without
 re-evaluating; they refuse collisions, same-scope moves, and source-provided
@@ -694,16 +701,16 @@ moving a global definition to cwd can break other global files. Dropping a
 shadowed `defmulti` re-evaluates the next record for that address, but
 methods from the other layer may need a rebuild. A move updates the file and
 the record only; it never re-evaluates. Dropping a `defmethod` address
-deletes its file and removes only that method; the multimethod and its other
-methods stay live. A multi-name `declare` writes its
-whole source under each name, so dropping one leaves the others declared (and
-the next build can restore the dropped name); moving one is refused because
-its file defines the siblings. Two addresses that
-sanitize to the same file name share a file; the last write wins. A
-hand-written file with several top-level definitions is still one address and
-file: moving one address is refused, and dropping one deletes the file for
-the others (a restart loses them). A source-provided key may be redefined
-live but is never written. A
+deletes its actual file and removes only that method; the multimethod and its
+other methods stay live. A multi-name `declare` writes its whole source under
+each name; dropping or moving one is refused unless every address that file
+defines is in the request. A hand-written file with several top-level
+definitions behaves the same way: dropping or moving one address refuses
+until all of them are requested, and a redefinition edits the named form in
+place so the siblings survive. Distinct addresses never share a file: a
+spelling that the readable sanitizer would collapse (`a?`/`a!`) gains a short
+address digest. A source-provided key may be redefined live but is never
+written. A
 call that ends in a normal error writes nothing; definitions it evaluated
 before the error stay live and are forgettable. `(eval/patch 'name old new)`
 replaces the first structurally equal subform inside the named definition,
@@ -729,9 +736,11 @@ symlinks are separate because the key uses the normalized path, not
 lists every record the current environment loaded, active and shadowed.
 Build failures are reported once, on the next result, and then cleared;
 `/eval list` still shows them from the disk index.
-Interpreted build code is bounded by a build deadline; host-blocked top-level
-code still has the sandbox's interrupt-grace limitation. Definition report
-lines are appended after the script's output budget, not counted inside it.
+Interpreted build code is bounded by a per-file deadline and one overall
+build budget; host-blocked top-level code still has the sandbox's
+interrupt-grace limitation. Source functions are synchronous extension code
+and are not interrupted—keep them fast. Definition report lines are appended
+after the script's output budget, not counted inside it.
 
 The bridge pool is process-wide **by decision**: it is a bound, not a setting,
 and everything per-run travels in the submission's `:bindings`, so two agents

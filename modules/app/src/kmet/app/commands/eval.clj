@@ -142,22 +142,6 @@
         (when (= 1 (count names))
           [(first names) (str/trim (subs arg (inc i)))])))))
 
-(defn- source-id [s]
-  (let [id (if (map? s) (:id s) s)]
-    (if (keyword? id) (name id) (str id))))
-
-(defn- source-report-line [s]
-  (let [id (source-id s)
-        error (when (map? s) (:error s))
-        doc (when (map? s) (:doc s))
-        verbs (when (map? s) (:verbs s))]
-    (if (seq error)
-      (str "- " id ": " error)
-      (str "- " id
-           (when (seq doc) (str ": " doc))
-           (when (seq verbs)
-             (str "\n" (str/join "\n" (map eval-format/verb-line verbs))))))))
-
 (defn- failure-line [failure]
   (str "  failure: " (or (:file failure) (:name failure) (:source failure)
                          (:root failure) "?")
@@ -172,7 +156,7 @@
     (str/join "\n"
               (concat
                (if (seq sources)
-                 (map source-report-line sources)
+                 (map eval-format/source-line sources)
                  ["No eval sources."])
                [(str n " definition" (when (not= 1 n) "s") " loaded")]
                (map #(entry-line cwd %) entries)
@@ -189,7 +173,8 @@
 (defn- help-text [svc cwd]
   (let [verbs ["/eval list [pattern]     List library definitions"
                "/eval search <text>     Search names and source"
-               "/eval drop <name>…      Delete files and unbind the live names"
+               "/eval drop <name>…      Delete actual files and unbind the live names"
+               "/eval drop names sharing a file together; a partial file is refused"
                "/eval move <name> global|cwd  Move a definition to the other scope"
                "/eval sources           List eval sources and loaded definitions"
                "/eval help              This help"]

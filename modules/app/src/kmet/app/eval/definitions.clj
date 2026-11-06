@@ -1,7 +1,8 @@
 (ns kmet.app.eval.definitions
   "Pure definition tracking for the eval tool: parsing a call's top-level
    defining forms and the address rules a library definition uses (name,
-   namespace, sanitized file name).
+   namespace, file base). A lossy sanitized spelling gains an address digest in
+   `file-base`, so two addresses never share one library file.
 
    A definition's source is the verbatim rewrite-clj slice of the form that
    defined it, so a library file shows the bytes the model wrote. Each record
@@ -230,15 +231,38 @@
               (str/replace #"^_+|_+$" ""))]
     (if (seq s) s "def")))
 
-(defn name-part
-  "The part of a definition address after its namespace — the file name
-   before sanitization (`area :rectangle` for a multimethod)."
-  [record]
-  (let [name (:name record)
-        ns (:ns record)]
-    (if (and ns (str/starts-with? name (str ns "/")))
-      (subs name (inc (count ns)))
-      name)))
+(defn- file-safe-spelling
+  "PART with no unsafe file characters, before sanitize's collapse and trim."
+  [part]
+  (str/replace part #"[^A-Za-z0-9_.-]" "_"))
+
+(defn- file-digest
+  "A stable short FNV-1a digest of ADDRESS for a lossy file name. It must not
+   depend on the host's `hash`, because bb, Jolt and the JVM share one agent
+   home."
+  [address]
+  (let [s (str address)]
+    (loop [i 0 h 2166136261]
+      (if (< i (count s))
+        (recur (inc i)
+               (bit-and 0xffffffff
+                        (* 16777619 (bit-xor h (int (nth s i))))))
+        (format "%08x" h)))))
+
+(defn file-base
+  "The file name (without `.clj`) for the definition address NAME in NS. A
+   lossless spelling keeps its readable name; a spelling sanitize would
+   collapse (`a?` and `a!` both used to become `a`) gains a digest of the full
+   address, so two distinct addresses never share one library file."
+  [name ns]
+  (let [name (str name)
+        part (if (and ns (str/starts-with? name (str ns "/")))
+               (subs name (inc (count ns)))
+               name)
+        safe (sanitize part)]
+    (if (= safe (file-safe-spelling part))
+      safe
+      (str safe "-" (file-digest name)))))
 
 (defn ns-dir
   "The directory name for NS inside an eval root. A namespace cannot carry a

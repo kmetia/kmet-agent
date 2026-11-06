@@ -99,7 +99,7 @@
       (t/is (not (fs/exists? path))))
     (t/is (= "2" (:content (support/eval! env "(ns license) value"))))
     (let [result (support/eval! env "(ns license) (eval/forget 'value)")]
-      (t/is (str/includes? (:content result) "[eval: forgot license/value (source)]")))
+      (t/is (str/includes? (:content result) "[eval: restored license/value (source)]")))
     (t/is (= "1" (:content (support/eval! env "(ns license) value")))
           "forget restores the source value")
     (t/is (not (fs/exists? (support/library-file env :cwd "license" "value.clj"))))))
@@ -112,7 +112,48 @@
     (let [result ((:drop! (:service env))
                   {:session (:session env) :drop ["license/value"]})]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (str/includes? (:content result) "[eval: forgot license/value (source)]")))
+      (t/is (str/includes? (:content result) "[eval: restored license/value (source)]")))
+    (t/is (= "1" (:content (support/eval! env "(ns license) value"))))))
+
+(t/deftest a-library-file-and-a-source-value-share-a-key-safely
+  (let [env (support/eval-ctx)
+        path (support/library-file env :cwd "license" "value.clj")]
+    (fs/create-dirs (fs/parent path))
+    (spit path "(ns license)\n(def value 2)\n")
+    (register! env :license
+               (fn [_] {:ns {'license {'value 1}}}))
+    (t/is (= "2" (support/script-content (support/eval! env "(ns license) value")))
+          "the saved definition wins at build")
+    (let [result (support/eval! env nil :drop ["license/value"])]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result)
+                           "[eval: forgot license/value (cwd); source restored]")))
+    (t/is (not (fs/exists? path)))
+    (t/is (= "1" (:content (support/eval! env "(ns license) value"))))
+    (let [restarted (support/restart-service env)]
+      (t/is (= "1"
+               (support/script-content
+                (support/eval-in! restarted (:session env) (:cwd env)
+                                  "(ns license) value")))))))
+
+(t/deftest a-source-with-two-library-layers-restores-records-before-the-source
+  (let [env (support/eval-ctx)]
+    (doseq [[scope value] [[:global 2] [:cwd 3]]]
+      (let [path (support/library-file env scope "license" "value.clj")]
+        (fs/create-dirs (fs/parent path))
+        (spit path (str "(ns license)\n(def value " value ")\n"))))
+    (register! env :license
+               (fn [_] {:ns {'license {'value 1}}}))
+    (t/is (= "3" (support/script-content (support/eval! env "(ns license) value"))))
+    (let [result (support/eval! env nil :drop ["license/value"])]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result) "[eval: forgot license/value (cwd)]")))
+    (t/is (= "2" (support/script-content (support/eval! env "(ns license) value")))
+          "the lower record is restored before the source value")
+    (let [result (support/eval! env nil :drop ["license/value"])]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result)
+                           "[eval: forgot license/value (global); source restored]")))
     (t/is (= "1" (:content (support/eval! env "(ns license) value"))))))
 
 (t/deftest a-source-key-stays-non-storable-after-unload
@@ -137,7 +178,7 @@
     (let [result (support/eval! env "(ns license) (eval/forget 'value)"
                                 :scope :global)]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (str/includes? (:content result) "[eval: forgot license/value (source)]")))
+      (t/is (str/includes? (:content result) "[eval: restored license/value (source)]")))
     (t/is (= "1" (:content (support/eval! env "(ns license) value"))))))
 
 (t/deftest a-code-less-drop-does-not-restore-an-unloaded-source

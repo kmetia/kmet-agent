@@ -444,6 +444,8 @@ first call), so the contribution is current, not a snapshot:
   prints when non-blank.
 - **Use the verbs within the call.** They read that call's signal and cwd, so
   capturing one past the call that produced it is unsupported.
+- The source fn runs synchronously on the eval build/call thread and has no
+  timeout. Keep it fast; a slow source delays every eval call.
 - `user` and `clj` are reserved for the built-in sources, as are the eval
   layer's own namespaces (`eval`, `clojure.core`, `clojure`, `sandbox`,
   `tools`, `babashka.process`, `kmet.libs.json`). The `:core` source ships
@@ -453,8 +455,8 @@ first call), so the contribution is current, not a snapshot:
   key, or a built-in `/eval` verb is refused as a whole.
 - A source-provided key is never written to the eval library. A model can
   redefine it live (the call line says `source; not stored`); `:drop` and
-  `(eval/forget …)` restore the source value while the source is mounted. The
-  key stays non-storable after the source unloads.
+  `(eval/forget …)` restore the source value while the source is mounted and
+  report `restored`. The key stays non-storable after the source unloads.
 - A source that throws or returns a bad shape contributes nothing and is
   reported; it never fails an eval call. Sources are removed automatically
   when the extension unloads.

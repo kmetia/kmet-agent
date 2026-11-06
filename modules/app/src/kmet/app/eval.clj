@@ -7,13 +7,20 @@
    `<agent-dir>/eval-scopes/<shared-cwd-key>` root. Every successful top-level
    definition writes its file immediately (cwd by default, global when
    requested or when it redefines an active global name); a redefinition
-   overwrites the active layer's file. A new session or a restarted process
-   loads both layers; an already-built environment is a runtime cache and
-   never refreshes. `:drop` and `(eval/forget 'name)` delete the active
-   layer's file and unbind the live name, restoring a shadowed record when one
-   exists; `(eval/move)` moves one record between layers. Sessions share the
-   files but not the environment. A broken file is recorded under `:failures`
-   and skipped, never fatal.
+   keeps the record's existing file and preserves a file's sibling
+   definitions. A name whose sanitized spelling would collide gets a short
+   address digest, so distinct addresses never share a file. A new session or
+   a restarted process loads both layers; an already-built environment is a
+   runtime cache and never refreshes. `:drop` and `(eval/forget 'name)` resolve
+   in the namespace the call ends in and delete the record's actual file,
+   unbinding the live name and restoring a shadowed record when one exists. A
+   file that also defines other addresses must be dropped with all of them. A
+   mounted source's value is restored (reported as `restored`, not `forgot`)
+   when its shadow is dropped. `(eval/move)` moves one record between layers.
+   Sessions share the files but not the environment. A broken file is recorded
+   under `:failures` and skipped, never fatal. One build is bounded by a
+   per-file and an overall deadline; source functions themselves are ordinary
+   extension code and are not interrupted.
 
    `kmet.app.tools.eval` owns the model-facing tool; `kmet.app.eval.files`
    owns the reviewable files and `kmet.app.eval.definitions` the pure parse
@@ -51,13 +58,22 @@
    still has the sandbox's documented limitation."
   10000)
 
+(def ^:private build-budget-ms
+  "Bound on one whole environment build across all library files. Each file
+   still gets at most `build-timeout-ms`, whichever deadline is sooner."
+  30000)
+
 (defn- rearm-build!
-  "Point ENV's interrupt holder at a fresh rebuild deadline."
-  [env]
-  (script/rearm! (:interrupt env)
-                 {:cancelled nil
-                  :deadline (+ (concurrent/monotonic-ms) build-timeout-ms)
-                  :abort (atom nil)}))
+  "Point ENV's interrupt holder at the next rebuild deadline. The one-arity
+   is a single file's bound; the two-arity also respects the build's overall
+   DEADLINE."
+  ([env] (rearm-build! env (+ (concurrent/monotonic-ms) build-timeout-ms)))
+  ([env deadline]
+   (script/rearm! (:interrupt env)
+                  {:cancelled nil
+                   :deadline (min deadline
+                                  (+ (concurrent/monotonic-ms) build-timeout-ms))
+                   :abort (atom nil)})))
 
 (defn- library-root
   "The global eval library root for SERVICE: `<agent-dir>/eval`."
@@ -127,11 +143,6 @@
 (defn- root-for [env scope]
   (get-in env [:roots (or scope :global)]))
 
-(defn- file-present?
-  "Does the ROOTS map's SCOPE hold NAME's file?"
-  [roots scope name]
-  (fs/exists? (eval-files/path-for-name (get roots scope) name)))
-
 (defn- ensure-no-siblings!
   "Refuse a move whose file also defines other addresses."
   [name siblings]
@@ -150,6 +161,154 @@
                    (str "no eval library definition named " name))
                  (merge {:name name :scope scope} extra))))
 
+(defn- target-scopes
+  "The scopes a lookup considers, preferred first."
+  [scope]
+  (if scope [scope] [:cwd :global]))
+
+(defn- index-entry-for
+  "The disk index entry for NAME in SCOPE, preferring cwd when SCOPE is nil."
+  [entries name scope]
+  (let [matching (filter #(= name (:name %)) entries)]
+    (if scope
+      (first (filter #(= scope (:scope %)) matching))
+      (or (first (filter #(= :cwd (:scope %)) matching))
+          (first (filter #(= :global (:scope %)) matching))))))
+
+(defn- canonical-file-target
+  "The canonical file for NAME in ROOTS when no record or index entry names it.
+   A file that parses but defines other addresses is refused: it is not this
+   definition's file. A broken canonical file is still deletable, preserving a
+   broken definition's drop path."
+  [roots name scope]
+  (let [candidates (->> (target-scopes scope)
+                        (mapcat
+                         (fn [s]
+                           (let [root (get roots s)
+                                 files (distinct
+                                        [(eval-files/path-for-name root name)
+                                         (eval-files/legacy-path-for-name root name)])]
+                             (keep (fn [file]
+                                     (when (fs/exists? file)
+                                       (let [{:keys [defs error]}
+                                             (eval-files/file-defs file)]
+                                         {:scope s :file file :defs defs :error error})))
+                                   files))))
+                        vec)
+        valid (first (filter #(some (fn [d] (= name (:name d))) (:defs %))
+                             candidates))
+        empty-defs (first (filter #(and (not (:error %)) (empty? (:defs %)))
+                                  candidates))]
+    (or valid
+        (first (filter :error candidates))
+        empty-defs
+        (when-let [{:keys [file defs scope]} (first candidates)]
+          (bad-request!
+           (str "the library file for " name " does not define it: " file
+                (when (seq defs)
+                  (str " (defines " (str/join ", " (map :name defs)) ")")))
+           {:name name :file file :scope scope :defs (mapv :name defs)})))))
+
+(defn- target-source-flags
+  "The source and unwritten flags for a target."
+  [env name]
+  {:source? (boolean (and env (contains? @(:source-keys env) name)))
+   :unwritten? (boolean (and env (contains? @(:unwritten env) name)))})
+
+(defn- record-drop-target
+  "A resolved target backed by a loaded record; its `:file` is authoritative."
+  [env name record]
+  (assoc (target-source-flags env name)
+         :name name
+         :record record
+         :file (:file record)
+         :scope (record-scope record)))
+
+(defn- file-drop-target
+  "A resolved target backed by a file with no loaded record."
+  [env name file scope]
+  (assoc (target-source-flags env name)
+         :name name :file file :scope scope))
+
+(defn- marker-drop-target
+  "A source-only or unwritten-only target, or nil when it has neither flag."
+  [env name]
+  (let [{:keys [source? unwritten?]} (target-source-flags env name)]
+    (cond
+      source? {:name name :scope :source :source? true :unwritten? unwritten?}
+      unwritten? {:name name :scope :unwritten :source? false :unwritten? true})))
+
+(defn- resolve-drop-target
+  "Resolve one drop target to its live record and/or file. A record's `:file`
+   is authoritative; the disk index and the canonical path are fallbacks for
+   files that are not loaded. Returns nil when nothing names NAME."
+  [env roots entries name scope]
+  (let [record (when env
+                 (if scope
+                   (some #(when (= scope (record-scope %)) %) (stack-for env name))
+                   (active-record env name)))]
+    (or (when record (record-drop-target env name record))
+        (when-let [entry (index-entry-for entries name scope)]
+          (file-drop-target env name (:file entry) (:scope entry)))
+        (when-let [canonical (canonical-file-target roots name scope)]
+          (file-drop-target env name (:file canonical) (:scope canonical)))
+        (when env (marker-drop-target env name)))))
+
+(defn- resolve-drop-targets
+  "Resolve TARGETS (`{:name :scope}`) against ENV and the disk index. Throws
+   for an unknown name or a canonical file that belongs to other addresses,
+   before the caller changes anything."
+  [env roots entries targets]
+  (mapv (fn [{:keys [name scope]}]
+          (or (resolve-drop-target env roots entries name scope)
+              (missing-definition! name scope)))
+        targets))
+
+(defn- validate-drop-targets!
+  "Refuse a request that names the same address twice."
+  [targets]
+  (when-not (= (count targets) (count (distinct targets)))
+    (bad-request! "drop names a definition twice" {:drop targets})))
+
+(defn- file-record-names
+  "The names the in-memory library or the disk index associates with FILE."
+  [env entries file]
+  (if env
+    (->> (mapcat identity (vals @(:library env)))
+         (filter #(= file (:file %)))
+         (map :name)
+         set)
+    (->> entries (filter #(= file (:file %))) (map :name) set)))
+
+(defn- check-drop-coverage!
+  "Refuse to delete a file whose definitions the request does not cover. A
+   file that parses with other addresses must be dropped with them (or edited
+   directly); a broken file has no parsed addresses and keeps its old
+   deletable path."
+  [env entries resolved]
+  (let [file-targets (filter :file resolved)
+        target-names (set (map :name resolved))
+        target-files (reduce (fn [acc {:keys [name file]}]
+                               (update acc name (fnil conj #{}) file))
+                             {} file-targets)]
+    (doseq [[file targets] (group-by :file file-targets)]
+      (let [library-names (file-record-names env entries file)
+            parsed (:defs (eval-files/file-defs file))
+            parsed-names (set (map :name parsed))
+            missing (for [name (into library-names parsed-names)
+                          :when (not (if (contains? library-names name)
+                                       (contains? (get target-files name #{}) file)
+                                       (contains? target-names name)))]
+                      name)]
+        (when (seq missing)
+          (let [name (:name (first targets))]
+            (bad-request!
+             (str "cannot drop " name
+                  ": its library file also defines "
+                  (str/join ", " (sort missing))
+                  "; drop them in the same request or edit the file")
+             {:name name :file file :siblings (vec (sort missing))})))))))
+
 (defn- target-scope
   "The scope a new record for NAME writes to: the active layer when NAME is
    loaded, else REQUESTED, else `:cwd`. A REQUESTED scope that names a
@@ -165,46 +324,6 @@
       current current
       requested requested
       :else :cwd)))
-
-(defn- known-in-scope?
-  "Is NAME present in SCOPE, either loaded or as a file? A source-provided
-   key and an unwritten definition with no library stack have no layer, and
-   keep their existing drop behavior for any scope."
-  [env name scope]
-  (boolean
-   (or (some #(= scope (record-scope %)) (stack-for env name))
-       (file-present? (:roots env) scope name)
-       (contains? @(:source-keys env) name)
-       (and (contains? @(:unwritten env) name)
-            (empty? (stack-for env name))))))
-
-(defn- known-name?
-  "A drop/forget target: loaded from either layer, present as a file in either
-   root, a source-provided key, or a live definition that was not written (a
-   failed write or an errored call)."
-  [env name]
-  (boolean
-   (or (seq (stack-for env name))
-       (some #(file-present? (:roots env) % name) [:cwd :global])
-       (contains? @(:source-keys env) name)
-       (contains? @(:unwritten env) name))))
-
-(defn- target-known?
-  "Is a drop/forget target present in ENV?"
-  [env {:keys [name scope]}]
-  (if scope
-    (known-in-scope? env name scope)
-    (known-name? env name)))
-
-(defn- drop-target-known?
-  "Is a drop target present in ENV, or as a file under ROOTS without one?"
-  [env roots {:keys [name scope] :as target}]
-  (if env
-    (target-known? env target)
-    (if scope
-      (file-present? roots scope name)
-      (or (file-present? roots :cwd name)
-          (file-present? roots :global name)))))
 
 (declare unbind!)
 
@@ -442,14 +561,6 @@
        :loaded-count (count entries)
        :lines (vec (build-report-lines entries failures))})))
 
-(defn- source-line [source]
-  (if-let [error (:error source)]
-    (str "- " (:id source) ": " error)
-    (str "- " (:id source)
-         (when-let [doc (:doc source)] (str ": " doc))
-         (when (seq (:verbs source))
-           (str "\n" (str/join "\n" (map eval-format/verb-line (:verbs source))))))))
-
 (defn- definition-line
   "One loaded definition's interface line: scope, kind and arglists, the
    first docstring line, or the file when there is no other interface."
@@ -475,7 +586,7 @@
         entries (library-entries env)]
     (str "Eval sources:\n"
          (if (seq sources)
-           (str/join "\n" (map source-line sources))
+           (str/join "\n" (map #(eval-format/source-line % :keyword) sources))
            "  (none)")
          "\nLibrary definitions: " (count entries)
          "\nScope: cwd " (get-in env [:roots :cwd])
@@ -491,7 +602,9 @@
          "let/fn bindings are not. New sessions and restarts load the library; "
          "this session's environment is a cache. A call that ends in a normal "
          "error writes nothing; its definitions stay live and can be forgotten. "
-         "The prompt previews the saved or loaded definitions; the first eval "
+         "Drop/forget resolve unqualified names in the namespace the call ends "
+         "in; a file that also defines other addresses must be dropped with "
+         "all of them. The prompt previews the saved or loaded definitions; the first eval "
          "reports any loaded definitions and files that failed."
          "\nDiscover: (all-ns) lists namespaces, (ns-publics 'ns) lists a "
          "namespace's vars, and (eval/library) lists loaded definitions. "
@@ -562,10 +675,9 @@
 
 (defn- take-failures!
   "Failures are reported once: return the current list and clear the
-   environment's entries. Service-level failures stay."
-  [service env]
-  (let [failures (into (vec @(:service-failures service))
-                       (when env @(:failures env)))]
+   environment's entries."
+  [env]
+  (let [failures (if env @(:failures env) [])]
     (when env (reset! (:failures env) []))
     failures))
 
@@ -578,14 +690,15 @@
   "Parse and evaluate CONTENT into ENV without indexing it. The original ns
    form runs first (preserving its requires), then the standard aliases, then
    the rest of the file. Returns `{:parsed …}` or `{:error …}`; a failed
-   evaluation leaves the caller to decide what to report."
-  [env content]
+   evaluation leaves the caller to decide what to report. DEADLINE is the
+   build's overall interrupt deadline."
+  [env content deadline]
   (try
     (let [parsed (defs/parse content "user")
           {:keys [ns-form body]} (defs/split-ns content)
           source (str (or ns-form (str "(ns " (:ns parsed) ")"))
                       "\n" script/alias-prelude "\n" body)]
-      (rearm-build! env)
+      (rearm-build! env deadline)
       (let [result (script/eval-source! (:sci-ctx env) source (atom nil))]
         (if (:error result)
           {:error (:error result)}
@@ -610,10 +723,10 @@
 (defn- load-library-file!
   "Read, parse and evaluate one library file into ENV at SCOPE. A read, parse
    or eval failure is recorded and skipped."
-  [env scope {:keys [file content error]}]
+  [env scope deadline {:keys [file content error]}]
   (if error
     (record-failure! (:failures env) {:file file :error error :scope scope})
-    (let [{:keys [parsed error]} (eval-content! env content)]
+    (let [{:keys [parsed error]} (eval-content! env content deadline)]
       (if error
         (record-failure! (:failures env) {:file file :error error :scope scope})
         (doseq [record (:defs parsed)]
@@ -622,10 +735,10 @@
 
 (defn- read-library!
   "Read and evaluate every definition file in ROOT into ENV at SCOPE, sorted
-   by path."
-  [env root scope]
+   by path, under the build's DEADLINE."
+  [env root scope deadline]
   (doseq [file (eval-files/scan root)]
-    (load-library-file! env scope file)))
+    (load-library-file! env scope deadline file)))
 
 (defn- active-scope! [env name requested label]
   (let [record (active-record env name)
@@ -661,7 +774,7 @@
                     {:name name :unwritten true}))
     (let [record (active-scope! env name scope label)
           root (root-for env (record-scope record))
-          path (or (:file record) (eval-files/path-for-name root name))]
+          path (or (:file record) (eval-files/definition-path root record))]
       (when-not (fs/exists? path)
         (bad-request! (str "the library file for " name " is missing: " path)
                       {:name name :file path}))
@@ -798,6 +911,19 @@
    (concat (source-siblings record)
            (sibling-names record (mapcat identity (vals @(:library env)))))))
 
+(defn- check-move!
+  "The shared refusals for moving NAME from CURRENT to TARGET: sibling
+   definitions, a same-scope move, and a target layer that already has the
+   name. TARGET-PRESENT? answers the last one."
+  [name current target siblings target-present?]
+  (ensure-no-siblings! name siblings)
+  (when (= current target)
+    (bad-request! (str name " is already in the " (scope-label target) " scope")
+                  {:name name :scope target}))
+  (when target-present?
+    (bad-request! (str "the " (scope-label target) " scope already has " name)
+                  {:name name :scope target})))
+
 (defn- move-record-line!
   "Move RAW-NAME's active definition to TARGET scope without re-evaluating.
    The live name stays; only the file and the library record move. Refuses a
@@ -825,14 +951,9 @@
       (when-not record
         (bad-request! (str "no loaded eval library definition named " name)
                       {:name name}))
-      (ensure-no-siblings! name (file-siblings env record))
       (let [current (record-scope record)]
-        (when (= current target)
-          (bad-request! (str name " is already in the " (scope-label target) " scope")
-                        {:name name :scope target}))
-        (when (some #(= target (record-scope %)) (stack-for env name))
-          (bad-request! (str "the " (scope-label target) " scope already has " name)
-                        {:name name :scope target}))
+        (check-move! name current target (file-siblings env record)
+                     (some #(= target (record-scope %)) (stack-for env name)))
         (let [path (eval-files/move-definition! (:roots env) record target)]
           (put-record! env name current
                        (assoc record :file path :scope target
@@ -874,10 +995,6 @@
     (when-not raw
       (bad-request! (str "forget needs a definition name, got " (pr-str name))
                     {:name name}))
-    (when (and (str/includes? raw "/")
-               (not (contains? @(:parsed-names env) raw))
-               (not (target-known? env {:name raw :scope scope})))
-      (missing-definition! raw scope))
     (swap! (:forgotten env) conj {:name raw :scope scope})
     raw))
 
@@ -902,7 +1019,6 @@
              :source-ids (atom [])
              :fresh-sources? (atom true)
              :change-lines (atom [])
-             :parsed-names (atom #{})
              :unwritten (atom #{})
              :unwritten-records (atom {})
              :build-report (atom nil)
@@ -940,7 +1056,8 @@
                   "eval")
         env (assoc env :sci-ctx sci-ctx :interrupt interrupt)
         _ (reset! env-ref env)
-        sources (refresh-sources! service env cwd nil)]
+        sources (refresh-sources! service env cwd nil)
+        deadline (+ (concurrent/monotonic-ms) build-budget-ms)]
     (binding [tool-util/*cwd* cwd
               bash-tool/*shell* bash-tool/*shell*
               bash-tool/*session-env-fn* bash-tool/*session-env-fn*
@@ -948,8 +1065,8 @@
       (script/with-prime-context
         sci-ctx (prime-state service cwd (:namespaces sources))
         (fn []
-          (read-library! env (:global roots) :global)
-          (read-library! env (:cwd roots) :cwd)
+          (read-library! env (:global roots) :global deadline)
+          (read-library! env (:cwd roots) :cwd deadline)
           (swap! (:model-shadows env)
                  into
                  (filter #(contains? @(:source-keys env) %)
@@ -983,33 +1100,6 @@
                                  (pr-str entry))
                             {:drop entry})))
         (or drop [])))
-
-;; ─── Validation ───────────────────────────────────────────────────────────
-
-(defn- validate-drop!
-  "Validate drop TARGETS (`{:name :scope}`) against KNOWN?: no duplicates,
-   every name present in the requested layer or, when SCOPE is nil, in either
-   layer."
-  [known? targets]
-  (when-not (= (count targets) (count (distinct targets)))
-    (bad-request! "drop names a definition twice" {:drop targets}))
-  (doseq [{:keys [name scope] :as target} targets]
-    (when-not (known? target)
-      (missing-definition! name scope {:drop true}))))
-
-(defn- validate-requests!
-  "Validate a drop before anything evaluates: duplicate entries, unknown
-   names, and a name the call itself defines. Forget requests are validated
-   when `(eval/forget …)` runs and again when changes apply."
-  [env records drop scope]
-  (validate-drop! (partial target-known? env)
-                  (map #(hash-map :name % :scope scope) drop))
-  (let [parsed-names (set (map :name records))]
-    (doseq [name drop]
-      (when (contains? parsed-names name)
-        (bad-request! (str "a definition cannot be defined and dropped in one call: "
-                           name)
-                      {:name name})))))
 
 ;; ─── Applying a call's changes ────────────────────────────────────────────
 
@@ -1064,11 +1154,16 @@
         (swap! (:unwritten env) conj (:name record))
         (swap! (:unwritten-records env) assoc (:name record) record)))))
 
+(defn- active-source-value?
+  "Is NAME currently provided by a mounted eval source?"
+  [env name]
+  (and (contains? @(:active-source-keys env) name)
+       (contains? @(:source-values env) name)))
+
 (defn- restore-source!
   "Seed NAME's active source value, if it has one, and return the seed error."
   [env name]
-  (when (and (contains? @(:active-source-keys env) name)
-             (get @(:source-values env) name))
+  (when (active-source-value? env name)
     (seed-source-value! env name (get @(:source-values env) name))))
 
 (defn- remove-record!
@@ -1090,27 +1185,42 @@
   (swap! (:unwritten env) disj name)
   (swap! (:unwritten-records env) dissoc name))
 
+(defn- restore-next-layer!
+  "After an active record was removed, re-evaluate the next record for NAME.
+   Returns `{:next? bool :error msg}`."
+  [env name active?]
+  (if-not active?
+    {:next? false}
+    (if-let [next (active-record env name)]
+      {:next? true
+       :error (some-> (eval-definition! env next) :error)}
+      {:next? false})))
+
 (defn- drop-record!
-  "Drop RECORD from its layer: delete the file, unbind the live var when it
-   is the active record, and re-evaluate the next layer after an active drop."
+  "Drop RECORD from its layer: delete its actual file, unbind the live var
+   when it is the active record, and re-evaluate the next layer after an
+   active drop. A missing file is not an error: the record and live name are
+   still removed."
   [env name record]
   (let [active? (= record (active-record env name))
         scope (record-scope record)
-        file (eval-files/delete-name! (root-for env scope) name)
-        unbind-error (when active? (unbind! env name record))
-        _ (remove-record! env name record)
-        next (when active? (active-record env name))
-        restore-error (when (and active? next)
-                        (some-> (eval-definition! env next) :error))]
-    (when active?
-      (clear-unwritten! env name))
-    {:name name
-     :file file
-     :scope scope
-     :active active?
-     :error (cond
-              restore-error (str "could not restore the next layer: " restore-error)
-              unbind-error unbind-error)}))
+        root (root-for env scope)
+        path (or (:file record) (eval-files/definition-path root record))
+        file (eval-files/delete-file! root path)
+        unbind-error (when active? (unbind! env name record))]
+    (remove-record! env name record)
+    (let [{:keys [next? error]} (restore-next-layer! env name active?)]
+      (when active?
+        (clear-unwritten! env name))
+      {:name name
+       :file file
+       :scope scope
+       :active active?
+       :next? next?
+       :action :forgot
+       :error (cond
+                error (str "could not restore the next layer: " error)
+                unbind-error unbind-error)})))
 
 (defn- drop-unwritten!
   "Unbind and forget NAME's unwritten live definition. Returns the unbind
@@ -1121,60 +1231,125 @@
     (clear-unwritten! env name)
     error))
 
-(defn- roots-file-scope
-  "The layer holding NAME's file under ROOTS: SCOPE when given, else cwd first
-   and then global. Nil when neither root has the file."
-  [roots name scope]
-  (or scope
-      (when (file-present? roots :cwd name) :cwd)
-      (when (file-present? roots :global name) :global)))
+(defn- drop-file-target!
+  "Delete the resolved file of a target that has no loaded record. Returns the
+   result map; a missing file is not an error."
+  [roots name file scope]
+  (let [root (get roots scope)]
+    (when-not root
+      (bad-request! (str "unknown eval scope " scope)
+                    {:name name :scope scope}))
+    {:name name
+     :file (eval-files/delete-file! root file)
+     :scope scope
+     :action :forgot}))
 
-(defn- drop-one!
-  "Delete NAME's library file and unbind its live var. A source-provided key
-   has no file: its live value (or the model's shadow of it) is unbound, and
-   the source value is seeded again while that source is active. SCOPE
-   selects a layer; nil means the active layer. A file without a loaded record
-   (a broken or not-yet-loaded file) can still be dropped, and an unwritten
-   live definition with no layer is dropped as before."
+(defn- drop-source!
+  "Drop NAME's live source shadow and restore the mounted source value. The
+   action is `:restored` only while the source is still mounted; an unloaded
+   source's leftover live value is unbound instead."
+  [env name]
+  (let [active? (active-source-value? env name)
+        shadow? (contains? @(:model-shadows env) name)
+        live? (interned? env {:name name})
+        unbind-error (when (and live? (or shadow? (not active?)))
+                       (unbind! env name nil))
+        restore-error (when active? (restore-source! env name))]
+    (swap! (:model-shadows env) disj name)
+    (clear-unwritten! env name)
+    {:name name
+     :scope :source
+     :action (if active? :restored :forgot)
+     :error (or unbind-error restore-error)}))
+
+(defn- drop-unwritten-follow-up!
+  "Unbind a live unwritten definition when the dropped record was not active."
+  [env name unwritten? active]
+  (when (and unwritten? (not active))
+    (drop-unwritten! env name)))
+
+(defn- restore-source-follow-up!
+  "Seed NAME's source value when a source shadow is what was dropped."
+  [env name source? restore?]
+  (when (and source? restore?)
+    (restore-source! env name)))
+
+(defn- drop-record-resolved!
+  "Drop NAME's RECORD and its source/unwritten follow-ups. Source restoration
+   only follows a drop that left no lower record to restore."
+  [env name record source? unwritten?]
+  (let [{:keys [active next? error] :as result} (drop-record! env name record)
+        source-dropped? (and source? active (not next?))
+        unbind-error (drop-unwritten-follow-up! env name unwritten? active)
+        _ (when active (swap! (:model-shadows env) disj name))
+        restore-error (restore-source-follow-up! env name source? source-dropped?)
+        restored? (and source-dropped? (active-source-value? env name))]
+    (assoc result
+           :action (if restored? :restored :forgot)
+           :error (or error unbind-error restore-error))))
+
+(defn- drop-file-resolved!
+  "Drop a target's file and, when it also had an unwritten live definition,
+   unbind that definition."
+  [env roots name file scope unwritten?]
+  (let [{:keys [error] :as result} (drop-file-target! roots name file scope)
+        unbind-error (when unwritten? (drop-unwritten! env name))]
+    (assoc result :error (or error unbind-error))))
+
+(defn- drop-resolved-target!
+  "Apply one resolved drop target: its record, its file, a source shadow, or
+   an unwritten live definition."
+  [env roots {:keys [name record file source? unwritten? scope]}]
+  (cond
+    record (drop-record-resolved! env name record source? unwritten?)
+    file (drop-file-resolved! env roots name file scope unwritten?)
+    source? (drop-source! env name)
+    unwritten? {:name name :scope :unwritten :action :forgot
+                :error (drop-unwritten! env name)}
+    :else (missing-definition! name scope)))
+
+(defn- existing-record
+  "The loaded record for NAME in SCOPE, or nil."
   [env name scope]
-  (let [source? (contains? @(:source-keys env) name)
-        unwritten? (contains? @(:unwritten env) name)
-        record (if scope
-                 (some #(when (= scope (record-scope %)) %) (stack-for env name))
-                 (active-record env name))]
-    (cond
-      source?
-      (let [shadow? (contains? @(:model-shadows env) name)
-            live? (interned? env {:name name})
-            unbind-error (when (and live? shadow?)
-                           (unbind! env name nil))
-            restore-error (restore-source! env name)]
-        (swap! (:library env) dissoc name)
-        (clear-unwritten! env name)
-        (swap! (:model-shadows env) disj name)
-        {:name name :scope :source :error (or unbind-error restore-error)})
+  (some #(when (= scope (record-scope %)) %) (stack-for env name)))
 
-      (nil? record)
-      (let [target-scope (roots-file-scope (:roots env) name scope)
-            file? (and target-scope (file-present? (:roots env) target-scope name))
-            drop-unwritten? (and unwritten?
-                                 (or (nil? scope)
-                                     (empty? (stack-for env name))))]
-        (when-not (or file? drop-unwritten?)
-          (missing-definition! name scope))
-        (let [file (when file?
-                     (eval-files/delete-name! (root-for env target-scope) name))
-              error (when drop-unwritten? (drop-unwritten! env name))]
-          {:name name :file file :scope (or (when file? target-scope) :unwritten)
-           :error error}))
-
-      :else (drop-record! env name record))))
+(defn- write-redefinition!
+  "Write a redefinition to its existing file. A file that also defines other
+   addresses is edited structurally so the siblings survive; otherwise the
+   file is replaced with the clean generated content. Returns `[path record]`,
+   where a structural edit's record carries the file's formatted source."
+  [env root record]
+  (let [existing (existing-record env (:name record) (:scope record))
+        path (:file existing)
+        siblings (when existing (file-siblings env existing))]
+    (if (and path (fs/exists? path))
+      (if (seq siblings)
+        (let [content (slurp path)
+              result (try (clj-edit/edit-definition-source
+                           content path existing (:source record))
+                          (catch Throwable t
+                            (bad-request! (ex-message t) {:name (:name record)})))]
+          (when (:is-error result)
+            (bad-request! (:content result) {:name (:name record) :file path}))
+          (let [content (:content result)
+                stored (some #(when (= (:name record) (:name %)) %)
+                             (:defs (defs/parse content "user")))]
+            (eval-files/write-content! root path content)
+            [path (if stored
+                    (assoc record
+                           :source (:source stored)
+                           :doc (:doc stored)
+                           :arglists (:arglists stored)
+                           :kind (:kind stored))
+                    record)]))
+        [(eval-files/write-definition! root record path) record])
+      [(eval-files/write-definition! root record) record])))
 
 (defn- apply-definition!
   "Write RECORD to its scope's library and index it. A source-provided key
    stays live but is never written, and is remembered as a model shadow so
-   later source reads do not overwrite it. A failed write is recorded and
-   reported; the live definition remains."
+   later source reads do not overwrite it. A redefinition keeps its file. A
+   failed write is recorded and reported; the live definition remains."
   [env cwd record]
   (let [name (:name record)
         scope (or (:scope record) :cwd)
@@ -1185,7 +1360,7 @@
         {:line (str "[eval: redefined " name " (source; not stored)]")})
       (try
         (let [root (root-for env scope)
-              path (eval-files/write-definition! root record)
+              [path record] (write-redefinition! env root record)
               record (assoc record :file path :root root)]
           (add-record! env record)
           (clear-unwritten! env name)
@@ -1202,17 +1377,33 @@
                       (ex-message t) "]")
            :error (ex-message t)})))))
 
+(defn- drop-report-line
+  "One drop result line. A restored source value is named as such; a record
+   drop that also restored a source says both."
+  [{:keys [name scope action error]}]
+  (cond
+    error (str "[eval: failed " name ": " error "]")
+    (and (= :restored action) (= :source scope))
+    (str "[eval: restored " name " (source)]")
+    (= :restored action)
+    (str "[eval: forgot " name " (" (scope-label scope) "); source restored]")
+    :else
+    (str "[eval: forgot " name " (" (scope-label scope) ")]")))
+
 (defn- apply-changes!
   "Apply the successful call's changes: drop/forget first, then write every
-   definition the call made. Returns the report the tool result carries; a
-   failure keeps the partial report."
+   definition the call made. Drop names resolve in the namespace the call ends
+   in, like `(eval/forget …)`. All targets resolve before anything is deleted.
+   Returns the report the tool result carries; a failure keeps the partial
+   report."
   [env cwd records drop forgotten scope]
-  (let [forgotten (mapv (fn [{:keys [name scope]}]
-                          {:name (qualify-name (env-ns env) name)
-                           :scope scope})
+  (let [env-ns (env-ns env)
+        forgotten (mapv (fn [{:keys [name scope]}]
+                          {:name (qualify-name env-ns name) :scope scope})
                         forgotten)
-        drop (distinct (concat (map #(hash-map :name % :scope scope) drop)
-                               forgotten))
+        targets (distinct (concat (map #(hash-map :name (qualify-name env-ns %) :scope scope)
+                                       drop)
+                                  forgotten))
         parsed-names (set (map :name records))
         lines (atom (let [changes @(:change-lines env)]
                       (reset! (:change-lines env) [])
@@ -1222,25 +1413,26 @@
         write-errors (atom 0)
         unbind-errors (atom 0)]
     (try
-      (doseq [{:keys [name]} drop]
+      (doseq [{:keys [name]} targets]
         (when (contains? parsed-names name)
           (bad-request! (str "a definition cannot be defined and dropped in one call: "
                              name)
                         {:name name})))
-      (validate-drop! (partial target-known? env) drop)
-      (doseq [{:keys [name scope]} drop]
-        (let [{:keys [error] actual-scope :scope} (drop-one! env name scope)]
-          (swap! lines conj
-                 (if error
-                   (str "[eval: forgot " name " (" (scope-label actual-scope)
-                        ") (unbind failed: " error ")]")
-                   (str "[eval: forgot " name " (" (scope-label actual-scope)
-                        ")]")))
-          (swap! forgotten-names conj name)
-          (when error
-            (swap! unbind-errors inc)
-            (record-failure! (:failures env) {:name name :error error
-                                              :scope actual-scope}))))
+      (validate-drop-targets! targets)
+      (when (seq targets)
+        (let [roots (:roots env)
+              entries (:entries (eval-files/index roots))
+              resolved (resolve-drop-targets env roots entries targets)]
+          (check-drop-coverage! env entries resolved)
+          (doseq [target resolved]
+            (let [result (drop-resolved-target! env roots target)
+                  {:keys [name error] actual-scope :scope} result]
+              (swap! lines conj (drop-report-line result))
+              (swap! forgotten-names conj name)
+              (when error
+                (swap! unbind-errors inc)
+                (record-failure! (:failures env) {:name name :error error
+                                                  :scope actual-scope}))))))
       (doseq [record records]
         (let [{:keys [line entry error]} (apply-definition! env cwd record)]
           (swap! lines conj line)
@@ -1295,10 +1487,10 @@
   "A failed call reports its error, never applies definitions or drops, and
    reports the build failures collected for this attempt. The first call after
    an environment build also carries the loaded-set report."
-  [service env base started]
+  [env base started]
   (let [base (base-result base started)
         report (take-build-report! env)
-        failures (take-failures! service env)
+        failures (take-failures! env)
         content (content-with-lines (:content base) (:lines report))]
     (result-parts
      base
@@ -1321,14 +1513,14 @@
 (defn- finish-call!
   "Merge the script result with the definition report: content lines after
    the emitted output, and the defined/forgotten vocabulary in :details."
-  [service env cwd records drop forgotten scope base started]
+  [env cwd records drop forgotten scope base started]
   (let [base (base-result base started)
         report (take-build-report! env)
         changes (apply-changes! env cwd records drop forgotten scope)
         _ (when (:error changes) (mark-transient! env records))
         lines (concat (:lines report) (:lines changes))
         content (content-with-lines (:content base) lines)
-        failures (take-failures! service env)
+        failures (take-failures! env)
         write-errors (pos? (:write-errors changes 0))
         unbind-errors (pos? (:unbind-errors changes 0))
         failed? (or (:error changes) write-errors unbind-errors)]
@@ -1357,7 +1549,7 @@
         (throw (ex-info "the agent's eval service is disposed"
                         {:type :eval/disposed})))
       (let [started (concurrent/monotonic-ms)
-            drop (mapv #(qualify-name (env-ns env) %) (normalize-drop drop))
+            drop (normalize-drop drop)
             {:keys [parsed error]} (try-parse-code code env)
             records (when parsed (scoped-records env scope parsed))
             run-code (fn []
@@ -1389,60 +1581,38 @@
                                       :select-tools registry/select-tools
                                       :execute-tool #(registry/execute-tool handle %1 %2 %3)})))]
         (if error
-          (error-result service env (run-code) started)
-          (do
-            (validate-requests! env records drop scope)
-            (if (str/blank? code)
-              (bad-request! "eval needs code or drop" {})
-              (do
-                (reset! (:forgotten env) #{})
-                (reset! (:change-lines env) [])
-                (reset! (:parsed-names env) (set (map :name records)))
-                (reset! (:call-scope env) scope)
-                (try
-                  (let [result (run-code)]
-                    (if (:is-error result)
-                      (do
-                        (when-not (contains? #{:timeout :aborted :incomplete}
-                                             (get-in result [:details :error]))
-                          (mark-transient! env records))
-                        (error-result service env result started))
-                      (finish-call! service env cwd records drop
-                                    @(:forgotten env) scope result started)))
-                  (finally
-                    (reset! (:call-scope env) nil)))))))))))
-
-(defn- drop-one-request!
-  "Drop one `{:name :scope}` target in ENV (or just its file when no
-   environment exists) and return `{:name :scope :error}` — an error is
-   reported without hiding the other names."
-  [env roots {:keys [name scope]}]
-  (try
-    (if env
-      (let [{:keys [error] actual-scope :scope} (drop-one! env name scope)]
-        {:name name :scope actual-scope :error error})
-      (let [scope (or (roots-file-scope roots name scope) :global)
-            root (get roots scope)
-            file (eval-files/delete-name! root name)]
-        {:name name :scope (when file scope) :error nil}))
-    (catch Throwable t
-      {:name name :scope scope :error (ex-message t)})))
+          (error-result env (run-code) started)
+          (if (str/blank? code)
+            (bad-request! "eval needs code or drop" {})
+            (do
+              (reset! (:forgotten env) #{})
+              (reset! (:change-lines env) [])
+              (reset! (:call-scope env) scope)
+              (try
+                (let [result (run-code)]
+                  (if (:is-error result)
+                    (do
+                      (when-not (contains? #{:timeout :aborted :incomplete}
+                                           (get-in result [:details :error]))
+                        (mark-transient! env records))
+                      (error-result env result started))
+                    (finish-call! env cwd records drop
+                                  @(:forgotten env) scope result started)))
+                (finally
+                  (reset! (:call-scope env) nil))))))))))
 
 (defn- drop-result
+  "The tool/command result for a code-less drop. Every target reports its own
+   line; a failed target does not hide the others."
   [started results]
   (let [forgotten (mapv :name results)
         failures (vec (keep #(when-let [error (:error %)]
                                {:name (:name %) :error error
                                 :scope (:scope %)})
                             results))]
-    {:content (str/join "\n"
-                        (concat (map #(str "[eval: forgot " (:name %)
-                                           " (" (scope-label (:scope %)) ")]")
-                                     results)
-                                (map #(str "[eval: failed " (:name %) ": "
-                                           (:error %) "]")
-                                     failures)))
-     :details (cond-> {:forgotten forgotten
+    {:content (str/join "\n" (map drop-report-line results))
+     :details (cond-> {:defined []
+                       :forgotten forgotten
                        :elapsed-ms (- (concurrent/monotonic-ms) started)}
                 (seq failures) (assoc :failures failures))
      :is-error (boolean (seq failures))}))
@@ -1481,10 +1651,22 @@
              roots (if env (:roots env) (roots-for service (or cwd (tool-util/cwd))))
              names (mapv #(qualify-name (or (some-> env env-ns) "user") %)
                          (normalize-drop names))
-             targets (mapv #(hash-map :name % :scope scope) names)]
-         (validate-drop! (partial drop-target-known? env roots) targets)
-         (drop-result started
-                      (mapv #(drop-one-request! env roots %) targets)))))))
+             targets (mapv #(hash-map :name % :scope scope) names)
+             entries (:entries (eval-files/index roots))]
+         (validate-drop-targets! targets)
+         (let [resolved (resolve-drop-targets env roots entries targets)]
+           (check-drop-coverage! env entries resolved)
+           (drop-result
+            started
+            (mapv (fn [target]
+                    (try
+                      (drop-resolved-target! env roots target)
+                      (catch Throwable t
+                        {:name (:name target)
+                         :scope (:scope target)
+                         :action :forgot
+                         :error (ex-message t)})))
+                  resolved))))))))
 
 (defn- current-environment [service]
   (when-let [session (extensions/get-session)]
@@ -1498,10 +1680,11 @@
     []))
 
 (defn- service-failures
+  "The current environment's unreported load failures, if it has one."
   [service]
-  (into (vec @(:service-failures service))
-        (when-let [env (current-environment service)]
-          @(:failures env))))
+  (if-let [env (current-environment service)]
+    @(:failures env)
+    []))
 
 (defn- service-index
   "The library on disk, read without evaluating anything — what `/eval` lists
@@ -1538,6 +1721,27 @@
                    {:fingerprint fingerprint :manifest manifest})
             manifest))))))
 
+(defn- move-indexed-record!
+  "Move NAME in the disk index when SESSION has no built environment. No
+   value is evaluated; only the file and the move result are produced."
+  [service name target cwd]
+  (let [roots (roots-for service cwd)
+        index (eval-files/index roots)
+        entries (filterv #(= name (:name %)) (:entries index))
+        source (or (first (filterv #(= :cwd (:scope %)) entries))
+                   (first (filterv #(= :global (:scope %)) entries)))]
+    (when-not source
+      (bad-request! (str "no eval library definition named " name)
+                    {:name name}))
+    (let [current (:scope source)]
+      (check-move! name current target (sibling-names source (:entries index))
+                   (some #(= target (:scope %)) entries))
+      (let [path (eval-files/move-definition! roots source target)]
+        {:content (str "[eval: moved " name " (" (scope-label current) " → "
+                       (scope-label target) ")]")
+         :details {:moved {:name name :from current :to target :file path}}
+         :is-error false}))))
+
 (defn- move-request*
   [service {:keys [name scope cwd]} session]
   (let [cwd (or cwd (tool-util/cwd))
@@ -1555,28 +1759,7 @@
         {:content line
          :details {:moved {:name name :scope target}}
          :is-error false})
-      (let [roots (roots-for service cwd)
-            index (eval-files/index roots)
-            entries (filterv #(= name (:name %)) (:entries index))
-            source (or (first (filterv #(= :cwd (:scope %)) entries))
-                       (first (filterv #(= :global (:scope %)) entries)))]
-        (when-not source
-          (bad-request! (str "no eval library definition named " name)
-                        {:name name}))
-        (ensure-no-siblings! name (sibling-names source (:entries index)))
-        (let [current (:scope source)]
-          (when (= current target)
-            (bad-request! (str name " is already in the " (scope-label target)
-                               " scope")
-                          {:name name :scope target}))
-          (when (some #(= target (:scope %)) entries)
-            (bad-request! (str "the " (scope-label target) " scope already has " name)
-                          {:name name :scope target}))
-          (let [path (eval-files/move-definition! roots source target)]
-            {:content (str "[eval: moved " name " (" (scope-label current) " → "
-                           (scope-label target) ")]")
-             :details {:moved {:name name :from current :to target :file path}}
-             :is-error false}))))))
+      (move-indexed-record! service name target cwd))))
 
 (defn- move-request!
   "Move NAME to SCOPE for the `/eval move` command and the service `:move!`
@@ -1636,14 +1819,12 @@
   ([agent-ctx] (value agent-ctx nil))
   ([agent-ctx {:keys [agent-dir]}]
    (let [envs (atom {})
-         failures (atom [])
          session-locks (atom {})
          manifest-cache (atom {})
          disposed? (atom false)
          service {:agent-ctx agent-ctx
                   :agent-dir (or agent-dir (cfg/get-agent-dir))
                   :envs envs
-                  :service-failures failures
                   :session-locks session-locks
                   :manifest-cache manifest-cache
                   :disposed? disposed?}]
@@ -1668,5 +1849,4 @@
                   (reset! envs {})
                   (reset! session-locks {})
                   (reset! manifest-cache {})
-                  (reset! failures [])
                   nil)})))

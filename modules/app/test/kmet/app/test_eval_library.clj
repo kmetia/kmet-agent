@@ -11,6 +11,7 @@
             [kmet.app.session.core :as session]
             [kmet.app.test-eval-support :as support]
             [kmet.app.tools.script :as script]
+            [kmet.libs.concurrent :as concurrent]
             [kmet.test-tmp :as test-tmp]))
 
 (defn- library-file [env & parts]
@@ -144,9 +145,9 @@
     (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"twice"
                             (support/eval! env nil :drop ["user/x" "user/x"])))
-    (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"defined and dropped"
-                            (support/eval! env "(def x 2)" :drop ["user/x"])))
+    (let [result (support/eval! env "(def x 2)" :drop ["user/x"])]
+      (t/is (:is-error result))
+      (t/is (str/includes? (:content result) "defined and dropped")))
     (t/is (str/includes? (slurp (library-file env "user" "x.clj")) "(def x 1)")
           "the rejected call wrote nothing")))
 
@@ -175,8 +176,8 @@
         _ (support/eval! env (str "(defmulti area :shape)\n"
                                   "(defmethod area :rect [m] :rect)\n"
                                   "(defmethod area :circle [m] :circle)"))
-        rect (library-file env "user" "area_rect.clj")
-        circle (library-file env "user" "area_circle.clj")]
+        rect (eval-files/path-for-name (support/cwd-root env) "user/area :rect")
+        circle (eval-files/path-for-name (support/cwd-root env) "user/area :circle")]
     (t/is (fs/exists? (library-file env "user" "area.clj")))
     (t/is (fs/exists? rect))
     (t/is (fs/exists? circle))
@@ -406,12 +407,12 @@
 (t/deftest test-a-partial-drop-reports-what-landed
   (let [env (support/eval-ctx)
         _ (support/eval! env "(def a 1) (def b 2)")
-        delete eval-files/delete-name!]
-    (with-redefs [eval-files/delete-name!
-                  (fn [root name]
-                    (if (= "user/b" name)
+        delete eval-files/delete-file!]
+    (with-redefs [eval-files/delete-file!
+                  (fn [root path]
+                    (if (str/includes? (str path) "b.clj")
                       (throw (ex-info "disk full" {:type :test}))
-                      (delete root name)))]
+                      (delete root path)))]
       (let [result (support/eval! env "(emit :ok)" :drop ["user/a" "user/b"])]
         (t/is (:is-error result))
         (t/is (str/includes? (:content result) "[eval: forgot user/a (cwd)]"))
@@ -424,7 +425,6 @@
     (with-redefs [script/eval-source! (fn [& _] {:error "boom"})]
       (let [result (support/eval! env nil :drop ["user/x"])]
         (t/is (:is-error result))
-        (t/is (str/includes? (:content result) "[eval: forgot user/x (cwd)]"))
         (t/is (str/includes? (:content result) "[eval: failed user/x: boom]"))
         (t/is (seq (get-in result [:details :failures])))))
     (t/is (not (fs/exists? path)))
@@ -435,12 +435,12 @@
 (t/deftest test-a-code-less-drop-reports-partial-deletes
   (let [env (support/eval-ctx)
         _ (support/eval! env "(def a 1) (def b 2)")
-        delete eval-files/delete-name!]
-    (with-redefs [eval-files/delete-name!
-                  (fn [root name]
-                    (if (= "user/b" name)
+        delete eval-files/delete-file!]
+    (with-redefs [eval-files/delete-file!
+                  (fn [root path]
+                    (if (str/includes? (str path) "b.clj")
                       (throw (ex-info "disk full" {:type :test}))
-                      (delete root name)))]
+                      (delete root path)))]
       (let [result (support/eval! env nil :drop ["user/a" "user/b"])]
         (t/is (:is-error result))
         (t/is (str/includes? (:content result) "[eval: forgot user/a (cwd)]"))
@@ -498,3 +498,144 @@
           (t/is (not (:is-error result)) (:content result))
           (t/is (seq (get-in result [:details :failures]))
                 "a looping library definition is recorded and skipped"))))))
+
+(t/deftest ^:slow test-the-build-budget-bounds-the-whole-build
+  (let [env (support/eval-ctx)]
+    (doseq [i (range 3)]
+      (let [path (library-file env "user" (str "spin-" i ".clj"))]
+        (fs/create-dirs (fs/parent path))
+        (spit path (eval-files/file-content
+                    {:ns "user"
+                     :source (str "(def spin-" i " (loop [] (recur)))")}))))
+    (with-redefs-fn {#'eval-service/build-budget-ms 50}
+      (fn []
+        (let [started (concurrent/monotonic-ms)
+              result (support/eval! env "(emit :ok)")]
+          (t/is (not (:is-error result)) (:content result))
+          (t/is (>= (count (get-in result [:details :failures])) 1))
+          (t/is (< (- (concurrent/monotonic-ms) started) 5000)
+                "one escaping file cannot spend the whole per-file budget"))))))
+
+(t/deftest drop-uses-the-records-file
+  (let [env (support/eval-ctx)
+        path (library-file env "user" "misc.clj")]
+    (fs/create-dirs (fs/parent path))
+    (spit path "(ns user)\n(defn from-misc [] 1)\n")
+    (t/is (= "1" (support/script-content (support/eval! env "(from-misc)"))))
+    (let [result (support/eval! env nil :drop ["user/from-misc"])]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result) "[eval: forgot user/from-misc (cwd)]")))
+    (t/is (not (fs/exists? path)))
+    (let [restarted (support/restart-service env)]
+      (t/is (= "false"
+               (support/script-content
+                (support/eval-in! restarted (:session env) (:cwd env)
+                                  "(emit (some? (resolve 'from-misc)))")))))))
+
+(t/deftest a-no-environment-drop-uses-the-disk-index
+  (let [env (support/eval-ctx)
+        path (library-file env "user" "misc.clj")]
+    (fs/create-dirs (fs/parent path))
+    (spit path "(ns user)\n(defn from-misc [] 1)\n")
+    (let [result (support/eval! env nil :drop ["user/from-misc"])]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result) "[eval: forgot user/from-misc (cwd)]")))
+    (t/is (not (fs/exists? path)))))
+
+(t/deftest drop-refuses-a-canonical-file-that-belongs-to-another-name
+  (let [env (support/eval-ctx)
+        path (library-file env "user" "f.clj")]
+    (fs/create-dirs (fs/parent path))
+    (spit path "(ns user)\n(def g 1)\n")
+    (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"does not define"
+                            (support/eval! env nil :drop ["user/f"])))
+    (t/is (fs/exists? path))
+    (t/is (= "1" (support/script-content (support/eval! env "g"))))
+    (t/is (= "false"
+             (:content (support/eval! env "(emit (some? (resolve 'f)))"))))))
+
+(t/deftest drop-a-qualified-defmethod-deletes-its-actual-file
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(ns other.ns) (defmulti area :shape)")
+    (support/eval! env "(ns user) (defmethod other.ns/area :rect [m] :rect)")
+    (let [path (:file (first (filter #(= "other.ns/area :rect" (:name %))
+                                     (support/eval-library env))))]
+      (t/is (fs/exists? path))
+      (let [result (support/eval! env nil :drop ["other.ns/area :rect"])]
+        (t/is (not (:is-error result)) (:content result)))
+      (t/is (not (fs/exists? path)))
+      (let [restarted (support/restart-service env)]
+        (t/is (= "false"
+                 (support/script-content
+                  (support/eval-in! restarted (:session env) (:cwd env)
+                                    "(emit (some? (get-method other.ns/area :rect)))"))))))))
+
+(t/deftest a-broken-legacy-lossy-file-is-still-droppable
+  (let [env (support/eval-ctx)
+        path (library-file env "user" "a.clj")]
+    (fs/create-dirs (fs/parent path))
+    (spit path "(defn a? [")
+    (let [result (support/eval! env nil :drop ["user/a?"])]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result) "[eval: forgot user/a? (cwd)]")))
+    (t/is (not (fs/exists? path)))))
+
+(t/deftest punctuation-names-do-not-share-a-file
+  (let [env (support/eval-ctx)
+        result (support/eval! env "(def a? 1) (def a! 2)")
+        files (mapv :file (support/eval-library env))]
+    (t/is (not (:is-error result)) (:content result))
+    (t/is (= 2 (count (distinct files))))
+    (let [restarted (support/restart-service env)
+          content (support/script-content
+                   (support/eval-in! restarted (:session env) (:cwd env)
+                                     "(emit [(some? (resolve 'a?)) (some? (resolve 'a!)) a? a!])"))]
+      (t/is (= "[true true 1 2]" content)))))
+
+(t/deftest drop-refuses-a-file-with-unrequested-siblings
+  (let [env (support/eval-ctx)
+        path (library-file env "user" "pair.clj")]
+    (fs/create-dirs (fs/parent path))
+    (spit path "(ns user)\n(def a 1)\n(def b 2)\n")
+    (t/is (= "3" (support/script-content (support/eval! env "(emit (+ a b))"))))
+    (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"also defines user/b"
+                            (support/eval! env nil :drop ["user/a"])))
+    (t/is (fs/exists? path))
+    (let [result (support/eval! env nil :drop ["user/a" "user/b"])]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result) "[eval: forgot user/a (cwd)]"))
+      (t/is (str/includes? (:content result) "[eval: forgot user/b (cwd)]")))
+    (t/is (not (fs/exists? path)))
+    (let [restarted (support/restart-service env)]
+      (t/is (= "[false false]"
+               (support/script-content
+                (support/eval-in! restarted (:session env) (:cwd env)
+                                  "(emit [(some? (resolve 'a)) (some? (resolve 'b))])")))))))
+
+(t/deftest a-redefinition-keeps-a-noncanonical-file-and-its-siblings
+  (let [env (support/eval-ctx)
+        path (library-file env "user" "pair.clj")]
+    (fs/create-dirs (fs/parent path))
+    (spit path "(ns user)\n(def a 1)\n(def b 2)\n")
+    (support/eval! env "(emit (+ a b))")
+    (let [result (support/eval! env "(defn a [] :new)")]
+      (t/is (not (:is-error result)) (:content result)))
+    (t/is (str/includes? (slurp path) "(defn a [] :new)"))
+    (t/is (str/includes? (slurp path) "(def b 2)"))
+    (let [restarted (support/restart-service env)]
+      (t/is (= "[:new 2]"
+               (support/script-content
+                (support/eval-in! restarted (:session env) (:cwd env)
+                                  "(emit [(a) b])")))))))
+
+(t/deftest an-unqualified-drop-uses-the-calls-final-namespace
+  (let [env (support/eval-ctx)
+        path (library-file env "demo" "x.clj")]
+    (support/eval! env "(ns demo) (def x 1)")
+    (support/eval! env "(ns user)")
+    (let [result (support/eval! env "(ns demo) :ok" :drop ["x"])]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result) "[eval: forgot demo/x (cwd)]")))
+    (t/is (not (fs/exists? path)))))
