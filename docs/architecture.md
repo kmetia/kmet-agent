@@ -511,8 +511,11 @@ probe and no real use, and is gone;
   host's `clojure.*`/`babashka.*` namespaces are copied in (public vars
   re-wrapped so macros survive), babashka gets the host class table, and the
   fixed bundled-extension set (`kmet.app.extensions.libs`) is shared by value
-  the way an extension context gets it. `:load-fn` refuses anything else, so
-  requiring a kmet namespace is the named boundary error. Jolt's SCI exposes no
+  the way an extension context gets it, as are the four portable `kmet.libs`
+  ports (`kmet.libs.json`, `kmet.libs.http`, `kmet.libs.yaml`,
+  `kmet.libs.markdown`) — the documented replacements for host-only data and
+  HTTP libraries. `:load-fn` refuses the rest, so requiring any other kmet
+  namespace is the named boundary error. Jolt's SCI exposes no
   class table and the JVM host an explicit `java.lang`/`java.io`/`java.util`
   subset. A `def` in one call is invisible to the next (`eval` is the
   persistent-context counterpart below), and redefining an injected var stays

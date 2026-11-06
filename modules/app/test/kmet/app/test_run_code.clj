@@ -223,6 +223,17 @@
   (t/is (= "[1 2 3]"
            (:content (run "(require '[edamame.core :as e]) (emit (e/parse-string \"[1 2 3]\"))")))))
 
+(t/deftest test-run-code-script-library-ports
+  ;; the portable kmet.libs seams are require-able in the shared sandbox
+  (t/is (= "true"
+           (:content (run "(require '[kmet.libs.http :as http]) (emit (fn? http/request))"))))
+  (t/is (= "true"
+           (:content (run "(require '[kmet.libs.yaml :as yaml]) (emit (fn? yaml/parse))"))))
+  (t/is (= "true"
+           (:content (run "(require '[kmet.libs.markdown :as md]) (emit (fn? md/parse))"))))
+  (t/is (= "true"
+           (:content (run "(emit (fn? json/parse-string))")))))
+
 (t/deftest test-run-code-reload-is-noop
   ;; SCI consults the sandbox :load-fn even for a :reload; a known namespace
   ;; stays available (the pre-simplification loader returned its handle)
@@ -685,7 +696,11 @@
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "kmet.app.loop"))
     (t/is (str/includes? (:content r) "cannot load namespace")
-          "the sandbox's own boundary error, not SCI's generic one")))
+          "the sandbox's own boundary error, not SCI's generic one"))
+  (let [r (run "(require 'kmet.libs.edn-store)")]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "kmet.libs.edn-store")
+          "the kmet.libs allow-list is the portable ports, not every lib")))
 
 (t/deftest test-run-code-namespace-discovery
   ;; the sandbox is self-describing: all-ns lists its surface, ns-publics its vars

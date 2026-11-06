@@ -461,6 +461,10 @@ set member needs **no `deps.edn`** and no host-conditional code (the table
 and the portability guarantee are in the contract reference's
 § Bundled extension libraries).
 
+Script contexts (`run_code` and `eval`) also get the four portable `kmet.libs`
+ports — `kmet.libs.json`, `kmet.libs.http`, `kmet.libs.yaml` and
+`kmet.libs.markdown`; no other kmet namespace is require-able from a script.
+
 The **guarantee is the namespace surface, not the version**: on babashka a
 bundled port decides its own edition, while Jolt uses the version kmet pins
 in `deps.edn`. Pinning a set member in an extension's `deps.edn` therefore
@@ -630,7 +634,8 @@ calls, so it can expose current state instead of a snapshot:
 
 - Values live under the namespace you return; `user`, `clj`, `eval` and the
   sandbox's fixed namespaces (`clojure.core`, `clojure`, `sandbox`, `tools`,
-  `babashka.process`, `kmet.libs.json`) are reserved for the built-in sources.
+  `babashka.process`, `kmet.libs.http`, `kmet.libs.json`, `kmet.libs.markdown`,
+  `kmet.libs.yaml`) are reserved for the built-in sources.
   The `:core` source ships `user/read-file` (backed by the read tool),
   `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` from the shared
   `kmet.libs.clj-edit` engine; use `license/add!`, not `add!` or `user/add!`.

@@ -93,8 +93,9 @@
   (str "aliases fs, str, set, edn, walk, json and p; bare sh; cwd-resolving "
        "slurp, spit and file-seq; (cwd), (env k), (now), (sleep ms), (spawn f), "
        "(emit v) and (emit-image x); the tools and sandbox namespaces; "
-       "clojure.*, babashka.* and the bundled libs (rewrite-clj, cljfmt, "
-       "edamame, parinferish) are require-able."))
+       "clojure.*, babashka.*, the bundled libs (rewrite-clj, cljfmt, "
+       "edamame, parinferish) and the kmet.libs ports (json, http, yaml, "
+       "markdown) are require-able."))
 
 (def alias-prelude
   "The aliases every script gets without a require — the standard Clojure and
@@ -634,19 +635,28 @@
    copyable-namespace?'s clojure.* clause)."
   (delay @(requiring-resolve 'kmet.app.extensions.libs/bundled-library-namespace?)))
 
+(def ^:private script-lib-namespaces
+  "The kmet.libs ports a script may require: the portable data boundaries
+   (JSON, YAML, Markdown) and the proxy-aware HTTP boundary. They replace the
+   babashka-hosted libraries that are not portable, and they are the same
+   seams extension contexts get. Every other kmet namespace stays out."
+  '#{kmet.libs.http kmet.libs.json kmet.libs.markdown kmet.libs.yaml})
+
 (defn- copyable-namespace?
-  "True for a loaded host namespace the full-babashka surface copies: the
+  "True for a loaded host namespace the sandbox base copies: the
    babashka/clojure vocabulary, minus clojure.core (SCI's builtin core is the
    interpreter's own and must not be shadowed) and babashka.nrepl (a host
    server, not a script API), plus the fixed bundled extension set
    (kmet.app.extensions.libs — the same shared copies extension contexts get,
    so a script's structural-editing and formatting vocabulary matches an
-   extension's). kmet's own namespaces are never in this set."
+   extension's) and the script library ports (script-lib-namespaces). All
+   other kmet namespaces stay out."
   [ns-sym]
   (let [n (str ns-sym)]
     (and (or (str/starts-with? n "clojure.")
              (str/starts-with? n "babashka.")
-             (@bundled-lib-namespace? n))
+             (@bundled-lib-namespace? n)
+             (contains? script-lib-namespaces ns-sym))
          (not= n "clojure.core")
          (not (str/starts-with? n "babashka.nrepl")))))
 
@@ -666,11 +676,12 @@
      (ns-publics ns-sym))))
 
 (defn- full-babashka-namespaces
-  "Map of the host's babashka/clojure namespaces, copied for the per-call
-   context — the `full babashka script` surface: clojure.pprint, java.io,
-   clojure.zip, babashka http/process/… all `require`-able, unlike the old
-   fixed capability table. Rebuilt each call so a script's redefinitions stay
-   call-local; the copy costs a few ms (measured ~3ms copy + ~9ms sci/init)."
+  "Map of the sandbox base namespaces: the host's babashka/clojure
+   namespaces plus the script library ports, copied for the per-call context —
+   the `full babashka script` surface (clojure.pprint, java.io, clojure.zip,
+   babashka http/process/… all `require`-able) and the kmet.libs data/HTTP
+   seams. Rebuilt each call so a script's redefinitions stay call-local; the
+   copy costs a few ms (measured ~3ms copy + ~9ms sci/init)."
   []
   (into {}
         (for [n (all-ns)
@@ -758,11 +769,15 @@
   "Host-require before value-sharing: babashka preloads babashka.fs/process,
    Jolt does not. kmet.app.extensions.libs is the fixed bundled extension set
    (its requires are the enumeration), loaded here so the copy sees it; the
-   set's membership rule rides copyable-namespace?'s lazy resolve."
+   script library ports are loaded for the same reason."
   []
   (require 'babashka.fs)
   (require 'babashka.process)
   (require 'kmet.app.extensions.libs)
+  (require 'kmet.libs.http)
+  (require 'kmet.libs.json)
+  (require 'kmet.libs.markdown)
+  (require 'kmet.libs.yaml)
   nil)
 
 (defn- unreadable-namespace
@@ -811,7 +826,7 @@
 
 (defn call-namespaces
   "The per-call half of the sandbox namespaces: SCI core patches
-   (slurp/spit/file-seq/pmap), json, the cwd/pid-tracking process wrappers,
+   (slurp/spit/file-seq/pmap), the cwd/pid-tracking process wrappers,
    the `tools` namespace (discovery, dispatch, the result readers and one var
    per active tool), the cwd/emit/spawn helpers, and the bare `emit`/`sh`.
    The functions read `*call-state*` at call time, so a kept context's
@@ -825,9 +840,6 @@
         namespaces (cond-> {'clojure.core (merge {'pmap (deref #'pmap)}
                                                  (core-fns)
                                                  (extra-core-vars-map))
-                            ;; kmet.libs.json under its real name and the short `json` alias
-                            ;; scripts would otherwise have to require
-                            'kmet.libs.json (shared-fns 'kmet.libs.json)
                             'babashka.process process
                             'sandbox sandbox
                             'tools (tools-namespace (or surface {}))

@@ -98,6 +98,7 @@
     (register! env :bad-macro (fn [_] {:macros {'user {'nope (fn [_ _] nil)}}}))
     (register! env :bad-key (fn [_] {:ns {'eval {'library 1}}}))
     (register! env :bad-fixed (fn [_] {:ns {'tools {'call 1}}}))
+    (register! env :bad-http (fn [_] {:ns {'kmet.libs.http {'get 1}}}))
     (register! env :bad-command (fn [_] {:commands {:list {:run (fn [_] nil)}}}))
     (register! env :bad-move (fn [_] {:commands {:move {:run (fn [_] nil)}}}))
     (let [result (support/eval! env "(+ 1 2)")
@@ -105,10 +106,12 @@
           ids (set (map :id errors))]
       (t/is (= "3" (:content result)))
       (t/is (= #{:boom :bad-user :bad-clj :bad-macro :bad-key
-                 :bad-fixed :bad-command :bad-move} ids))
+                 :bad-fixed :bad-http :bad-command :bad-move} ids))
       (t/is (seq (get-in result [:details :source-errors])))
       (t/is (str/includes? (pr-str (:details result)) "may not contribute to clj"))
       (t/is (str/includes? (pr-str (:details result)) "may not contribute to eval"))
+      (t/is (str/includes? (pr-str (:details result))
+                           "may not contribute to kmet.libs.http"))
       (t/is (= "false" (:content (support/eval! env "(some? (resolve 'user/nope))"))))
       (t/is (nil? (get (support/eval! env "(eval/sources)") :id))))))
 

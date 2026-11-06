@@ -185,6 +185,9 @@ SCI — Java-backed copies fail on classes the native image does not expose —
 and Jolt has no copies at all. Use `kmet.libs.json`, `kmet.libs.yaml`,
 `kmet.libs.markdown` and `kmet.libs.http` instead.
 
+Script contexts (`run_code` and `eval`) share those same four ports; no other
+kmet namespace is require-able from a script.
+
 ## Runtime lifecycle
 
 Extensions load when a composition row names them (`:ext/<id>`,
@@ -449,7 +452,8 @@ first call), so the contribution is current, not a snapshot:
   timeout. Keep it fast; a slow source delays every eval call.
 - `user` and `clj` are reserved for the built-in sources, as are the eval
   layer's own namespaces (`eval`, `clojure.core`, `clojure`, `sandbox`,
-  `tools`, `babashka.process`, `kmet.libs.json`). The `:core` source ships
+  `tools`, `babashka.process`, `kmet.libs.http`, `kmet.libs.json`,
+  `kmet.libs.markdown`, `kmet.libs.yaml`). The `:core` source ships
   `user/read-file` (backed by the read tool), `clj/edit-form`,
   `clj/replace-sexp` and `clj/paren-repair` from `kmet.libs.clj-edit`; an
   extension source cannot replace them. Namespace what you contribute

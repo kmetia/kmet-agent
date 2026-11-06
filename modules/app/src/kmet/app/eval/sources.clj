@@ -17,7 +17,9 @@
    `user` and `clj`, the eval namespace itself, and the fixed namespaces the
    sandbox installs around it."
   #{"user" "clj" "eval" "clojure" "clojure.core"
-    "sandbox" "tools" "babashka.process" "kmet.libs.json"})
+    "sandbox" "tools" "babashka.process"
+    "kmet.libs.http" "kmet.libs.json"
+    "kmet.libs.markdown" "kmet.libs.yaml"})
 
 (def reserved-source-keys
   "Built-in keys refused even when a namespace check would allow them. A
