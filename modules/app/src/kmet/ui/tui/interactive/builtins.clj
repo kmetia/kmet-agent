@@ -1,7 +1,7 @@
 (ns kmet.ui.tui.interactive.builtins
   "Builtin slash commands for the interactive mode: the view-bound commands
-   (thinking handling, help/tools text, /session, /share, /reload, and the
-   session/selector flows) and their registration. The engine-portable
+   (thinking handling, help, the tools selector, /session, /share, /reload, and
+   the session/selector flows) and their registration. The engine-portable
    builtins live in kmet.app.commands.builtins and are registered by
    register-builtin-commands! first."
   (:require [clojure.string :as str]
@@ -45,6 +45,7 @@
             [kmet.ui.tui.tree-selector :refer [show-session-tree]]
             [kmet.ui.tui.subs :as subs]
             [kmet.ui.tui.thinking-selector :as thinking-selector]
+            [kmet.ui.tui.tools-selector :as tools-selector]
             [kmet.libs.clipboard :as clipboard]
             [kmet.app.project-context :as context]
             [kmet.libs.process :as process]
@@ -140,25 +141,6 @@
          "  Ctrl+T     — Cycle thinking display (visible/stream-last/hidden)\n"
          "  Ctrl+L     — Select model\n"
          "  Up/Down    — Scroll chat history")))
-
-(defn- tools-text
-  "Text listing the tools this session runs on, with their parameters."
-  [cs]
-  (let [tool-list (sort-by :name (vals (runtime/tool-table (:engine cs))))
-        tool-lines
-        (mapv (fn [t]
-                (let [required (set (:required (:parameters t)))
-                      param-lines
-                      (mapv (fn [[pname p]]
-                              (let [req (if (contains? required (name pname)) " (required)" "")]
-                                (str "    " (name pname) " (" (:type p) ")" req " — " (:description p))))
-                            (:properties (:parameters t)))]
-                  (str "  " (:name t) " — " (:description t)
-                       (when (seq param-lines)
-                         (str "\n" (str/join "\n" param-lines))))))
-              tool-list)]
-    (str "Available tools (" (count tool-list) "):\n"
-         (str/join "\n" tool-lines))))
 
 (declare handle-reload)
 
@@ -304,9 +286,9 @@
 ;; ─── Builtin command registration ──────────────────────────────────────────
 
 (defn- register-builtin-command!
-  "Register an interactive builtin slash command unless an extension
-   already took the name (commands/register-builtin! owns the check — e.g.
-   the shipped /tools extension replaces the builtin tools listing).
+  "Register an interactive builtin slash command. A non-reserved command
+   yields to an extension that already took the name; a reserved builtin
+   (e.g. /tools) claims it (commands/register-builtin! owns that rule).
 
    The registry calls handlers with the command ctx ({:runtime :ui
    :frontend}); these builtins are written against the interactive UI
@@ -376,10 +358,8 @@
                               (make-hotkey-wired? cs))}))})
    (register-builtin-command!
     {:name "tools"
-     :description "List available tools with parameters"
-     :handler (fn [cs _]
-                (chat-history/chat-history-add-message! (:chat-history cs)
-                                                        {:role :assistant :content (tools-text cs)}))})
+     :description "Select tools for this session"
+     :handler (fn [cs _] (tools-selector/show-tools-selector cs))})
    (register-builtin-command!
     {:name "model"
      :description "Switch model"

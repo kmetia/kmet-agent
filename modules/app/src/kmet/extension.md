@@ -299,32 +299,17 @@ the wrappers below or directly.
 (ext/get-all-tools api)
 (ext/get-active-tools api)      ; nil = no process install; else the enabled names
 (ext/set-active-tools api ["read" "write"])
-
-(ext/tool-selection api)
-;; => {:scope :global
-;;     :entries {:global ["-bash"] :project ["+read"]}
-;;     :paths {:global "…/settings.edn" :project ".kmet/settings.edn"}
-;;     :enabled #{"read" "write"}
-;;     :origin {"read" :project "write" :default "bash" :global}}
-
-(ext/set-tool-enabled! api "my-tool" false {:scope :project})
 ```
 
-`set-active-tools` is the **runtime** selection: it changes what this agent
-sends now and is not persisted. `tool-selection` and `set-tool-enabled!` are
-the settings side: `tool-selection` returns the raw `:enabled-tools` entries
-per scope, the target settings file per scope, the effective enabled set, each
-live name's origin
-(`:global`, `:project`, `:session`, `:default`) and the default write scope
-(project when the cwd has `.kmet/`, else global). `set-tool-enabled!` writes
-`true`/`false`/`nil` (nil = inherit) into the scope's `:enabled-tools` list
-(an opt-in built-in such as `run_code` is enabled by `+run_code`; the entry
-rules are in [`docs/configuration.md`](../../../../docs/configuration.md#tools));
-it does not change the runtime selection.
+`set-active-tools` is the **session** selection: it changes what this agent
+sends now and is not persisted. Persistent global/project selection is owned
+by the host's `kmet.app.resources` service and the config screen; there is no
+extension API for writing it.
 
-Both are new `api` keys. The contract has no compatibility promise before
-1.0: a host that builds the api map by hand must add `:tool-selection` and
-`:set-tool-enabled!`, while `create-nullable-api` already carries them.
+Command names in `kmet.app.commands/reserved-command-names` (currently
+`tools`) are builtins: registering one throws
+`:kmet.app.commands/reserved-command-name`, and a builtin registration claims
+the name over any other owner.
 
 
 ### Tool sources (`register-tool-source!`)
@@ -339,9 +324,9 @@ tools that are meant to be looped over inside scripts but would bloat the
 model's context if advertised (the mcp-adapter contributes its cached MCP
 catalog this way — see `docs/architecture.md` § Tools and the script sandbox).
 - **`:deferred`** — the model-facing table, but **not declared**: the tools are
-callable from `run_code` and `:enabled-tools` / `:default-tools` select over
-them like any registered tool, and one becomes declared to the model once
-`tool_search` loads it. Give the source a `:description` — one line — and the
+callable from `run_code` and the resources selection (or a session override)
+picks over them like any registered tool, and one becomes declared to the model
+once `tool_search` loads it. Give the source a `:description` — one line — and the
 model is told the source exists through an appended conversation entry when the
 set of deferred sources changes. A promotion does not rebuild the leading
 system prompt (that would be a full prefix miss), so a promoted tool does not
@@ -357,9 +342,9 @@ stays a growing prefix.
 `run_code` is a mounted but opt-in row (`:default-enabled? false`; see
 [Tools](../../../../docs/configuration.md#tools)): while it is off, `:sandbox`
 sources stay registered and their tools are absent from the model's script
-surface, not unregistered. Enabling `run_code` with `/config` or `/tools`
-makes them callable immediately, and unloading the extension is what removes
-them. The same holds for `:deferred` sources and a disabled `tool_search` —
+surface, not unregistered. Enabling `run_code` with the config screen or
+`/tools` makes them callable immediately, and unloading the extension is what
+removes them. The same holds for `:deferred` sources and a disabled `tool_search` —
 the sources remain, but nothing can promote them (the run warns; see
 [Tools](../../../../docs/configuration.md#tools)).
 
@@ -1404,12 +1389,10 @@ involved. Call the plugin's `:apply` with it and assert what was registered:
 State shape: `:commands` `:tools` `:tool-sources` `:eval-sources` `:handlers` `:flags` `:shortcuts`
 `:markdown-transformers` `:entry-renderers` `:message-renderers` `:aliases`
 `:tool-hooks` `:input-hooks`
-`:before-agent-start-hooks` `:tool-selection` `:tool-enabled-writes`
+`:before-agent-start-hooks`
 `:ui-calls` `:emitted` `:model-calls`. Every
 registration function returns a deregister fn; the nullable api's deregister
-fns remove the corresponding registration. `:tool-selection` holds the value
-`tool-selection` answers, and `:tool-enabled-writes` collects
-`[name enabled opts]` triples from `set-tool-enabled!`.
+fns remove the corresponding registration.
 
 For runtime integration tests, `load-extension!` + `unload-extension!` against
 the real registries (see `modules/app/test/kmet/app/extensions/`).

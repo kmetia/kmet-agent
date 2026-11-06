@@ -1,13 +1,14 @@
 # Resource selection
 
-Status: steps 1–2 implemented (`kmet.app.resources`, the per-type settings
+Status: steps 1–3 implemented (`kmet.app.resources`, the per-type settings
 merge, the `:resources` row and settings-schema validation; the runtime now
-reads `enabled-names :tool` and keeps only the session active-tool override).
-Migration steps 3–8 remain. The legacy `kmet config` screen still reads the
-retired `:default-tools`/`:enabled-tools` keys until steps 4–5 replace it. This
-file stays at the
-repository root as the working design and plan until the migration lands;
-moving it beside the source and design record is a separate cleanup task.
+reads `enabled-names :tool` and keeps only the session active-tool override;
+the builtin `/tools` session selector replaces the bundled tools extension).
+Migration steps 4–8 remain. The legacy `kmet config` screen still reads the
+retired `:default-tools`/`:enabled-tools` keys until steps 4–5 replace it.
+This file stays at the repository root as the working design and plan until
+the migration lands; moving it beside the source and design record is a
+separate cleanup task.
 
 ## Three surfaces
 

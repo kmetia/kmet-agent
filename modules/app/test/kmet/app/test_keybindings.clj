@@ -189,8 +189,6 @@
       (t/is (= ["right"] (tui-kb/get-keys kmgr "tui.settings.cycleForward")))
       (t/is (= ["ctrl+s"] (tui-kb/get-keys kmgr "app.thinking.save"))
             "pi id kmet was missing")
-      (t/is (= ["ctrl+s"] (tui-kb/get-keys kmgr "app.tools.save"))
-            "the /tools dialog's settings save")
       (t/is (= ["ctrl+q"] (tui-kb/get-keys kmgr "app.quit"))
             "global quit (kmet-only id)"))
     (t/testing "user overrides replace the whole chord set"

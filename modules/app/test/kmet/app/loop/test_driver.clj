@@ -526,8 +526,8 @@
     (try
       (is (map? caps))
       (is (every? #(fn? (get caps %))
-                  [:get-active-tools :set-active-tools :tool-selection
-                   :set-tool-enabled! :set-model :get-thinking-level
+                  [:get-active-tools :set-active-tools
+                   :set-model :get-thinking-level
                    :set-thinking-level :send-user-message :send-message!])
           "the capability map carries the out-of-run controls")
       (extensions/bind-runtime-capabilities! {})

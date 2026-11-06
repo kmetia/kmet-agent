@@ -30,6 +30,13 @@
    takes every command it contributed."
   [:app :commands])
 
+(def reserved-command-names
+  "Command names a builtin owns. `/tools` is a builtin session selector, so
+   an extension cannot register it and a builtin registration claims it even
+   when another owner got there first. Reserved names are the app's live
+   selectors; their implementation is not an extension's to replace."
+  #{"tools"})
+
 (defn- command-for
   "The command named NAME, or nil (see `kmet.app.registry/entry` for the
    owner rule)."
@@ -48,10 +55,18 @@
    registry by default; an extension passes its own owner path
    (`kmet.app.extensions.core/extension-owner`) so unloading it takes the
    command with the owner. The registration is addressed by
-   :name, so a command is always its own key. Returns the registry's
-   deregister fn."
+   :name, so a command is always its own key. A name in
+   `reserved-command-names` belongs to the app: registering it under another
+   owner throws `:kmet.app.commands/reserved-command-name`. Returns the
+   registry's deregister fn."
   ([cmd] (register-command! cmd commands-owner))
   ([cmd owner]
+   (when (and (contains? reserved-command-names (:name cmd))
+              (not= owner commands-owner))
+     (throw (ex-info (str "command /" (:name cmd) " is reserved for a builtin")
+                     {:type ::reserved-command-name
+                      :name (:name cmd)
+                      :owner owner})))
    (registry/register! (registry/current)
                        :kmet/command (:name cmd) cmd owner)))
 
@@ -121,10 +136,15 @@
      (when (available-to? frontend cmd) cmd))))
 
 (defn register-builtin!
-  "Register CMD unless a command already took the name (extensions load before
-   builtins; an extension command owns the name when taken). Used for the
-   engine-portable builtins: no front-end tag, so every front end dispatches
-   them. Returns nil."
+  "Register CMD as an app builtin. A reserved name (see
+   `reserved-command-names`) is the builtin's: any existing registration is
+   removed first, so an extension cannot shadow it. Any other builtin yields
+   to a command already registered (extensions load before builtins). Returns
+   nil."
   [cmd]
-  (when-not (find-command (:name cmd))
-    (register-command! cmd commands-owner)))
+  (let [name (:name cmd)
+        reserved? (contains? reserved-command-names name)]
+    (when (or reserved? (nil? (find-command name)))
+      (when reserved? (unregister-command! name))
+      (register-command! cmd commands-owner)
+      nil)))

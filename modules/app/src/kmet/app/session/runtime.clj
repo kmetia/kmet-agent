@@ -377,6 +377,21 @@
   [engine]
   (loop-state/active-tools (agent-state engine)))
 
+(defn enabled-tool-names
+  "The names the agent's current selection enables over the live table —
+   the resources selection, or the session override the `/tools` selector
+   sets. The set includes a deferred tool before `tool_search` loads it."
+  [engine]
+  (some-> (agent-state engine) loop-state/enabled-tool-names))
+
+(defn set-active-tools!
+  "Restrict this session's model-facing tools to NAMES; nil restores the
+   resources selection. The session override is not persisted."
+  [engine names]
+  (when-let [agent (agent-state engine)]
+    (loop-state/set-active-tools! agent names))
+  nil)
+
 (defn add-context-message!
   "Append a context-only message (not persisted to the session) to the
    agent's in-memory context."

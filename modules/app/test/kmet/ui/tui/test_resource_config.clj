@@ -537,7 +537,7 @@
       (let [screen (rc/make-resource-config-screen :rows 40)
             items (item-rows screen)
             first-row (first-item-row screen)]
-        (t/is (= 11 (count items)))
+        (t/is (= (count (bundled/artifacts)) (count items)))
         (t/is (every? #(= :bundled (get-in (:item %) [:metadata :origin])) items))
         (t/is (= "Bundled with kmet" (:label (:group first-row))))
         (t/is (= 1 (count (filter #(= :group (:kind %)) (rc/screen-rows screen)))))

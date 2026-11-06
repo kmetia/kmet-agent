@@ -108,8 +108,7 @@
      (loop-state/restore-session-context! new-ag)
      (when apply-settings?
        ;; pi: createRuntime builds a fresh session with the config-derived
-       ;; tool set — the outgoing session's set-active-tools!/tools-selector
-       ;; selection must not carry over (the switch also emits :session-start,
+       ;; tool set — the outgoing session's set-active-tools! selection must not carry over (the switch also emits :session-start,
        ;; letting extensions restore their own per-session state).
        ;; loading a session never rewrites it: the incoming branch's own
        ;; record is its history; the first request reconciles live-only

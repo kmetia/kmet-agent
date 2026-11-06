@@ -174,15 +174,19 @@ The shipped set is enumerated in `modules/app/src/kmet/bundled-extensions.edn`;
 single file defines `plugin`, strict ns-path layout, `deps.edn` with only
 `:deps` and no `:local/root`).
 
+The bundled `tools` extension was replaced by the builtin `/tools` session
+selector and removed from the manifest. Delete any `:ext/tools` row from a
+patch layer; a row naming a missing artifact fails the composition.
+
 To develop against an edited copy, symlink (or copy) an extension into the
 global or project extensions dir:
 
 ```bash
-ln -s "$PWD/extensions/tools.clj" ~/.kmet/agent/extensions/tools.clj
+ln -s "$PWD/extensions/grep-tool.clj" ~/.kmet/agent/extensions/grep-tool.clj
 ```
 
 That only changes which artifact a row resolves to; it does not load by
-itself. A bundled extension's row usually exists already (`:ext/tools` in the
+itself. A bundled extension's row usually exists already (`:ext/grep-tool` in the
 global patch layer), and a new extension needs its row composed — `kmet
 config`, or `{:id :ext/my-ext :plugin :ext/my-ext}` in a patch layer (see
 [Where extensions live and what loads them](#where-extensions-live-and-what-loads-them)).
@@ -738,25 +742,25 @@ A complete extension showing the common pieces:
   (ext/ui-set-status api "my-ext" nil))
 ```
 
-More complete extensions to read: `extensions/tools.clj` (a command's
-persisted selection), `extensions/clojure/` (a directory extension with
-tools, a skill, and custom renderers), and `extensions/mcp-adapter/` (tool
+More complete extensions to read: `extensions/clojure/` (a directory extension
+with tools, a skill, and custom renderers) and `extensions/mcp-adapter/` (tool
 sources and an overlay panel).
 
+Builtin names in `kmet.app.commands/reserved-command-names` (currently
+`/tools`) cannot be registered by an extension: the registration throws
+`:kmet.app.commands/reserved-command-name`, and the builtin claims the name.
+
 Tool availability has two layers. `ext/set-active-tools` changes the runtime
-selection for the current agent and is not persisted. `ext/tool-selection`
-reports the settings side — raw `:enabled-tools` entries, target file, effective
-enabled set and each name's origin per scope — and
-`ext/set-tool-enabled!` writes `true`/`false`/`nil` (nil = inherit) into the
-global or project list. The default write scope is project when the cwd has
-`.kmet/`, else global. The config screen and `/tools` use these; an extension
-that only needs to enable or disable a tool should prefer them over hand-editing
-settings.edn. Both are new `api` keys; the contract is pre-1.0, so a host that
-builds the api map itself must add them (`create-nullable-api` already does).
+selection for the current agent and is not persisted. The persistent
+selection — global and project lists of enabled tools — belongs to the host's
+resource service (`kmet.app.resources`) and the config screen; the extension
+API deliberately exposes no settings writer. An extension that contributes a
+tool makes it available; whether it is selected is the user's choice.
 
 `run_code` and `eval` are mounted but opt-in (`:default-enabled? false`; see
 [Tools](configuration.md#tools)). While no script tool is on, `:sandbox` tool
 sources stay registered — their tools are simply absent from the model's script
-surface until `/config` or `/tools` enables one of them. A disabled `tool_search`
-likewise leaves `:deferred` sources registered but unpromotable (the run warns
-about the orphaned sources; see [Tools](configuration.md#tools)).
+surface until the config screen or the `/tools` session selector enables one
+of them. A disabled `tool_search` likewise leaves `:deferred` sources registered but
+unpromotable (the run warns about the orphaned sources; see
+[Tools](configuration.md#tools)).

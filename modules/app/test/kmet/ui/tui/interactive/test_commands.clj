@@ -18,14 +18,13 @@
             [kmet.ui.tui.dock :as dock]
             [kmet.ui.tui.model-selector :as model-selector]
             [kmet.ui.tui.thinking-selector :as thinking-selector]
+            [kmet.ui.tui.tools-selector :as tools-selector]
             [kmet.ai.models :as m]
             [kmet.ai.auth :as auth]
             [kmet.app.loop.state :as loop-state]
-            [kmet.app.tools.registry :as tools-registry]
             [kmet.app.loop :as agent]
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]
-            [kmet.srce.core :as srce]
             [kmet.ui.tui.interactive.test-handle-support :as hs]
             [kmet.app.config :as cfg]
             [kmet.libs.concurrent :as concurrent]
@@ -86,16 +85,30 @@
       (t/is (= 2 (count @calls)) "no warning for an already-clean name"))))
 
 (deftest test-builtins-do-not-clobber-extension-commands
-  (testing "builtin registration skips names an extension already took
-            (extensions load before the layout is built; the shipped /tools
-            extension replaces the builtin tools listing)"
+  (testing "a non-reserved builtin skips a name an extension already took
+            (extensions load before the layout is built)"
     (commands/clear-commands!)
     (commands/register-command!
-     {:name "tools" :description "extension version" :handler (fn [_ _] nil)})
+     {:name "help" :description "extension version" :handler (fn [_ _] nil)}
+     [:app :extensions :test])
     ((var builtins/register-builtin-commands!) cfg/default-config)
-    (t/is (= "extension version" (:description (commands/find-command "tools")))
+    (t/is (= "extension version" (:description (commands/find-command "help")))
           "extension command survives builtin registration")
-    (t/is (some? (commands/find-command "model")) "unclaimed builtins still register")))
+    (t/is (some? (commands/find-command "model")) "unclaimed builtins still register"))
+  (testing "the reserved /tools name belongs to the builtin"
+    (commands/clear-commands!)
+    (t/is (thrown-with-msg? Exception #"reserved for a builtin"
+                            (commands/register-command!
+                             {:name "tools" :description "extension version"
+                              :handler (fn [_ _] nil)}
+                             [:app :extensions :test])))
+    (commands/register-command!
+     {:name "tools" :description "stale app registration"
+      :handler (fn [_ _] nil)})
+    ((var builtins/register-builtin-commands!) cfg/default-config)
+    (t/is (= "Select tools for this session"
+             (:description (commands/find-command "tools")))
+          "the builtin claims the name over a stale registration")))
 
 (deftest test-login-logout-unmatched-reference
   (testing "an unmatched /login reference opens the provider selector pre-filled;
@@ -750,27 +763,14 @@
         ((var turn/handle-cancel) cs)
         (t/is (= 1 @cancelled) "second escape cancels the turn")))))
 
-(deftest test-tools-command-lists-the-engines-table
-  (testing "/tools lists the table the engine runs on (4c-iii-c)"
+(deftest test-tools-command-opens-the-session-selector
+  (testing "/tools opens the builtin selector over the live table, not a text listing"
     (commands/clear-commands!)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [handle (hs/new-handle)
-          tools (srce/get (:ctx handle) :tools)
-          _ (tools-registry/register-tool! tools
-                                           {:name "probe" :label "Probe"
-                                            :description "Says what it is"
-                                            :params {:x {:type :string
-                                                         :description "an x"
-                                                         :required? true}}
-                                            :execute (fn [_] {:content "ok"})})
-          msg (atom nil)
-          cs (hs/core-state handle)]
-      (with-redefs [chat-history/chat-history-add-message! (fn [_ m] (reset! msg m))]
+          cs (hs/core-state handle)
+          opened (atom nil)]
+      (with-redefs [tools-selector/show-tools-selector
+                    (fn [cs] (reset! opened cs))]
         ((:handler (commands/find-command "tools")) (support/command-ctx cs) ""))
-      (let [content (:content @msg)]
-        (t/is (str/starts-with? content "Available tools (")
-              "the listing is the tools section")
-        (t/is (str/includes? content "  probe — Says what it is")
-              "a tool the run's ctx holds is listed")
-        (t/is (str/includes? content "    x (string) (required) — an x")
-              "with its parameters and which are required")))))
+      (t/is (= cs @opened) "the handler hands the view to the selector"))))

@@ -338,7 +338,7 @@
 
 (deftest ^:bb-only bundle-validator-accepts-the-committed-manifest
   (let [manifest (build/validate-bundled-extensions!)]
-    (is (= 11 (count (:artifacts manifest))))
+    (is (= 10 (count (:artifacts manifest))))
     (is (= [] (:exclude manifest)))))
 
 (deftest ^:bb-only bundle-validator-discovery-is-convention-based
@@ -423,7 +423,7 @@
       (is (fs/regular-file? "target/kmet-bundled/extensions/clojure/src/kmet/extensions/clojure/core.clj"))
       (is (fs/regular-file? "target/kmet-bundled/extensions/clojure/src/skills/clojure-edit/SKILL.md")))
     (testing "single-file artifacts ship at extensions/<file>.clj"
-      (is (fs/regular-file? "target/kmet-bundled/extensions/tools.clj"))
+      (is (fs/regular-file? "target/kmet-bundled/extensions/grep-tool.clj"))
       (is (fs/regular-file? "target/kmet-bundled/extensions/deepseek-peak.clj")))
     (testing "dev wrappers never ship"
       (is (not (fs/exists? "target/kmet-bundled/extensions/clojure/bb.edn")))
@@ -437,7 +437,7 @@
                               (enumeration-seq (.entries zf))))]
         (is (contains? entries "extensions/clojure/src/extension.edn"))
         (is (contains? entries "extensions/clojure/src/skills/clojure-edit/SKILL.md"))
-        (is (contains? entries "extensions/tools.clj"))
+        (is (contains? entries "extensions/grep-tool.clj"))
         (is (contains? entries "kmet/bundled-extensions.edn"))))))
 
 (deftest ^:bb-only uberjar-extra-roots-never-shadow
@@ -454,8 +454,8 @@
     (fs/create-dirs (str normal "/extensions"))
     (fs/create-dirs (str extra "/extensions/clojure/src"))
     (spit (str normal "/app.clj") "(ns app)\n")
-    (spit (str normal "/extensions/tools.clj") "(ns app.shadowed-tools)\n")
-    (spit (str extra "/extensions/tools.clj") "(ns bundled.tools)\n")
+    (spit (str normal "/extensions/grep-tool.clj") "(ns app.shadowed-grep)\n")
+    (spit (str extra "/extensions/grep-tool.clj") "(ns bundled.grep)\n")
     (spit (str extra "/extensions/clojure/src/extension.edn") "{:name \"clojure\"}\n")
     (spit (str extra "/extensions/clojure/src/SKILL.md") "skill\n")
     (try
@@ -464,8 +464,8 @@
                     (set (map (fn [e] (.getName ^java.util.zip.ZipEntry e))
                               (enumeration-seq (.entries zf)))))
             tools (with-open [zf (java.util.zip.ZipFile. (fs/file jar))]
-                    (slurp (.getInputStream zf (.getEntry zf "extensions/tools.clj"))))]
-        (is (= "(ns app.shadowed-tools)\n" tools) "the normal root wins the collision")
+                    (slurp (.getInputStream zf (.getEntry zf "extensions/grep-tool.clj"))))]
+        (is (= "(ns app.shadowed-grep)\n" tools) "the normal root wins the collision")
         (is (contains? names "extensions/clojure/src/extension.edn"))
         (is (contains? names "extensions/clojure/src/SKILL.md")
             "extra roots are walked without an extension filter"))

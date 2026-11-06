@@ -36,8 +36,7 @@
    the effective selection (plain names replace the whole set). The project
    scope writes the +name/-name delta over the user list the other resources
    use (:load/:unload/:inherit). Both settings share the same writers."
-  (:require [babashka.fs :as fs]
-            [kmet.app.tools.registry :as registry]
+  (:require [kmet.app.tools.registry :as registry]
             [kmet.app.config :as cfg]))
 
 (defn- parse-entry
@@ -246,58 +245,8 @@
 
 ;; ─── The :enabled-tools selection (S2) ─────────────────────────────────────
 
-(defn default-scope
-  "The scope a settings write defaults to: project when the cwd has `.kmet/`,
-   else global (the config command's rule)."
-  []
-  (if (fs/exists? (str (fs/path (fs/cwd) ".kmet"))) :project :global))
-
-(defn- tool-origins
-  "Each live name's provenance from the raw settings entries — the enabling
-   or disabling entry that decides its current state."
-  [names global project]
-  (let [project-targets (entry-targets project)
-        global-targets (entry-targets global)
-        project-absolute? (and (seq project)
-                               (some #(not (registry/tool-selection-modifier? %)) project))
-        global-absolute? (not (modifier-style? global))
-        origin (fn [name]
-                 (cond
-                   (or project-absolute? (contains? project-targets name)) :project
-                   (or global-absolute? (contains? global-targets name)) :global
-                   :else :default))]
-    (into {} (map (fn [name] [name (origin name)])) names)))
-
-(defn tool-selection
-  "The `/tools` dialog's one-call view: the raw `:enabled-tools` entries per
-   scope, the effective ENABLED name set, and each live name's origin. SESSION
-   is the runtime `set-active-tools!` set (nil = none); when present, every
-   live name is sourced from the session. Returns
-   `{:scope :entries {:global [...] :project [...]}
-     :paths {:global <file> :project <file>}
-     :enabled #{...} :origin {name :global|:project|:session|:default}}`."
-  [live-names enabled {:keys [session]}]
-  (let [global (:enabled-tools (cfg/read-global-settings-map))
-        project (:enabled-tools (cfg/read-project-settings-map))
-        live (set live-names)
-        enabled (into #{} (filter live) enabled)]
-    {:scope (default-scope)
-     :entries {:global (entry-vector global)
-               :project (entry-vector project)}
-     :paths {:global (cfg/global-settings-path)
-             :project (cfg/project-settings-path)}
-     :enabled enabled
-     :origin (if (some? session)
-               (zipmap live (repeat :session))
-               (tool-origins live global project))}))
-
 (defn- delta-entry [name enabled]
   (str (if enabled "+" "-") name))
-
-(def ^:private enabled->state
-  "The project override state an :enabled-tools value encodes: true → :load,
-   false → :unload, nil → :inherit."
-  {true :load false :unload nil :inherit})
 
 (defn- toggle-options
   "The `write-global-toggle!` options for SETTING-KEY: the tool's opt-in
@@ -379,26 +328,3 @@
   [item state]
   (write-project-override! (tool-setting item) (tool-name item) state)
   true)
-
-(defn set-tool-enabled!
-  "Persist NAME's enabled state in SCOPE: true enables, false disables, nil
-   removes the scope's entry (inherit). OPTIONS: :scope (:global or :project;
-   default `default-scope`), :live-names (the model-facing order a plain
-   global list is rewritten in). Returns the merged :enabled-tools entry list
-   after the write."
-  [name enabled {:keys [scope live-names]}]
-  (when-not (and (string? name) (seq name))
-    (throw (ex-info "a tool name is required" {:type ::bad-tool-name :name name})))
-  (when-not (or (nil? enabled) (boolean? enabled))
-    (throw (ex-info "enabled must be true, false or nil"
-                    {:type ::bad-enabled :name name :enabled enabled})))
-  (let [scope (or scope (default-scope))]
-    (case scope
-      :global (write-global-toggle! :enabled-tools name enabled
-                                    (toggle-options :enabled-tools name live-names))
-      :project (write-project-override! :enabled-tools name
-                                        (enabled->state enabled))
-      (throw (ex-info "scope must be :global or :project"
-                      {:type ::bad-scope :name name :scope scope}))))
-  (merge-scope-entries (:enabled-tools (cfg/read-global-settings-map))
-                       (:enabled-tools (cfg/read-project-settings-map))))

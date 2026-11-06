@@ -4,10 +4,10 @@
 
    `artifacts` answers one descriptor per manifest entry:
 
-     {:name \"clojure\" :kind :dir           :root \"/repo/extensions/clojure/src\"}
-     {:name \"tools\"   :kind :file          :root \"/repo/extensions/tools.clj\"}
-     {:name \"clojure\" :kind :resource-dir  :prefix \"extensions/clojure/src\"}
-     {:name \"tools\"   :kind :resource-file :path \"extensions/tools.clj\"}
+     {:name \"clojure\"   :kind :dir           :root \"/repo/extensions/clojure/src\"}
+     {:name \"grep-tool\" :kind :file          :root \"/repo/extensions/grep-tool.clj\"}
+     {:name \"clojure\"   :kind :resource-dir  :prefix \"extensions/clojure/src\"}
+     {:name \"grep-tool\" :kind :resource-file :path \"extensions/grep-tool.clj\"}
 
    On Jolt an artifact-mode directory descriptor carries
    `:native \"embed:<prefix>\"`, while a single-file descriptor carries its

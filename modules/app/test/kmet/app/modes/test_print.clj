@@ -34,7 +34,7 @@
              durable session the rest of the app reads")))))
 
 (deftest print-mode-without-a-prompt-says-what-it-needs
-  (let [{:keys [code err]} (support/run-main ["--profile" "print"])]
+  (let [{:keys [code err]} (support/run-main-isolated ["--profile" "print"])]
     (is (= 1 code))
     (is (str/includes? err "No message provided")
         "the usage names the flag and the message, before anything boots")))

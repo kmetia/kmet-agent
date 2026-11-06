@@ -14,7 +14,6 @@
   {:name "mcp-adapter"     :kind :dir  :root "mcp-adapter/src"}
   {:name "review"          :kind :dir  :root "review/src"}
   {:name "tree-sitter"     :kind :dir  :root "tree-sitter/src"}
-  {:name "tools"           :kind :file :root "tools.clj"}
   {:name "grep-tool"       :kind :file :root "grep-tool.clj"}
   {:name "find-tool"       :kind :file :root "find-tool.clj"}
   {:name "ls-tool"         :kind :file :root "ls-tool.clj"}

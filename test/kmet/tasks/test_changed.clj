@@ -20,7 +20,7 @@
            (changed/path->ns "tasks/kmet/tasks/generate_models.clj")))
     (is (= 'kmet.tasks.test-lint (changed/path->ns "test/kmet/tasks/test_lint.clj"))))
   (testing "extension files map to their canonical namespaces"
-    (is (= 'kmet.extensions.tools (changed/path->ns "extensions/tools.clj")))
+    (is (= 'kmet.extensions.grep-tool (changed/path->ns "extensions/grep-tool.clj")))
     (is (= 'kmet.extensions.clojure.core
            (changed/path->ns "extensions/clojure/src/kmet/extensions/clojure/core.clj")))
     (is (= 'kmet.libs.test-clj-edit

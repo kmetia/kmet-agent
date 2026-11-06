@@ -73,8 +73,8 @@
     (t/is true "skipped: the adapter is Jolt-only")))
 
 (deftest adapter-maps-a-namespace-to-an-exact-source
-  ;; A bundled single file is stored at extensions/tools.clj, but its native
-  ;; namespace is kmet.extensions.tools. :sources maps the namespace request
+  ;; A bundled single file is stored at extensions/grep-tool.clj, but its native
+  ;; namespace is kmet.extensions.grep-tool. :sources maps the namespace request
   ;; directly to that exact file without materializing or restaging it.
   (if-let [{:keys [root classpath host-view]} (adapter)]
     (let [d (dir! "mapped-source")
