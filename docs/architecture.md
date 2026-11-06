@@ -520,6 +520,10 @@ probe and no real use, and is gone;
   subset. A `def` in one call is invisible to the next (`eval` is the
   persistent-context counterpart below), and redefining an injected var stays
   call-local.
+- **Ordering.** The tool declares `:sequential`, so a loop batch containing
+  `run_code` runs its calls one at a time in source order. That classifier
+  does not reach the bridge: a script's own `tools/call` fan-out still runs
+  concurrently and has no barrier.
 - **The bridge.** `(tools/call name args)` returns a promise that settles with
   the record's verbatim result map (`{:content :is-error :details :truncation
   :images}`). Calls run on a shared process-wide pool (16 daemon workers) with
@@ -591,8 +595,11 @@ and call lock. `seed!` installs the call's namespaces into that context each
 time, so the tool surface follows the agent's registry while definitions stay.
 A definition from one call is visible to the next in the same session, and the
 last namespace a successful call ended in is re-entered at the start of the
-next. Eval creates verbs: a successful top-level definition with a non-blank
-docstring is written immediately to one of two durable layers: the global
+next. Because that makes a call order-dependent, the tool declares
+`:sequential`: the loop runs a batch containing it in source order instead of
+letting the call futures race for the session's call lock. Eval creates verbs:
+a successful top-level definition with a non-blank docstring is written
+immediately to one of two durable layers: the global
 `<agent-dir>/eval/<ns>/<name>.clj`, or the session cwd's
 `<agent-dir>/eval-scopes/<shared-cwd-key>/<ns>/<name>.clj` (one verbatim
 source slice per generated definition; a hand-written file can hold several;

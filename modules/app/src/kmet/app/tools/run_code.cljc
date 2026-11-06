@@ -5,8 +5,11 @@
    Lifecycle: every call builds a fresh SCI context and discards it on
    return; the shared sandbox machinery (capabilities, the tools bridge,
    capture, the interrupt and the result assembly) lives in
-   kmet.app.tools.script, so `eval` can run on a kept context. The module is
-   deliberately run_code's own: the tool record, its description and its row."
+   kmet.app.tools.script, so `eval` can run on a kept context. The tool is
+   `:sequential`, so a model batch containing run_code runs its calls in
+   source order while a script's own `tools/call` fan-out stays concurrent.
+   The module is deliberately run_code's own: the tool record, its
+   description and its row."
   (:require [clojure.string :as str]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
@@ -19,7 +22,7 @@
 
 (def ^:private description
   (str "Run a Clojure script to work over the environment and report a digest. Use it when the intermediate output would flood the context — scan or transform many files, run a search→read→verify chain, compute counts, matches or a summary — instead of chaining bash cat/head/rg. Use bash for one small command and read for one file.\n\n"
-       "Every run_code call starts from a fresh context; definitions do not persist.\n\n"
+       "Every run_code call starts from a fresh context; definitions do not persist. Calls in one batch run in source order.\n\n"
        "Inside the script the local primitives return values, not rendered text; prefer them over bash/read for local work. Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. A plain name is also a var — @(tools/read {:path \"x\"}) — while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one tool's declaration.\n\n"
        "Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image \"shot.png\") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.\n\n"
        "Sandbox: Clojure/SCI — " script/sandbox-summary
@@ -84,6 +87,10 @@
    ;; the script tool: the transcript keeps the Elapsed/Took tail line
    ;; (tool-execution :status) for its whole life
    :status true
+   ;; Calls can share the workspace (files, shell). The session has no lock
+   ;; for them, so the batch classifier is what keeps a later call from
+   ;; racing an earlier one; the script's own tools/call fan-out is unaffected.
+   :execution-mode :sequential
    :title title))
 
 ;; ─── The tool and its row ──────────────────────────────────────────────────

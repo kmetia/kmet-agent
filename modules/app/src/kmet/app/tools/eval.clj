@@ -2,9 +2,12 @@
   "The `eval` tool: model-written Clojure in the agent session's persistent
    SCI environment (`kmet.app.eval`). Unlike `run_code`, the environment is
    kept across calls, so a definition from one call is visible to the next.
-   Every successful definition is written to the agent home's eval library —
-   the session cwd's scope by default, the global scope when requested — and
-   loaded by every session; a new session or a restart sees both layers. The
+   The tool is `:sequential`: a loop batch containing an eval call runs in
+   source order, so that visibility never depends on which future wins the
+   session's call lock. Every successful definition is written to the agent
+   home's eval library — the session cwd's scope by default, the global scope
+   when requested — and loaded by every session; a new session or a restart
+   sees both layers. The
    fresh-context, output-economy tool stays `run_code`.
 
    The row also registers the `:core` eval source, which puts the shared
@@ -90,15 +93,16 @@
                      "final value of a silent success); stdout and stderr are "
                      "discarded. One call runs a whole script: forms run in order, "
                      "independent work can overlap — start (sandbox/spawn f) or "
-                     "(tools/call …) and deref them to join — and separate calls "
-                     "from a session serialize, so pack a multi-step task into "
-                     "one call. This is the sandbox, not the project's nREPL.")
+                     "(tools/call …) and deref them to join — and eval is "
+                     "sequential: calls in one batch serialize in source order, "
+                     "so pack a multi-step task into one call. This is the "
+                     "sandbox, not the project's nREPL.")
    :prompt-snippet "Persistent Clojure/SCI sandbox (fs/sh/tools); eval creates saved verbs from documented top-level definitions; pack multi-step work in one call"
    :prompt-guidelines
    ["eval is the full script sandbox, not a bare REPL: fs, sh, slurp, tools and require work as in a babashka script; (eval/help) lists sources, loaded definitions and the surface."
     "Read files with (user/read-file path) or (user/read-file path offset limit); it shares the read tool's 1-indexed offset/limit and truncation. For images use (emit-image path)."
     "Call the run's tools through the `tools` namespace: (tools/list) lists them, (tools/describe \"name\") shows one declaration, and (tools/call \"name\" args) returns a promise to deref — or use (tools/call! \"name\" args) to settle and throw on failure; a plain name is a var too, @(tools/name args)."
-    "Pack independent work into one eval call: forms run in order and independent work overlaps — `(sandbox/spawn f)` for local work, and starting several `(tools/call …)` promises before dereferencing any of them. Separate eval calls from a session serialize, so a second call buys no concurrency; use one call for a multi-step task instead of one call per operation."
+    "Pack independent work into one eval call: forms run in order and independent work overlaps — `(sandbox/spawn f)` for local work, and starting several `(tools/call …)` promises before dereferencing any of them. Eval is sequential: calls in one batch serialize in source order, so a second call buys no concurrency; use one call for a multi-step task instead of one call per operation."
     "Define what should survive the call: a documented top-level definition is written to the agent's eval library as a verb, while an undocumented one stays live for this session only. Use local bindings for throwaway code."
     "Eval creates verbs: give a top-level defn/defmacro/def/etc. a non-blank docstring to save it to the library, where later calls and sessions can use it; a new definition without one is live-only and not saved. Add a docstring and re-evaluate to keep it; a defmethod is saved with its loaded multimethod. A saved definition redefined without a docstring is not written; the saved documented file is unchanged. The docstring is the interface later calls see, with its arglists; (eval/describe 'name) reads it; a patch or edit-form result cannot remove it."
     "New sessions and a restart load the library; an already-running session is a cache and does not see another session's new files. The prompt previews the saved or loaded definitions; the first eval reports any loaded definitions and files that failed. A call that ends in a normal error writes nothing; its definitions stay live and can be forgotten."
@@ -128,6 +132,10 @@
    ;; the script tool: the transcript keeps the Elapsed/Took tail line
    ;; (tool-execution :status) for its whole life
    :status true
+   ;; The session lock serializes calls but does not order them. Eval is
+   ;; stateful, so the batch classifier must run calls one at a time in the
+   ;; order the model emitted them.
+   :execution-mode :sequential
    :title title))
 
 (srce/defplugin plugin

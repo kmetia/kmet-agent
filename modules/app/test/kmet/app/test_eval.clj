@@ -5,6 +5,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.app.loop.tool-exec :as tool-exec]
             [kmet.app.session.core :as session]
             [kmet.app.test-eval-support :as support]
             [kmet.app.tools.eval :as eval-tool]
@@ -67,6 +68,15 @@
                                                          {:code "(def via-tool \"Via tool.\" 9) via-tool"}))
                             "9"))
     (t/is (= "10" (:content (support/call-tool env "eval" {:code "(+ via-tool 1)"}))))))
+
+(t/deftest test-an-eval-batch-runs-sequentially
+  ;; Regression: parallel eval calls race for the session lock, and the lock
+  ;; does not preserve source order. A batch containing eval must take the
+  ;; sequential path, so a later call sees an earlier call's definition.
+  (t/is (= :sequential (:execution-mode eval-tool/definition)))
+  (t/is (tool-exec/has-sequential-tool-call?
+         [{:name "eval"}] {"eval" eval-tool/definition})
+        "one eval call makes the whole batch sequential"))
 
 (t/deftest test-the-tool-prompt-stands-alone
   (let [{:keys [description prompt-snippet prompt-guidelines]} eval-tool/definition

@@ -6,6 +6,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.app.loop.tool-exec :as tool-exec]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.read :as read-tool]
             [kmet.app.tools.registry :as tools]
@@ -48,6 +49,15 @@
   (let [dir (temp-dir)]
     (try (binding [tool-util/*cwd* dir] (f dir))
          (finally (fs/delete-tree dir)))))
+
+(t/deftest test-a-run-code-batch-runs-sequentially
+  ;; Regression: run_code calls can share the workspace (files, shell), and
+  ;; the batch must run them one at a time in source order.
+  (let [definition (tools/get-tool reg "run_code")]
+    (t/is (= :sequential (:execution-mode definition)))
+    (t/is (tool-exec/has-sequential-tool-call?
+           [{:name "run_code"}] {"run_code" definition})
+          "one run_code call makes the whole batch sequential")))
 
 (t/deftest test-run-code-emit-image
   ;; images travel beside the emitted text as the result's :images, from a
