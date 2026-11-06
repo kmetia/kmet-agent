@@ -97,7 +97,7 @@
       (str n " file" (when (not= 1 n) "s") " failed to load"))))
 
 (defn- list-text [entries failures]
-  (let [lines (map entry-line entries)
+  (let [lines (map #(str "* " (entry-line %)) entries)
         n (count lines)
         note (failure-note failures)]
     (if (zero? n)

@@ -77,6 +77,8 @@
       (t/is (= :info level))
       (t/is (str/includes? content "user/report"))
       (t/is (str/includes? content "demo/area"))
+      (t/is (str/includes? content "* user/report  defn"))
+      (t/is (str/includes? content "* demo/area  defn"))
       (t/is (str/includes? content "2 definitions"))
       (t/is (str/includes? content "(cwd)"))
       (t/is (not (str/includes? content "report.clj")))
