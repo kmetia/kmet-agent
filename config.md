@@ -1,38 +1,44 @@
 # Resource selection
 
-Status: agreed design, not implemented. Replaces the earlier per-extension
-resource-toggle proposal.
+Status: agreed design and implementation plan; not implemented. Replaces the
+earlier per-extension resource-toggle proposal. This file stays at the
+repository root as the working design and plan until the migration lands;
+moving it beside the source and design record is a separate cleanup task.
+
+## Three surfaces
+
+| Surface | Scope | Owns | Does not |
+|---|---|---|---|
+| `kmet plugins` | static composition | plugin rows (`:ext/<id>`) in global/project patch layers | load extension code, list resources, write `:resources` |
+| `/config` | live session | `:resources` selection for providers available in the current project run | edit composition, manage disabled plugins, write plugin rows |
+| `/tools` | live session only | the in-memory active-tool set | write settings, scope, save, persist selection |
+
+`kmet plugins` is the static composition editor for plugin rows. `/config` is
+the live resource selector. `/tools` is the session-only tool selector.
 
 ## Model
 
-One enablement model for tools and the other selectable assets: skills and
-prompts. Composition decides what exists in a run; one settings selection
-decides what that run uses. Selectable extension resources are ordinary
-resources with names.
-
-Commands, eval sources and themes are not selectable in v1. Composition and
-extension enablement already decide whether commands and eval sources exist;
-per-command and per-source selection would add a second selection layer without
-a clear benefit. Themes remain governed by the active `:theme` setting and the
-picker. All three can be added later without changing this model.
-
-- Resource identity: `[type name]`, types `:tool`, `:skill`, `:prompt`;
-  settings keys `:tools`, `:skills`, `:prompts`.
-- A name is a canonical non-empty string. A path is provider metadata, never
-  selection state.
-- Names are first-wins across providers: two providers offering the same
-  `[type name]` produce one resource, owned by the first available provider.
-- Composition and discovery make resources **available**: plugin rows,
-  packages, settings paths, auto dirs and `:resources-discover`.
-- Selection makes available resources **selected**. A consumer uses a resource
-  only when it is available and selected: **enabled**.
+- Resource identity is `[type name]`, types `:tool`, `:skill`, `:prompt`;
+  settings keys are `:tools`, `:skills`, `:prompts`.
+- A name is the exact non-empty registry name. A path is provider metadata,
+  never selection state.
+- A provider makes resources **available**: plugin rows, packages, settings
+  paths, auto dirs, and `:resources-discover` contributions.
+- Selection makes available resources **selected**. A consumer uses a
+  resource only when it is available and selected: **enabled**.
+- Availability is always computed from the current project run, not from a
+  settings scope. A provider is available only when it is mounted and active
+  in that run.
 - Mounting stays composition-only. There are no per-resource mounts.
-- A resource can be available but not selected, or selected but unavailable
-  (provider disabled). Stored selection survives either state.
+- Commands, eval sources and themes are not selectable in v1. Composition and
+  extension enablement decide whether commands and eval sources exist; themes
+  remain governed by the active `:theme` setting and the picker.
+- `:sandbox` tool sources are not selectable resources. Their tools stay
+  callable from scripts as they are today; they are not `/config` rows.
 
 ## Store
 
-One settings key per scope, one entry grammar for every type:
+One settings key per scope, one entry grammar for every selectable type:
 
 ```edn
 ;; ~/.kmet/agent/settings.edn
@@ -40,36 +46,74 @@ One settings key per scope, one entry grammar for every type:
              :skills ["-clojure-edit"]}}
 
 ;; .kmet/settings.edn
-{:resources {:tools ["+bash" "+run_code"]}}
+{:resources {:tools ["+bash"]}}
 ```
 
-Within a scope: a missing list inherits; plain names are absolute; a
-non-empty modifier-only list starts from defaults; an empty list is nothing.
+### Global scope: enable/disable
 
-Across scopes: a missing project list inherits the global selection; any
-project list replaces it. The project list resolves in its own scope, so a
-modifier-only project list starts from defaults, not from the global list.
-Skills and prompts default on; tools follow the rule below.
+- A missing type list inherits defaults.
+- An empty list selects nothing.
+- A non-empty modifier-only list starts from defaults and applies `+name` and
+  `-name` in order.
+- A list with plain names is absolute: only the named resources are selected,
+  plus any `+name` and minus any `-name` applied after the plain base.
+- A mixed list keeps the pi rule: plain names form the base, then modifiers
+  apply in list order. `/config` does not create mixed lists; it reads them for
+  compatibility with hand-edited settings.
 
-The settings loader must merge `:resources` per type with these rules, not
-deep-merge it.
+### Project scope: inherit/enable/disable
 
-Effective precedence:
+- A project type list contains only `+name` and `-name` entries.
+- A missing or empty project list means every resource inherits the global
+  selection.
+- `+name` explicitly enables the resource in the project.
+- `-name` explicitly disables the resource in the project.
+- No entry for a name means inherit.
+- A plain name in a project list is invalid. Warn once and ignore the whole
+  project list; the project inherits global.
+- Apply entries in list order; the last entry for a name decides that name.
+
+The project list is a delta over the effective global selection, not a
+replacement and not a base resolved from defaults.
+
+### Merge and precedence
 
 ```
-/tools session selection (tools only)  >  merged persisted selection  >  defaults
+defaults
+  -> global selection
+  -> project delta
+  -> /tools session override (tools only)
 ```
 
-`/tools` is the session-only surface and never writes `:resources`. Saving
-`/config` clears the override when the effective `:tools` selection changes.
+`/tools` is a session-only absolute tool set. It never writes `:resources`, has
+no scope or save control, and disappears with the session. A successful tool
+write in `/config` clears the `/tools` override so the persisted choice takes
+effect.
 
-### Tool defaults
+### Examples
 
-A tool is on by default unless it is a built-in row marked
-`:default-enabled? false` (`run_code`, `eval`). Extension tools are on by
-default, matching current behavior where `:default-tools` filters built-ins and
-leaves extension tools enabled. A plain `:resources :tools` list is absolute
-over every available tool, so it also turns extension tools off unless named.
+```edn
+;; global: bash off, everything else default
+{:resources {:tools ["-bash"]}}
+
+;; project: bash on here, the rest inherits global
+{:resources {:tools ["+bash"]}}
+
+;; a project list with plain names is invalid: warn once, ignore the list
+{:resources {:tools ["read"]}}
+```
+
+Global and project lists merge per type. The settings loader must not deep-merge
+`:resources` across scopes.
+
+### Defaults
+
+- Skills and prompts default on.
+- A tool defaults on unless it is a built-in row marked
+  `:default-enabled? false` (`run_code`, `eval`).
+- Extension tools default on.
+- A global plain `:tools` list is absolute over every available tool, so it
+  also turns extension tools off unless they are named.
 
 This is a settings break from `:default-tools` and `:enabled-tools`:
 
@@ -83,203 +127,259 @@ live set. One list has one meaning, so the break is explicit.
 
 ## Service
 
-`kmet.app.resources` owns persisted selection. The tool session override stays
-with the tool adapter (`set-active-tools!`); this service reports persisted
-selection only.
+`kmet.app.resources` provides the `:resources` service. It is mounted by a
+plugin row near the registry rows, injects the live `:tools`, `:skills` and
+`:prompts` registries, and reads/writes selection through `kmet.app.config`.
 
 ```clojure
-(catalog kind opts)                  ; rows for /config
-(selected? kind name opts)           ; stored intent, independent of availability
-(enabled? kind name opts)            ; available and selected
-(set-selected! kind name state opts) ; write the scope's selection
+(catalog kind)                    ; available rows with both scope states
+(available? kind name)
+(global-selected? kind name)
+(project-state kind name)         ; :inherit | :enabled | :disabled
+(selected? kind name)             ; effective persisted selection, ignore availability
+(enabled? kind name)              ; available and selected
+(enabled-names kind)              ; available and selected; consumers use this
+
+(set-global! kind name enabled?)
+(set-project! kind name state)    ; :inherit | :enabled | :disabled
 ```
 
-- `state` is `true`, `false` or `nil` (nil = remove/inherit). The write keeps a
-  nil or modifier-only list's shape (enabling a default-off resource writes
-  `+name`; disabling a default-on resource writes `-name`); otherwise it
-  rewrites the list as its effective plain selection. Both scopes use this
-  rule; a missing project list is materialized from the effective selection so
-  the write replaces global explicitly.
-- `opts` carries `:scope` (`:global` or `:project`; default project when the
-  cwd has `.kmet/`, else global). The tool adapter applies the `/tools` session
-  override on top of the persisted selection.
-- `selected?` is stored intent, so an unavailable resource still reports
-  `true`. `enabled?` is `(and available? selected?)`.
-- `catalog` reads availability from the kind table and returns available
-  rows only. A saved entry whose provider is absent is not a row; `/config`
-  counts it in a hint.
-- `resolve-scope` and `apply-modifiers` stay internal. There is no public
-  raw-entry merge API.
-
-Kind table:
-
-```clojure
-{:tool   {:available tools/available   :default-enabled? default-tool?}
- :skill  {:available skills/available}
- :prompt {:available prompts/available}}
-```
-
-`default-enabled?` defaults to true. The settings key is derived from the type
-(`:tool` -> `:tools`, ...). Keep the separate registries: they have different
-consumers. Only selection is shared.
-
-Each consumer filters at read time; management APIs keep returning everything,
-so a disabled resource can always be re-enabled:
-
-- tools: declared schema, execution, `run_code` surface, `tool_search`
-- skills: prompt block, `/skill:` expansion
-- prompts: template lookup and expansion
-
-Discovery and loaders register every **available** resource. They do not prune
-by selection: disabling never unregisters, and a selection change is applied by
-`/reload` (or the next run), not at registration time. Selected resources are
-read-time filtered. Tool selection keeps its existing `:tool-change` session
-recording and declaration replay as a tool-only adapter.
-
-## UI
+`catalog` returns **available rows only**. A row carries both scope states and
+the effective result:
 
 ```clojure
 {:kind :resource
  :type :skill
  :name "clojure-edit"
  :provider {:kind :extension :id :ext/clojure}
- :selected? true}
+ :global? true
+ :project-state :inherit
+ :selected? true
+ :enabled? true}
 ```
 
-Rows are available resources only. A saved entry whose provider is absent is
-not a row; it is counted in the `/config` hint. While a `/tools` session
-override is active, `/config` shows it in the header hint, not as a row state.
-Composition rows use `{:kind :composition ...}` and do not use
-`[type name]`. Grouping by `:provider` is display only; selection is keyed by
-`[type name]`.
+- `selected?` is the effective persisted selection: global when the project
+  state is `:inherit`, otherwise the project override. Availability is not
+  consulted.
+- `enabled?` is `(and available? selected?)`.
+- `enabled-names` is the read-time filter for consumers.
+- A stored entry whose provider is unavailable is not a row, is not returned by
+  `catalog`, and is not counted in a hint. It survives in settings and applies
+  when the provider becomes available again.
+- Collision behavior stays the registry's. Tools keep custom shadowing and
+  last-registration wins; skills keep first-wins; prompts keep their current
+  registration behavior. `:resources` does not define a second provider
+  precedence.
+- `set-global!` preserves an absent or modifier-only global list's shape;
+  enabling a default-off resource writes `+name`, disabling a default-on
+  resource writes `-name`. Removing the last modifier removes the key, restoring
+  defaults. A plain or mixed global list is rewritten as its effective plain
+  selection; an emptied plain selection is written as `[]` (nothing).
+- `set-project!` writes only the project delta. `:inherit` removes entries for
+  the name; `:enabled` writes `+name` and removes `-name`; `:disabled` writes
+  `-name` and removes `+name`. A write drops any plain entries from the type
+  list. An emptied project type list is removed, which means inherit all.
+- `resolve-scope` and the entry merge stay internal. There is no public raw
+  merge API.
 
-### Surfaces
+## Availability and visibility
 
-- `kmet plugins` — standalone composition editor. Reads installed extension
-  manifests for the composition rows and writes the composition layers (which
-  plugin/extension rows load); it does not load extension code, list selectable
-  resources, or write `:resources`. Resource selection is `/config`-only in v1.
-- `/config` — in-session resource toggle over live selectable resources only,
-  and the only resource-selection editor. It enables and disables, has the
-  global/project scope switch, and writes `:resources` in that scope. It clears
-  the tool session override when the effective `:tools` selection changes,
-  then applies the change. Initially it forces the existing full `/reload`
-  path; the follow-up below replaces that with a selection-only refresh. It
-  does not edit composition. Saved entries whose provider is absent stay
-  stored and are counted in a hint.
-- `/tools` — the builtin session-only tools view. In TUI it opens the
-  selector; headless/print mode keeps the existing `/tools` listing. Its toggles
-  call `set-active-tools!` and record the session branch entry; it never writes
-  `:resources` and has no save/scope controls. Use `/config` to persist a tool
-  selection. Saving a changed tool selection in `/config` clears the `/tools`
-  override.
-- `/reload` — re-reads settings and selection and reloads extensions and
-  resources. It does not re-read composition layers.
+- `/config` lists resources of providers mounted and active in the current
+  project run, in both global and project scope.
+- If a plugin is disabled in the project, its resources are not available and
+  are not listed. There is nothing to manage for that provider in this run.
+- A built-in tool whose composition row was removed is not available and is
+  not listed.
+- Stored selection for an unavailable provider is invisible and inert. It is
+  not pruned. Re-enabling the provider makes the stored selection apply again.
+- `kmet plugins` changes composition statically. Its changes apply on the next
+  start; `/reload` does not re-read composition layers.
+- A selected resource whose provider becomes unavailable stops being used at
+  read time, but its stored entry remains.
 
-`/config` selects resources; `/settings` remains the scalar-settings command.
+## Consumers
 
-Discovery paths and package filters are installation, not per-item enablement.
-Package filters decide availability only: a resource they exclude has no row
-and cannot be selected. Per-item checkboxes in `/config` write
-`:resources` for every selectable type.
+Each consumer filters at read time with `enabled-names` or `enabled?`.
+Stored selection is never pruned; a selected resource whose provider is
+unavailable is inert and becomes active again when the provider is re-enabled.
 
-A disabled extension's selectable resources are unavailable and not listed.
-Its stored selection remains inert; re-enable the extension in `kmet plugins`,
-then use `/config` to edit it. No pruning on disable.
+- **tools**: model-facing declared schema, execution, `tool_search` candidates,
+  and the registry-tool portion of the `run_code` bridge.
+- **sandbox-only tools**: remain callable from `run_code`; they are not
+  selectable and not filtered by `/config`.
+- **skills**: system-prompt skill block and `/skill:` expansion.
+  `disable-model-invocation` still excludes a skill from the prompt block but
+  not from `/skill:` expansion.
+- **prompts**: template lookup, expansion and autocomplete.
+- **unavailable resources**: stored selection is inert; consumers ignore them.
+
+Discovery and loaders register every available resource. They do not prune by
+selection; selection is applied by the read-time filters.
+
+## UI
+
+### `kmet plugins`
+
+Static composition editor for plugin rows only.
+
+- Lists bundled and installed extension plugin rows (`:ext/<id>`).
+- Reads installed extension manifests and composition layers.
+- Writes plugin rows and remove patches to `~/.kmet/agent/patch.edn` or
+  `.kmet/patch.edn`.
+- Supports global/project scope.
+- Does not load extension code.
+- Does not list tools, skills, prompts, themes or packages.
+- Never writes `:resources`.
+
+Package installation stays with `kmet install`, `kmet remove`, `kmet update`
+and `kmet list`.
+
+The CLI changes from `kmet config [-l]` to `kmet plugins [-l]`. Update the
+command set, help text, core dispatch, tests and docs. The old `config` command
+is retired, not aliased.
+
+### `/config`
+
+Live in-session resource selector.
+
+- Rows are `catalog` output: resources of providers available in the current
+  project run.
+- Scope switch: global / project.
+- Global scope: enable/disable checkbox.
+- Project scope: tri-state `inherit | enable | disable`.
+- Space cycles inherit -> enable -> disable -> inherit. The row also shows the
+  effective state.
+- Writes through `set-global!`/`set-project!`.
+- Never edits composition.
+- A plugin disabled in the project has no rows.
+- Stored selections for unavailable providers are not shown.
+- A tool write clears the `/tools` session override.
+- A save is a no-op when it would not change the normalized stored selection
+  (entries and project state): no event, no refresh.
+- A save refreshes selection only: emit `:resources-change` with affected
+  types; tools re-resolve, record the normal `:tool-change` when the declared
+  set changes, and rebuild schema/declarations/`tool_search`; skills rebuild
+  the system-prompt block; prompts rebuild lookup and autocomplete. Do not
+  remount providers, re-run `:resources-discover`, reload models or keybindings,
+  or clear registrations.
+- Full `/reload` remains the fallback and the manual reload-everything command.
+
+`/settings` remains the scalar-settings command.
+
+### `/tools`
+
+Builtin, session-only selector over active tools.
+
+- Lists tools available in the live session.
+- Toggles the in-memory set through `set-active-tools!`.
+- No global/project scope.
+- No save key.
+- No `:resources` writes.
+- No separate `tools-config` branch entry.
+- A resumed or switched session initializes from persisted `:resources`; a
+  previous `/tools` override is not restored. The normal `:tool-change` record
+  remains declaration history and replay data, not a saved selection.
+- An extension cannot shadow the builtin `/tools` name.
+- TUI opens the selector; non-TUI front ends may print the active tool list.
+
+Remove `extensions/tools.clj`, the bundled `tools` artifact, its tests, docs
+and examples. Remove the extension API `set-tool-enabled!` and
+`tool-selection`; keep `get-active-tools` and `set-active-tools!`.
+
+### `/reload`
+
+Re-reads settings and selection and reloads extensions/resources. It does not
+re-read composition layers. Use it as the full fallback; `/config` uses the
+selection-only path above.
+
+## Warnings and settings breaks
+
+- `:default-tools` and `:enabled-tools`: warn once at startup; ignore.
+- Plain names in a project `:resources` list: warn once; ignore the project
+  list for that type; inherit global.
+- Top-level `:skills`, `:prompts` and `:extensions` paths remain discovery
+  sources. Signed entries are no longer selection; warn once and ignore them.
+  Selection belongs in `:resources`.
+- Package filters remain availability-only. A resource a package filter
+  excludes has no row and cannot be selected.
+- `:meta {:tools ...}` is removed from the extension manifest contract.
 
 ## Migration
 
-1. Add `kmet.app.resources` (`resolve-scope`, `apply-modifiers`, kind table,
-   catalog, `selected?`, `enabled?`, `set-selected!`) with tests.
-2. Rename the `kmet config` CLI to `kmet plugins`; make it composition-only:
-   remove its selectable-resource rows and writers and keep the composition
-   rows. Delete `kmet.app.tools.config` selection and both writers, and remove
-   the per-type resource toggle branches from `kmet.ui.tui.resource-config`.
-   Replace the builtin `/tools` listing command with the selector in TUI,
-   keeping the listing for headless mode. Move that selector from
-   `extensions/tools.clj` to the builtin: keep `set-active-tools!` and the
-   session branch restore, remove `Ctrl+S`, the scope tab, and the
-   `set-tool-enabled!`/`tool-selection` calls. Remove the bundled `:ext/tools`
-   row and the extension file; update the bundled set, build tests and
-   docs/examples that point at it.
-3. Reserve builtin command names: an extension command cannot shadow a builtin,
-   including `/tools` and the new `/config`. Update the command registry and
-   its tests.
-4. Add `:resources :tools` and `/config` as the only resource-selection editor
-   (a new generic resource screen over `kmet.app.resources`). `/config` writes
-   `:resources`, clears the tool session override when the effective `:tools`
-   selection changes, and initially calls the full `/reload` path. Retire
-   `:default-tools`/`:enabled-tools`: stop reading them and warn once when
-   present. Treat this as a settings break; old keys are not translated.
-5. Add `:skills` and `:prompts` and their read-time filters. Loaders register
-   every available resource; selection filters reads. Retire package per-item
-   `:enabled` filtering and path writers; package filters become discovery-only.
-6. Remove the remaining `:meta {:tools ...}` projection and update docs and
-   tests. No `:meta {:resources ...}` catalog in v1. The follow-up section
-   replaces `/config`'s full reload with a selection-only refresh.
+1. Add the `kmet.app.resources` row and service (`:resources`), the per-type
+   settings merge, the API above and settings-schema validation.
+2. Replace the runtime settings path: initialize the runtime from
+   `enabled-names :tool`; keep only the session active-tool override (rename
+   its atom to `:active-tools` if that avoids confusion). Remove
+   `merge-tool-entries`, `get-default-tools`, `get-enabled-tools`, the
+   settings-derived `:default-tools` state and persisted `:enabled-tools`
+   selection path, `apply-default-tools!`, `apply-enabled-tools!`,
+   `enabled-tool-entries` and `default-tool-exclusions`; update
+   `config.clj`, `loop/driver.clj`, `loop/state.clj`, `session/runtime.clj`,
+   `session/lifecycle.clj`, `loop.clj` and the TUI builtins.
+3. Replace the builtin `/tools` listing with the session selector, remove the
+   `extensions/tools.clj` artifact and bundled entry, and remove the
+   `set-tool-enabled!`/`tool-selection` extension API. Update
+   `kmet.extension`, `extension.md`, `docs/extensions.md`, build/staging tests
+   and examples.
+4. Rename `kmet config` to `kmet plugins`; make it a static plugin-row editor.
+   Remove resource rows and writers from the standalone screen. Update
+   `packages_cli.clj`, `core.clj`, CLI help, tests and every doc that names
+   `kmet config`.
+5. Add `/config` as the live resource screen over `kmet.app.resources`, with
+   global enable/disable, project inherit/enable/disable, the scope switch,
+   override clearing and the `:resources-change` selection-only refresh.
+   Declare `:resources-change` in `kmet.app.events` and update the event
+   documentation. Reserve `/tools` and `/config` as builtin command names and
+   update the command registry tests.
+6. Add skills/prompts read-time filters. Retire top-level signed selection and
+   package per-item selection writers; package filters become availability-only.
+7. Remove `:meta {:tools ...}`, add the warnings above, and update docs,
+   examples and generated composition docs if required.
+8. Run the changed-file gates; finish with `bb test`, `bb test-ext`, `bb lint`
+   and `bb format-check`.
 
-Remove extension API `set-tool-enabled!`/`tool-selection` in the same change;
-the old tools extension was their only in-repo consumer. Do not add a generic
-`set-resource-enabled!`/`resource-selection` pair until an extension needs one.
-`set-active-tools!` remains the tool session override.
+## Tests
 
-Tests: type/name normalization and first-wins collisions; missing versus
-present project lists; modifier-only lists resolve from defaults; empty selects
-nothing; plain versus modifier tool lists, including extension tools and
-`:default-enabled? false`;
-`/config` initially writes then reloads, writes the chosen scope, and clears the
-tool override only when the effective `:tools` selection changes; `/tools` is
-builtin, applies a runtime override without writing `:resources`, and works
-without the tools extension; builtin command names cannot be shadowed; package
-filters as availability only; `:meta :tools` removal; changed-file gates;
-`kmet plugins` writes composition only and no `:resources`; CLI usage/help
-names `kmet plugins`.
-
-## Follow-up: partial selection refresh
-
-After the migration steps land, replace `/config`'s full `/reload` with a
-selection-only refresh. Preconditions: loaders register every available
-resource (step 5), and every consumer reads `selected?`/`enabled?` at read
-time.
-
-Add one app event, `:resources-change`, emitted by the `/config` save path
-after all of its writes complete. `set-selected!` stays a pure write. `/config`
-clears the tool session override when the effective `:tools` selection
-changes, emits the event once, and does not:
-
-- unmount or remount extension rows;
-- re-run `:resources-discover`;
-- reload models, keybindings or context files;
-- clear or re-register skills or prompts.
-
-Each consumer refreshes only its derived view:
-
-| type | refresh |
-|---|---|
-| tools | reapply the selection; rebuild the declared schema, declarations and `tool_search` candidates |
-| skills | rebuild the system-prompt skill block |
-| prompts | rebuild template lookup and expansion |
-
-Keep full `/reload` as the fallback for anything not covered, and as the manual
-"reload everything" command. Guard the `/config` path with an
-effective-selection diff: an unchanged save does not emit `:resources-change`
-or reload.
-
-Tests: a selection change rebuilds the affected views without unmounting
-extensions or re-running `:resources-discover`; unselected resources stay
-registered; a non-tool save preserves the `/tools` override and a tool change
-clears it; an unchanged save is a no-op; full `/reload` still works.
+- Global lists: missing, empty, modifier-only, plain, mixed; empty versus
+  missing.
+- Project lists: inherit, `+name`, `-name`, multiple entries, last entry wins,
+  plain entry invalid and warned; emptied project list inherits.
+- Merge: project delta applies over global, not defaults; global empty selects
+  nothing; project empty inherits.
+- Defaults: built-in opt-ins (`run_code`, `eval`), extension tools default on,
+  plain global list is absolute over extension tools.
+- Availability: disabled project plugin has no rows; built-in removed by
+  composition has no row; stored selection survives and applies after
+  re-enable.
+- Service: `selected?` ignores availability; `enabled?` requires both;
+  `enabled-names` is the consumer filter.
+- `/config`: writes global and project scopes, cycles project tri-state,
+  clears the `/tools` override on tool writes, treats an unchanged save as a
+  no-op, refreshes only affected views, does not remount or re-run
+  `:resources-discover`.
+- `/tools`: builtin, session-only, no settings or `:resources` writes, works
+  without the tools extension, cannot be shadowed by an extension.
+- Consumers: tools schema/execution/tool_search, sandbox-only tools still
+  callable from `run_code`, skills prompt block and `/skill:` expansion with
+  `disable-model-invocation`, prompts lookup and expansion.
+- `kmet plugins`: static plugin rows only, no extension loading, no
+  `:resources` writes; CLI usage names `kmet plugins`.
+- Settings breaks and warnings; removed extension API and artifact; changed-file
+  gates.
 
 ## Out of scope
 
-- Per-command, per-eval-source and per-theme selection. Commands and eval
-  sources are composition-controlled; themes stay with the active `:theme`
-  setting and the picker. Add them later if needed.
-- Offline resource selection, including a manifest catalog. Resource
-  selection is `/config`-only in v1; add offline browsing later if needed.
-- Live composition recomposition (`design.md` § Open at HEAD 1).
-- MCP server enablement; that stays with the MCP adapter. Individual MCP tools
-  are ordinary `:tool` resources.
-- A per-extension selection key.
+- Per-command, per-eval-source and per-theme selection.
+- Project-scope absolute selection lists. Project selection is always a delta
+  over global.
+- Offline resource selection and unavailable-resource cleanup in `/config`.
+- Live composition recomposition. `kmet plugins` changes apply on the next
+  start.
+- MCP server enablement; that stays with the MCP adapter. MCP tools remain
+  `:sandbox` contributions in v1 and are not `/config` rows.
 - A generic extension API for persisted selection; add one when a consumer
   exists.
+- Moving this file. `config.md` stays at the repository root as both the design
+  record and the implementation plan until the migration is done; relocating it
+  is a separate cleanup task.
