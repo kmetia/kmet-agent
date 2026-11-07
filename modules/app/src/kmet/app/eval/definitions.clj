@@ -165,9 +165,11 @@
 (defn parse
   "Parse CODE as top-level forms starting in CURRENT-NS (a string, `user`
    when nil). Returns `{:ns <the namespace the forms end in> :defs
-   [record …]}` with one record per defining form in source order. A form
-   that is not a top-level definition — `do`, `comment`, a reader conditional —
-   contributes nothing.
+   [record …]}` with one record per defining form in source order. Only a
+   top-level list is a form: a vector is data and contributes nothing, even
+   when its first element spells a defining head. A form that is not a
+   top-level definition — `do`, `comment`, a reader conditional — contributes
+   nothing.
 
    Transferring a reader error is the caller's job: a call whose code cannot
    be read fails at evaluation."
@@ -182,7 +184,7 @@
           (if-let [node (first nodes)]
             (let [form (try (n/sexpr node) (catch Throwable _ nil))]
               (cond
-                (not (sequential? form))
+                (not (seq? form))
                 (recur (rest nodes) current defs)
 
                 (ns-form? form)
@@ -214,7 +216,7 @@
            body []]
       (if-let [node (first nodes)]
         (let [form (try (n/sexpr node) (catch Throwable _ nil))]
-          (if (and (nil? ns-form) (sequential? form) (ns-form? form))
+          (if (and (nil? ns-form) (seq? form) (ns-form? form))
             (recur (rest nodes) (n/string node) body)
             (recur (rest nodes) ns-form (conj body (n/string node)))))
         {:ns-form ns-form

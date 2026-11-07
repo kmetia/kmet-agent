@@ -5,6 +5,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.app.eval.definitions :as eval-defs]
             [kmet.app.loop.tool-exec :as tool-exec]
             [kmet.app.session.core :as session]
             [kmet.app.test-eval-support :as support]
@@ -85,10 +86,22 @@
          [{:name "eval" :arguments {"code" "(def live-only 1)"}}]
          {"eval" eval-tool/definition})
         "a live-only definition makes the whole batch sequential too")
+  (t/is (tool-exec/has-sequential-tool-call?
+         [{:name "eval" :arguments {"code" "(defn f [] 1)"}}]
+         {"eval" eval-tool/definition})
+        "an undocumented defn is live-only and still sequential")
   (t/is (not (tool-exec/has-sequential-tool-call?
               [{:name "eval" :arguments {"code" "(+ 1 2)"}}]
               {"eval" eval-tool/definition}))
         "a definition-free eval call stays parallel")
+  (t/is (not (tool-exec/has-sequential-tool-call?
+              [{:name "eval" :arguments {"code" "[def x 1]"}}]
+              {"eval" eval-tool/definition}))
+        "a top-level vector is data, not a definition")
+  (t/is (not (tool-exec/has-sequential-tool-call?
+              [{:name "eval" :arguments {"code" "[defn f \"F.\" [] 1]"}}]
+              {"eval" eval-tool/definition}))
+        "a vector spelling a documented definition is still data")
   (t/is (not (tool-exec/has-sequential-tool-call?
               [{:name "eval" :arguments {"code" "(defn broken"}}]
               {"eval" eval-tool/definition}))
@@ -97,6 +110,19 @@
               [{:name "eval" :arguments {"code" "(def x 1)"}}]
               {}))
         "an undeclared call cannot change the batch mode"))
+
+(t/deftest test-a-top-level-vector-is-not-a-definition
+  (t/is (not (eval-defs/defines? "[def x 1]")))
+  (t/is (not (eval-defs/defines? "[defn f \"F.\" [] 1]")))
+  (t/is (empty? (:defs (eval-defs/parse "[def x 1]" "user"))))
+  (t/is (= "user" (:ns (eval-defs/parse "[ns demo] (def x 1)" "user")))
+        "a vector is not an ns form")
+  (t/is (= "user"
+           (:ns (first (:defs (eval-defs/parse "[ns demo] (def x 1)" "user")))))
+        "a real definition after vector data keeps the caller's namespace")
+  (t/is (nil? (:ns-form (eval-defs/split-ns "[ns demo] (def x 1)")))
+        "a vector is not an ns form")
+  (t/is (= "(ns demo)" (:ns-form (eval-defs/split-ns "(ns demo) (def x 1)")))))
 
 (t/deftest test-the-tool-prompt-stands-alone
   (let [{:keys [description prompt-snippet prompt-guidelines]} eval-tool/definition
