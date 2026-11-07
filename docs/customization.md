@@ -27,14 +27,14 @@ color values, installation, and live reload; complete starting points are in
   ["extensions/*.clj" "!extensions/legacy.clj"]}` (plain globs include,
   `!` excludes, `+path`/`-path` force include/exclude, `[]` disables a type).
   `kmet plugins` composes extension and built-in tool rows; package filters
-  and the other resource arrays stay settings. The same top-level arrays
-  (`:extensions`/`:skills`/`:prompts`/`:themes`) name auto-root resources
-  without installing a package: the skills, prompts and themes arrays select
-  which ones stay enabled, while an `:extensions` path only widens the
-  discovered set — an extension loads when a composition row names it (see the
-  Extensions bullet). A project entry with `:autoload false` is a delta over
-  the global entry of the same package (pi's package model — same pattern
-  semantics as pi's `packages.md`).
+  stay settings. The top-level arrays (`:extensions`/`:skills`/`:prompts`/
+  `:themes`) add discovery paths without installing a package: each entry is
+  a file or directory resolved against the settings scope root. Signed and
+  glob entries are ignored there — selection is `/config`'s `:resources`
+  state for skills and prompts, and an extension loads when a composition
+  row names it (see the Extensions bullet). A project entry with
+  `:autoload false` is a delta over the global entry of the same package
+  (pi's package model — same pattern semantics as pi's `packages.md`).
 - **Skills**: Place `name/SKILL.md` directories (or flat `.md` files) with YAML frontmatter (`name`, `description`) in `~/.kmet/agent/skills/` or `.kmet/skills/` — listed in the system prompt as `<available_skills>`; `/skill:name` loads one on demand (Agent Skills standard, pi-compatible)
 - **Prompt Templates**: Place `.md` files in `~/.kmet/agent/prompts/` or `.kmet/prompts/` — `/name args` expands to the template body with `$1`, `$@`, `${1:-default}`, `${@:N}` placeholders; unknown `/cmd` falls through to the agent (pi-compatible)
 - **Extensions**: Place `.clj` files (or directories with `extension.edn`) in

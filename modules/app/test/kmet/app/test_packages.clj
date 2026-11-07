@@ -585,10 +585,8 @@
 ;; ─── Top-level settings entries (pi: resolveLocalEntries) ─────────────────
 
 (t/deftest test-top-level-plain-file-and-dir
-  ;; pi resolveLocalEntries: plain entries (no glob/override syntax) expand
-  ;; against the base dir — a file contributes itself, a directory its
-  ;; discovered items; with no pattern entries every collected file is
-  ;; enabled (pi: applyPatterns with an empty pattern list).
+  ;; plain entries expand against the base dir — a file contributes itself,
+  ;; a directory its discovered items — and every collected file is enabled.
   (let [sandbox (tmp-dir)
         ext-file (str sandbox "/solo.clj")
         extra (str sandbox "/extra")]
@@ -606,40 +604,23 @@
         (t/is (every? #(= "local" (get-in % [:metadata :source])) (:extensions res)))
         (t/is (every? #(= sandbox (get-in % [:metadata :base-dir])) (:extensions res)))))))
 
-(t/deftest test-top-level-includes-narrow
-  ;; the dir entry contributes both files; the glob + exclude narrow to
-  ;; just a.md (pi: plain entries expand, pattern entries filter).
-  (let [sandbox (tmp-dir)
-        proj (tmp-dir)]
-    (fs/create-dirs (str sandbox "/prompts"))
-    (spit (str sandbox "/prompts/a.md") "# a\n")
-    (spit (str sandbox "/prompts/b.md") "# b\n")
-    (with-redefs [cfg/get-agent-dir (fn [] sandbox)
-                  cfg/project-dir (fn [] (str proj "/.kmet"))
-                  fs/cwd (fn [] proj)]
-      (let [res (pkgs/resolve-package-items {:prompts ["prompts" "prompts/*.md" "!prompts/b.md"]} nil)
-            local (filterv #(= "local" (get-in % [:metadata :source])) (:prompts res))]
-        ;; excluded files stay in the resolution with :enabled false
-        ;; (pi: every collected file is added with its enabled state)
-        (t/is (= (slash #{(str sandbox "/prompts/a.md") (str sandbox "/prompts/b.md")})
-                 (slash (set (map :path local)))))
-        (t/is (= [(slash (str sandbox "/prompts/a.md"))]
-                 (slash (mapv :path (filterv :enabled local)))))))))
-
-(t/deftest test-top-level-overrides-adjust
+(t/deftest test-top-level-signed-entries-ignored
+  ;; top-level entries are discovery paths only. Glob and signed entries no
+  ;; longer narrow or adjust the collected set: selection is :resources.
   (let [sandbox (tmp-dir)]
     (fs/create-dirs (str sandbox "/prompts"))
     (spit (str sandbox "/prompts/a.md") "# a\n")
     (spit (str sandbox "/prompts/b.md") "# b\n")
     (with-redefs [cfg/get-agent-dir (fn [] sandbox)
                   fs/cwd (fn [] (tmp-dir))]
-      (let [res (pkgs/resolve-package-items {:prompts ["prompts" "!prompts/b.md"]} nil)
-            by-name (into {} (map (fn [i] [(fs/file-name (:path i)) i]) (:prompts res)))]
-        (t/is (true? (:enabled (by-name "a.md"))))
-        (t/is (false? (:enabled (by-name "b.md")))))
-      (let [res (pkgs/resolve-package-items {:prompts ["prompts" "-prompts/b.md"]} nil)
-            by-name (into {} (map (fn [i] [(fs/file-name (:path i)) i]) (:prompts res)))]
-        (t/is (false? (:enabled (by-name "b.md"))))))))
+      (let [res (pkgs/resolve-package-items
+                 {:prompts ["prompts" "prompts/*.md" "!prompts/b.md"
+                            "-prompts/b.md" "+prompts/a.md"]}
+                 nil)
+            local (filterv #(= "local" (get-in % [:metadata :source])) (:prompts res))]
+        (t/is (= (slash #{(str sandbox "/prompts/a.md") (str sandbox "/prompts/b.md")})
+                 (slash (set (map :path local)))))
+        (t/is (every? :enabled local))))))
 
 (t/deftest test-top-level-project-scope
   (let [sandbox (tmp-dir)
@@ -663,7 +644,7 @@
 
 ;; ─── Auto-dir scans (pi: addAutoDiscoveredResources) ──────────────────────
 
-(t/deftest test-auto-dirs-scan-with-overrides
+(t/deftest test-auto-dirs-scan
   (let [sandbox (tmp-dir)
         proj (tmp-dir)]
     (fs/create-dirs (str sandbox "/extensions"))
@@ -677,24 +658,12 @@
       (let [res (pkgs/resolve-package-items {:extensions ["!extensions/b.clj"]} nil)
             by-name (into {} (map (fn [i] [(fs/file-name (:path i)) i]) (:extensions res)))]
         (t/is (= #{"a.clj" "b.clj" "c.clj"} (set (keys by-name))))
-        (t/is (false? (:enabled (by-name "b.clj"))) "!-override disables")
-        (t/is (true? (:enabled (by-name "a.clj"))))
+        (t/is (every? :enabled (vals by-name))
+              "top-level signed entries no longer adjust the auto scan")
         (t/is (= :project (get-in (by-name "c.clj") [:metadata :scope]))
               "project auto wins order")
         (t/is (= :user (get-in (by-name "a.clj") [:metadata :scope])))
-        (t/is (every? #(= "auto" (get-in % [:metadata :source])) (vals by-name))))
-      (let [enabled-of (fn [patterns]
-                         (->> (pkgs/resolve-package-items {:extensions patterns} nil)
-                              (:extensions)
-                              (filter #(= "b.clj" (fs/file-name (:path %))))
-                              first
-                              :enabled))]
-        (t/is (true? (enabled-of ["+extensions/b.clj"])) "force-include keeps enabled")
-        (t/testing "pi precedence: a later check wins (+ over !, - over +)"
-          (t/is (true? (enabled-of ["!extensions/b.clj" "+extensions/b.clj"]))
-                "force-include overrides an exclude")
-          (t/is (false? (enabled-of ["+extensions/b.clj" "-extensions/b.clj"]))
-                "force-exclude overrides a force-include"))))))
+        (t/is (every? #(= "auto" (get-in % [:metadata :source])) (vals by-name)))))))
 
 (t/deftest test-precedence-project-local-beats-user-auto
   ;; same canonical path via a project top-level entry and the user auto

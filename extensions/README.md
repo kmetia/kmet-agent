@@ -28,8 +28,8 @@ settings — see
 [`docs/usage.md`](../docs/usage.md#package-subcommands) and
 [`docs/extensions.md`](../docs/extensions.md)).
 
-A directory extension's manifest may carry `:meta {:tools [{:name "…"}]}`:
-it is opaque host metadata that nothing reads at HEAD. And because `run_code`
+A directory extension's manifest may carry `:meta` for opaque host
+metadata; nothing reads it at HEAD. And because `run_code`
 is opt-in, an extension's `:sandbox` tool sources stay registered but
 unreachable from the model until `run_code` is enabled through the persisted
 `:resources` selection or the `/tools` session selector.

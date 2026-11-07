@@ -16,13 +16,13 @@
    (kmet.app.extensions.rows). Skills, prompts and themes keep the
    enabled-path loaders below.
 
-   `resolve-package-items` is pi's full resolve pipeline: top-level settings
+   `resolve-package-items` is pi's resolve pipeline: top-level settings
    resource entries (`:extensions`/`:skills`/`:prompts`/`:themes` — plain
-   paths expand, `!glob`/`+path`/`-path` patterns filter), the fixed
-   auto-dir scans (agent dir + .kmet), then packages, accumulated in pi's
-   insertion order and finalized with pi's precedence sort (project-local 0,
-   project-auto 1, user-local 2, user-auto 3, package 4, bundled 5) +
-   canonical-path
+   paths expand; signed/glob entries are ignored), the fixed auto-dir scans
+   (agent dir + .kmet), then packages (whose per-type filters use
+   `!glob`/`+path`/`-path`), accumulated in pi's insertion order and
+   finalized with pi's precedence sort (project-local 0, project-auto 1,
+   user-local 2, user-auto 3, package 4, bundled 5) + canonical-path
    dedupe. `load-skills!`/`load-prompts!`/`load-themes!` load the enabled
    items of a type; extensions load through composition rows.
 
@@ -708,76 +708,20 @@
                 sorted)]
     (vec result)))
 
-(defn- collect-files-from-paths
-  "pi collectFilesFromPaths — PATHS (files and/or directories) expanded to
-   item paths of TYPE: a file contributes itself, a directory contributes
-   its discovered items. Missing paths are skipped."
-  [paths type]
-  (vec (mapcat (fn [p]
-                 (cond
-                   (fs/regular-file? p) [(str p)]
-                   (fs/directory? p) (discover-items-in-dir type (str p))
-                   :else []))
-               paths)))
-
-(defn- pattern-entry?
-  "pi isPattern — an entry carrying glob/override syntax (`*`, `?`, or a
-   `!`/`+`/`-` prefix) as opposed to a plain path."
-  [entry]
-  (let [s (str entry)]
-    (or (str/starts-with? s "!")
-        (str/starts-with? s "+")
-        (str/starts-with? s "-")
-        (str/includes? s "*")
-        (str/includes? s "?"))))
-
-(defn- enabled-by-overrides?
-  "pi isEnabledByOverrides — auto-dir enabled state: `!` globs exclude,
-   `+` exact paths force-include, `-` exact paths force-exclude; the set
-   starts enabled. Only override entries participate — plain includes are
-   ignored (auto dirs have no narrowing step). pi applies the checks in
-   sequence (exclude → force-include → force-exclude), so a later check
-   wins: `+` overrides `!`, `-` overrides `+`."
-  [path patterns base-dir]
-  (let [patterns (mapv str patterns)
-        excludes (mapv #(subs % 1) (filterv #(str/starts-with? % "!") patterns))
-        force-includes (mapv #(subs % 1) (filterv #(str/starts-with? % "+") patterns))
-        force-excludes (mapv #(subs % 1) (filterv #(str/starts-with? % "-") patterns))]
-    (cond
-      (and (seq force-excludes) (matches-any-exact-pattern? force-excludes path base-dir)) false
-      (and (seq force-includes) (matches-any-exact-pattern? force-includes path base-dir)) true
-      (and (seq excludes) (matches-any-pattern? excludes path base-dir)) false
-      :else true)))
-
-(defn- resolve-local-entries
-  "pi resolveLocalEntries — top-level settings ENTRIES of TYPE into items:
-   plain entries resolve against BASE-DIR and expand to files (a file
-   contributes itself, a directory its discovered items); the collected
-   files are then filtered by the pattern entries via apply-patterns
-   (plain includes narrow, `!`/`+`/`-` adjust). Items carry origin
-   :top-level, source \"local\"."
+(defn- resolve-entries
+  "Resolve ENTRIES of TYPE against BASE-DIR into enabled items: a file
+   contributes itself, a directory its discovered items. Callers pass
+   top-level settings paths or an auto-dir root. Signed/glob entries are
+   ignored — selection is the `:resources` service, not the path list.
+   METADATA carries origin, scope and source."
   [acc type entries metadata base-dir]
-  (let [entries (mapv str (or entries []))
-        {:keys [plain patterns]} (group-by #(if (pattern-entry? %) :patterns :plain) entries)
-        resolved (mapv #(resolve-path % base-dir) (or plain []))
-        files (collect-files-from-paths resolved type)
-        ;; pi's pattern stage: only the override/glob entries filter the
-        ;; collected files — plain entries are not includes.
-        enabled (apply-patterns files patterns base-dir)]
-    (doseq [path files]
-      (add-resource! acc type
-                     (->PackageItem path (contains? enabled path) type metadata)))))
-
-(defn- resolve-auto-dir
-  "pi addAutoDiscoveredResources (one dir) — discovered items of TYPE in
-   DIR with override-only enabled state from the same-type top-level
-   entries (isEnabledByOverrides against BASE-DIR, the scope root). Items
-   carry origin :top-level, source \"auto\"."
-  [acc type dir metadata base-dir overrides]
-  (doseq [path (discover-items-in-dir type dir)]
-    (add-resource! acc type
-                   (->PackageItem path (enabled-by-overrides? path overrides base-dir)
-                                  type metadata))))
+  (doseq [entry entries
+          :let [path (resolve-path entry base-dir)]
+          item (cond
+                 (fs/regular-file? path) [path]
+                 (fs/directory? path) (discover-items-in-dir type path)
+                 :else [])]
+    (add-resource! acc type (->PackageItem item true type metadata))))
 
 (defn- resolve-bundled-layer
   "pi addAutoDiscoveredResources' trailing analogue — the bundled
@@ -861,8 +805,8 @@
 (defn- top-level-metadata
   "Item metadata for top-level settings resources (pi: PathMetadata with
    origin \"top-level\"): SOURCE is \"local\" (explicit settings entry)
-   or \"auto\" (auto-dir scan); BASE-DIR is the scope root the entry
-   patterns resolve against."
+   or \"auto\" (auto-dir scan); BASE-DIR is the scope root the entry paths
+   resolve against."
   [source scope base-dir]
   {:scope scope :origin :top-level :source source :base-dir base-dir})
 
@@ -879,13 +823,13 @@
         user-base (or agent-dir (cfg/get-agent-dir))]
     (when project-scope?
       (doseq [type resource-types]
-        (resolve-local-entries acc type (get project-settings type)
-                               (top-level-metadata "local" :project project-base)
-                               project-base)))
+        (resolve-entries acc type (get project-settings type)
+                         (top-level-metadata "local" :project project-base)
+                         project-base)))
     (doseq [type resource-types]
-      (resolve-local-entries acc type (get user-settings type)
-                             (top-level-metadata "local" :user user-base)
-                             user-base))
+      (resolve-entries acc type (get user-settings type)
+                       (top-level-metadata "local" :user user-base)
+                       user-base))
     ;; Scope is decided by exact root equality, not path prefix: the agent
     ;; dir can live inside the project root (cwd = $HOME puts the agent at
     ;; $HOME/.kmet/agent under the project root $HOME/.kmet), and a prefix
@@ -896,11 +840,10 @@
                   root (str (fs/path scope-base (name type)))]
             d (cfg/auto-resource-dirs type agent-dir)
             :when (= (str d) root)]
-      (resolve-auto-dir acc type d
-                        (top-level-metadata "auto" (if project? :project :user)
-                                            scope-base)
-                        scope-base
-                        (get (if project? project-settings user-settings) type)))))
+      (resolve-entries acc type [d]
+                       (top-level-metadata "auto" (if project? :project :user)
+                                           scope-base)
+                       scope-base))))
 
 (declare bundled-items)
 

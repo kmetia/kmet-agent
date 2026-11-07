@@ -161,18 +161,18 @@ The standalone screen is the composition editor `kmet plugins`; the live
 resource selector pi's `config-selector.ts` also provides is `config.md`'s
 step 5.
 
-`PackageManager.resolve()` is fully ported: top-level settings resource
-entries (`:extensions`/`:skills`/`:prompts`/`:themes`, plain paths plus
-`!glob`/`+path`/`-path` patterns), the fixed auto-dir scans
-(`~/.kmet/agent/<type>` + `.kmet/<type>`), and `:packages`, all into pi's
-insertion order (project-local → user-local → project-auto → user-auto →
-packages) with pi's `toResolvedPaths` finalization — a stable sort by
-`resourcePrecedenceRank` (project-local 0, project-auto 1, user-local 2,
-user-auto 3, package 4) then dedupe by canonical path, first wins. Loading
-is one unified enabled-path pass per type (`load-skills!` /
-`load-prompts!` / `load-themes!`). Extensions diverge: they are composition
-rows, so only an `:ext/<id>` row loads one (`kmet.app.extensions.rows`); the
-resolution above is discovery.
+`PackageManager.resolve()` is ported: top-level settings resource entries
+(`:extensions`/`:skills`/`:prompts`/`:themes`) are plain paths only (signed
+and glob entries are ignored — selection lives in `:resources`); the fixed
+auto-dir scans (`~/.kmet/agent/<type>` + `.kmet/<type>`) and `:packages`
+follow pi, all into pi's insertion order
+(project-local → user-local → project-auto → user-auto → packages) with pi's
+`toResolvedPaths` finalization — a stable sort by `resourcePrecedenceRank`
+(project-local 0, project-auto 1, user-local 2, user-auto 3, package 4) then
+dedupe by canonical path, first wins. Loading is one unified enabled-path
+pass per type (`load-skills!` / `load-prompts!` / `load-themes!`). Extensions
+diverge: they are composition rows, so only an `:ext/<id>` row loads one
+(`kmet.app.extensions.rows`); the resolution above is discovery.
 Sources are local **files** (load as one extension) or **directories**
 (one `extension.edn` extension, or conventional `extensions/` `skills/`
 `prompts/` `themes/` subdirectories, or a bare dir as an extension container).
@@ -188,20 +188,18 @@ pi's per-package resource rows are not ported; the live in-TUI `/config`
 screen selects tools, skills and prompts from the `:resources` service in
 Tools/Skills/Prompts sections, with Tab switching the global/project scope.
 
-Object entries are fully supported with pi's semantics:
+Object entries keep pi's package-filter semantics:
 `{:source ... :extensions [...] :skills [...] :prompts [...] :themes [...]}`
 (plain globs include, `!glob` excludes, `+path`/`-path` exact force
 include/exclude, `[]` disables all of a type, absent key loads all) and
 project entries with `:autoload false` apply as deltas over the global entry
-of the same identity. Top-level entries split into plain paths (resolved
-and expanded — a file loads itself, a directory its discovered items) and
-pattern entries (filter the collected files; auto-dir items are adjusted by
-`!`/`+`/`-` overrides only, pi `isEnabledByOverrides`). Filtered-out items
-stay in the resolution with `:enabled false` so the config list can
-re-enable them. Skills, prompts and themes load at startup, in print mode and
-on `/reload`; extensions load when a composition row mounts (print and the
-other profiles compose the same ambient layers), and `/reload` reloads the
-mounted rows.
+of the same identity. Top-level entries are plain paths (resolved and
+expanded — a file loads itself, a directory its discovered items); auto dirs
+are fully enabled. Filtered-out package items stay in the resolution with
+`:enabled false`. Skills, prompts and themes load at startup, in print mode
+and on `/reload`; extensions load when a composition row mounts (print and
+the other profiles compose the same ambient layers), and `/reload` reloads
+the mounted rows.
 
 Kmet adaptations (deliberate deviations):
 
@@ -217,16 +215,16 @@ Kmet adaptations (deliberate deviations):
 - Pattern matching implements minimatch's common subset (`*`, `?`, `**`,
   `[...]`; no extglobs/braces) against the same match forms as pi (relative
   path, file name, absolute path; skills also match their parent folder).
-- `config` lists all layers (pi buildGroups: packages first, then
-  top-level groups, user before project). Extension items toggle the
-  composition layer (`~/.kmet/agent/patch.edn` / `.kmet/patch.edn`), not
-  settings; skills/prompts/themes keep the settings toggles (package entry
-  and top-level resource array, pi toggleTopLevelResource /
-  setProjectTopLevelOverride). Project mode is available whenever `.kmet/` exists or `-l` was
-  passed (no trust gate), and the screen starts in project-local scope when
-  `.kmet/` exists — project settings and auto dirs load unconditionally, so
-  project-defined resources show enabled by default (pi starts global
-  because its project mode requires trust).
+- Top-level settings entries are discovery only (plain paths). pi's
+  `!glob`/`+path`/`-path` selection patterns are not read there: the
+  persisted selection is `:resources` (`/config`), and auto-dir items are
+  always enabled. Per-package filters keep pi's pattern semantics.
+- `kmet plugins` is the static composition editor: extension items toggle
+  the composition layer (`~/.kmet/agent/patch.edn` / `.kmet/patch.edn`), not
+  settings. Resources are selected in the live `/config` screen over
+  `:resources` (global list plus project delta), replacing pi's
+  `config-selector.ts` toggles. Project composition is available whenever
+  `.kmet/` exists or `-l` was passed (no trust gate).
 - No configurable resource dirs: the auto roots are fixed
   (`~/.kmet/agent/<type>` + `.kmet/<type>`, pi `join(agentDir, type)` +
   `join(cwd, CONFIG_DIR_NAME, type)`); the retired `:*-dir` settings keys

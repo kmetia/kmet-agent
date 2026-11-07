@@ -210,7 +210,7 @@
   (extensions/clear-extensions!)
   (let [valid (write-manifest-extension! (str dir "/meta-valid") "meta-valid.main"
                                          {:name "meta-valid"
-                                          :meta {:tools [{:name "meta_tool"}]
+                                          :meta {:custom [{:name "meta_tool"}]
                                                  :anything [1 2]}})
         bare (write-manifest-extension! (str dir "/meta-bare") "meta-bare.main"
                                         {:name "meta-bare"})
@@ -219,7 +219,7 @@
     (with-installed [valid bare odd]
       (fn []
         (try
-          (is (= {:tools [{:name "meta_tool"}] :anything [1 2]}
+          (is (= {:custom [{:name "meta_tool"}] :anything [1 2]}
                  (:meta (rows/entry :ext/meta-valid))))
           (is (nil? (:meta (rows/entry :ext/meta-bare)))
               "an absent :meta answers nil")

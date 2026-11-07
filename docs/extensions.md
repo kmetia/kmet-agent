@@ -107,14 +107,14 @@ is discovery: the fixed auto roots — `~/.kmet/agent/extensions` plus
 `settings.edn`, packages, and the bundled artifacts. The agent dir honors the
 `KMET_CODING_AGENT_DIR` env override (pi: `ENV_AGENT_DIR`). Top-level
 `:extensions` entries are files or directories resolved against the settings
-scope root; `!glob` excludes, `+path`/`-path` force include/exclude exact
-paths. Discovery feeds `kmet plugins` and the `:ext/<id>` resolver; it does not
-load.
+scope root; they widen the discovered set. Signed and glob entries are
+ignored there — the composition decides what loads. Discovery feeds
+`kmet plugins` and the `:ext/<id>` resolver; it does not load.
 
-Per-type package filters (`:extensions [...]`) and auto-dir `-path`
-overrides still shape the discovered list, but they no longer decide whether
-an extension loads: compose or remove its row. (Skills, prompts and themes
-keep their settings-based filter/array resolution.)
+Per-type package filters (`:extensions [...]`) still shape the discovered
+list, but they no longer decide whether an extension loads: compose or
+remove its row. (Skills, prompts and themes use `/config`'s `:resources`
+selection; top-level paths are discovery only.)
 
 An extension that was enabled only through settings after an upgrade is not
 migrated automatically: `kmet plugins` lists it unchecked, so compose it once.
@@ -234,9 +234,7 @@ underscores, dots → slashes; `.clj` → `.cljc` → `.bb` fallback):
 ;; extension.edn
 {:name   "my-ext"
  :plugin my-ext.main/plugin
- :loader [:jolt :sci]
- ;; optional, opaque host metadata; nothing reads it at HEAD
- :meta   {:tools [{:name "my_tool"}]}}
+ :loader [:jolt :sci]}
 ```
 
 ```clojure

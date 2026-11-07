@@ -1,17 +1,19 @@
 # Resource selection
 
-Status: steps 1–6 implemented (`kmet.app.resources`, the per-type settings
+Status: steps 1–7 implemented (`kmet.app.resources`, the per-type settings
 merge, the `:resources` row and settings-schema validation; the runtime now
 reads `enabled-names :tool` and keeps only the session active-tool override;
 the builtin `/tools` session selector replaces the bundled tools extension;
 `kmet plugins` is the static plugin-row editor; the builtin `/config` resource
 selector writes both scopes and emits `:resources-change`; the package
-per-item selection writers and top-level signed selection are retired; and the
+per-item selection writers and top-level signed selection are retired; the
 skills/prompts read-time filters are wired: the system-prompt row filters its
 skill block, `/skill:` expansion and prompt lookup/expansion/autocomplete
-honor the selection). Steps 7–8 remain. The retired `:default-tools`/`:enabled-tools`
-keys are ignored at runtime until step 7 adds their warnings; no standalone
-screen edits them any more.
+honor the selection; top-level entries are discovery paths only and
+`:meta {:tools ...}` is gone from the manifest contract). Step 8 remains.
+The retired `:default-tools`/`:enabled-tools` keys and top-level signed
+entries are ignored silently: kmet is pre-1.0 and adds no migration warnings
+for them. No standalone screen edits the retired keys any more.
 This file stays at the repository root as the working design and plan until
 the migration lands; moving it beside the source and design record is a
 separate cleanup task.
@@ -130,8 +132,8 @@ Global and project lists merge per type. The settings loader must not deep-merge
 
 This is a settings break from `:default-tools` and `:enabled-tools`:
 
-- both keys are retired, not read, and not translated;
-- startup warns once when either key is present;
+- both keys are retired and not read; no migration warning is emitted;
+- selection belongs in `:resources`;
 - users re-select in `/config`, or edit `settings.edn` by hand.
 
 The old keys cannot be translated without choosing one of their meanings: old
@@ -305,14 +307,14 @@ Re-reads settings and selection and reloads extensions/resources. It does not
 re-read composition layers. Use it as the full fallback; `/config` uses the
 selection-only path above.
 
-## Warnings and settings breaks
+## Settings breaks
 
-- `:default-tools` and `:enabled-tools`: warn once at startup; ignore.
+- `:default-tools` and `:enabled-tools`: ignored, with no migration warning.
 - Plain names in a project `:resources` list: warn once; ignore the project
   list for that type; inherit global.
 - Top-level `:skills`, `:prompts` and `:extensions` paths remain discovery
-  sources. Signed entries are no longer selection; warn once and ignore them.
-  Selection belongs in `:resources`.
+  sources. Signed and glob entries are no longer selection; ignore them
+  silently. Selection belongs in `:resources`.
 - Package filters remain availability-only. A resource a package filter
   excludes has no row and cannot be selected.
 - `:meta {:tools ...}` is removed from the extension manifest contract.
@@ -347,8 +349,9 @@ selection-only path above.
    update the command registry tests.
 6. Add skills/prompts read-time filters. Retire top-level signed selection and
    package per-item selection writers; package filters become availability-only.
-7. Remove `:meta {:tools ...}`, add the warnings above, and update docs,
-   examples and generated composition docs if required.
+7. Remove `:meta {:tools ...}`, retire top-level signed entry reads, and
+   update docs, examples and generated composition docs. Migration warnings
+   are intentionally omitted before 1.0.
 8. Run the changed-file gates; finish with `bb test`, `bb test-ext`, `bb lint`
    and `bb format-check`.
 
