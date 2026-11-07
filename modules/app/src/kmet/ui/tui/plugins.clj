@@ -20,38 +20,21 @@
    `kmet plugins` is its own process, so a toggle applies to the run the user
    starts next.
 
-   The frame is a mounted hiccup root (tui.md §14.1): the two borders are
-   [:dynamic-border] elements, the header/hint/row lines are
-   [:truncated-text] leaves over already-styled strings, and the search field
-   is a tag-owned [:input] whose text lives in state and whose emphasis and
-   caret follow the screen's focus flag."
+   The frame, search field, section rows, navigation and Tab scope switch
+   come from the shared `kmet.ui.tui.grouped-selector` screen; this namespace
+   owns the plugin items, their origin grouping, the checkbox lines and the
+   composition writes."
   (:require [clojure.string :as str]
             [babashka.fs :as fs]
             [kmet.app.config :as cfg]
             [kmet.app.extensions.layers :as ext-layers]
             [kmet.app.extensions.rows :as ext-rows]
-            [kmet.app.keybindings :as app-kb]
             [kmet.app.packages :as pkgs]
             [kmet.app.tools.registry :as tool-registry]
-            [kmet.hikap.core :as engine]
             [kmet.libs.path :as path]
             [kmet.libs.theme :as th]
-            [kmet.reakt.core :as r]
-            [kmet.tui.components.input :as input]
-            [kmet.tui.hikap :as hikap]
-            [kmet.tui.keybindings :as kb]
-            [kmet.tui.keys :as keys]
-            [kmet.tui.macros :refer [defcomponent]]
-            [kmet.tui.protocols :as protocols]
             [kmet.tui.utils :as u]
-            [kmet.ui.tui.list-screen :as ls]
-            [kmet.ui.tui.subs :as s]))
-
-(def ^:private chrome-lines
-  "Fixed lines around the list rows (pi ConfigSelectorComponent chrome):
-   top spacer, top border, spacer, two header lines, spacer, search input
-   line, blank line, bottom spacer, bottom border."
-  11)
+            [kmet.ui.tui.grouped-selector :as grouped]))
 
 ;; ─── View model (pi: buildGroups / ResourceItem / filterItems) ────────────
 
@@ -121,38 +104,7 @@
       (str/includes? (name (:resource-type item)) query)
       (str/includes? (str/lower-case (:path item)) query)))
 
-(defn- build-flat
-  "The filtered flat row list of GROUPS (pi buildFlatList + filterItems):
-   group rows and item rows, keeping only groups with matching items."
-  [groups query]
-  (let [query (str/lower-case (str/trim (or query "")))]
-    (vec (mapcat (fn [g]
-                   (let [items (filterv #(query-match? % query) (:items g))
-                         group (assoc g :items items)]
-                     (when (seq items)
-                       (cons {:kind :group :group group}
-                             (map (fn [item] {:kind :item :group group :item item})
-                                  items)))))
-                 groups))))
-
 ;; ─── Rendering helpers ────────────────────────────────────────────────────
-
-(defn- hint
-  "A key hint: the current binding text for BINDING-ID (or FALLBACK) plus
-   the action description (pi keyHint/rawKeyHint)."
-  [binding-id fallback desc]
-  (let [key-text (app-kb/key-text binding-id)]
-    (str (if (seq key-text) key-text fallback) " " desc)))
-
-(defn- render-checkbox
-  "pi renderCheckbox."
-  [t write-scope state enabled]
-  (if (= write-scope :project)
-    (case state
-      :load (th/fg t :success "[+]")
-      :unload (th/fg t :warning "[-]")
-      (th/fg t :dim (if enabled "[x]" "[ ]")))
-    (if enabled (th/fg t :success "[x]") (th/fg t :dim "[ ]"))))
 
 (defn- group-line
   "Render a group heading."
@@ -194,19 +146,11 @@
                :else name)]
     (u/truncate-to-width
      (str cursor "    "
-          (render-checkbox t write-scope ov (:enabled item))
+          (grouped/checkbox t write-scope ov (:enabled item))
           " " name (item-suffix t write-scope item))
      width "...")))
 
-(defn- row-line
-  "Render one visible row: a group heading or an extension item."
-  [t state width row selected?]
-  (let [write-scope (:write-scope state)]
-    (case (:kind row)
-      :group (group-line t write-scope width (:group row))
-      :item (item-line t write-scope width (:item row) selected?))))
-
-;; ─── Screen state ─────────────────────────────────────────────────────────
+;; ─── Reading the composition ─────────────────────────────────────────────────────────
 
 (defn- warn-layer-errors!
   "Report every unreadable composition layer on stderr, the way the run
@@ -272,95 +216,11 @@
                        :override-state :inherit :unreadable? true))))
           (concat (builtin-tool-items) (:extensions items)))))
 
-(defn- rebuild-layout!
-  "(Re)build the screen's flat rows from ITEMS (a fresh resolution when nil)
-   and the current query. Construction and scope switches resolve; search
-   reuses the items already read; a toggle updates one row in place."
-  ([this] (rebuild-layout! this nil))
-  ([this items]
-   (let [st @(:state-atom this)
-         items (or items (read-items (:write-scope st)))
-         rows (build-flat (build-groups items (cfg/get-agent-dir)) (:query st))
-         first-item (first (keep-indexed (fn [i r] (when (= :item (:kind r)) i))
-                                         rows))
-         selected (or first-item
-                      (min (or (:selected st) 0) (max 0 (dec (count rows)))))]
-     (swap! (:state-atom this) assoc
-            :items items :rows rows :selected selected))))
-
-(defn- refilter!
-  "Re-filter the rows from the items the screen already has (a search change
-   does not change the files)."
-  [this]
-  (rebuild-layout! this (:items @(:state-atom this))))
-
 (defn- item-identity
   "The identity a row's cached item carries across a search re-filter: an
    extension's source or a built-in row's id."
   [item]
   (or (:source item) (get-in item [:metadata :id])))
-
-(defn- update-row-state!
-  "Refresh the selected item after a toggle without re-resolving the layout.
-   The item cache is updated too, so a later search cannot show the old
-   checkbox."
-  [this changes]
-  (swap! (:state-atom this)
-         (fn [{:keys [rows items selected] :as st}]
-           (if (= :item (:kind (get rows selected)))
-             (let [item-id (item-identity (:item (get rows selected)))]
-               (assoc st
-                      :rows (update rows selected update :item merge changes)
-                      :items (mapv #(if (= item-id (item-identity %))
-                                      (merge % changes)
-                                      %)
-                                   items)))
-             st))))
-
-(defn- item-indices
-  "The indices of selectable item rows."
-  [rows]
-  (keep-indexed (fn [i row] (when (= :item (:kind row)) i)) rows))
-
-(defn- move-selection!
-  [this direction]
-  (swap! (:state-atom this)
-         (fn [{:keys [rows selected] :as st}]
-           (let [items (vec (item-indices rows))]
-             (if (seq items)
-               (let [pos (count (take-while #(< % selected) items))
-                     pos (max 0 (min (dec (count items)) (+ pos direction)))]
-                 (assoc st :selected (nth items pos)))
-               st)))))
-
-(defn- page-target
-  "The nearest item row at or beyond TARGET in DIRECTION, or nil when the
-   scan leaves the rows."
-  [rows target direction]
-  (let [items (item-indices rows)
-        candidates (if (pos? direction)
-                     (filter #(>= % target) items)
-                     (filter #(<= % target) items))]
-    (if (pos? direction) (first candidates) (last candidates))))
-
-(defn- page-selection!
-  "pi pageUp/pageDown scan — jump by maxVisible rows, then to the nearest
-   item row in DIRECTION (+1 forward, -1 backward)."
-  [this direction]
-  (swap! (:state-atom this)
-         (fn [st]
-           (let [rows (:rows st)
-                 max-visible (max 5 (- @(:rows-count this) chrome-lines))
-                 sel (:selected st)
-                 n (count rows)
-                 up? (= -1 direction)
-                 target (if up?
-                          (max 0 (- sel max-visible))
-                          (min (max 0 (dec n)) (+ sel max-visible)))
-                 found (page-target rows target direction)]
-             (if found
-               (assoc st :selected found)
-               st)))))
 
 (defn- apply-write!
   "Run WRITE (a scope's writer, answering true when it changed the file),
@@ -375,11 +235,11 @@
          false)))
 
 (defn- write-row!
-  "Run WRITE for SCOPE and update the selected row in place when the writer
-   changed the file."
-  [this scope write changes]
+  "Run WRITE for SCOPE and update ITEM in place when the writer changed the
+   file."
+  [screen item scope write changes]
   (when (apply-write! scope write)
-    (update-row-state! this changes)))
+    (grouped/screen-update-item! screen item changes)))
 
 (defn- project-toggle-changes
   "The state changes a project toggle records: inherit cycles to unload for a
@@ -397,14 +257,14 @@
    its row; the project scope cycles inherit/load/unload over the global
    composition. A built-in tool is restored by dropping its remove patch; a
    project load of one re-inserts its base row. No settings key changes."
-  [this item write-scope]
+  [screen item write-scope]
   (let [builtin? (= :builtin (get-in item [:metadata :origin]))
         id (get-in item [:metadata :id])
         source (:source item)
         enabled? (:enabled item)]
     (when (or builtin? source)
       (if (= :global write-scope)
-        (write-row! this :global
+        (write-row! screen item :global
                     (cond
                       builtin? #(ext-layers/apply-global-builtin-state!
                                  id (not enabled?))
@@ -413,214 +273,14 @@
                     {:enabled (not enabled?) :override-state :inherit})
         (let [changes (project-toggle-changes item)
               next-state (:override-state changes)]
-          (write-row! this :project
+          (write-row! screen item :project
                       (if builtin?
                         #(ext-layers/apply-project-builtin-state!
                           id (get-in item [:metadata :plugin]) next-state)
                         #(ext-layers/apply-project-state! source next-state))
                       changes))))))
 
-(defn- toggle-selected!
-  "Space/enter on the selected item row; every row is a plugin row."
-  [this]
-  (let [{:keys [rows selected write-scope]} @(:state-atom this)
-        row (get rows selected)]
-    (when (= :item (:kind row))
-      (toggle-item! this (:item row) write-scope))))
-
-(defn- refresh-filter!
-  "Apply the search field's text to the row list (pi: searchInput change →
-   filterItems). The field is tag-owned, so the panel mirrors its live text
-   into :query as it forwards — the tree feeds that value straight back,
-   which is why an unchanged value never disturbs the caret."
-  [this]
-  (swap! (:state-atom this) assoc
-         :query (input/input-get-value
-                 (hikap/materialize-ref! this (:search-ref this))))
-  (refilter! this))
-
-(defn- switch-scope!
-  "Tab: switch the write scope and rebuild the layout from the composition
-   of the new scope (pi: setWriteScope)."
-  [this]
-  (swap! (:state-atom this) update :write-scope
-         (fn [s] (if (= s :global) :project :global)))
-  (rebuild-layout! this))
-
-(defn- close!
-  [this]
-  (when-let [f @(:on-close-atom this)] (f)))
-
-;; ─── The screen frame (a mounted hiccup root) ─────────────────────────────
-
-(defn- line-leaf
-  "One already-styled line as an element. [:truncated-text], not [:text]:
-   the imperative renderer returned exact lines, and [:text] would re-wrap
-   any line that is wider than the frame."
-  [line]
-  [:truncated-text {:text line :padding-x 0 :padding-y 0}])
-
-(defn- header-line
-  "The title and key hints, padded to the frame width."
-  [t w write-scope project-mode?]
-  (let [title (th/bold (if (= write-scope :project)
-                         "Project Plugins"
-                         "Global Plugins"))
-        sep (th/fg t :muted " · ")
-        switch-hint (when project-mode?
-                      (hint "tui.input.tab" "tab" "switch mode"))
-        action (if (= write-scope :project)
-                 "space cycle inherit/load/unload"
-                 "space compose/remove")
-        hints (str (when switch-hint (str switch-hint sep))
-                   action sep "esc close")]
-    (u/truncate-to-width
-     (str title (apply str (repeat (max 1 (- w (u/visible-width title)
-                                             (u/visible-width hints)))
-                                   " "))
-          hints)
-     w "")))
-
-(defn- scope-line
-  "The layer path the current scope writes, and its inheritance note."
-  [t w write-scope project-mode?]
-  (u/truncate-to-width
-   (th/fg t :muted
-          (str (if (= write-scope :global)
-                 (cfg/global-patch-path)
-                 ".kmet/patch.edn")
-               (when (and (= write-scope :project) project-mode?)
-                 " · inherited plugin rows are dimmed")))
-   w ""))
-
-(defn- frame-tree
-  "The screen's element tree: spacers, accent borders, the title/hint/scope
-   lines, the width-truncated row lines and the clipped counter, with the
-   search field as a tag-owned [:input]. The height is tracked: a terminal
-   resize re-lays out the frame (max-visible follows the live rows)."
-  [screen]
-  (let [w hikap/*width*
-        ;; tracked: a theme switch re-derives the frame's styled chrome
-        t (r/tracked-deref s/theme-sub)
-        st (r/tracked-deref (:state-atom screen))
-        rows-count (r/tracked-deref (:rows-count screen))
-        write-scope (:write-scope st)
-        project-mode? (:project-mode? screen)
-        rows (:rows st)
-        n (count rows)
-        item-total (count (filterv #(= :item (:kind %)) rows))
-        max-visible (max 5 (- rows-count chrome-lines))
-        sel (min (or (:selected st) 0) (max 0 (dec n)))
-        [start-idx end-idx] (ls/window sel max-visible n)
-        visible (subvec rows start-idx end-idx)
-        border-fn #(th/fg t :accent %)
-        title-line (header-line t w write-scope project-mode?)
-        scope-hint (scope-line t w write-scope project-mode?)
-        row-lines (map-indexed (fn [rel row]
-                                 (row-line t st w row
-                                           (and (= :item (:kind row))
-                                                (= (+ start-idx rel) sel))))
-                               visible)
-        clipped? (or (pos? start-idx) (< end-idx n))
-        scroll-line (when clipped?
-                      (let [cur (count (filterv #(= :item (:kind %))
-                                                (subvec rows 0 (inc sel))))]
-                        (u/truncate-to-width
-                         (th/fg t :dim (str "  (" cur "/" item-total ")")) w "")))]
-    [:container {}
-     [:spacer {:lines 1}]
-     [:dynamic-border {:color-fn border-fn}]
-     [:spacer {:lines 1}]
-     (line-leaf title-line)
-     (line-leaf scope-hint)
-     [:spacer {:lines 1}]
-     [:input {:ref (:search-ref screen)
-              :value (:query st)
-              :focused? (r/tracked-deref (:focused? screen))}]
-     [:spacer {:lines 1}]
-     (map line-leaf row-lines)
-     (when scroll-line (line-leaf scroll-line))
-     [:spacer {:lines 1}]
-     [:dynamic-border {:color-fn border-fn}]]))
-
-(defcomponent PluginsScreen nil
-              [state-atom search-ref on-close-atom rows-count project-mode?
-               focused? rows-unwatch root]
-
-  (render [this width] (protocols/render (:root this) width))
-
-  (handle-input [this data]
-    (let [kmgr (kb/get-global-keybindings)]
-      (cond
-        ;; Navigation (pi tui.select.up/down; ctrl+p/ctrl+n ride the ids)
-        (kb/matches-key kmgr data "tui.select.up")
-        (do (move-selection! this -1) nil)
-
-        (kb/matches-key kmgr data "tui.select.down")
-        (do (move-selection! this 1) nil)
-
-        (kb/matches-key kmgr data "tui.select.pageUp")
-        (do (page-selection! this -1) nil)
-
-        (kb/matches-key kmgr data "tui.select.pageDown")
-        (do (page-selection! this 1) nil)
-
-        (kb/matches-key kmgr data "tui.select.cancel")
-        (do (close! this) nil)
-
-        ;; pi config-selector still matches ctrl+c raw (onExit), and space
-        ;; raw; everything else goes through the manager
-        (keys/matches-key? data "ctrl+c")
-        (do (close! this) nil)
-
-        (kb/matches-key kmgr data "tui.input.tab")
-        (do (when (:project-mode? this) (switch-scope! this)) nil)
-
-        (or (= data " ") (kb/matches-key kmgr data "tui.select.confirm"))
-        (do (toggle-selected! this) nil)
-
-        ;; Everything else — the search field, then the unconditional
-        ;; re-filter (pi: searchInput.handleInput + filterItems); the
-        ;; materialize helper compiles the tree when the host has not
-        ;; painted yet, so a key is never dropped
-        :else
-        (do (protocols/handle-input
-             (hikap/materialize-ref! this (:search-ref this)) data)
-            (refresh-filter! this)
-            nil))))
-
-  ;; the root's reaction and the tag-owned search field are the screen's
-  ;; lifecycle — unwinding the tree disposes the field with it; the
-  ;; terminal-size watch (when one is attached) must not outlive the screen
-  (dispose [this]
-    (when-some [unwatch (:rows-unwatch this)]
-      (unwatch))
-    (protocols/dispose (:root this))))
-
-;; ─── IFocusable — the panel's flag; the tree derives the field emphasis ────
-
-(extend-type PluginsScreen
-  protocols/IFocusable
-  (focused [this] @(:focused? this))
-  (set-focused! [this val] (reset! (:focused? this) val)))
-
 ;; ─── Construction & test helpers ──────────────────────────────────────────
-
-(defn- watch-terminal-rows!
-  "Keep SCREEN's layout height in step with the TUI's terminal-size ref
-   and force a repaint through REQUEST-RENDER! whenever the height changes.
-   Returns a cancel fn for the screen's dispose."
-  [screen size-ref request-render!]
-  (let [k (keyword (gensym "plugins-rows-"))
-        last-rows (atom @(:rows-count screen))]
-    (add-watch size-ref k
-               (fn [_ _ _ size]
-                 (let [rows (:rows size)]
-                   (when (not= rows @last-rows)
-                     (reset! last-rows rows)
-                     (reset! (:rows-count screen) rows)
-                     (request-render!)))))
-    (fn [] (remove-watch size-ref k))))
 
 (defn make-plugins-screen
   "Build the plugin-composition screen. OPTS:
@@ -639,42 +299,54 @@
    :on-close        — called when the user closes the screen (escape or
                       ctrl+c)"
   [& {:keys [write-scope project-mode? rows size-ref request-render! on-close]}]
-  (let [state-atom (atom {:write-scope (or write-scope :global)
-                          :query ""
-                          :selected 0
-                          :rows []})
-        screen (map->PluginsScreen
-                {:state-atom state-atom
-                 :search-ref (engine/ref)
-                 :on-close-atom (atom on-close)
-                 :rows-count (atom (or rows 24))
-                 :project-mode? (boolean project-mode?)
-                 :focused? (atom false)})
-        root (hikap/root (fn [_props] (frame-tree screen)))
-        screen (assoc screen :root root)]
-    (rebuild-layout! screen)
-    (cond-> screen
-      (and size-ref request-render!)
-      (assoc :rows-unwatch (watch-terminal-rows! screen size-ref request-render!)))))
+  (let [project-mode? (boolean project-mode?)]
+    (grouped/make-screen
+     {:write-scope (or write-scope :global)
+      :can-switch-scope? project-mode?
+      :rows rows
+      :size-ref size-ref
+      :request-render! request-render!
+      :on-close on-close
+      :read read-items
+      :groups #(build-groups % (cfg/get-agent-dir))
+      :filter-match query-match?
+      :item-identity item-identity
+      :render-group (fn [{:keys [group scope theme width]}]
+                      (group-line theme scope width group))
+      :render-item (fn [{:keys [item scope theme width selected?]}]
+                     (item-line theme scope width item selected?))
+      :on-activate (fn [{:keys [screen item scope]}]
+                     (toggle-item! screen item scope))
+      :title (fn [scope]
+               (if (= scope :project) "Project Plugins" "Global Plugins"))
+      :action-hint (fn [scope]
+                     (if (= scope :project)
+                       "space cycle inherit/load/unload"
+                       "space compose/remove"))
+      :scope-line (fn [scope]
+                    (str (if (= scope :global)
+                           (cfg/global-patch-path)
+                           ".kmet/patch.edn")
+                         (when (and (= scope :project) project-mode?)
+                           " · inherited plugin rows are dimmed")))})))
 
 (defn screen-write-scope
   "The screen's current write scope (tests)."
   [screen]
-  (:write-scope @(:state-atom screen)))
+  (grouped/screen-write-scope screen))
 
 (defn screen-rows
   "The screen's current flat rows (tests)."
   [screen]
-  (:rows @(:state-atom screen)))
+  (grouped/screen-rows screen))
 
 (defn screen-selected
   "The screen's selected row index (tests)."
   [screen]
-  (:selected @(:state-atom screen)))
+  (grouped/screen-selected screen))
 
 (defn screen-set-query!
   "Set the search query and re-filter (tests; typing drives the same path
    through the tag-owned field)."
   [screen query]
-  (swap! (:state-atom screen) assoc :query (str query))
-  (refilter! screen))
+  (grouped/screen-set-query! screen query))

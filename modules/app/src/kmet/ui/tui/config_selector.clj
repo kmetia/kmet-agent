@@ -1,25 +1,31 @@
 (ns kmet.ui.tui.config-selector
   "The builtin `/config` live resource selector over `kmet.app.resources`.
 
-   Rows are the available resources of the current project run: global scope
-   toggles a resource's persistent selection, project scope cycles its delta
-   state (inherit -> enabled -> disabled -> inherit). A write persists through
+   Rows are the available resources of the current project run, grouped into
+   the Tools, Skills and Prompts sections. Global scope toggles a resource's
+   persistent selection; project scope cycles its delta state
+   (inherit -> enabled -> disabled -> inherit) and dims inherited rows, the
+   same Tab-to-switch-scope layout as `kmet plugins`. A write persists through
    the resources service, refreshes only the affected consumers and emits
    `:resources-change` with the affected types; it never edits composition,
    remounts providers or re-runs discovery."
-  (:require [kmet.app.config :as cfg]
+  (:require [clojure.string :as str]
+            [kmet.app.config :as cfg]
             [kmet.app.resources :as resources]
             [kmet.app.session.runtime :as runtime]
-            [kmet.hikap.core :as engine]
             [kmet.libs.theme :as th]
-            [kmet.tui.components.settings-list :as settings-list]
             [kmet.tui.core :as tui]
-            [kmet.tui.hikap :as h]
-            [kmet.ui.tui.dock :as dock]))
+            [kmet.tui.utils :as u]
+            [kmet.ui.tui.dock :as dock]
+            [kmet.ui.tui.grouped-selector :as grouped]))
 
 (def ^:private kinds
-  "The selectable resource types, in display order."
+  "The selectable resource types, in section order."
   [:tool :skill :prompt])
+
+(def ^:private section-labels
+  "The heading for each resource type."
+  {:tool "Tools" :skill "Skills" :prompt "Prompts"})
 
 (defn- provider-label
   "A short description of the provider that made a resource available."
@@ -30,52 +36,81 @@
     :app "app"
     (str kind)))
 
-(defn- scope-row
-  "The first row: the global/project scope switch."
-  [scope]
-  {:id ::scope
-   :label "Scope"
-   :description "Global selection applies everywhere; project writes a delta over it"
-   :value (name scope)
-   :values ["global" "project"]})
-
-(defn- effective-suffix
-  "The per-row marker for an effective state the value column does not
-   already show: a project override in global scope, or the inherited global
-   state in project scope. nil when the value itself is the answer."
-  [scope {:keys [global? project-state selected?]}]
-  (cond
-    (and (= scope :global) (not= global? selected?))
-    (if selected? " (project: on)" " (project: off)")
-
-    (and (= scope :project) (= project-state :inherit))
-    (if selected? " (global: on)" " (global: off)")))
-
 (defn- row
-  "One catalog row in SCOPE: a global enable/disable or a project tri-state,
-   with the effective state in the description and, when the value column
-   cannot show it, in the label."
-  [scope {:keys [type provider project-state global? selected?] resource-name :name :as resource}]
-  (merge {:id [type resource-name]
-          :label (str (name type) "/" resource-name
-                      (effective-suffix scope resource))
-          :description (str (provider-label provider)
-                            " · effective: "
-                            (if selected? "enabled" "disabled"))}
-         (if (= scope :global)
-           {:value (if global? "enabled" "disabled")
-            :values ["enabled" "disabled"]}
-           {:value (name project-state)
-            :values ["inherit" "enabled" "disabled"]})))
+  "One catalog resource as a screen item: its `[type name]` identity, the
+   name shown in its section, and the catalog's provider/scope fields."
+  [{:keys [type name] :as resource}]
+  (assoc resource :id [type name] :label name))
 
 (defn- items
-  "The selector's rows: the scope switch, then every available resource of
-   every type."
-  [service scope]
-  (into [(scope-row scope)]
-        (mapcat (fn [kind]
-                  (map #(row scope %) ((:catalog service) kind))))
+  "Every available resource of every type, in section order."
+  [service]
+  (vec (mapcat (fn [kind]
+                 (map row ((:catalog service) kind)))
+               kinds)))
+
+(defn- groups
+  "The screen sections: one per resource type with at least one item."
+  [items]
+  (keep (fn [kind]
+          (let [section-items (filterv #(= kind (:type %)) items)]
+            (when (seq section-items)
+              {:key kind
+               :label (get section-labels kind (str/capitalize (name kind)))
+               :items (vec (sort-by :name section-items))})))
         kinds))
+
+(defn- query-match?
+  "True when the lower-cased QUERY matches a resource's name, type or
+   provider."
+  [item query]
+  (or (str/blank? query)
+      (str/includes? (str/lower-case (:name item)) query)
+      (str/includes? (name (:type item)) query)
+      (str/includes? (str/lower-case (provider-label (:provider item))) query)))
+
+(defn- section-line
+  "Render a resource-type section heading (the indented type heading the old
+   config screen used for its resource subgroups)."
+  [theme width group]
+  (u/truncate-to-width
+   (str "    " (th/fg theme :muted (:label group)))
+   width ""))
+
+(defn- checkbox-state
+  "Map a project delta state to the shared checkbox state; inherit keeps the
+   effective global checkbox."
+  [project-state]
+  (case project-state :enabled :load :disabled :unload nil))
+
+(defn- item-suffix
+  "The project-scope override annotation after a resource name, worded the
+   way the old config screen worded its load/unload deltas."
+  [theme scope item]
+  (when (= scope :project)
+    (case (:project-state item)
+      :enabled (th/fg theme :muted "  project load")
+      :disabled (th/fg theme :muted "  project unload")
+      (th/fg theme :dim "  inherited global"))))
+
+(defn- item-line
+  "Render one resource row: cursor, checkbox, name and project annotation."
+  [theme scope width item selected?]
+  (let [project? (= scope :project)
+        state (when project? (checkbox-state (:project-state item)))
+        enabled (if project? (:selected? item) (:global? item))
+        dimmed? (and project? (= :inherit (:project-state item)))
+        cursor (if selected? (th/fg theme :accent "> ") "  ")
+        name (:label item)
+        name (cond
+               dimmed? (th/fg theme :dim name)
+               selected? (th/bold name)
+               :else name)]
+    (u/truncate-to-width
+     (str cursor "    "
+          (grouped/checkbox theme scope state enabled)
+          " " name (item-suffix theme scope item))
+     width "...")))
 
 (defn- stored-entries
   "The raw stored entry list for KIND in SCOPE, used to tell a real write from
@@ -94,57 +129,82 @@
     (when (not= before (stored-entries scope kind))
       [kind])))
 
-(defn- refresh-items!
-  "Rebuild the rows from the stored state, keeping the search query and
-   selection."
-  [service scope-atom sl-ref]
-  (settings-list/settings-list-set-items!
-   @sl-ref (items service @scope-atom) {:preserve-state? true}))
+(defn- next-value
+  "The value one activation applies to ITEM in SCOPE: the opposite global
+   toggle, or the next project delta state."
+  [scope item]
+  (if (= scope :global)
+    (if (:global? item) "disabled" "enabled")
+    (case (:project-state item)
+      :inherit "enabled"
+      :enabled "disabled"
+      :disabled "inherit")))
 
-(defn- apply-change!
-  "Apply one row change: switch scope, or write the resource and refresh the
-   selection-only consumers."
-  [cs service scope-atom sl-ref id value]
-  (if (= id ::scope)
-    (reset! scope-atom (keyword value))
-    (when-let [changed (with-scope service @scope-atom id value)]
-      (runtime/refresh-resources! (:engine cs) changed)))
-  (refresh-items! service scope-atom sl-ref)
-  nil)
+(defn- activate!
+  "Apply one activation: write the resource in SCOPE, refresh only the
+   affected consumers, then rebuild the rows from the stored state."
+  [cs service scope screen item]
+  (when-let [changed (with-scope service scope (:id item) (next-value scope item))]
+    (runtime/refresh-resources! (:engine cs) changed))
+  (grouped/screen-refresh! screen))
+
+(defn- close!
+  "Close the docked selector and request a repaint."
+  [cs frame-atom]
+  (dock/close-atom! cs frame-atom)
+  (when-let [tui (:tui cs)]
+    (tui/tui-request-render tui)))
+
+(defn- screen-spec
+  "The grouped-selector spec for the `/config` screen over SERVICE."
+  [cs service frame-atom]
+  (let [tui (:tui cs)
+        size (when tui (tui/tui-terminal-size tui))]
+    {:write-scope :global
+     :can-switch-scope? true
+     :rows (or (:rows size) 24)
+     :size-ref (when tui (tui/tui-terminal-size-ref tui))
+     :request-render! (when tui #(tui/tui-request-render tui true))
+     :on-close #(close! cs frame-atom)
+     :read (fn [_scope] (items service))
+     :groups groups
+     :filter-match query-match?
+     :item-identity :id
+     :render-group (fn [{:keys [group theme width]}]
+                     (section-line theme width group))
+     :render-item (fn [{:keys [item scope theme width selected?]}]
+                    (item-line theme scope width item selected?))
+     :on-activate (fn [{:keys [screen item scope]}]
+                    (activate! cs service scope screen item))
+     :title (fn [scope]
+              (if (= scope :project)
+                "Project Local Resources"
+                "Global Resources"))
+     :action-hint (fn [scope]
+                    (if (= scope :project)
+                      "space cycle inherit/+/-"
+                      "space toggle"))
+     :scope-line (fn [scope]
+                   (str (if (= scope :global)
+                          (cfg/global-settings-path)
+                          ".kmet/settings.edn")
+                        (when (= scope :project)
+                          " · inherited global resources are dimmed")))}))
 
 (defn show-config
   "Open the builtin `/config` resource selector over the engine's live
    `:resources` service.
 
-   Space/Enter cycles the selected row: global toggles enabled/disabled,
-   project cycles inherit -> enabled -> disabled -> inherit. Every write takes
-   effect immediately and persists; Esc closes."
+   Tab switches global/project scope. Space/Enter cycles the selected row:
+   global toggles enabled/disabled, project cycles
+   inherit -> enabled -> disabled -> inherit. Every write takes effect
+   immediately and persists; Esc closes."
   [cs]
   (let [engine (:engine cs)
         service (or (runtime/resources engine)
                     (throw (ex-info "the composition mounted no :resources service"
                                     {:type ::no-resources-service})))
-        scope-atom (atom :global)
         frame-atom (atom nil)
-        close! (fn []
-                 (dock/close-atom! cs frame-atom)
-                 (when (:tui cs)
-                   (tui/tui-request-render (:tui cs))))
-        sl-ref (engine/ref)
-        frame (h/compile-tree
-               [:container {}
-                [:text {:padding-x 1 :padding-y 0
-                        :text (str (th/bold "Resources") "  "
-                                   (th/dim "global/project selection · Enter/Space change · Esc close"))}]
-                [:dynamic-border {:color-fn #(th/fg (th/get-current-theme) :accent %)}]
-                [:settings-list {:ref sl-ref
-                                 :items (items service @scope-atom)
-                                 :enable-search true
-                                 :max-visible 15
-                                 :on-change (fn [id value]
-                                              (apply-change! cs service scope-atom sl-ref id value))
-                                 :on-escape close!}]
-                [:dynamic-border {:color-fn #(th/fg (th/get-current-theme) :accent %)}]])
-        sl @sl-ref]
-    (reset! frame-atom frame)
-    (dock/mount! cs frame {:focus-target sl})))
+        screen (grouped/make-screen (screen-spec cs service frame-atom))]
+    (reset! frame-atom screen)
+    (dock/mount! cs screen {:focus-target screen})))

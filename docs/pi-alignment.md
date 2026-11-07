@@ -184,8 +184,9 @@ sections with installed paths; `plugins` opens the static composition editor —
 built-in tool and extension rows grouped by origin, search, space
 composes/removes, Tab global/project scope switching with the
 inherit/load/unload tri-state and dimmed inherited rows, escape/ctrl+c close.
-pi's resource rows (per-package and per-type toggles) are not ported yet; see
-`config.md` steps 5–6.
+pi's per-package resource rows are not ported; the live in-TUI `/config`
+screen selects tools, skills and prompts from the `:resources` service in
+Tools/Skills/Prompts sections, with Tab switching the global/project scope.
 
 Object entries are fully supported with pi's semantics:
 `{:source ... :extensions [...] :skills [...] :prompts [...] :themes [...]}`
@@ -295,7 +296,7 @@ Missing, by pi's cli.md groups:
 | **Terminal protocol overrides** | `terminal.hyperlinks`, `terminal.images`, `terminal.trueColor` settings | Missing — kmet's `kmet.libs.terminal` auto-detects hyperlinks, inline-image protocol, and true color; no per-setting override |
 | **Cache-miss notices** | `showCacheMissNotices` setting | Done — `:show-cache-miss-notices` setting, `session/detect-cache-miss` (pi detectMiss), notice at agent-end (≥ 20k tokens) |
 | **Skill invocation presentation** | `components/skill-invocation-message.ts` | **Done** — `kmet.app.skill-block/parse` + `kmet.ui.tui.skill-message`: a `/skill:name` block renders as `[skill] name (ctrl+o to expand)` (collapsed) or the name + body as Markdown (expanded), with the trailing args as a normal user message below. Live and replay share the parse; the session still stores the expanded text |
-| **Custom entry rendering** | `registerEntryRenderer` + `components/custom-entry.ts` | Done — `extensions/register-entry-renderer!` + live entry sink; rendered at replay and on append (pi registerEntryRenderer + CustomEntryComponent) |
+| **Custom entry rendering** | `registerEntryRenderer` + `components/custom-entry.ts` | Done — `extensions/register-entry-renderer!` + live entry sink; rendered at replay and on append, and a live append is spliced before the streaming component (pi `addCustomEntryToChat`), so a posted entry never lands below the in-flight response |
 
 ### 3. Slash commands
 
