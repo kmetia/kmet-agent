@@ -445,8 +445,9 @@
         (finally
           (fs/delete-tree dir))))))
 
-(deftest custom-entry-sink-requests-frame-after-append
-  (testing "a rendered custom entry requests a frame after appending to chat"
+(deftest live-posts-stay-above-the-streaming-response
+  (testing "a rendered custom entry or chat-info posted while a response
+            streams lands above it and requests a frame"
     (let [dir (test-tmp/temp-dir! "test-entry-render-")
           sess (session/create-session dir)
           render-requested? (atom false)
@@ -456,15 +457,15 @@
           cs (hs/core-state (hs/handle-with {:session sess})
                             {:tui tui*
                              :chat-history chat-history})
+          registry ((var ui-registry/build-extension-ui-registry)
+                    {:tui tui* :cs cs}
+                    {:ch chat-history}
+                    nil)
           dereg (extensions/register-entry-renderer! (extensions/extension-owner "test-entry-render")
                                                      "test-entry-render"
                                                      (fn [_]
                                                        {:role :info :label "Entry" :content "rendered entry"}))]
       (try
-        ((var ui-registry/build-extension-ui-registry)
-         {:tui tui* :cs cs}
-         {:ch chat-history}
-         nil)
         (extensions/set-session! sess)
         (with-redefs [tui/tui-request-render
                       (fn [_]
@@ -478,6 +479,22 @@
                   @(:messages-atom chat-history)))
         (is (some pos? @request-message-counts)
             "the entry request was made after the message was appended")
+        ;; An entry appended while a response streams goes above it (pi:
+        ;; addCustomEntryToChat splices before the streaming component), so
+        ;; the live stream stays the last transcript entry.
+        (chat-history/chat-history-start-streaming! chat-history)
+        (chat-history/chat-history-append-streaming-text! chat-history "streaming")
+        (extensions/append-custom-entry! "test-entry-render" {})
+        (is (= [:info :info :assistant]
+               (mapv :role @(:messages-atom chat-history)))
+            "the streamed entry stays last")
+        ;; The extension chat-info capability is a posted transcript entry
+        ;; too: it goes above the live stream for the same reason.
+        (with-redefs [tui/tui-request-render (fn [_] nil)]
+          ((:chat-info registry) "Label" "posted info"))
+        (is (= [:info :info :info :assistant]
+               (mapv :role @(:messages-atom chat-history)))
+            "chat-info also stays above the live stream")
         (finally
           (dereg)
           (tu/clear-extension-wiring!)
@@ -1401,8 +1418,8 @@
         (let [errs (filterv #(= :error (:role %)) @(:messages-atom ch))]
           (is (= 1 (count errs)) "the retried attempt records its reason once")
           (is (= err-msg (:content (first errs))))))
-      (testing "attempt with partials: the streamed text stays, no placeholder
-                is dropped"
+      (testing "attempt with partials: the streamed text stays, finalized at
+                message-end (pi: streamingComponent undefined)"
         (handler {:type :message-start :message {:role :assistant :content []}})
         ;; text deltas reach the streaming component through the agent's
         ;; on-text callback (turn.clj), not through a bus event
@@ -1412,8 +1429,11 @@
                             :content [{:type :text :text "partial answer"}]
                             :stop-reason :error
                             :error-message "network error: request timed out"}})
-        (is (some? @(:streaming-atom ch))
-            "the placeholder with streamed text is kept")
+        (is (nil? @(:streaming-atom ch))
+            "the partial is finalized, not left streaming")
+        (is (= "partial answer"
+               (:content (last (chat-history/chat-history-get-messages ch))))
+            "the streamed text is kept as an ordinary transcript entry")
         (handler {:type :auto-retry-start :attempt 2 :max-attempts 3
                   :delay-ms 1000 :error-message "network error: request timed out"})
         (let [errs (filterv #(= :error (:role %)) @(:messages-atom ch))]

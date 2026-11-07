@@ -512,9 +512,13 @@
 
 (defn chat-history-insert-before-streaming!
   "Insert a message immediately before the current streaming message.
-   Used for before-agent-start injected messages, which are input context
-   that belongs above the assistant response. Falls back to appending when
-   no streaming message exists. Returns the created component (or nil)."
+   Used for messages posted while a response is streaming (before-agent-start
+   injected info, extension custom messages and custom entries) and for
+   transcript entries appended from outside the loop: streamed content stays
+   the last thing on screen. The placeholder is located by IDENTITY, not by
+   position — a status line or another entry may have been appended after it.
+   Falls back to appending when no streaming message exists. Returns the
+   created component (or nil)."
   [ch msg]
   (let [msg (with-skill-block (with-assistant-data msg))
         comp (make-component-for-msg msg (message-context ch))
@@ -523,8 +527,11 @@
       (let [entry (assoc msg :component comp)]
         (swap! (:messages-atom ch)
                (fn [msgs]
-                 (let [idx (if streaming (max 0 (dec (count msgs))) (count msgs))]
-                   (vec (concat (subvec msgs 0 idx) [entry] (subvec msgs idx))))))))
+                 (if-let [idx (first (keep-indexed
+                                      (fn [i m] (when (identical? m streaming) i))
+                                      msgs))]
+                   (vec (concat (subvec msgs 0 idx) [entry] (subvec msgs idx)))
+                   (conj msgs entry))))))
     comp))
 
 (defn- split-trailing-statuses

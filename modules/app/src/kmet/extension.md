@@ -956,7 +956,8 @@ covers, so blocking the `run_code` tool itself is what a hook can do.
 ```clojure
 ;; send a custom message (pi: sendCustomMessage): persisted as a custom_message
 ;; session entry, injected into the LLM context (sent as a user message),
-;; rendered in the chat when :display. :next-turn queues it for the next
+;; rendered in the chat when :display (above a live streaming response).
+;; :next-turn queues it for the next
 ;; prompt. While streaming, :trigger-turn (default true) queues it into the
 ;; run (:steer into the current turn, :follow-up after it) and :trigger-turn
 ;; false defers it to the end of the turn, so it cannot land between a tool
@@ -1086,7 +1087,8 @@ from the api.
 
 ;; append an :info message to the chat history (the /session display style):
 ;; LABEL renders bracketed above CONTENT; part of the live transcript,
-;; never sent to the LLM, not persisted across restarts
+;; never sent to the LLM, not persisted across restarts; posted while a
+;; response streams, it lands above the live stream
 (ext/ui-chat-info api "Label" "content")
 
 (ext/ui-set-theme api "light")

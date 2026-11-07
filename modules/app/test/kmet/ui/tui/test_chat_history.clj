@@ -612,7 +612,19 @@
         (is (= 3 (count msgs)))
         (is (= :user (:role (nth msgs 0))))
         (is (= :info (:role (nth msgs 1))) "info box sits above the response")
-        (is (= :assistant (:role (nth msgs 2))))))))
+        (is (= :assistant (:role (nth msgs 2)))))))
+  (testing "the placeholder is found by identity, not position: a trailing
+            status line does not put the posted entry below the stream"
+    (let [ch (ch/make-chat-history)]
+      (ch/chat-history-add-message! ch {:role :user :content "hi"})
+      (ch/chat-history-start-streaming! ch)
+      (ch/chat-history-append-streaming-text! ch "response")
+      (ch/chat-history-show-status! ch "Tool display: expanded")
+      (ch/chat-history-insert-before-streaming! ch
+                                                {:role :info :label "ext" :content "note"})
+      (is (= [:user :info :assistant :status]
+             (mapv :role @(:messages-atom ch)))
+          "the note goes above the assistant, the status stays last"))))
 
 (deftest test-insert-before-streaming-appends-when-no-streaming
   (testing "falls back to appending when no streaming placeholder exists"

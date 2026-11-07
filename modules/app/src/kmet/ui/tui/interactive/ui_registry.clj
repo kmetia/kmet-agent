@@ -259,8 +259,10 @@
          ;; message to the chat history — part of the live transcript, no
          ;; overlay and nothing to dismiss (never sent to the LLM, never
          ;; persisted to the session; pi has no equivalent — kmet-specific).
+         ;; A post while a response streams goes above it, so the live stream
+         ;; stays the last entry.
          :chat-info (fn [label content]
-                      (chat-history/chat-history-add-message!
+                      (chat-history/chat-history-insert-before-streaming!
                        ch {:role :info :label label :content (str content)})
                       (tui/tui-request-render t)
                       nil)
@@ -714,7 +716,12 @@
           entry-sink (fn [entry]
                        (when-let [rendered (session-admin/run-entry-renderer
                                             (extensions/get-entry-renderer (:custom-type entry)) entry)]
-                         (chat-history/chat-history-add-message!
+                         ;; A custom entry appended mid-stream goes above the live
+                         ;; response, like every other message posted while the
+                         ;; model is streaming (pi: addCustomEntryToChat splices
+                         ;; before the streaming component); once the response
+                         ;; finalized, this appends in order.
+                         (chat-history/chat-history-insert-before-streaming!
                           (:chat-history cs)
                           (session-admin/renderer-result->message rendered))
                          ;; The sink appends to the untracked chat message

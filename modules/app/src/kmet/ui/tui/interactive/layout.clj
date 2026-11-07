@@ -88,10 +88,12 @@
   (case (:type evt)
     :tool-execution-start
     ;; Pi: create pending component once, update in place.
-    ;; The streaming placeholder finalizes here (the tool box lands after
-    ;; it) — mark the message as tool-call-bearing FIRST so a tool-call-only
-    ;; assistant message stays invisible instead of bubbling '(no response)'
-    ;; (pi: hasToolCalls; loop-continue turns are usually tool-call-only).
+    ;; The assistant message's :message-end finalized the streaming
+    ;; placeholder already, so the tool box lands after it. Finalize here
+    ;; too for an event sequence that skipped that end (and mark the message
+    ;; tool-call-bearing FIRST so a tool-call-only assistant message stays
+    ;; invisible instead of bubbling '(no response)' — pi: hasToolCalls;
+    ;; loop-continue turns are usually tool-call-only).
     (let [msg {:role :tool
                :tool-name (:tool-name evt)
                :arguments (:args evt {})
@@ -164,7 +166,11 @@
 (defn- on-message
   "Message lifecycle events: the transcript entry for each message role.
    Streaming text/thinking itself arrives through the on-text/on-thinking
-   callbacks, so :message-update needs no UI action."
+   callbacks, so :message-update needs no UI action. An assistant
+   :message-end finalizes the streaming placeholder here (pi sets its
+   streamingComponent undefined at message_end): the response becomes an
+   ordinary transcript entry immediately, so a message posted after it lands
+   below it while only a TRULY live stream stays the last entry."
   [{:keys [chat-history tui cs-ref]} evt]
   (case (:type evt)
     :message-start
@@ -172,7 +178,8 @@
     ;; prompt and consumed steering/follow-up messages)
     ;; land in the chat here; assistant message starts
     ;; finalize the previous turn's streaming placeholder
-    ;; and open a fresh one, so a follow-up continuation
+    ;; (a no-op after its message-end finalized it) and
+    ;; open a fresh one, so a follow-up continuation
     ;; never merges into the prior response; before-
     ;; agent-start injected messages (role :info) display
     ;; as labeled info boxes above the response. Content
@@ -222,12 +229,24 @@
     ;; partial text/thinking stays (record-abandoned-attempt! kept
     ;; it), and the reason surfaces once per attempt with the retry
     ;; line — or, for a terminal failure, through on-agent-error.
-    (when (and (:error-message (:message evt))
-               (chat-history/chat-history-streaming-empty? chat-history))
-      (chat-history/chat-history-remove-streaming-placeholder! chat-history)
-      (tui/tui-request-render tui))
-    (when-let [cs @cs-ref]
-      (status/show-working-phase! cs :working))))
+    ;; Then a completed assistant message finalizes its placeholder
+    ;; (pi: message_end clears streamingComponent): the response is an
+    ;; ordinary entry from here on, so an entry or message posted after
+    ;; it appends below it. A tool-call message is marked first — the
+    ;; finalized map and component keep :tool-calls? (the quiet-mode run
+    ;; grouping and the '(no response)' suppression read it).
+    (let [{:keys [role tool-calls error-message]} (:message evt)]
+      (when (and error-message
+                 (chat-history/chat-history-streaming-empty? chat-history))
+        (chat-history/chat-history-remove-streaming-placeholder! chat-history)
+        (tui/tui-request-render tui))
+      (when (= :assistant role)
+        (when (seq tool-calls)
+          (chat-history/chat-history-mark-streaming-tool-calls! chat-history))
+        ;; finalize also closes the live thinking phase
+        (chat-history/chat-history-finalize-streaming! chat-history))
+      (when-let [cs @cs-ref]
+        (status/show-working-phase! cs :working)))))
 
 (defn- on-run-lifecycle
   "Run-level events: the spinner/animation presentation, the footer, and the
