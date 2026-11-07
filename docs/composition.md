@@ -49,7 +49,7 @@ its layers; this page is what the build ships.
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
 | `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
-| `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
+| `:system-prompt` | `kmet.app.system-prompt/plugin` | `resources`, `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
 | `:projections` | `kmet.app.projections/plugin` | `sessions` | `projections` |  |  |
@@ -89,7 +89,7 @@ its layers; this page is what the build ships.
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
 | `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
-| `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
+| `:system-prompt` | `kmet.app.system-prompt/plugin` | `resources`, `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
 | `:projections` | `kmet.app.projections/plugin` | `sessions` | `projections` |  |  |
@@ -123,7 +123,7 @@ its layers; this page is what the build ships.
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
 | `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
-| `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
+| `:system-prompt` | `kmet.app.system-prompt/plugin` | `resources`, `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
 | `:projections` | `kmet.app.projections/plugin` | `sessions` | `projections` |  |  |
@@ -157,7 +157,7 @@ its layers; this page is what the build ships.
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
 | `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
-| `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
+| `:system-prompt` | `kmet.app.system-prompt/plugin` | `resources`, `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
 | `:projections` | `kmet.app.projections/plugin` | `sessions` | `projections` |  |  |
@@ -192,7 +192,7 @@ its layers; this page is what the build ships.
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
 | `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
-| `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
+| `:system-prompt` | `kmet.app.system-prompt/plugin` | `resources`, `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
 | `:projections` | `kmet.app.projections/plugin` | `sessions` | `projections` |  |  |
@@ -226,7 +226,7 @@ its layers; this page is what the build ships.
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
 | `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
-| `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
+| `:system-prompt` | `kmet.app.system-prompt/plugin` | `resources`, `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
 | `:projections` | `kmet.app.projections/plugin` | `sessions` | `projections` |  |  |
@@ -259,7 +259,7 @@ its layers; this page is what the build ships.
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
 | `:resources` | `kmet.app.resources/plugin` | `prompts`, `skills`, `tools` | `resources` |  |  |
-| `:system-prompt` | `kmet.app.system-prompt/plugin` | `skills` | `system-prompt` |  |  |
+| `:system-prompt` | `kmet.app.system-prompt/plugin` | `resources`, `skills` | `system-prompt` |  |  |
 | `:session-persistence` | `kmet.app.session.backend/plugin` |  | `sessionPersistence` |  |  |
 | `:sessions` | `kmet.app.sessions/plugin` | `sessionPersistence` | `sessions` |  |  |
 | `:projections` | `kmet.app.projections/plugin` | `sessions` | `projections` |  |  |

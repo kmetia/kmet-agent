@@ -64,6 +64,7 @@
             [kmet.app.extensions.core :as extensions]
             [kmet.app.git-packages :as git]
             [kmet.app.prompts :as prompts]
+            [kmet.app.resources :as app-resources]
             [kmet.app.skills :as skills]
             [kmet.app.config :as cfg]))
 
@@ -1031,13 +1032,19 @@
 
 (defn expand-input
   "kmet1's input expansion: an extension-registered skill command or a prompt
-   template in TEXT is replaced by what it stands for. A front end passes this
-   as the Engine's `:expand-input`, so the Engine knows the chain's shape but
-   not where a process keeps its skills or templates."
-  [text]
-  (-> text
-      (skills/expand-skill-command)
-      (prompts/expand-prompt-template (prompts/get-prompt-templates))))
+   template in TEXT is replaced by what it stands for. RESOURCES is the
+   `:resources` service value; when non-nil, a disabled skill or template does
+   not expand (nil is a process without the row, which keeps every
+   registration). A front end passes this as the Engine's `:expand-input`, so
+   the Engine knows the chain's shape but not where a process keeps its skills
+   or templates."
+  ([text] (expand-input text nil))
+  ([text resources]
+   (-> text
+       (skills/expand-skill-command
+        (when resources ((:enabled-names resources) :skill)))
+       (prompts/expand-prompt-template
+        (app-resources/enabled resources :prompt (prompts/get-prompt-templates))))))
 
 (defn resolve-theme-paths
   "Return every enabled theme path in the unified resolution. AGENT-DIR pins

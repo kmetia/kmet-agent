@@ -7,10 +7,11 @@
    The builder is pure: every registry-shaped input is an argument (`:tools`,
    `:skills`), so an engine builds its prompt from the ctx it holds — its
    `:tools` handle, its `:prompts`/`:skills` services — and never from a process
-   registry. The row fills the one input a service owns: the skills a run may be
-   told about. Everything else is the caller's, because only the caller knows
-   which agent it is building a prompt for; a tool table read here would be a
-   process default, which is the thing the driver exists to replace.
+   registry. The row fills the inputs services own: the skills a run may be
+   told about, filtered by the `:resources` selection. Everything else is the
+   caller's, because only the caller knows which agent it is building a prompt
+   for; a tool table read here would be a process default, which is the thing
+   the driver exists to replace.
 
    The row provides the builder itself rather than a record around it, so a
    driver reads one value and calls it — the same keyword-argument shape the
@@ -22,6 +23,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.registry :as registry]
+            [kmet.app.resources :as app-resources]
             [kmet.srce.core :as srce]))
 
 ;; ─── Skills section (pi: formatSkillsForPrompt) ───────────────────────────
@@ -189,27 +191,35 @@
   (mapv second (registry/effective-entries skills :kmet/skill)))
 
 (defn builder
-  "A prompt builder over SKILLS (a `:skills` handle): `build-system-prompt`'s
-   keyword options with `:skills` defaulting to the registered ones. A caller
-   that names its own `:skills` keeps them — an agent-scoped list, or a test's
-   empty one."
-  [skills]
+  "A prompt builder over SKILLS (a `:skills` handle) and RESOURCES (the
+   `:resources` service value, or nil): `build-system-prompt`'s keyword
+   options with `:skills` defaulting to the registered skills the selection
+   enables. A caller that names its own `:skills` keeps them — an
+   agent-scoped list, or a test's empty one."
+  [skills resources]
   (fn [& opts]
-    (let [opts (apply hash-map opts)]
+    (let [opts (apply hash-map opts)
+          skill-list (or (:skills opts)
+                         (app-resources/enabled resources :skill
+                                                (registered-skills skills)))]
       (apply build-system-prompt
              (mapcat identity
-                     (update opts :skills #(or % (registered-skills skills))))))))
+                     (-> opts
+                         (dissoc :resources)
+                         (assoc :skills skill-list)))))))
 
 (defn- serve
   "The `:systemPrompt` row: the builder over the injected `:skills` registry,
-   provided into the mount site's scope so a sibling row (the loop driver) sees
-   it while the entry stays this fiber's effect."
+   filtered by the `:resources` selection when that row is mounted, provided
+   into the mount site's scope so a sibling row (the loop driver) sees it while
+   the entry stays this fiber's effect."
   [ctx _config]
-  (srce/provide! ctx :system-prompt (builder (srce/get ctx :skills))
+  (srce/provide! ctx :system-prompt
+                 (builder (srce/get ctx :skills) (srce/get ctx :resources))
                  {:in (:parent ctx)}))
 
 (srce/defplugin plugin
   {:name :system-prompt
-   :inject [:skills]
+   :inject {:skills nil :resources :optional}
    :provide #{:system-prompt}
    :apply serve})

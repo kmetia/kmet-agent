@@ -1,14 +1,15 @@
 # Resource selection
 
-Status: steps 1–5 implemented (`kmet.app.resources`, the per-type settings
+Status: steps 1–6 implemented (`kmet.app.resources`, the per-type settings
 merge, the `:resources` row and settings-schema validation; the runtime now
 reads `enabled-names :tool` and keeps only the session active-tool override;
 the builtin `/tools` session selector replaces the bundled tools extension;
 `kmet plugins` is the static plugin-row editor; the builtin `/config` resource
-selector writes both scopes and emits `:resources-change`). Step 6's
-retirement of the package per-item selection writers and top-level signed
-selection is also done. The remaining step 6 (skills/prompts read-time
-filters) and steps 7–8 remain. The retired `:default-tools`/`:enabled-tools`
+selector writes both scopes and emits `:resources-change`; the package
+per-item selection writers and top-level signed selection are retired; and the
+skills/prompts read-time filters are wired: the system-prompt row filters its
+skill block, `/skill:` expansion and prompt lookup/expansion/autocomplete
+honor the selection). Steps 7–8 remain. The retired `:default-tools`/`:enabled-tools`
 keys are ignored at runtime until step 7 adds their warnings; no standalone
 screen edits them any more.
 This file stays at the repository root as the working design and plan until

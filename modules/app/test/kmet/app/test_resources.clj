@@ -1,9 +1,11 @@
 (ns kmet.app.test-resources
   "The `:resources` selection service: defaults, the two scopes, the
    available/selected split, and the writers that keep each scope's shape."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [kmet.app.config :as cfg]
             [kmet.app.config-schema :as config-schema]
+            [kmet.app.packages :as packages]
             [kmet.app.registries :as registries]
             [kmet.app.registry :as registry]
             [kmet.app.resources :as resources]
@@ -304,6 +306,51 @@
               :project {:skills ["+review"]}}
              (cfg/read-resource-settings))
           "each scope keeps its own map; the service merges per type"))))
+
+;; ─── Read-time filters ─────────────────────────────────────────────────────
+
+(deftest the-read-time-filter
+  (let [items [{:name "a"} {:name "b"}]]
+    (is (= items (resources/enabled nil :skill items))
+        "a missing service keeps every item")
+    (let [s (service [] [["a" :app]] [])]
+      (with-settings nil nil
+        (fn [_ _]
+          (is (= [{:name "a"}] (resources/enabled s :skill items))
+              "only the enabled names survive")
+          (is (= [] (resources/enabled s :tool items))
+              "an empty selection keeps none"))))))
+
+(deftest input-expansion-follows-the-selection
+  (let [handle (registry/atom-registry)
+        previous (registry/publish-process-handle! handle)
+        skill {:name "demo"
+               :body "SKILL BODY"
+               :location "ext:skills/demo/SKILL.md"
+               :extension "ext"}
+        template {:name "deploy" :content "DEPLOY BODY"}]
+    (try
+      (registry/register! handle :kmet/skill "demo" skill :test)
+      (registry/register! handle :kmet/prompt "deploy" template :test)
+      (let [s (resources/service {:tools (registry/atom-registry)
+                                  :skills handle
+                                  :prompts handle})]
+        (with-settings nil nil
+          (fn [_ _]
+            (is (str/includes? (packages/expand-input "/skill:demo" s) "SKILL BODY")
+                "an enabled skill expands")
+            (is (= "DEPLOY BODY" (packages/expand-input "/deploy" s))
+                "an enabled template expands")))
+        (with-settings {:resources {:skills [] :prompts []}} nil
+          (fn [_ _]
+            (is (= "/skill:demo" (packages/expand-input "/skill:demo" s))
+                "a disabled skill passes through")
+            (is (= "/deploy" (packages/expand-input "/deploy" s))
+                "a disabled template passes through")))
+        (is (str/includes? (packages/expand-input "/skill:demo") "SKILL BODY")
+            "no resources service keeps the process registrations"))
+      (finally
+        (registry/publish-process-handle! previous)))))
 
 ;; ─── The row ───────────────────────────────────────────────────────────────
 

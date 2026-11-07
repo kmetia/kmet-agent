@@ -379,6 +379,18 @@
     (save-project! kind updated)
     updated))
 
+;; ─── Read-time filter ──────────────────────────────────────────────────────
+
+(defn enabled
+  "ITEMS (maps carrying a `:name`) filtered to the names RESOURCES, a
+   `:resources` service value, enables for KIND. A nil RESOURCES (the
+   composition mounted no row) keeps every item; an empty selection keeps
+   none."
+  [resources kind items]
+  (if-some [names (and resources ((:enabled-names resources) kind))]
+    (filterv #(contains? names (:name %)) items)
+    (vec items)))
+
 ;; ─── The service ───────────────────────────────────────────────────────────
 
 (defn service

@@ -17,6 +17,7 @@
             [clojure.string :as str]
             [babashka.fs :as fs]
             [kmet.app.registry :as registry]
+            [kmet.app.resources :as app-resources]
             [kmet.libs.yaml :as yaml]))
 
 ;; ─── Template registry ────────────────────────────────────────────────────
@@ -289,3 +290,10 @@
                    :description (:description t)}
             (:argument-hint t) (assoc :argument-hint (:argument-hint t))))
         template-list))
+
+(defn enabled-command-maps
+  "The templates the `:resources` selection enables, in slash-command shape. A
+   nil RESOURCES (the composition mounted no row) keeps every template."
+  [resources]
+  (as-command-maps
+   (app-resources/enabled resources :prompt (get-prompt-templates))))

@@ -19,13 +19,10 @@
             [kmet.ai.models :as models]
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]
-            [kmet.app.commands :as commands]
             [kmet.app.keybindings :as app-kb]
             [kmet.app.packages :as packages]
             [kmet.app.events :as events]
             [kmet.app.presets :as presets]
-            [kmet.app.prompts :as prompts]
-            [kmet.app.skills :as skills]
             [kmet.ui.tui.theme-controller :as theme-ctrl]
             [kmet.app.tools.registry :as tool-registry]
             [kmet.srce.core :as srce]
@@ -858,13 +855,7 @@
     ;; commands + file paths
      (editor/editor-set-autocomplete-provider! ed
                                                (ac/make-combined-provider
-                                                :commands-fn #(vec (concat (commands/get-commands :interactive)
-                                                                           (prompts/as-command-maps (prompts/get-prompt-templates))
-                                                                          ;; pi: enableSkillCommands — read live,
-                                                                          ;; so a /settings toggle takes effect on
-                                                                          ;; the next autocomplete open
-                                                                           (when (cfg/get-enable-skill-commands config)
-                                                                             (skills/as-command-maps (skills/get-skills)))))
+                                                :commands-fn #(ui-registry/autocomplete-commands engine)
                                                ;; a fn: path completion follows a session switch's cwd
                                                 :base-path #(fdp/fdp-get-cwd fdp)))
      (editor/editor-set-autocomplete-theme! ed (th/get-select-list-theme (config-theme config)))

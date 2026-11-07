@@ -227,12 +227,16 @@ the `/tools` session override. A tool selection change refreshes the live tool
 set immediately; it does not remount providers or re-run discovery, and an
 unchanged write is a no-op. Project scope writes the `.kmet/settings.edn` of the directory kmet was
 started in; resuming a session recorded in another directory does not move it.
-The selection applies at startup, on a session switch and on `/reload`.
-
-The runtime rebuilds the prompt over the `:resources` selection at startup,
-on a session switch (`/resume`, `/import` — pi recreates the runtime from
-settings there, so the outgoing session's runtime selection does not carry
-over), and on `/reload`. A
+The selection applies at startup, on a session switch (`/resume`, `/import` —
+pi recreates the runtime from settings there, so the outgoing session's runtime
+selection does not carry over), and on `/reload`. A `/config` write applies
+immediately: a tool write refreshes the live set, a skill write rebuilds the
+prompt, and prompt-template lookup reads the selection live. The selection also
+filters skills and prompt templates at read time: a disabled skill is left out
+of the prompt's `<available_skills>` block and `/skill:name` does not expand
+it, and a disabled template is neither offered in autocomplete nor expanded. A
+`disable-model-invocation` skill still expands through `/skill:name` even
+though the prompt never lists it. A
 runtime selection made with the builtin `/tools` selector is a separate
 override: `/reload` does not clear it, so it still decides the
 set until it is reset, a `/config` tool write clears it, or a session switch

@@ -7,8 +7,10 @@
    it supplies the process defaults and is covered by `kmet.app.test-skills`."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [kmet.app.config :as cfg]
             [kmet.app.registry :as registry]
             [kmet.app.registries :as registries]
+            [kmet.app.resources :as resources]
             [kmet.app.system-prompt :as system-prompt]
             [kmet.srce.core :as srce]))
 
@@ -77,6 +79,32 @@
                                       :location "skills/mine/SKILL.md"}])]
         (is (str/includes? prompt "<name>mine</name>"))
         (is (not (str/includes? prompt "from-the-registry")))))))
+
+(deftest a-service-that-is-not-mounted-keeps-every-skill
+  (let [ctx (mounted)
+        builder (srce/get ctx :system-prompt)]
+    (register-skill! ctx "from-the-registry")
+    (is (str/includes? (builder :cwd "/work" :tools [read-tool])
+                       "from-the-registry")
+        "the optional :resources inject does not gate the row")))
+
+(deftest the-selection-filters-the-prompt-skills
+  (let [ctx (srce/root {:name :app})]
+    (doseq [row [registries/tools registries/skills registries/prompts]]
+      (srce/plugin! ctx row))
+    (srce/settle! ctx)
+    (srce/plugin! ctx resources/plugin)
+    (srce/plugin! ctx system-prompt/plugin)
+    (srce/settle! ctx)
+    (register-skill! ctx "kept")
+    (register-skill! ctx "dropped")
+    (with-redefs [cfg/read-global-settings-map
+                  (constantly {:resources {:skills ["-dropped"]}})
+                  cfg/read-project-settings-map (constantly {})]
+      (let [prompt ((srce/get ctx :system-prompt) :cwd "/work" :tools [read-tool])]
+        (is (str/includes? prompt "<name>kept</name>"))
+        (is (not (str/includes? prompt "dropped"))
+            "a disabled skill is not offered to the model")))))
 
 ;; ── the builder itself ────────────────────────────────────────────────────
 

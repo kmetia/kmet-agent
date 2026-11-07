@@ -33,6 +33,7 @@
   (:require [clojure.string :as str]
             [kmet.app.wire :as wire]
             [kmet.app.packages :as packages]
+            [kmet.app.session.runtime :as runtime]
             [kmet.app.events :as events]
             [kmet.app.front-end :as front-end]
             [kmet.app.invocation :as invocation]
@@ -116,7 +117,9 @@
         ;; the mode expands the invocation's text before the agent sees it:
         ;; `/skill:` and prompt templates are the front end's chain (kmet1's
         ;; print mode does the same one layer down)
-        ((:send! agents) handle (packages/expand-input prompt) {:target :next-turn})
+        ((:send! agents) handle
+                         (packages/expand-input prompt (runtime/resources handle))
+                         {:target :next-turn})
         (exit-code format (:outcome (deref settled)) @error)
         (finally
           (events/unsubscribe! listener)

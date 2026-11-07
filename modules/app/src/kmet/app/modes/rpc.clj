@@ -187,14 +187,15 @@
   "The registry as a client builds a palette from it (docs/rpc.md §
    get-commands): the portable builtins and extension commands this front end
    dispatches, then the prompt templates and skills a prompt expands."
-  [_state _command]
-  (ok :get-commands
-      {:commands (vec (concat (map #(wire-command (if (:extension-handler %) :extension :builtin) %)
-                                   (commands/get-commands :rpc))
-                              (map #(wire-command :prompt %)
-                                   (prompts/as-command-maps (prompts/get-prompt-templates)))
-                              (map #(wire-command :skill %)
-                                   (skills/as-command-maps (skills/get-skills)))))}))
+  [state _command]
+  (let [res (some-> (:handle state) runtime/resources)]
+    (ok :get-commands
+        {:commands (vec (concat (map #(wire-command (if (:extension-handler %) :extension :builtin) %)
+                                     (commands/get-commands :rpc))
+                                (map #(wire-command :prompt %)
+                                     (prompts/enabled-command-maps res))
+                                (map #(wire-command :skill %)
+                                     (skills/enabled-command-maps res))))})))
 
 (defn- command-prompt
   "Start, steer, queue, or handle a prompt (pi: prompt). A slash-command line
@@ -229,7 +230,8 @@
             ;; the answer is what the enqueue did: the flag was read a moment
             ;; ago, and a run that settled since then starts the message instead
             (ok :prompt {:disposition (enqueue! state behavior
-                                                (packages/expand-input text))})
+                                                (packages/expand-input
+                                                 text (runtime/resources handle)))})
 
             :else
             (let [{:keys [action]}
@@ -257,7 +259,9 @@
    queues for."
   [state command]
   (let [type (:type command)
-        text (some-> (message-of command) packages/expand-input)]
+        resources (some-> (:handle state) runtime/resources)
+        text (some-> (message-of command)
+                     (packages/expand-input resources))]
     (cond
       (:images command)
       (failed type (str (name type) " does not support :images yet"))

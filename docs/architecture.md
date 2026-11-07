@@ -245,7 +245,7 @@ schema-validated at load).
 | `:commands` `:prompts` `:skills` | a `Registry` handle each | `kmet.app.registries/{commands,prompts,skills}` |
 | `:resources` | `{:catalog :available? :global-selected? :project-state :selected? :enabled? :enabled-names :set-global! :set-project!}` — selection over the three registries, read through the scoped `:resources` settings | `kmet.app.resources/plugin` |
 | `:events` | the event vocabulary registry | `kmet.app.events/plugin` |
-| `:systemPrompt` | ordered sections assembled over `:skills` | `kmet.app.system-prompt/plugin` |
+| `:systemPrompt` | ordered sections assembled over `:skills`, filtered by the `:resources` selection | `kmet.app.system-prompt/plugin` |
 | `:sessionPersistence` | `{:create! :load :paths :append! :entries :delete! :header}` | `kmet.app.session.backend/plugin` (EDNL files) |
 | `:sessions` | the log over the backend, plus the id index | `kmet.app.sessions/plugin` |
 | `:projections` | derived state over the log: inbox, boundaries, token meter | `kmet.app.projections/plugin` |

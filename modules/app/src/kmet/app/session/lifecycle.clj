@@ -38,7 +38,9 @@
    tools run in) crosses the switch."
   [engine cwd]
   (let [ag (runtime/agent-state engine)
-        opts (assoc @(:system-prompt-opts ag) :cwd cwd)]
+        opts (assoc @(:system-prompt-opts ag)
+                    :cwd cwd
+                    :resources (runtime/resources engine))]
     (reset! (:system-prompt-opts ag) opts)
     (reset! (:system ag) (apply (or (:system-prompt-fn ag) skills/build-system-prompt)
                                 (mapcat identity opts)))))

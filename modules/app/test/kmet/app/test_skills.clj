@@ -279,6 +279,14 @@
           (t/is (str/includes? expanded "Do the thing.\n</skill>\n\narg1 \"a b\""))))
       (t/testing "unknown skill passes through"
         (t/is (= "/skill:nope x" (skills/expand-skill-command "/skill:nope x"))))
+      (t/testing "a skill outside the selection does not expand"
+        (t/is (= "/skill:expand-target"
+                 (skills/expand-skill-command "/skill:expand-target" #{})))
+        (t/is (= "/skill:expand-target"
+                 (skills/expand-skill-command "/skill:expand-target" #{"other"})))
+        (t/is (str/includes? (skills/expand-skill-command "/skill:expand-target"
+                                                          #{"expand-target"})
+                             "<skill name=\"expand-target\"")))
       (t/testing "non-skill text passes through"
         (t/is (= "hello" (skills/expand-skill-command "hello"))))
       (finally (fs/delete-tree tmp-dir)))))

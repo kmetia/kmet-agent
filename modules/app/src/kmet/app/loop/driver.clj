@@ -299,6 +299,9 @@
         running? (atom nil)
         last-run (atom nil)
         disposed? (atom false)
+        ;; the ctx's selection service, read once: the expansion chain and
+        ;; the extension send path resolve through it
+        resource-service (srce/get child :resources)
         ;; the front end's value over the agent state: the same field atoms a
         ;; session engine holds, so `kmet.app.session.runtime` reads it and
         ;; the settings ops below write it without a second derivation
@@ -317,8 +320,10 @@
                  :cwd (atom runtime-cwd)
                  ;; the process's expansion chain: a queued or submitted text
                  ;; reaches the run with its skill commands and prompt
-                 ;; templates replaced, the same way kmet1's engine does
-                 :expand-input packages/expand-input
+                 ;; templates replaced, filtered by this ctx's resource
+                 ;; selection
+                 :expand-input (fn [text]
+                                 (packages/expand-input text resource-service))
                  :turn-running? running?
                  :compaction-queued (atom [])
                  :pending-compaction (atom [])
@@ -403,7 +408,7 @@
                :send-user-message
                (fn [text {:keys [deliver-as expand-prompt-templates?]}]
                  (let [text (if expand-prompt-templates?
-                              (packages/expand-input text)
+                              (packages/expand-input text resource-service)
                               text)]
                    (when text
                      (deliver! text (if (= :steer deliver-as) :next-step :next-turn) nil)))

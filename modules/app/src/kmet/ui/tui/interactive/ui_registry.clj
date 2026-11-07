@@ -44,6 +44,18 @@
 ;; call the kmet.app.extensions.core ui-* fns, which dispatch through it. All
 ;; closures capture the layout pieces they mutate.
 
+(defn autocomplete-commands
+  "The input-completion commands: the builtin slash commands, then the prompt
+   templates and `/skill:` commands the engine's `:resources` selection
+   enables. Read per call, so a `/settings` toggle or `/config` write is
+   picked up on the next autocomplete open."
+  [engine]
+  (let [res (runtime/resources engine)]
+    (vec (concat (commands/get-commands :interactive)
+                 (prompts/enabled-command-maps res)
+                 (when (cfg/get-enable-skill-commands (runtime/config engine))
+                   (skills/enabled-command-maps res))))))
+
 (defn make-widget-area-above
   "The above-editor widget strip as a fn component (dsl.md stage 4, pi:
    renderWidgets): a leading spacer plus the registered widgets. The widget
@@ -228,13 +240,7 @@
                                          ;; extension factory wraps the provider
                                          ;; chain; nil results keep the base
                                          (let [base (ac/make-combined-provider
-                                                     :commands-fn #(vec (concat
-                                                                         (commands/get-commands :interactive)
-                                                                         (prompts/as-command-maps (prompts/get-prompt-templates))
-                                                                         ;; pi: enableSkillCommands — read live at
-                                                                         ;; autocomplete open
-                                                                         (when (cfg/get-enable-skill-commands (runtime/config (:engine cs)))
-                                                                           (skills/as-command-maps (skills/get-skills)))))
+                                                     :commands-fn #(autocomplete-commands (:engine cs))
                                                      :base-path #(fdp/fdp-get-cwd fdp))
                                                provider (reduce (fn [prov factory]
                                                                   (or (normalize-autocomplete-provider

@@ -123,7 +123,7 @@
           (when-let [f (:on-done opts)] (f :stop))
           :done))
       (fn []
-        (with-redefs [packages/expand-input (fn [text] (str "expanded:" text))]
+        (with-redefs [packages/expand-input (fn [text _resources] (str "expanded:" text))]
           (let [{:keys [code]} (run-rpc {:lines ["{:type :prompt :id \"p\" :message \"/greet world\"}"]
                                          :until ":agent-settled"})]
             (is (= 0 code))

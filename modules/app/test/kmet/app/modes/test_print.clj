@@ -130,7 +130,7 @@
           :done))
       (fn []
         (with-redefs [packages/expand-input
-                      (fn [text] (reset! seen text) "expanded text")]
+                      (fn [text _resources] (reset! seen text) "expanded text")]
           (let [{:keys [code err]} (support/run-main ["-p" "hello"])]
             (is (= 0 code) err)
             (is (= "hello" @seen) "the mode expands the invocation's text")

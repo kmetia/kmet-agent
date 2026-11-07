@@ -664,6 +664,10 @@
               active-tools (runtime/active-tools (:engine cs))
               system-prompt-opts {:custom-prompt (cfg/get-custom-prompt config)
                                   :append-prompt (cfg/get-append-system-prompt config)
+                                  ;; the resources service reads settings live: a
+                                  ;; reloaded selection filters the prompt's
+                                  ;; skills and the template lookup
+                                  :resources (runtime/resources (:engine cs))
                                   ;; the cwd line follows the runtime cwd (a session
                                   ;; from another project may be active); context
                                   ;; files and everything else project-scoped stay

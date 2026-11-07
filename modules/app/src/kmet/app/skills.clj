@@ -23,6 +23,7 @@
             [babashka.fs :as fs]
             [kmet.app.debug :as debug]
             [kmet.app.registry :as registry]
+            [kmet.app.resources :as app-resources]
             [kmet.app.system-prompt :as system-prompt]
             [kmet.app.tools.registry :as tools-registry]
             [kmet.libs.yaml :as yaml]))
@@ -346,33 +347,38 @@
 (defn expand-skill-command
   "Expand /skill:name args into the skill body wrapped in a <skill> block
    (pi: agent-session _expandSkillCommand). Extension skills disclose from
-   their in-memory body; file skills re-slurp their SKILL.md. Returns text
-   unchanged when not a /skill: command, the skill is unknown, or the file
-   cannot be read. Reading the block back is `kmet.app.skill-block/parse` (the
-   format's own namespace, below every front end)."
-  [text]
-  (if-not (str/starts-with? text "/skill:")
-    text
-    (let [space-idx (str/index-of text " ")
-          skill-name (if (nil? space-idx) (subs text 7) (subs text 7 space-idx))
-          args (if (nil? space-idx) "" (str/trim (subs text (inc space-idx))))]
-      (if-let [skill (get-skill skill-name)]
-        (try
-          (let [raw-body (or (:body skill)
-                             (:body (yaml/parse-frontmatter (slurp (:file-path skill)))))
-                body (str/trim (or raw-body ""))
-                location (or (:location skill) (:file-path skill))
-                refs-line (if (:extension skill)
-                            "This skill is self-contained; it has no skill directory.\n\n"
-                            (str "References are relative to " (:base-dir skill) ".\n\n"))
-                block (str "<skill name=\"" (:name skill) "\" location=\"" location "\">\n"
-                           refs-line
-                           body "\n</skill>")]
-            (if (seq args) (str block "\n\n" args) block))
-          (catch Exception e
-            (debug/log "skill expansion failed: " e)
-            text))
-        text))))
+   their in-memory body; file skills re-slurp their SKILL.md. ENABLED-NAMES,
+   when non-nil, is the set of skill names the `:resources` selection enables;
+   a skill outside it does not expand. Returns text unchanged when not a
+   /skill: command, the skill is unknown or not enabled, or the file cannot be
+   read. Reading the block back is `kmet.app.skill-block/parse` (the format's
+   own namespace, below every front end)."
+  ([text] (expand-skill-command text nil))
+  ([text enabled-names]
+   (if-not (str/starts-with? text "/skill:")
+     text
+     (let [space-idx (str/index-of text " ")
+           skill-name (if (nil? space-idx) (subs text 7) (subs text 7 space-idx))
+           args (if (nil? space-idx) "" (str/trim (subs text (inc space-idx))))]
+       (if-let [skill (and (or (nil? enabled-names)
+                               (contains? enabled-names skill-name))
+                           (get-skill skill-name))]
+         (try
+           (let [raw-body (or (:body skill)
+                              (:body (yaml/parse-frontmatter (slurp (:file-path skill)))))
+                 body (str/trim (or raw-body ""))
+                 location (or (:location skill) (:file-path skill))
+                 refs-line (if (:extension skill)
+                             "This skill is self-contained; it has no skill directory.\n\n"
+                             (str "References are relative to " (:base-dir skill) ".\n\n"))
+                 block (str "<skill name=\"" (:name skill) "\" location=\"" location "\">\n"
+                            refs-line
+                            body "\n</skill>")]
+             (if (seq args) (str block "\n\n" args) block))
+           (catch Exception e
+             (debug/log "skill expansion failed: " e)
+             text))
+         text)))))
 
 (defn as-command-maps
   "Skills in slash-command shape for the editor autocomplete provider
@@ -382,6 +388,13 @@
   (mapv (fn [s] {:name (str "skill:" (:name s))
                  :description (:description s)})
         skill-list))
+
+(defn enabled-command-maps
+  "The skills the `:resources` selection enables, in slash-command shape. A
+   nil RESOURCES (the composition mounted no row) keeps every skill."
+  [resources]
+  (as-command-maps
+   (app-resources/enabled resources :skill (get-skills))))
 
 ;; ─── System prompt ────────────────────────────────────────────────────────
 ;; The builder itself lives in `kmet.app.system-prompt`, where every
@@ -400,15 +413,20 @@
   "Build the system prompt with tools, guidelines, context files, and skills
    (see `kmet.app.system-prompt/build-system-prompt` for the options).
 
-   The two process-bound defaults are this wrapper's: `:tools` from the
-   process tool table and `:skills` from the process skill registry. A caller
-   that holds its own (kmet2's `:systemPrompt` row) calls the app namespace
-   directly."
-  [& {:keys [tools skills] :as opts}]
-  (apply system-prompt/build-system-prompt
-         (mapcat identity
-                 (assoc opts
-                        :tools (or tools
-                                   (vals (tools-registry/get-all-tools
-                                          (registry/current))))
-                        :skills (or skills (registered-skills))))))
+   The process-bound defaults are this wrapper's: `:tools` from the process
+   tool table, `:skills` from the process skill registry, and — when the
+   caller passes the `:resources` service value — only the skills that
+   selection enables. A caller that holds its own (kmet2's `:systemPrompt` row)
+   calls the app namespace directly."
+  [& {:keys [tools skills resources] :as opts}]
+  (let [skill-list (or skills
+                       (app-resources/enabled resources :skill
+                                              (registered-skills)))]
+    (apply system-prompt/build-system-prompt
+           (mapcat identity
+                   (-> opts
+                       (dissoc :resources)
+                       (assoc :tools (or tools
+                                         (vals (tools-registry/get-all-tools
+                                                (registry/current))))
+                              :skills skill-list))))))
