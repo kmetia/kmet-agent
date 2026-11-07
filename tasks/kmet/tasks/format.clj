@@ -43,30 +43,18 @@
        vec))
 
 (defn format!
-  "Fix formatting (bb format / jolt format). ARGS: specific files/dirs, else
-   the whole managed tree."
-  [args]
-  (run-cljfmt! :fix (if (seq args) args (source-paths))))
-
-(defn format-check!
-  "Verify formatting (bb format-check / jolt format-check). ARGS as format!."
-  [args]
-  (run-cljfmt! :check (if (seq args) args (source-paths))))
+  "Run cljfmt OP (:fix or :check) over ARGS: specific files/dirs, else the
+   whole managed tree. :check changes nothing and exits non-zero for
+   unformatted files (bb format / bb format-check)."
+  [op args]
+  (run-cljfmt! op (if (seq args) args (source-paths))))
 
 (defn format-changed!
-  "Fix formatting of the files changed since the last commit (bb
-   format-changed)."
-  []
-  (let [paths (changed/changed-clj-files)]
-    (if (seq paths)
-      (run-cljfmt! :fix paths)
-      (println "No changed files to format."))))
-
-(defn format-check-changed!
-  "Verify formatting of the files changed since the last commit (bb
-   format-check-changed)."
-  []
-  (let [paths (changed/changed-clj-files)]
-    (if (seq paths)
-      (run-cljfmt! :check paths)
-      (println "No changed files to check."))))
+  "Run cljfmt OP (:fix or :check) over the files changed since the last
+   commit (bb format-changed / bb format-check-changed)."
+  [op]
+  (if-let [paths (seq (changed/changed-clj-files))]
+    (run-cljfmt! op paths)
+    (println (case op
+               :fix "No changed files to format."
+               :check "No changed files to check."))))

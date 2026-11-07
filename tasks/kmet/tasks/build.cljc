@@ -493,13 +493,15 @@
     (doseq [src srcs]
       (io/copy (io/input-stream (fs/file src)) out))))
 
-(defn- wrapper-script
-  "Termux launcher script text: exec through the glibc linker and pass
-   --jar <self> explicitly, because bb's appended-jar detection resolves
-   /proc/self/exe to the dynamic linker under this invocation style."
-  [bin-name linker]
+(defn termux-launcher-script
+  "Termux launcher script text: exec BIN-NAME through the glibc LINKER.
+   PAYLOAD? marks a babashka payload: it passes --jar <self> explicitly,
+   because bb's appended-jar detection resolves /proc/self/exe to the dynamic
+   linker under this invocation style, and `--` stops babashka's own option
+   parsing. A self-contained binary (jolt) needs neither."
+  [bin-name linker payload?]
   (format "#!/data/data/com.termux/files/usr/bin/sh
-# kmet launcher (Termux): run the glibc babashka binary through the glibc
+# kmet launcher (Termux): run the glibc-linked binary through the glibc
 # dynamic linker; LD_PRELOAD (libtermux-exec) breaks non-bionic executables.
 DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)
 BIN=\"$DIR/%s\"
@@ -507,12 +509,14 @@ LD=\"$PREFIX/glibc/lib/%s\"
 [ -x \"$LD\" ] || { echo \"termux glibc package required: pkg install glibc-repo && pkg install glibc\" >&2; exit 1; }
 unset LD_PRELOAD
 export TMPDIR=\"${TMPDIR:-$PREFIX/tmp}\"
-# `--` stops babashka's own option parsing: `--version` (or any other flag
-# name babashka also owns) must reach the jar's main, not babashka, which
-# would print its own version and exit.
-exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" -- \"$@\"
+%s
+exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\"%s \"$@\"
 "
-          bin-name linker))
+          bin-name linker
+          (if payload?
+            "# `--` stops babashka's own option parsing: `--version` (or any\n# other flag name babashka also owns) must reach the jar's main."
+            "")
+          (if payload? " --jar \"$BIN\" --" "")))
 
 (defn assemble-one!
   "Produce the executable for PLATFORM under target/dist/<platform>/kmet[.exe]
@@ -531,7 +535,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" -- \"$
     (when (and (not (windows-platform? platform)) (not (fs/windows?)))
       (fs/set-posix-file-permissions exe "rwxr-xr-x"))
     (when launcher
-      (spit (str launcher) (wrapper-script (fs/file-name exe) linker))
+      (spit (str launcher) (termux-launcher-script (fs/file-name exe) linker true))
       (fs/set-posix-file-permissions launcher "rwxr-xr-x")
       (println "launcher:" (str launcher)))
     {:exe exe :launcher launcher}))
@@ -579,13 +583,14 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" -- \"$
   (println "copied executable to" (str dir))
   (str dir))
 
-(defn- temp-run-dir
+(defn temp-run-dir
   "A throwaway dir to run an artifact from, on the platform's real temp root
-   (java.io.tmpdir is unreliable on Termux: it hardcodes /tmp)."
-  []
+   (java.io.tmpdir is unreliable on Termux: it hardcodes /tmp). NAME scopes
+   the packager's scratch parent."
+  [name]
   (let [root (or (not-empty (str (System/getenv "TMPDIR")))
                  (System/getProperty "java.io.tmpdir"))
-        dir (fs/path root "kmet-build-bb")]
+        dir (fs/path root name)]
     (fs/create-dirs dir)
     (fs/create-temp-dir {:dir dir :prefix "smoke-"})))
 
@@ -623,7 +628,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" -- \"$
                                        launcher
                                        artifact)))]
        (if test?
-         (let [dir (temp-run-dir)
+         (let [dir (temp-run-dir "kmet-build-bb")
                run (fn [& args]
                      (apply p/shell {:out :string :err :string :continue true
                                      :dir (str dir)} cmd args))]

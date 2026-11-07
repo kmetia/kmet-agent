@@ -456,25 +456,6 @@
     (fs/set-posix-file-permissions artifact "rwxr-xr-x"))
   artifact)
 
-(defn- wrapper-script
-  "Termux launcher script: exec through the glibc dynamic linker (the built
-   binary is glibc-linked; LD_PRELOAD — libtermux-exec — breaks non-bionic
-   executables, so it is unset first). Same shape as the babashka packager's,
-   minus bb's --jar: a jolt binary carries its payload itself."
-  [bin-name linker]
-  (format "#!/data/data/com.termux/files/usr/bin/sh
-# kmet launcher (Termux): run the glibc-linked binary through the glibc
-# dynamic linker; LD_PRELOAD (libtermux-exec) breaks non-bionic executables.
-DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)
-BIN=\"$DIR/%s\"
-LD=\"$PREFIX/glibc/lib/%s\"
-[ -x \"$LD\" ] || { echo \"termux glibc package required: pkg install glibc-repo && pkg install glibc\" >&2; exit 1; }
-unset LD_PRELOAD
-export TMPDIR=\"${TMPDIR:-$PREFIX/tmp}\"
-exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
-"
-          bin-name linker))
-
 (defn- binary-contains?
   "True when the raw bytes of FILE contain the ASCII NEEDLE. Streamed in
    64 KiB chunks with a small carry, so a needle split across a chunk
@@ -512,23 +493,13 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
                    "ld-linux-x86-64.so.2")
           launcher (fs/path (fs/parent artifact) (str (fs/file-name artifact) ".sh"))]
       (if (glibc-linked? artifact)
-        (do (spit (str launcher) (wrapper-script (str (fs/file-name artifact)) linker))
+        (do (spit (str launcher) (build/termux-launcher-script (str (fs/file-name artifact)) linker false))
             (fs/set-posix-file-permissions launcher "rwxr-xr-x")
             launcher)
         ;; a stale launcher from an earlier glibc-linked build of the same
         ;; path would shadow the (directly running) artifact for users and
         ;; smoke runs alike
         (do (fs/delete-if-exists launcher) nil)))))
-
-(defn- temp-run-dir
-  "A throwaway dir to run the artifact from, on the platform's real temp root
-   (java.io.tmpdir is unreliable on Termux: it hardcodes /tmp)."
-  []
-  (let [root (or (not-empty (str (System/getenv "TMPDIR")))
-                 (System/getProperty "java.io.tmpdir"))
-        dir (fs/path root "kmet-build-jolt")]
-    (fs/create-dirs dir)
-    (fs/create-temp-dir {:dir dir :prefix "smoke-"})))
 
 (defn- prepare-smoke-agent-dir
   "Create an isolated agent dir under the smoke run directory whose global
@@ -576,7 +547,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
           cmd (if (and (build/termux?) (fs/exists? launcher))
                 (str launcher)
                 (str artifact))
-          dir (temp-run-dir)
+          dir (build/temp-run-dir "kmet-build-jolt")
           run (let [agent-dir (prepare-smoke-agent-dir dir)]
                 (fn [& args]
                   (apply p/sh {:continue true :out :string :err :string

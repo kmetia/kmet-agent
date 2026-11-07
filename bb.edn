@@ -91,10 +91,10 @@
                 :task (help/with-help (lint/lint-changed!))}
   format-changed {:doc "Format changed files in place\n\nFull gate: bb format; jolt format-changed runs the same task."
                   :requires ([kmet.tasks.format :as fmt])
-                  :task (help/with-help (fmt/format-changed!))}
+                  :task (help/with-help (fmt/format-changed! :fix))}
   format-check-changed {:doc "Check formatting of changed files\n\nFull gate: bb format-check; jolt format-check-changed runs the same task."
                         :requires ([kmet.tasks.format :as fmt])
-                        :task (help/with-help (fmt/format-check-changed!))}
+                        :task (help/with-help (fmt/format-changed! :check))}
   nrepl  {:doc "Start nREPL server on port 7801 for interactive development"
           :task (help/with-help (do (require 'babashka.nrepl.server)
                                     (println "Starting nREPL on port 7801...")
@@ -146,10 +146,10 @@
            :task (help/with-help (lint/lint! *command-line-args*))}
   format  {:doc "Format src/test/tasks/extensions with cljfmt (fix in place; same task on both hosts)\n\nOptionally: specific files/dirs; generated model_data catalogs are excluded."
            :requires ([kmet.tasks.format :as fmt])
-           :task (help/with-help (fmt/format! *command-line-args*))}
+           :task (help/with-help (fmt/format! :fix *command-line-args*))}
   format-check {:doc "Check src/test/tasks/extensions formatting with cljfmt (no changes; same task on both hosts)\n\nOptionally: specific files/dirs; generated model_data catalogs are excluded."
                 :requires ([kmet.tasks.format :as fmt])
-                :task (help/with-help (fmt/format-check! *command-line-args*))}
+                :task (help/with-help (fmt/format! :check *command-line-args*))}
   clean   {:doc "Remove build artifacts, caches, logs and test residue (--dry-run/-n lists only)\n\ntarget/, dist/, extensions/*/target/, .cpcache, .jolt, the clj-kondo cache, *.log and .kmet-changed-baseline. Source, .kmet/ and .lsp/ are never touched; same task on both hosts, `bb clean --help` for the full reference."
            :requires ([kmet.tasks.clean :as clean])
            :task (apply clean/-main *command-line-args*)}

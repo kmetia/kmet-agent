@@ -238,6 +238,14 @@
                        (str (long ms) " ms")))
     :else (format "%.1f s" (/ us 1000000.0))))
 
+(defn- counter-deltas
+  "Per-run deltas between the clojure.test counter maps BEFORE and AFTER."
+  [before after]
+  {:test (- (:test after) (:test before))
+   :pass (- (:pass after) (:pass before))
+   :fail (- (:fail after) (:fail before))
+   :error (- (:error after) (:error before))})
+
 (defn- capture-streams!
   "Point System/out and System/err at fresh byte streams; returns the
    saved originals and the writers to replay later."
@@ -273,9 +281,8 @@
                 *err* err-writer
                 t/*test-out* out-writer]
         (t/test-var v))
-      (let [counters-after @t/*report-counters*
-            failed? (or (pos? (- (:fail counters-after) (:fail counters-before)))
-                        (pos? (- (:error counters-after) (:error counters-before))))
+      (let [{n-fail :fail n-error :error} (counter-deltas counters-before @t/*report-counters*)
+            failed? (or (pos? n-fail) (pos? n-error))
             out (String. (.toByteArray out-baos) "UTF-8")
             err (String. (.toByteArray err-baos) "UTF-8")]
         (when failed?
@@ -304,11 +311,8 @@
        (fn []
          (doseq [v vars]
            (each-fx (fn [] (test-var-with-capture v)))))))
-    (let [after @t/*report-counters*
-          n-test (- (:test after) (:test before))
-          n-pass (- (:pass after) (:pass before))
-          n-fail (- (:fail after) (:fail before))
-          n-error (- (:error after) (:error before))
+    (let [{n-test :test n-pass :pass n-fail :fail n-error :error}
+          (counter-deltas before @t/*report-counters*)
           elapsed-us (quot (- (System/nanoTime) start-ns) 1000)]
       (println (str "  " (fmt-summary n-test n-pass n-fail n-error)
                     " (" (fmt-duration elapsed-us) ")")))))
@@ -351,11 +355,8 @@
         deref-result (deref f jolt-ns-timeout-ms ::timeout)]
     (when (= ::timeout deref-result)
       (future-cancel f))
-    (let [after @counters
-          n-test (- (:test after) (:test before))
-          n-pass (- (:pass after) (:pass before))
-          n-fail (- (:fail after) (:fail before))
-          n-error (- (:error after) (:error before))
+    (let [{n-test :test n-pass :pass n-fail :fail n-error :error}
+          (counter-deltas before @counters)
           elapsed-us (quot (- (System/nanoTime) start-ns) 1000)]
       (cond
         (= ::timeout deref-result)
@@ -434,12 +435,8 @@
             before @counter-atom]
         (doseq [[ns-sym ns-vars] (sort-by key (group-by (comp ns-name :ns meta) vars))]
           (run-ns ns-sym #(run-ns-vars-jolt ns-sym ns-vars)))
-        (let [after @counter-atom]
-          {:counters {:test (- (:test after) (:test before))
-                      :pass (- (:pass after) (:pass before))
-                      :fail (- (:fail after) (:fail before))
-                      :error (- (:error after) (:error before))}
-           :agent-dir-writes @writes}))
+        {:counters (counter-deltas before @counter-atom)
+         :agent-dir-writes @writes})
       {:counters (binding [t/*report-counters* (ref t/*initial-report-counters*)]
                    (doseq [[ns-sym ns-vars] (sort-by key (group-by (comp ns-name :ns meta) vars))]
                      (run-ns ns-sym #(run-ns-vars ns-sym ns-vars)))
@@ -552,14 +549,7 @@
   "Run the test vars of NS-SYMS matching SLOW? (true = ^:slow only, false =
    non-slow only), for `bb test-ext-changed` / `bb test-changed`."
   [ns-syms slow?]
-  (let [{vars :vars unloaded :unloaded}
-        (reduce (fn [acc ns-sym]
-                  (let [{vars :vars unloaded :unloaded} (ns-vars-of ns-sym)]
-                    (cond-> acc
-                      unloaded (update :unloaded conj unloaded)
-                      :always (update :vars into (filter #(test-var? % slow?)) vars))))
-                {:vars [] :unloaded []}
-                ns-syms)]
+  (let [{:keys [vars unloaded]} (select-requested-nss (map str ns-syms) slow?)]
     (run-and-summarize {:vars vars :unloaded unloaded} false)))
 
 (defn- isolate-diagnostics!

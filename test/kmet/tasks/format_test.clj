@@ -30,5 +30,5 @@
     (let [f (test-tmp/temp-file! ".clj")]
       (try
         (spit f "(ns t)\n\n(defn f [x]\n  x)\n")
-        (t/is (nil? (format/format-check! [f])))
+        (t/is (nil? (format/format! :check [f])))
         (finally (fs/delete-if-exists f))))))
