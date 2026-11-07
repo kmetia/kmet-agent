@@ -186,6 +186,21 @@
         lines (core/render s 30)]
     (t/is (pos? (count lines)))))
 
+(t/deftest test-settings-list-description-line-cap
+  (let [items [{:id :a :label "A" :value "x"
+                :description "first line\nsecond line\nthird line\nfourth line"}]]
+    (t/testing "max-description-lines caps the wrapped selected description"
+      (let [s (sl/make-settings-list items :max-description-lines 3)
+            plain (mapv #(str/replace % #"\u001b\[[0-9;]*[a-zA-Z]" "")
+                        (core/render s 80))]
+        (t/is (some #(str/includes? % "third line") plain))
+        (t/is (not-any? #(str/includes? % "fourth line") plain))))
+    (t/testing "no cap means the full description renders"
+      (let [s (sl/make-settings-list items)
+            plain (mapv #(str/replace % #"\u001b\[[0-9;]*[a-zA-Z]" "")
+                        (core/render s 80))]
+        (t/is (some #(str/includes? % "fourth line") plain))))))
+
 ;; ─── Default theme ─────────────────────────────────────────────────────────
 
 (t/deftest test-settings-list-default-theme

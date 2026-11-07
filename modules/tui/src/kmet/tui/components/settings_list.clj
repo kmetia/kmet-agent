@@ -143,8 +143,8 @@
 (defcomponent SettingsList nil [items-atom selected-idx-atom filter-atom
                                 focused? theme-atom cache-atom
                                 on-change-atom on-escape-atom
-                                search-enabled? max-visible search-input-atom
-                                submenu-atom]
+                                search-enabled? max-visible max-description-lines
+                                search-input-atom submenu-atom]
 
   (render [this width]
     ;; An open submenu renders instead of the list (pi: render). Deliberately
@@ -216,8 +216,11 @@
                                               (max 1 (- width 2))))))
               (when-let [desc (:description (nth display selected))]
                 (vswap! lines conj "")
-                (doseq [line (u/wrap-text-with-ansi (str desc) (max 1 (- width 4)))]
-                  (vswap! lines conj ((:description theme) (str "  " line)))))
+                (let [wrapped (u/wrap-text-with-ansi (str desc) (max 1 (- width 4)))
+                      limit @max-description-lines
+                      shown (if limit (take limit wrapped) wrapped)]
+                  (doseq [line shown]
+                    (vswap! lines conj ((:description theme) (str "  " line))))))
               (add-hint! lines theme width search?)))
           @lines))))
 
@@ -295,10 +298,13 @@
    maxVisible, theme, onChange, onCancel)).
    Each item: {:id :label :value current :values [possible ...]
    :description opt}. Options: :theme (default-theme), :on-change callback,
-   :enable-search (default false — pi's tools dialog has no search), and
+   :enable-search (default false — pi's tools dialog has no search),
    :max-visible — the scroll window height (default 10; pi's tools dialog
-   passes (min (+ (count items) 2) 15))."
-  [items & {:keys [theme on-change enable-search max-visible]
+   passes (min (+ (count items) 2) 15)), and :max-description-lines — cap
+   the selected item's wrapped description (default nil, unlimited; the
+   session tool selector passes 3 so a long model-facing description cannot
+   push the dialog past the terminal)."
+  [items & {:keys [theme on-change enable-search max-visible max-description-lines]
             :or {theme default-theme
                  enable-search false
                  max-visible 10}}]
@@ -312,6 +318,7 @@
                       :on-escape-atom (atom nil)
                       :search-enabled? (atom enable-search)
                       :max-visible (atom max-visible)
+                      :max-description-lines (atom max-description-lines)
                       :search-input-atom (atom (when enable-search
                                                  (input/make-input)))
                       :submenu-atom (atom nil)}))
@@ -345,6 +352,11 @@
 
 (defn settings-list-set-max-visible! [sl n]
   (reset! (:max-visible sl) n))
+
+(defn settings-list-set-max-description-lines!
+  "Cap the selected item's rendered description to N lines; nil means no cap."
+  [sl n]
+  (reset! (:max-description-lines sl) n))
 
 ;; ─── Public helpers ─────────────────────────────────────────────────────────
 

@@ -56,3 +56,21 @@
         (testing "Esc closes the dock"
           (core/handle-input sl "\u001b")
           (is (empty? @(:dock-stack cs))))))))
+
+(deftest long-description-is-capped-at-three-lines
+  (testing "a model-facing tool description cannot grow the dialog past three
+            description lines"
+    (let [cs {:engine ::engine :dock-stack (atom []) :tui nil}
+          focused (atom nil)
+          long-desc "line one\nline two\nline three\nline four\nline five"]
+      (with-redefs [runtime/tool-table
+                    (fn [_] {"bash" {:name "bash" :description long-desc}})
+                    runtime/enabled-tool-names (fn [_] #{"bash"})
+                    core/tui-set-focus (fn [_ component] (reset! focused component))
+                    core/tui-request-render (fn [_])]
+        (sut/show-tools-selector cs)
+        (let [frame (dock/top-component @(:dock-stack cs))
+              rendered (mapv #(str/replace % #"\u001b\[[0-9;]*[a-zA-Z]" "")
+                             (core/render frame 80))]
+          (is (some #(str/includes? % "line three") rendered))
+          (is (not-any? #(str/includes? % "line four") rendered)))))))

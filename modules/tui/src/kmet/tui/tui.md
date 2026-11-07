@@ -271,7 +271,7 @@ elements. Tags and props:
 | `:expandable-text` | `:collapsed-fn`, `:expanded-fn` (both required), `:expanded?`, `:padding-x` `:padding-y` | none (leaf) |
 | `:image` | `:base64-data`, `:mime-type` (both required), `:theme`, `:max-width-cells` (default 60), `:max-height-cells`, `:filename`, `:image-id` | none (leaf) |
 | `:select-list` | `:items` (primary), `:height` (default 10), `:theme`, `:header`, `:no-match-text`, `:min-primary-column-width` `:max-primary-column-width`, `:truncate-primary`, `:on-select`, `:on-escape`, `:on-selection-change`, `:on-key` | none (leaf) |
-| `:settings-list` | `:items` (primary), `:theme`, `:on-change`, `:on-escape`, `:enable-search`, `:max-visible` (default 10) | none (leaf) |
+| `:settings-list` | `:items` (primary), `:theme`, `:on-change`, `:on-escape`, `:enable-search`, `:max-visible` (default 10), `:max-description-lines` (default nil — the selected item's description wraps without a cap; `/tools` passes 3) | none (leaf) |
 | `:editor` | `:text` (primary), `:height` (default 12), `:padding-x`, `:border-fn`, `:border` (§2.8), `:keybindings`, `:terminal-rows`, `:on-submit`, `:on-change` | none (leaf) |
 | `:cancellable-loader` | `:spinner` (defaults to a fresh active Spinner), `:on-abort`, `:text` (message for the default spinner) | none (leaf) |
 | `:alt-screen-flash` | `:request-render` (primary; nil = no callback) | none (leaf) |

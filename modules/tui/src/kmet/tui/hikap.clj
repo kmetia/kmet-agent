@@ -248,13 +248,15 @@
                            (select-list/select-list-set-on-key! sl (:on-key props))
                            true)}
    :settings-list {:ctor (fn [{:keys [items theme on-change on-escape
-                                      enable-search max-visible]}]
+                                      enable-search max-visible
+                                      max-description-lines]}]
                            (let [sl (settings-list/make-settings-list
                                      (or items [])
                                      :theme (or theme settings-list/default-theme)
                                      :on-change on-change
                                      :enable-search (boolean enable-search)
-                                     :max-visible (or max-visible 10))]
+                                     :max-visible (or max-visible 10)
+                                     :max-description-lines max-description-lines)]
                              (when on-escape
                                (settings-list/settings-list-set-on-escape! sl
                                                                            on-escape))
@@ -282,6 +284,8 @@
                                  sl (:on-escape props))
                                 (settings-list/settings-list-set-max-visible!
                                  sl (or (:max-visible props) 10))
+                                (settings-list/settings-list-set-max-description-lines!
+                                 sl (:max-description-lines props))
                                 true)))}
    :editor       {:ctor (fn [{:keys [text height padding-x border-fn border
                                      keybindings terminal-rows

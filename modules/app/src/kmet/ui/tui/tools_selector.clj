@@ -58,6 +58,10 @@
                                  :items (tool-rows (vals table) @enabled-atom)
                                  :enable-search true
                                  :max-visible (min (+ (count table) 2) 15)
+                                 ;; a model-facing tool description can run to
+                                 ;; paragraphs; three lines keep the dialog
+                                 ;; inside the terminal
+                                 :max-description-lines 3
                                  :on-change (fn [name value]
                                               (apply-toggle! engine enabled-atom name value))
                                  :on-escape close!}]
