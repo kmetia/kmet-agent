@@ -181,10 +181,11 @@ settings `:packages` (stored relative to the scope base dir, pi
 `normalizePackageSourceForSettings`); `remove`/`uninstall` matches by
 resolved identity (pi `packageSourcesMatch`); `list` shows user + project
 sections with installed paths; `plugins` opens the static composition editor —
-extension rows grouped by origin, search, space composes/removes, Tab
-global/project scope switching with the inherit/load/unload tri-state and
-dimmed inherited rows, escape/ctrl+c close. pi's resource rows (per-package
-and per-type toggles) are not ported yet; see `config.md` steps 5–6.
+built-in tool and extension rows grouped by origin, search, space
+composes/removes, Tab global/project scope switching with the
+inherit/load/unload tri-state and dimmed inherited rows, escape/ctrl+c close.
+pi's resource rows (per-package and per-type toggles) are not ported yet; see
+`config.md` steps 5–6.
 
 Object entries are fully supported with pi's semantics:
 `{:source ... :extensions [...] :skills [...] :prompts [...] :themes [...]}`

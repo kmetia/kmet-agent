@@ -95,7 +95,7 @@ Install, remove, update and list **packages** — extensions, skills, prompt
 templates and themes bundled in a local directory or file, or in a git
 repository (pi's `install`/`remove`/`update`/`list`/`config`; npm installs are
 not ported). `kmet plugins` replaces pi's resource `config`: it composes
-extension rows, not packages:
+plugin rows (built-in tools and extensions), not packages:
 
 ```sh
 kmet install ./path/to/package [-l]        # local dir/file package
@@ -104,7 +104,7 @@ kmet install git:github.com/user/repo//packages/foo  # a package dir inside it
 kmet remove <source> [-l]                  # remove it (alias: kmet uninstall)
 kmet update [source]                       # update installed git packages
 kmet list                                  # show configured packages
-kmet plugins [-l]                          # compose extension plugin rows (TUI)
+kmet plugins [-l]                          # compose plugin rows (TUI)
 ```
 
 `kmet config` is retired; it reports a one-line error naming `kmet plugins`.
@@ -149,19 +149,23 @@ to the settings file, git sources verbatim. Configured packages are
 resources they contain (skills, prompts, themes) load as resources. Installing
 an extension does not load it; compose its row (`kmet plugins` or the patch
 file) and it applies on the next start.
-- `kmet plugins` is a static composition editor. It lists bundled and
-  installed extension rows (`:ext/<id>`) with a checkbox; space composes or
-  removes the selected row, Tab switches global/project scope, typing filters,
-  escape closes. A project with a `.kmet/` dir starts in project-local scope;
-  `-l` forces project-local. It never loads extension code and never edits
-  settings or `:resources`: the global scope writes a `:ext/…` row or a
-  remove patch in `~/.kmet/agent/patch.edn` (the row and its config stay, so
-  re-enabling is lossless), and the project scope writes a project row or a
+- `kmet plugins` is a static composition editor. It lists the built-in tool
+  rows (`:tool/<name>`) and the bundled and installed extension rows
+  (`:ext/<id>`) with a checkbox; space composes or removes the selected row,
+  Tab switches global/project scope, typing filters, escape closes. A project
+  with a `.kmet/` dir starts in project-local scope; `-l` forces
+  project-local. It never loads extension code and never edits settings or
+  `:resources`: the global scope writes a row or a remove patch in
+  `~/.kmet/agent/patch.edn` (an extension's row and config stay, so
+  re-enabling is lossless; a built-in tool is restored by dropping its remove
+  patch), and the project scope writes a project row, a restore patch or a
   remove patch in `.kmet/patch.edn`. The files apply on the next start;
   `/reload` re-applies the rows already mounted.
-- The **Bundled with kmet** group lists the app-provided bundled extensions.
-  Skills, prompts, themes and tools are not rows here; `/tools` remains the
-  live session tool selector, and skills/prompts/themes stay discovery
+- The **Built-in tools** group lists the base composition's tool rows; remove
+  one to run without that tool (a project layer can restore a globally
+  removed one). The **Bundled with kmet** group lists the app-provided bundled
+  extensions. Skills, prompts and themes are not rows here: `/tools` remains
+  the live session tool selector, while skills/prompts/themes stay discovery
   resources.
 
 ### In-TUI commands

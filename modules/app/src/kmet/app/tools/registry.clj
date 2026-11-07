@@ -454,6 +454,13 @@
    tool declarations."
   (profile/bundle (profile/builtin) :bundle/minimal))
 
+(defn builtin-tool-rows
+  "The `:bundle/minimal` rows whose ids are tool rows (`:tool/<name>`), in
+   composition order. Data only: a row carries its plugin source, so a
+   composition editor can re-insert it into a later layer."
+  []
+  (filterv (comp tool-row-name :id) (:rows minimal-bundle)))
+
 (def builtin-tool-names
   "Names of the built-in tools, in composition order — the full set: a
    removal patch targets one, and resume logic distinguishes them from

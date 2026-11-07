@@ -1,12 +1,14 @@
 (ns kmet.app.extensions.layers
-  "The extension plugin rows of the two ambient composition layers.
+  "The plugin rows of the two ambient composition layers.
 
    Extensions are plugins: a run loads the ones its composition names
-   (`:ext/<id>` rows) and nothing else. The two files a user edits directly
-   are the global `~/.kmet/agent/patch.edn` and the project `.kmet/patch.edn`
-   (see `docs/profiles.md`); this namespace reads those layers, resolves the
-   extension rows they compose, and writes the row or remove patch a
-   `kmet plugins` toggle needs.
+   (`:ext/<id>` rows) and nothing else. Built-in tools are rows too
+   (`:tool/<name>` in `:bundle/minimal`), removed or restored by an ambient
+   patch. The two files a user edits directly are the global
+   `~/.kmet/agent/patch.edn` and the project `.kmet/patch.edn` (see
+   `docs/profiles.md`); this namespace reads those layers, resolves the
+   extension rows they compose, computes a built-in row's state, and writes
+   the row or remove patch a `kmet plugins` toggle needs.
 
    Reading is data-only: a layer is an EDN map with `:rows` and `:patch`
    collections, and nothing here loads an extension. A malformed file is
@@ -14,10 +16,12 @@
    plugin screen still opens (the run itself fails at compose with the usual
    `:kmet.app/bad-patch-file`). Writing refuses to touch a malformed file.
 
-   The composition mirrors `kmet.app.profile/compose` for extension rows only:
+   The composition mirrors `kmet.app.profile/compose` for extension rows:
    rows add, a patch with a `:plugin` adds or replaces by id, and a `:remove`
    patch drops the row with that id. Other rows and patches are ignored here;
-   the run's own compose still sees them.
+   the run's own compose still sees them. Built-in rows are tracked by id: the
+   base row is composed until a `:remove` patch drops it, and a project
+   `:plugin` insert restores one the global layer removed.
 
    A write re-renders the layer's EDN and keeps the file's leading comments;
    it runs under the EDN store's file lock, so two editors cannot lose each
@@ -121,23 +125,60 @@
   [state]
   (set (vals (:rows state))))
 
+(defn- scoped-state
+  "The item state for a row whose global and project presence are GLOBAL?
+   and PROJECT?: `{:enabled bool :override-state :inherit|:load|:unload
+   :inherited-enabled bool}`. `:inherited-enabled` is what a project override
+   inherits, and the project override state is the difference from it. The
+   plugin screen renders both."
+  [global? project? scope]
+  {:inherited-enabled global?
+   :enabled (if (= scope :global) global? project?)
+   :override-state (if (= scope :global)
+                     :inherit
+                     (cond
+                       (and project? (not global?)) :load
+                       (and global? (not project?)) :unload
+                       :else :inherit))})
+
 (defn item-state
-  "The composition state of SOURCE in SCOPE (`:global` or `:project`):
-   `{:enabled bool :override-state :inherit|:load|:unload
-   :inherited-enabled bool}`. `:inherited-enabled` is the global layer's
-   state — what a project override inherits — and the project override state
-   is the difference from it. The plugin screen renders both."
+  "The composition state of extension SOURCE in SCOPE (`:global` or
+   `:project`). See `scoped-state` for the shape."
   [{:keys [global project]} source scope]
-  (let [global? (contains? (sources-of global) source)
-        project? (contains? (sources-of project) source)]
-    {:inherited-enabled global?
-     :enabled (if (= scope :global) global? project?)
-     :override-state (if (= scope :global)
-                       :inherit
-                       (cond
-                         (and project? (not global?)) :load
-                         (and global? (not project?)) :unload
-                         :else :inherit))}))
+  (scoped-state (contains? (sources-of global) source)
+                (contains? (sources-of project) source)
+                scope))
+
+(defn- row-present?
+  "Whether LAYER leaves ID composed, starting from PRESENT?. All rows of a
+   layer are appended before its patches, as in `kmet.app.profile/compose`:
+   a row restores ID, a `:plugin` patch inserts or replaces it, and a
+   `:remove` patch drops it."
+  [present? layer id]
+  (let [present (if (some #(= id (row-id %)) (:rows layer))
+                  true
+                  present?)]
+    (reduce (fn [present patch]
+              (if (= id (:id patch))
+                (cond
+                  (:remove patch) false
+                  (:plugin patch) true
+                  :else present)
+                present))
+            present
+            (:patch layer))))
+
+(defn builtin-item-state
+  "The composition state of built-in row ID in SCOPE (`:global` or
+   `:project`): `{:enabled bool :override-state :inherit|:load|:unload
+   :inherited-enabled bool}`. The base composition supplies the row, so the
+   global layer's state is 'removed by a `:remove` patch or not', and the
+   project layer can remove a globally composed row or insert one the global
+   layer removed. The shape matches `item-state`."
+  [{:keys [global project]} id scope]
+  (let [global? (row-present? true (:data global) id)
+        project? (row-present? global? (:data project) id)]
+    (scoped-state global? project? scope)))
 
 ;; ─── Writing ─────────────────────────────────────────────────────────────
 
@@ -235,6 +276,12 @@
          [rows (into [] (concat (remove removing? patches)
                                 (map (fn [id] {:id id :remove true}) ids)))])))))
 
+(defn- check-project-state!
+  [state]
+  (when-not (#{:inherit :load :unload} state)
+    (throw (ex-info (str "unknown project state " (pr-str state))
+                    {:type :kmet.app/bad-project-state :state state}))))
+
 (defn apply-project-state!
   "Set SOURCE's project state (`:load`, `:unload` or `:inherit`) in the
    project layer. `:load` composes a row when the global layer does not
@@ -243,9 +290,7 @@
    the global layer still composes stays). Returns true when the file changed;
    anything but the three states is `:kmet.app/bad-project-state`."
   [source state]
-  (when-not (#{:inherit :load :unload} state)
-    (throw (ex-info (str "unknown project state " (pr-str state))
-                    {:type :kmet.app/bad-project-state :state state})))
+  (check-project-state! state)
   (update-layer!
    (cfg/project-patch-path)
    (fn [rows patches]
@@ -268,5 +313,65 @@
                        (conj patch {:id source :plugin source}))
                :unload (if (and global? (seq global-ids))
                          (into patch (map (fn [id] {:id id :remove true}) global-ids))
+                         patch)
+               :inherit patch)]))))
+
+(defn apply-global-builtin-state!
+  "Set built-in row ID's global state: ENABLED? false writes a `:remove`
+   patch at the end of the layer, true drops the remove patches and lets the
+   base composition (or the layer's own insert) supply the row again. The
+   current state is read the way the run composes the layer, so a remove
+   patch followed by an insert is enabled. Returns true when the file
+   changed."
+  [id enabled?]
+  (update-layer!
+   (cfg/global-patch-path)
+   (fn [rows patches]
+     (let [removing? #(and (:remove %) (= (:id %) id))
+           present? (row-present? true {:rows rows :patch patches} id)
+           kept (into [] (remove removing?) patches)]
+       [rows (if (= enabled? present?)
+               patches
+               (if enabled?
+                 kept
+                 (conj kept {:id id :remove true})))]))))
+
+(defn- without-builtin-state
+  "ROWS/PATCHES with this layer's own enablement or disablement of ID
+   removed. A config-only patch stays when GLOBAL? still composes ID; it has
+   no row to apply to otherwise."
+  [rows patches id global?]
+  (let [project-row? #(= id (row-id %))
+        project-patch? (fn [patch]
+                         (and (= id (:id patch))
+                              (or (:remove patch)
+                                  (:plugin patch)
+                                  (not global?))))]
+    [(into [] (remove project-row?) rows)
+     (into [] (remove project-patch?) patches)]))
+
+(defn apply-project-builtin-state!
+  "Set built-in row ID's project state (`:load`, `:unload` or `:inherit`) in
+   the project layer. PLUGIN is the row's plugin source, used only when
+   `:load` must re-insert a row the global layer removed. `:unload` removes a
+   globally composed row; `:inherit` drops the project entry. Returns true
+   when the file changed; anything but the three states is
+   `:kmet.app/bad-project-state`."
+  [id plugin state]
+  (check-project-state! state)
+  (update-layer!
+   (cfg/project-patch-path)
+   (fn [rows patches]
+     ;; the global layer is read inside the lock, so the state a toggle
+     ;; writes is the one a run would compose now
+     (let [{:keys [global]} (layers)
+           global? (row-present? true (:data global) id)
+           [rows patch] (without-builtin-state rows patches id global?)]
+       [rows (case state
+               :load (if global?
+                       patch
+                       (conj patch {:id id :plugin plugin}))
+               :unload (if global?
+                         (conj patch {:id id :remove true})
                          patch)
                :inherit patch)]))))

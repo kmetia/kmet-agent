@@ -25,9 +25,9 @@ color values, installation, and live reload; complete starting points are in
   `extensions/`, `skills/`, `prompts/`, `themes/` subdirectories. Filter what a
   package loads with the object form — `{:source "../pkg" :extensions
   ["extensions/*.clj" "!extensions/legacy.clj"]}` (plain globs include,
-  `!` excludes, `+path`/`-path` force include/exclude, `[]` disables a type)
-  `kmet plugins` composes extension rows only; package filters and the other
-  resource arrays stay settings. The same top-level arrays
+  `!` excludes, `+path`/`-path` force include/exclude, `[]` disables a type).
+  `kmet plugins` composes extension and built-in tool rows; package filters
+  and the other resource arrays stay settings. The same top-level arrays
   (`:extensions`/`:skills`/`:prompts`/`:themes`) name auto-root resources
   without installing a package: the skills, prompts and themes arrays select
   which ones stay enabled, while an `:extensions` path only widens the

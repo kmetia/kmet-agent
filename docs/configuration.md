@@ -64,9 +64,10 @@ it (`:ext/<id>`). Settings still install and discover extensions (top-level
 `:extensions` paths, `:packages`, auto dirs) and the retired
 `:bundled-extensions` key no longer decides what loads; compose the extension
 in a layer or toggle it in `kmet plugins`. Skills, prompts and themes remain
-settings-backed resources. Tool selection is `:resources` at runtime; the
-retired `:default-tools`/`:enabled-tools` keys below are ignored (the live
-`/config` screen is not implemented yet).
+settings-backed resources. Built-in tool rows (`:tool/<name>`) compose the
+same way, and `kmet plugins` removes or restores them; their live selection
+is `:resources` at runtime. The retired `:default-tools`/`:enabled-tools`
+keys below are ignored (the live `/config` screen is not implemented yet).
 
 ## Provider catalogs
 
@@ -144,9 +145,9 @@ content. CLI flags `--system-prompt <txt>` and `--append-system-prompt <txt>`
 > **Migration note:** the runtime selection is now `kmet.app.resources`, fed by
 > the `:resources` settings key. The `:default-tools` / `:enabled-tools` shapes
 > documented below are retired: the runtime ignores those keys, and the
-> standalone editor is now `kmet plugins`, which edits extension composition
-> rows only. The builtin `/tools` command is a session-only selector; `/config`
-> (the live resource selector) is not implemented yet.
+> standalone editor is now `kmet plugins`, which edits extension and built-in
+> tool composition rows. The builtin `/tools` command is a session-only
+> selector; `/config` (the live resource selector) is not implemented yet.
 
 The built-in tools are `read`, `write`, `edit`, `bash`, `tool_search`,
 `run_code` and `eval`. All but the last two start enabled; `run_code` and
@@ -212,11 +213,12 @@ plain name replaced it.
 The builtin `/tools` selector is session-only: its toggles apply immediately
 and do not write settings, and a session switch clears the override.
 
-`kmet plugins` is the composition editor: it lists extension rows and writes
-`:ext/<id>` rows and remove patches, not tools. The builtin `/tools` selector
-lists the live tool set and toggles the session override. The persisted
-`:resources` selection is read by the runtime and applies at startup, on a
-session switch and on `/reload`; it has no TUI editor until `/config` lands.
+`kmet plugins` is the composition editor: it lists the built-in tool rows and
+the extension rows, writing `:tool/<name>` remove/restore patches and
+`:ext/<id>` rows or remove patches. The builtin `/tools` selector lists the
+live tool set and toggles the session override. The persisted `:resources`
+selection is read by the runtime and applies at startup, on a session switch
+and on `/reload`; it has no TUI editor until `/config` lands.
 
 The runtime rebuilds the prompt over the `:resources` selection at startup,
 on a session switch (`/resume`, `/import` — pi recreates the runtime from

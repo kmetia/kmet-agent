@@ -486,7 +486,7 @@
   (println "  remove <source>    Remove a package (alias: uninstall)")
   (println "  update [source]    Update installed git packages (all, or one source)")
   (println "  list               List installed packages")
-  (println "  plugins            Compose extension plugin rows (TUI)")
+  (println "  plugins            Compose built-in tool and extension rows (TUI)")
   (println)
   (println "  kmet --profile print \"list the files\"   run one prompt and exit"))
 

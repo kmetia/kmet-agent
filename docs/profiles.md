@@ -125,15 +125,18 @@ extension in `~/.kmet/agent/patch.edn` or disables it with a remove patch
 (the row and its `:config` stay, so re-enabling is lossless); the project
 scope writes a project row or a remove patch in `.kmet/patch.edn`. A write
 re-renders the file's EDN and keeps its leading comments (inline comments
-inside the map are not preserved). The screen lists extension rows only;
-skills, prompts, themes and tools keep their settings/resource resolution.
+inside the map are not preserved).
+
+The built-in tools are rows too (`:tool/read`, `:tool/bash`, … in the built-in
+bundle), so the screen lists them under **Built-in tools**: toggling one in
+the global scope writes its remove patch (or drops it again), and the project
+scope unloads a globally composed row or re-inserts one the global layer
+removed. Skills, prompts and themes keep their settings/resource resolution;
+their runtime selection is `:resources` in `settings.edn` (the retired
+`:default-tools` key is ignored), and only the mounted tools count.
 
 The extension's own plugin still mounts under the host ctx, so an `:ext/…` row
-belongs to a root profile, not an agent preset. Built-in tools are rows too
-(`:tool/read`, `:tool/bash`, … in the built-in bundle), so a layer can remove
-one from the composition; their runtime selection is `:resources` in
-`settings.edn` (the retired `:default-tools` key is ignored), and only the
-mounted tools count.
+belongs to a root profile, not an agent preset.
 
 A row-mounted extension initializes during boot, before the process world loads
 its provider catalogs and `models.edn`; the world then recomposes provider

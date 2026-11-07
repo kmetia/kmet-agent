@@ -403,7 +403,7 @@
     (is (str/includes? out "--session-dir <dir>"))
     (is (str/includes? out "install <source>")
         "the package subcommands the entry dispatches are listed too")
-    (is (str/includes? out "plugins            Compose extension plugin rows (TUI)"))))
+    (is (str/includes? out "plugins            Compose built-in tool and extension rows (TUI)"))))
 
 (deftest package-subcommands-run-the-shared-cli
   ;; `plugins` is a command, not a profile: the entry hands the args to the

@@ -1,18 +1,18 @@
 (ns kmet.ui.tui.plugins
-  "The `kmet plugins` composition screen: a static editor for extension
-   plugin rows.
+  "The `kmet plugins` composition screen: a static editor for plugin rows.
 
-   It lists bundled and installed extension rows (`:ext/<id>`), grouped by
-   where they come from, and writes only the two ambient composition layers:
-   the global `~/.kmet/agent/patch.edn` and the project `.kmet/patch.edn`
+   It lists the built-in tool rows (`:tool/<name>`) and the bundled and
+   installed extension rows (`:ext/<id>`), grouped by where they come from,
+   and writes only the two ambient composition layers: the global
+   `~/.kmet/agent/patch.edn` and the project `.kmet/patch.edn`
    (kmet.app.extensions.layers). It never loads extension code, never lists
-   tools, skills, prompts, themes or packages, and never writes settings or
+   skills, prompts, themes or packages, and never writes settings or
    `:resources`.
 
    Space toggles the selected row: in global scope it composes or removes the
-   extension's row; in project scope it cycles inherit/load/unload as a delta
-   over the global composition. Tab switches the write scope, escape closes,
-   and the search input filters by name, type or path.
+   row; in project scope it cycles inherit/load/unload as a delta over the
+   global composition. Tab switches the write scope, escape closes, and the
+   search input filters by name, type or path.
 
    The screen resolves the composition files when it opens and on a scope
    switch; a toggle updates the selected row in place, so what it shows
@@ -32,6 +32,7 @@
             [kmet.app.extensions.rows :as ext-rows]
             [kmet.app.keybindings :as app-kb]
             [kmet.app.packages :as pkgs]
+            [kmet.app.tools.registry :as tool-registry]
             [kmet.hikap.core :as engine]
             [kmet.libs.path :as path]
             [kmet.libs.theme :as th]
@@ -67,10 +68,12 @@
           (or file path)))))
 
 (defn- group-label
-  "The group heading for an item's origin: the bundled set, a package source
-   with its scope, a settings-entry scope, or an auto-dir scope."
+  "The group heading for an item's origin: the built-in tool set, the
+   bundled extensions, a package source with its scope, a settings-entry
+   scope, or an auto-dir scope."
   [origin scope source base-dir agent-dir]
   (case origin
+    :builtin "Built-in tools"
     :bundled "Bundled with kmet"
     :package (str source " (" (name scope) ")")
     (if (= source "auto")
@@ -81,23 +84,24 @@
       (str (if (= scope :user) "User" "Project") " settings"))))
 
 (defn- build-groups
-  "The extension items grouped per origin/scope/source/base-dir. Packages
-   first, then top-level; user scope before project; items sorted by display
-   name."
+  "The plugin items grouped per origin/scope/source/base-dir. Built-in tools
+   first, then bundled extensions, packages and top-level; user scope before
+   project; items sorted by display name."
   [items agent-dir]
   (let [by-group (group-by (fn [item]
                              (let [origin (get-in item [:metadata :origin] :package)]
                                {:origin origin
                                 :scope (get-in item [:metadata :scope])
                                 :source (get-in item [:metadata :source])
-                                ;; the bundled set is ONE group whatever each
-                                ;; artifact's base dir is
-                                :base-dir (when-not (= :bundled origin)
+                                ;; the built-in and bundled sets are one group
+                                ;; each, whatever an artifact's base dir is
+                                :base-dir (when-not (#{:builtin :bundled} origin)
                                             (get-in item [:metadata :base-dir]))}))
                            items)]
     (vec
      (for [[gk group-items] (sort-by (fn [[gk _]]
-                                       [(case (:origin gk) :bundled 0 :package 1 2)
+                                       [(case (:origin gk)
+                                          :builtin 0 :bundled 1 :package 2 3)
                                         (if (= :user (:scope gk)) 0 1)
                                         (str (:source gk))
                                         (str (:base-dir gk))])
@@ -183,9 +187,11 @@
         inherited? (:inherited? item)
         dimmed? (and (= write-scope :project) inherited? (= ov :inherit))
         cursor (if selected? (th/fg t :accent "> ") "  ")
-        name (cond-> (display-name item)
-               (and selected? (not dimmed?)) th/bold
-               dimmed? (th/fg t :dim))]
+        name (display-name item)
+        name (cond
+               dimmed? (th/fg t :dim name)
+               selected? (th/bold name)
+               :else name)]
     (u/truncate-to-width
      (str cursor "    "
           (render-checkbox t write-scope ov (:enabled item))
@@ -212,10 +218,27 @@
       (println "Warning: cannot read" (:path layer) "-"
                (get-in layer [:error :message])))))
 
+(defn- builtin-tool-items
+  "The built-in tool rows (`:tool/<name>`) as screen items. They come from
+   the base composition, so `:path` is empty and `:metadata` carries the row
+   id and plugin source the layer writers need."
+  []
+  (mapv (fn [{:keys [id plugin]}]
+          {:path ""
+           :resource-type :tools
+           :metadata {:origin :builtin
+                      :scope :user
+                      :source "builtin"
+                      :display-name (tool-registry/tool-row-name id)
+                      :id id
+                      :plugin plugin}})
+        (tool-registry/builtin-tool-rows)))
+
 (defn- read-items
-  "Resolve the extension items for WRITE-SCOPE, each carrying its composition
-   state. The global view is the user scope only; the project view merges the
-   project scope over it. Nothing here loads an extension."
+  "Resolve the built-in tool and extension items for WRITE-SCOPE, each
+   carrying its composition state. The global view is the user scope only;
+   the project view merges the project scope over it. Nothing here loads an
+   extension."
   [write-scope]
   (let [user-settings (cfg/read-global-settings-map)
         project? (= :project write-scope)
@@ -226,20 +249,28 @@
         items (pkgs/resolve-package-items user-settings project-settings nil
                                           project? (pkgs/bundled-items))]
     (mapv (fn [item]
-            (if-let [source (ext-rows/item-source item)]
-              (let [state (ext-layers/item-state composed source write-scope)]
-                (assoc item
-                       :source source
-                       :enabled (:enabled state)
-                       :inherited-enabled (:inherited-enabled state)
+            (let [builtin? (= :builtin (get-in item [:metadata :origin]))
+                  source (when-not builtin? (ext-rows/item-source item))
+                  state (cond
+                          builtin?
+                          (ext-layers/builtin-item-state
+                           layers (get-in item [:metadata :id]) write-scope)
+
+                          source
+                          (ext-layers/item-state composed source write-scope))]
+              (if state
+                (cond-> (assoc item
+                               :enabled (:enabled state)
+                               :inherited-enabled (:inherited-enabled state)
+                               :inherited? (= :user (get-in item [:metadata :scope]))
+                               :override-state (if project?
+                                                 (:override-state state)
+                                                 :inherit))
+                  source (assoc :source source))
+                (assoc item :enabled false :inherited-enabled false
                        :inherited? (= :user (get-in item [:metadata :scope]))
-                       :override-state (if project?
-                                         (:override-state state)
-                                         :inherit)))
-              (assoc item :enabled false :inherited-enabled false
-                     :inherited? (= :user (get-in item [:metadata :scope]))
-                     :override-state :inherit :unreadable? true)))
-          (:extensions items))))
+                       :override-state :inherit :unreadable? true))))
+          (concat (builtin-tool-items) (:extensions items)))))
 
 (defn- rebuild-layout!
   "(Re)build the screen's flat rows from ITEMS (a fresh resolution when nil)
@@ -263,6 +294,12 @@
   [this]
   (rebuild-layout! this (:items @(:state-atom this))))
 
+(defn- item-identity
+  "The identity a row's cached item carries across a search re-filter: an
+   extension's source or a built-in row's id."
+  [item]
+  (or (:source item) (get-in item [:metadata :id])))
+
 (defn- update-row-state!
   "Refresh the selected item after a toggle without re-resolving the layout.
    The item cache is updated too, so a later search cannot show the old
@@ -271,10 +308,10 @@
   (swap! (:state-atom this)
          (fn [{:keys [rows items selected] :as st}]
            (if (= :item (:kind (get rows selected)))
-             (let [item-path (:path (:item (get rows selected)))]
+             (let [item-id (item-identity (:item (get rows selected)))]
                (assoc st
                       :rows (update rows selected update :item merge changes)
-                      :items (mapv #(if (= item-path (:path %))
+                      :items (mapv #(if (= item-id (item-identity %))
                                       (merge % changes)
                                       %)
                                    items)))
@@ -344,38 +381,52 @@
   (when (apply-write! scope write)
     (update-row-state! this changes)))
 
-(defn- toggle-extension!
-  "Toggle an extension item in WRITE-SCOPE: the global scope composes or
-   drops its row; the project scope cycles inherit/load/unload over the
-   global composition. No settings key changes."
+(defn- project-toggle-changes
+  "The state changes a project toggle records: inherit cycles to unload for a
+   globally composed row and to load for one the global layer removed; a
+   project override returns to inherit."
+  [item]
+  (if (= :inherit (:override-state item))
+    (if (:inherited-enabled item)
+      {:override-state :unload :enabled false}
+      {:override-state :load :enabled true})
+    {:override-state :inherit :enabled (:inherited-enabled item)}))
+
+(defn- toggle-item!
+  "Toggle a plugin item in WRITE-SCOPE: the global scope composes or drops
+   its row; the project scope cycles inherit/load/unload over the global
+   composition. A built-in tool is restored by dropping its remove patch; a
+   project load of one re-inserts its base row. No settings key changes."
   [this item write-scope]
-  (when-let [source (:source item)]
-    (if (= :global write-scope)
-      (let [enabled? (:enabled item)]
+  (let [builtin? (= :builtin (get-in item [:metadata :origin]))
+        id (get-in item [:metadata :id])
+        source (:source item)
+        enabled? (:enabled item)]
+    (when (or builtin? source)
+      (if (= :global write-scope)
         (write-row! this :global
-                    (if enabled?
-                      #(ext-layers/disable-global! source)
-                      #(ext-layers/enable-global! source))
-                    {:enabled (not enabled?) :override-state :inherit}))
-      (let [inherited? (:inherited-enabled item)
-            next-state (if (= :inherit (:override-state item))
-                         (if inherited? :unload :load)
-                         :inherit)]
-        (write-row! this :project
-                    #(ext-layers/apply-project-state! source next-state)
-                    {:override-state next-state
-                     :enabled (case next-state
-                                :load true
-                                :unload false
-                                inherited?)})))))
+                    (cond
+                      builtin? #(ext-layers/apply-global-builtin-state!
+                                 id (not enabled?))
+                      enabled? #(ext-layers/disable-global! source)
+                      :else #(ext-layers/enable-global! source))
+                    {:enabled (not enabled?) :override-state :inherit})
+        (let [changes (project-toggle-changes item)
+              next-state (:override-state changes)]
+          (write-row! this :project
+                      (if builtin?
+                        #(ext-layers/apply-project-builtin-state!
+                          id (get-in item [:metadata :plugin]) next-state)
+                        #(ext-layers/apply-project-state! source next-state))
+                      changes))))))
 
 (defn- toggle-selected!
-  "Space/enter on the selected item row; every row is an extension plugin."
+  "Space/enter on the selected item row; every row is a plugin row."
   [this]
   (let [{:keys [rows selected write-scope]} @(:state-atom this)
         row (get rows selected)]
     (when (= :item (:kind row))
-      (toggle-extension! this (:item row) write-scope))))
+      (toggle-item! this (:item row) write-scope))))
 
 (defn- refresh-filter!
   "Apply the search field's text to the row list (pi: searchInput change →

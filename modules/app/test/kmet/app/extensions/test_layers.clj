@@ -1,5 +1,5 @@
 (ns kmet.app.extensions.test-layers
-  "kmet.app.extensions.layers — the extension rows of the two ambient
+  "kmet.app.extensions.layers — the plugin rows of the two ambient
    composition layers: what they compose, the per-scope state the config
    screen shows, and the writes its toggles make."
   (:require [babashka.fs :as fs]
@@ -150,6 +150,82 @@
         (testing "inherit cleans that remove patch again"
           (is (true? (layers/apply-project-state! :ext/a :inherit)))
           (is (= [] (:patch (read-layer project)))))))))
+
+(deftest builtin-row-state-follows-the-ambient-layers
+  (with-layers
+    (fn [{:keys [global project]}]
+      (let [state #(layers/builtin-item-state (layers/layers) :tool/bash %)]
+        (is (= {:enabled true :override-state :inherit :inherited-enabled true}
+               (state :global)))
+        (is (= {:enabled true :override-state :inherit :inherited-enabled true}
+               (state :project)))
+        (write-layer! global {:patch [{:id :tool/bash :remove true}]})
+        (is (= {:enabled false :override-state :inherit :inherited-enabled false}
+               (state :global)))
+        (is (= {:enabled false :override-state :inherit :inherited-enabled false}
+               (state :project)))
+        (write-layer! project {:patch [{:id :tool/bash
+                                        :plugin 'kmet.app.tools.bash/plugin}]})
+        (is (= {:enabled false :override-state :inherit :inherited-enabled false}
+               (state :global)))
+        (is (= {:enabled true :override-state :load :inherited-enabled false}
+               (state :project)))
+        (fs/delete global)
+        (is (= {:enabled true :override-state :inherit :inherited-enabled true}
+               (state :project)))))))
+
+(deftest builtin-writers-remove-and-restore-the-base-row
+  (with-layers
+    (fn [{:keys [global project]}]
+      (testing "a global toggle writes and drops a remove patch"
+        (is (true? (layers/apply-global-builtin-state! :tool/bash false)))
+        (is (= [{:id :tool/bash :remove true}] (:patch (read-layer global))))
+        (is (false? (layers/apply-global-builtin-state! :tool/bash false))
+            "already off")
+        (is (true? (layers/apply-global-builtin-state! :tool/bash true)))
+        (is (= [] (:patch (read-layer global)))))
+      (testing "a later insert patch wins, so a toggle-off appends a remove"
+        (fs/delete global)
+        (write-layer! global
+                      {:patch [{:id :tool/bash :remove true}
+                               {:id :tool/bash
+                                :plugin 'kmet.app.tools.bash/plugin}]})
+        (is (= {:enabled true :override-state :inherit
+                :inherited-enabled true}
+               (layers/builtin-item-state (layers/layers) :tool/bash :global)))
+        (is (true? (layers/apply-global-builtin-state! :tool/bash false)))
+        (is (= [{:id :tool/bash :plugin 'kmet.app.tools.bash/plugin}
+                {:id :tool/bash :remove true}]
+               (:patch (read-layer global))))
+        (is (= {:enabled false :override-state :inherit
+                :inherited-enabled false}
+               (layers/builtin-item-state (layers/layers) :tool/bash :global)))
+        (is (true? (layers/apply-global-builtin-state! :tool/bash true)))
+        (is (= [{:id :tool/bash :plugin 'kmet.app.tools.bash/plugin}]
+               (:patch (read-layer global)))))
+      (testing "the project layer unloads and inherits a composed row"
+        (is (true? (layers/apply-project-builtin-state!
+                    :tool/bash 'kmet.app.tools.bash/plugin :unload)))
+        (is (= [{:id :tool/bash :remove true}] (:patch (read-layer project))))
+        (is (true? (layers/apply-project-builtin-state!
+                    :tool/bash 'kmet.app.tools.bash/plugin :inherit)))
+        (is (= [] (:patch (read-layer project)))))
+      (testing "the project layer loads a globally removed row"
+        (is (true? (layers/apply-global-builtin-state! :tool/bash false)))
+        (is (true? (layers/apply-project-builtin-state!
+                    :tool/bash 'kmet.app.tools.bash/plugin :load)))
+        (is (= [{:id :tool/bash :plugin 'kmet.app.tools.bash/plugin}]
+               (:patch (read-layer project))))
+        (let [parsed (layers/layers)
+              composed (profile/compose
+                        [{:rows [{:id :tool/bash
+                                  :plugin 'kmet.app.tools.bash/plugin}]}
+                         (:data (:global parsed))
+                         (:data (:project parsed))])]
+          (is (= ['kmet.app.tools.bash/plugin] (mapv :plugin (:rows composed)))))
+        (is (true? (layers/apply-project-builtin-state!
+                    :tool/bash 'kmet.app.tools.bash/plugin :inherit)))
+        (is (= [] (:patch (read-layer project))))))))
 
 (deftest the-written-layers-compose
   (with-layers
