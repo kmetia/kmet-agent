@@ -42,7 +42,7 @@
    ;; delegates to a DSL root whose body tracks the status text atom
    "StatusLine"                 :transparent-parent
    ;; delegates to a DSL root whose body tracks the screen state atom
-   "ResourceConfigScreen"       :transparent-parent
+   "GroupedSelector"            :transparent-parent
    ;; transparent delegate over foreign dialog closures — nothing the
    ;; deref tracker could see; lifetime owned by ui-custom's bookkeeping
    "CustomDialogAdapter"        :transparent-parent

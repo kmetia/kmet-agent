@@ -20,16 +20,28 @@
             [rewrite-clj.parser :as parser]
             [sci.core :as sci]))
 
-(defn- lib-files []
+(def ^:private lib-files
+  "Every lib source file. Memoized: the guards read the same tree repeatedly
+   and it does not change during a run."
   ;; recurse: src/kmet/libs/mcp/transport/*.clj is two levels down and the
   ;; one-level scan this replaces silently stopped checking nested libs
-  (letfn [(walk [dir]
-            (mapcat (fn [f]
-                      (if (fs/directory? f) (walk f) [f]))
-                    (fs/list-dir dir)))]
-    (->> (walk "modules/libs/src/kmet/libs")
-         (filter #(re-find #"\.clj[ca]?$" (str %)))
-         (map str))))
+  (memoize
+   (fn []
+     (letfn [(walk [dir]
+               (mapcat (fn [f]
+                         (if (fs/directory? f) (walk f) [f]))
+                       (fs/list-dir dir)))]
+       (->> (walk "modules/libs/src/kmet/libs")
+            (filter #(re-find #"\.clj[ca]?$" (str %)))
+            (map str))))))
+
+(def ^:private parsed-file
+  "PATH's rewrite-clj parse tree. Memoized: the static-field and
+   runtime-resolve guards read the same files, and a fresh parse is the
+   dominant cost on Jolt."
+  (memoize
+   (fn [path]
+     (parser/parse-string-all (slurp path)))))
 
 (defn- ns-form [path]
   ;; Read the ns form itself. A regex over the file was the original
@@ -77,7 +89,7 @@
    only reads `:require`. A library that reaches an upper layer this way is
    still coupled — and the self-containment claim would be false."
   [path]
-  (->> (parser/parse-string-all (slurp path))
+  (->> (parsed-file path)
        (tree-seq node/inner? node/children)
        (keep (fn [n]
                (when (= :list (node/tag n))
@@ -122,7 +134,7 @@
   "The static-field references in PATH that a sandbox would have to resolve."
   [path]
   (distinct (mapcat #(field-refs % true)
-                    (node/children (parser/parse-string-all (slurp path))))))
+                    (node/children (parsed-file path)))))
 
 (deftest libs-name-no-static-fields-in-sandbox-code
   ;; SCI has static-method access but no static-field access, and every

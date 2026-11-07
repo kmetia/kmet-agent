@@ -62,15 +62,17 @@
     "dispose-subtree!"
     "Unloading an extension: the record leaves the process registry first, then the extension's own ctx — its rows, whatever its body mounted there, and its fiber — unwinds. Its callers are `/reload`'s row reload (`kmet.app.extensions.rows/reload-all!`), a row's disposal effect, the rollback of a load that threw, the process's own shutdown, and tests — all on the thread the command or the entry runs on. A tool thread that unloads would be the bug this guard is for; none does."}})
 
-(defn- source-files
+(def ^:private source-files
   "Every Clojure source file under SOURCE-ROOTS, repo-relative and
-   `/`-normalized."
-  []
-  (->> source-roots
-       (filter fs/directory?)
-       (mapcat #(fs/glob % "**/*.{clj,cljc}"))
-       (map #(str/replace (str %) "\\" "/"))
-       sort))
+   `/`-normalized. Memoized: every guard test reads the same tree and the
+   sources do not change during a run."
+  (memoize
+   (fn []
+     (->> source-roots
+          (filter fs/directory?)
+          (mapcat #(fs/glob % "**/*.{clj,cljc}"))
+          (map #(str/replace (str %) "\\" "/"))
+          sort))))
 
 (defn- ns-form
   "FILE's own `(ns …)` node, or nil. The alias scan reads this and nothing else:
@@ -122,16 +124,20 @@
                    (contains? structural-mutators name))
           {:fn name :row (:row (meta node))})))))
 
-(defn- call-sites
+(def ^:private call-sites
   "Every structural kernel mutation FILE performs, as `[{:fn :row}]` in source
    order. Parsed, not grepped: a comment or a docstring naming a mutator is
-   prose."
-  [file]
-  (let [text (slurp file)
-        root (p/parse-string-all text)
-        aliases (kernel-names file root)]
-    (into [] (keep #(structural-call % aliases))
-          (tree-seq n/inner? n/children root))))
+   prose.
+
+   Memoized per file: the guard tests scan the same sources repeatedly, and a
+   fresh rewrite-clj parse of the whole app tree is the dominant cost on Jolt."
+  (memoize
+   (fn [file]
+     (let [text (slurp file)
+           root (p/parse-string-all text)
+           aliases (kernel-names file root)]
+       (into [] (keep #(structural-call % aliases))
+             (tree-seq n/inner? n/children root))))))
 
 ;; ── the guard ─────────────────────────────────────────────────────────────
 
