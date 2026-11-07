@@ -114,21 +114,41 @@
 (defn- item-by-id [screen id]
   (first (filter #(= id (:id %)) (item-rows screen))))
 
-(deftest resource-items-form-sections
+(deftest resource-items-form-provider-groups
   (let [service (fake-service (atom {}))
         items (#'sut/items service)]
     (testing "the catalog items carry their [type name] identity"
       (is (= [[:tool "bash"] [:tool "read"] [:skill "review"]]
              (mapv :id items)))
-      (is (= "bash" (:label (first items))))
+      (is (= "tool/bash" (:label (first items))))
       (is (= [:tool "bash"] (:id (#'sut/row (first (:tool base-rows))))))))
-  (testing "sections follow the resource type order and drop empty types"
-    (let [sections (#'sut/groups (#'sut/items (fake-service (atom {}))))]
-      (is (= ["Tools" "Skills"] (mapv :label sections)))
-      (is (= [["bash" "read"] ["review"]]
-             (mapv #(mapv :name (:items %)) sections))))))
+  (testing "groups are providers with type/name rows inside"
+    (let [groups (#'sut/groups (#'sut/items (fake-service (atom {}))))]
+      (is (= ["Built-in tools" "ext/review"] (mapv :label groups)))
+      (is (= [["tool/bash" "tool/read"] ["skill/review"]]
+             (mapv #(mapv :label (:items %)) groups))))))
 
-(deftest screen-shows-sections-and-switches-scope
+(deftest groups-split-providers
+  (let [items [{:type :tool :name "mcp"
+                :provider {:kind :extension :id :ext/mcp-adapter}}
+               {:type :skill :name "mcp"
+                :provider {:kind :extension :id :ext/mcp-adapter}}
+               {:type :skill :name "review"
+                :provider {:kind :extension :id :ext/review}}
+               {:type :prompt :name "summary"
+                :provider {:kind :app :id [:kmet/prompts]}}
+               {:type :tool :name "bash"
+                :provider {:kind :builtin :id :tool/bash}}]
+        groups (#'sut/groups (mapv #(#'sut/row %) items))]
+    (is (= ["Built-in tools" "ext/mcp-adapter" "ext/review" "kmet app"]
+           (mapv :label groups))
+        "one group per extension, extensions alphabetical, built-ins first")
+    (is (= [["tool/mcp" "skill/mcp"]
+            ["skill/review"]
+            ["prompt/summary"]]
+           (mapv #(mapv :label (:items %)) (rest groups))))))
+
+(deftest screen-shows-groups-and-switches-scope
   (let [settings (atom {})
         service (fake-service settings)
         focused (atom nil)
@@ -142,29 +162,30 @@
       (let [screen (dock/top-component @(:dock-stack cs))]
         (is (identical? screen @focused)
             "the grouped screen itself takes focus")
-        (testing "global scope renders the title and type sections"
+        (testing "the project view is the default and groups by provider"
           (let [lines (render-lines screen 120)]
-            (is (= :global (grouped/screen-write-scope screen)))
-            (is (some #(str/includes? % "Global Resources") lines))
-            (is (some #(str/includes? % "Tools") lines))
-            (is (some #(str/includes? % "Skills") lines))
-            (is (not-any? #(str/includes? % "Prompts") lines))
-            (is (not-any? #(str/includes? % "Scope") lines)
-                "there is no scope row any more")
-            (is (some #(str/includes? % "settings.edn") lines))))
-        (testing "Tab switches to the project view"
-          (protocols/handle-input screen "\t")
-          (is (= :project (grouped/screen-write-scope screen)))
-          (let [lines (render-lines screen 120)]
+            (is (= :project (grouped/screen-write-scope screen)))
             (is (some #(str/includes? % "Project Local Resources") lines))
             (is (some #(str/includes? % ".kmet/settings.edn") lines))
             (is (some #(str/includes? % "inherited global") lines))
-            (is (some #(str/includes? % "space cycle inherit/+/-") lines))))
+            (is (some #(str/includes? % "space cycle inherit/+/-") lines))
+            (is (some #(str/includes? % "Built-in tools") lines))
+            (is (some #(str/includes? % "ext/review") lines))
+            (is (some #(str/includes? % "tool/bash") lines))
+            (is (some #(str/includes? % "skill/review") lines))
+            (is (not-any? #(str/includes? % "Scope") lines)
+                "there is no scope row any more")))
+        (testing "Tab switches to the global view"
+          (protocols/handle-input screen "\t")
+          (is (= :global (grouped/screen-write-scope screen)))
+          (let [lines (render-lines screen 120)]
+            (is (some #(str/includes? % "Global Resources") lines))
+            (is (some #(str/includes? % "space toggle") lines))))
         (testing "Tab switches back"
           (protocols/handle-input screen "\t")
-          (is (= :global (grouped/screen-write-scope screen))))))))
+          (is (= :project (grouped/screen-write-scope screen))))))))
 
-(deftest navigation-skips-section-headings
+(deftest navigation-skips-group-headings
   (let [settings (atom {})
         service (fake-service settings)
         cs {:engine ::engine :dock-stack (atom []) :tui nil}]
@@ -183,11 +204,11 @@
         (is (= [:tool "read"] (selected-id)))
         (protocols/handle-input screen "\u001b[B")
         (is (= [:skill "review"] (selected-id))
-            "the Skills heading is skipped")
+            "the ext/review group heading is skipped")
         (protocols/handle-input screen "\u001b[B")
         (is (= [:skill "review"] (selected-id)))))))
 
-(deftest search-filters-items-and-sections
+(deftest search-filters-items-and-groups
   (let [settings (atom {})
         service (fake-service settings)
         cs {:engine ::engine :dock-stack (atom []) :tui nil}]
@@ -201,11 +222,16 @@
         (grouped/screen-set-query! screen "review")
         (is (= [[:skill "review"]] (mapv :id (item-rows screen))))
         (let [lines (render-lines screen 120)]
-          (is (some #(str/includes? % "Skills") lines))
-          (is (not-any? #(str/includes? % "Tools") lines)))
+          (is (some #(str/includes? % "ext/review") lines))
+          (is (some #(str/includes? % "skill/review") lines))
+          (is (not-any? #(str/includes? % "Built-in tools") lines))
+          (is (not-any? #(str/includes? % "tool/bash") lines)))
         (grouped/screen-set-query! screen "ext/review")
         (is (= [[:skill "review"]] (mapv :id (item-rows screen)))
-            "the provider label is searchable")
+            "the provider group is searchable")
+        (grouped/screen-set-query! screen "built-in tools")
+        (is (= [[:tool "bash"] [:tool "read"]] (mapv :id (item-rows screen)))
+            "the built-in group heading is searchable")
         (grouped/screen-set-query! screen "nothing")
         (is (empty? (item-rows screen)))))))
 
@@ -221,6 +247,7 @@
                   core/tui-request-render (fn [_] nil)]
       (sut/show-config cs)
       (let [screen (dock/top-component @(:dock-stack cs))]
+        (protocols/handle-input screen "\t")
         (grouped/screen-set-query! screen "bash")
         (testing "space enables the default-off tool"
           (protocols/handle-input screen " ")
@@ -251,7 +278,8 @@
                   core/tui-request-render (fn [_] nil)]
       (sut/show-config cs)
       (let [screen (dock/top-component @(:dock-stack cs))]
-        (protocols/handle-input screen "\t")
+        (is (= :project (grouped/screen-write-scope screen))
+            "the screen starts in project scope")
         (grouped/screen-set-query! screen "bash")
         (testing "inherit -> enabled writes a +name delta"
           (protocols/handle-input screen " ")
@@ -304,6 +332,7 @@
                   core/tui-request-render (fn [_] nil)]
       (sut/show-config cs)
       (let [screen (dock/top-component @(:dock-stack cs))]
+        (protocols/handle-input screen "\t")
         (grouped/screen-set-query! screen "bash")
         (protocols/handle-input screen " ")
         (is (empty? @refreshed)

@@ -219,10 +219,12 @@ and do not write settings, and a session switch clears the override.
 the extension rows, writing `:tool/<name>` remove/restore patches and
 `:ext/<id>` rows or remove patches. The builtin `/config` screen edits the
 persistent `:resources` selection: rows are the resources available in the
-current project run, grouped into Tools/Skills/Prompts sections. Tab switches
-the global/project write scope (the same screen layout as `kmet plugins`);
-global scope toggles enabled/disabled, project scope cycles
-inherit/enabled/disabled with inherited rows dimmed, and a tool write clears
+current project run, grouped by the extension that provides them (built-in
+tools and app resources have their own groups) and labelled `type/name`. It
+starts in project scope; Tab switches the global/project write scope (the
+same screen layout as `kmet plugins`); project scope cycles
+inherit/enabled/disabled with inherited rows dimmed, global scope toggles
+enabled/disabled, and a tool write clears
 the `/tools` session override. A tool selection change refreshes the live tool
 set immediately; it does not remount providers or re-run discovery, and an
 unchanged write is a no-op. Project scope writes the `.kmet/settings.edn` of the directory kmet was

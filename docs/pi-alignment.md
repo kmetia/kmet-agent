@@ -185,8 +185,9 @@ built-in tool and extension rows grouped by origin, search, space
 composes/removes, Tab global/project scope switching with the
 inherit/load/unload tri-state and dimmed inherited rows, escape/ctrl+c close.
 pi's per-package resource rows are not ported; the live in-TUI `/config`
-screen selects tools, skills and prompts from the `:resources` service in
-Tools/Skills/Prompts sections, with Tab switching the global/project scope.
+screen selects tools, skills and prompts from the `:resources` service,
+grouped by the providing extension and labelled `type/name`. It starts in
+project scope, with Tab switching the global/project scope.
 
 Object entries keep pi's package-filter semantics:
 `{:source ... :extensions [...] :skills [...] :prompts [...] :themes [...]}`

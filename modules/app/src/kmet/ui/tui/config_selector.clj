@@ -1,14 +1,16 @@
 (ns kmet.ui.tui.config-selector
   "The builtin `/config` live resource selector over `kmet.app.resources`.
 
-   Rows are the available resources of the current project run, grouped into
-   the Tools, Skills and Prompts sections. Global scope toggles a resource's
-   persistent selection; project scope cycles its delta state
-   (inherit -> enabled -> disabled -> inherit) and dims inherited rows, the
-   same Tab-to-switch-scope layout as `kmet plugins`. A write persists through
-   the resources service, refreshes only the affected consumers and emits
-   `:resources-change` with the affected types; it never edits composition,
-   remounts providers or re-runs discovery."
+   Rows are the available resources of the current project run, grouped by
+   the extension that provides them (built-in tools and app resources have
+   their own groups) and labelled `type/name`. The screen starts in project
+   scope: project scope cycles a resource's delta state
+   (inherit -> enabled -> disabled -> inherit) and dims inherited rows; Tab
+   switches to global scope, which toggles the persistent selection, the same
+   layout as `kmet plugins`. A write persists through the resources service,
+   refreshes only the affected consumers and emits `:resources-change` with
+   the affected types; it never edits composition, remounts providers or
+   re-runs discovery."
   (:require [clojure.string :as str]
             [kmet.app.config :as cfg]
             [kmet.app.resources :as resources]
@@ -19,62 +21,53 @@
             [kmet.ui.tui.dock :as dock]
             [kmet.ui.tui.grouped-selector :as grouped]))
 
-(def ^:private kinds
-  "The selectable resource types, in section order."
-  [:tool :skill :prompt])
-
-(def ^:private section-labels
-  "The heading for each resource type."
-  {:tool "Tools" :skill "Skills" :prompt "Prompts"})
-
-(defn- provider-label
-  "A short description of the provider that made a resource available."
-  [{:keys [kind id]}]
-  (case kind
-    :extension (str "extension " id)
-    :builtin (str "built-in " (name id))
-    :app "app"
-    (str kind)))
-
 (defn- row
   "One catalog resource as a screen item: its `[type name]` identity, the
-   name shown in its section, and the catalog's provider/scope fields."
-  [{:keys [type name] :as resource}]
-  (assoc resource :id [type name] :label name))
+   `type/name` label shown inside its provider group, and the catalog's
+   provider/scope fields."
+  [{:keys [type] resource-name :name :as resource}]
+  (assoc resource :id [type resource-name]
+         :label (str (name type) "/" resource-name)))
 
 (defn- items
-  "Every available resource of every type, in section order."
+  "Every available resource of every type, in display order."
   [service]
-  (vec (mapcat (fn [kind]
-                 (map row ((:catalog service) kind)))
-               kinds)))
+  (vec (mapcat (fn [kind] (map row ((:catalog service) kind)))
+               [:tool :skill :prompt])))
+
+(defn- provider-group
+  "The group heading for a resource's provider: its extension id, the
+   built-in tool set, or the app."
+  [{:keys [provider]}]
+  (case (:kind provider)
+    :extension (subs (str (:id provider)) 1)
+    :builtin "Built-in tools"
+    :app "kmet app"
+    (str (:kind provider))))
 
 (defn- groups
-  "The screen sections: one per resource type with at least one item."
+  "The screen groups: one per provider extension, with built-in and app
+   resources in their own groups. The headings sort built-ins first and the
+   app last."
   [items]
-  (keep (fn [kind]
-          (let [section-items (filterv #(= kind (:type %)) items)]
-            (when (seq section-items)
-              {:key kind
-               :label (get section-labels kind (str/capitalize (name kind)))
-               :items (vec (sort-by :name section-items))})))
-        kinds))
+  (->> (group-by provider-group items)
+       (sort-by key)
+       (mapv (fn [[label items]]
+               {:key label :label label :items (vec items)}))))
 
 (defn- query-match?
-  "True when the lower-cased QUERY matches a resource's name, type or
-   provider."
+  "True when the lower-cased QUERY matches a resource's `type/name` label or
+   its provider group heading."
   [item query]
   (or (str/blank? query)
-      (str/includes? (str/lower-case (:name item)) query)
-      (str/includes? (name (:type item)) query)
-      (str/includes? (str/lower-case (provider-label (:provider item))) query)))
+      (str/includes? (str/lower-case (:label item)) query)
+      (str/includes? (str/lower-case (provider-group item)) query)))
 
-(defn- section-line
-  "Render a resource-type section heading (the indented type heading the old
-   config screen used for its resource subgroups)."
+(defn- group-line
+  "Render a provider group heading."
   [theme width group]
   (u/truncate-to-width
-   (str "    " (th/fg theme :muted (:label group)))
+   (str "  " (th/fg theme :accent (th/bold (:label group))))
    width ""))
 
 (defn- checkbox-state
@@ -160,7 +153,7 @@
   [cs service frame-atom]
   (let [tui (:tui cs)
         size (when tui (tui/tui-terminal-size tui))]
-    {:write-scope :global
+    {:write-scope :project
      :can-switch-scope? true
      :rows (or (:rows size) 24)
      :size-ref (when tui (tui/tui-terminal-size-ref tui))
@@ -171,7 +164,7 @@
      :filter-match query-match?
      :item-identity :id
      :render-group (fn [{:keys [group theme width]}]
-                     (section-line theme width group))
+                     (group-line theme width group))
      :render-item (fn [{:keys [item scope theme width selected?]}]
                     (item-line theme scope width item selected?))
      :on-activate (fn [{:keys [screen item scope]}]
@@ -193,7 +186,7 @@
 
 (defn show-config
   "Open the builtin `/config` resource selector over the engine's live
-   `:resources` service.
+   `:resources` service, starting in project scope.
 
    Tab switches global/project scope. Space/Enter cycles the selected row:
    global toggles enabled/disabled, project cycles
