@@ -140,15 +140,106 @@ Config values win over files; a config value naming an existing file is read as
 content. CLI flags `--system-prompt <txt>` and `--append-system-prompt <txt>`
 (repeatable) override everything.
 
+## Resource selection
+
+Tools, skills and prompt templates share one persisted selection under
+`:resources`; a resource is identified by its type and exact registry name.
+Settings keep one list per type:
+
+```edn
+;; ~/.kmet/agent/settings.edn
+{:resources {:tools  ["-bash"]
+             :skills ["-clojure-edit"]}}
+
+;; .kmet/settings.edn
+{:resources {:tools ["+bash"]}}
+```
+
+The global list selects or modifies the defaults; the project list is a delta
+over the effective global selection:
+
+- A missing global type list inherits the defaults; an empty list selects
+  nothing.
+- A modifier-only global list starts from defaults and applies `+name` and
+  `-name` in order.
+- A global list with plain names is absolute: only the named resources are
+  selected, then modifiers apply. A mixed list uses its plain names as that
+  base, then applies the modifiers.
+- A plain global `:tools` list is absolute over every available tool, so it
+  also excludes extension tools that are not named.
+- A project type list accepts only `+name` and `-name`; a missing or empty
+  list inherits the global selection. `+name` enables and `-name` disables
+  that resource in the project, a resource with no entry inherits, and the
+  last entry wins.
+- A plain name in a project list is invalid: the whole list for that type is
+  ignored with one warning, and the project inherits global.
+- Project scope is the `.kmet/settings.edn` of the directory kmet started in;
+  a resumed session's recorded cwd does not move it.
+
+Merge order, per type:
+
+```
+defaults -> global selection -> project delta -> /tools session override
+```
+
+The `/tools` override applies to tools only.
+
+Defaults: skills and prompt templates are on. A built-in tool is on unless
+its row carries `:default-enabled? false` (`run_code` and `eval`); extension
+tools are on. A modifier-only or unset selection never turns `run_code` or
+`eval` on; a plain name or `+name` does.
+
+Availability is separate from selection. A resource is available when a
+provider mounted and active in the current project run registers it (a tool
+row, an extension, a package or a discovery path). A consumer uses it only
+when it is both available and selected. `/config` lists available rows only; a
+stored entry for a provider that is not mounted in this run is inert and not
+shown, but it stays in settings and applies again when the provider returns. A
+built-in tool whose composition row was removed is unavailable until the row
+is restored with `kmet plugins`. A package filter shapes availability too: a
+resource it excludes has no `/config` row and cannot be selected. `:sandbox`
+tool sources are not selectable: their tools stay callable from scripts,
+including MCP tools.
+
+The three surfaces are:
+
+- `kmet plugins` — static composition editor for `:ext/<id>` and
+  `:tool/<name>` rows in the global and project patch layers. It never writes
+  `:resources`, never loads extension code, and its changes apply on the next
+  start.
+- `/config` — live selector for the persisted `:resources` selection over the
+  providers available in the current run. Rows are grouped by provider and
+  labelled `type/name`; it starts in project scope, and Tab switches between
+  project and global. Project rows cycle inherit/enabled/disabled, global rows
+  toggle enabled/disabled. A tool write clears the `/tools` session override
+  and refreshes the live tool set; a skill write rebuilds the prompt;
+  prompt-template lookup reads the selection live. An unchanged write is a
+  no-op, and a write does not remount providers or re-run discovery.
+- `/tools` — session-only absolute tool set. It never writes settings and
+  disappears with the session. `/reload` does not clear the override; a
+  `/config` tool write or a session switch does.
+
+The selection applies at startup, on `/reload`, and on a session switch
+(`/resume`, `/import`), where the runtime is recreated from settings and the
+outgoing session's `/tools` override does not carry over. A tool that is not
+active is not executable: a call the model makes for it settles as
+`Tool <name> not found`. kmet has no CLI equivalent of pi's
+`--tools`/`--exclude-tools`/`--no-tools`/`--no-builtin-tools` yet.
+
+A disabled skill is left out of the prompt's `<available_skills>` block and
+`/skill:name` does not expand it; a disabled prompt template is neither
+offered in autocomplete nor expanded. A skill marked
+`disable-model-invocation` still expands through `/skill:name` even though the
+prompt never lists it.
+
 ## Tools
 
-> **Migration note:** the runtime selection is now `kmet.app.resources`, fed by
-> the `:resources` settings key. The `:default-tools` / `:enabled-tools` shapes
-> documented below are retired: the runtime ignores those keys, and the
-> standalone editor is now `kmet plugins`, which edits extension and built-in
-> tool composition rows. The builtin `/tools` command is a session-only
-> selector; `/config` edits the persistent `:resources` selection in global
-> and project scope.
+> **Migration note:** `:default-tools` and `:enabled-tools` are retired and
+> ignored; selection lives in `:resources` (see [Resource
+> selection](#resource-selection)). `kmet plugins` edits composition rows,
+> `/config` edits the persistent selection, and `/tools` is the session-only
+> tool selector. The retired shapes are recorded under [Retired selection
+> shapes](#retired-selection-shapes) for migration reference.
 
 The built-in tools are `read`, `write`, `edit`, `bash`, `tool_search`,
 `run_code` and `eval`. All but the last two start enabled; `run_code` and
@@ -211,43 +302,6 @@ startup was not silently dropped). An empty list selected no model-facing tools
 layered over user settings for both keys: a `.kmet/settings.edn` list of only
 `+name`/`-name` entries modified the user's list, while a list containing a
 plain name replaced it.
-
-The builtin `/tools` selector is session-only: its toggles apply immediately
-and do not write settings, and a session switch clears the override.
-
-`kmet plugins` is the composition editor: it lists the built-in tool rows and
-the extension rows, writing `:tool/<name>` remove/restore patches and
-`:ext/<id>` rows or remove patches. The builtin `/config` screen edits the
-persistent `:resources` selection: rows are the resources available in the
-current project run, grouped by the extension that provides them (built-in
-tools and app resources have their own groups) and labelled `type/name`. It
-starts in project scope; Tab switches the global/project write scope (the
-same screen layout as `kmet plugins`); project scope cycles
-inherit/enabled/disabled with inherited rows dimmed, global scope toggles
-enabled/disabled, and a tool write clears
-the `/tools` session override. A tool selection change refreshes the live tool
-set immediately; it does not remount providers or re-run discovery, and an
-unchanged write is a no-op. Project scope writes the `.kmet/settings.edn` of the directory kmet was
-started in; resuming a session recorded in another directory does not move it.
-The selection applies at startup, on a session switch (`/resume`, `/import` —
-pi recreates the runtime from settings there, so the outgoing session's runtime
-selection does not carry over), and on `/reload`. A `/config` write applies
-immediately: a tool write refreshes the live set, a skill write rebuilds the
-prompt, and prompt-template lookup reads the selection live. The selection also
-filters skills and prompt templates at read time: a disabled skill is left out
-of the prompt's `<available_skills>` block and `/skill:name` does not expand
-it, and a disabled template is neither offered in autocomplete nor expanded. A
-`disable-model-invocation` skill still expands through `/skill:name` even
-though the prompt never lists it. A
-runtime selection made with the builtin `/tools` selector is a separate
-override: `/reload` does not clear it, so it still decides the
-set until it is reset, a `/config` tool write clears it, or a session switch
-rebuilds the runtime — the prompt is
-rebuilt over that active set. A tool that is not active is also not executable
-— a call the model makes for a disabled tool settles as `Tool <name> not
-found` (pi: `prepareToolCall`) instead of running.
-kmet has no CLI equivalent of pi's `--tools`/`--exclude-tools`/`--no-tools`/
-`--no-builtin-tools` yet.
 
 An extension tool source may be *deferred*: its tools are callable from
 `run_code` but not declared to the model until the built-in `tool_search`

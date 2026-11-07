@@ -750,8 +750,8 @@ API deliberately exposes no settings writer. An extension that contributes a
 tool makes it available; whether it is selected is the user's choice.
 
 `run_code` and `eval` are mounted but opt-in (`:default-enabled? false`; see
-[Tools](configuration.md#tools)). While no script tool is on, `:sandbox` tool
-sources stay registered — their tools are simply absent from the model's script
+[Resource selection](configuration.md#resource-selection)). While no script
+tool is on, `:sandbox` tool sources stay registered — their tools are simply absent from the model's script
 surface until the persisted `:resources` selection or the `/tools` session
 selector enables one
 of them. A disabled `tool_search` likewise leaves `:deferred` sources registered but

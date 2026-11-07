@@ -28,8 +28,8 @@
  :shell-command-prefix nil
  ;; scoped resource selection, e.g. {:tools ["-bash"]}; global lists
  ;; select or modify the defaults, project lists are +name/-name deltas over
- ;; global. See docs/configuration.md#tools. The old :default-tools and
- ;; :enabled-tools keys are ignored.
+ ;; global. See docs/configuration.md#resource-selection. The old
+ ;; :default-tools and :enabled-tools keys are ignored.
  :resources {}
  :terminal {:show-images true
             :image-width-cells 60

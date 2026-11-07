@@ -174,3 +174,10 @@ the process install — which is why a connection must not take the slot.
 - The kernel's own exclusions (JS syntax, the loader/HMR/console packages, the
   plugin market, async stack splicing) are listed in
   [`srce.md`](../../../../modules/srce/src/kmet/srce/srce.md).
+- A second resource-selection surface: `:resources` (global list plus project
+  delta) is the only persisted selection, `/tools` is the session override and
+  `kmet plugins` is composition. Per-command, per-eval-source and per-theme
+  selection, project-scope absolute lists, live composition recomposition and
+  a generic extension API for persisted selection stay unbuilt; there is no
+  offline selection or unavailable-resource cleanup, and MCP tools are
+  `:sandbox` sources, not `/config` rows.

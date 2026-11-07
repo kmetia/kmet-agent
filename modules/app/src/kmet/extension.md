@@ -340,8 +340,8 @@ expensive front of the cached prefix — is not re-sent and the message list
 stays a growing prefix.
 
 `run_code` is a mounted but opt-in row (`:default-enabled? false`; see
-[Tools](../../../../docs/configuration.md#tools)): while it is off, `:sandbox`
-sources stay registered and their tools are absent from the model's script
+[Resource selection](../../../../docs/configuration.md#resource-selection)):
+while it is off, `:sandbox` sources stay registered and their tools are absent from the model's script
 surface, not unregistered. Enabling `run_code` through the persisted
 `:resources` selection or `/tools` makes them callable immediately, and
 unloading the extension is what
