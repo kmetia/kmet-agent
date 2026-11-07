@@ -3,8 +3,8 @@
         babashka/process {:mvn/version "0.6.25"}
         borkdude/edamame {:mvn/version "1.6.44"}
         dev.weavejester/cljfmt {:mvn/version "0.16.6"}
-        org.babashka/http-client {:mvn/version "0.4.25"}
-        org.clojure/core.async {:mvn/version "1.6.681"}
+        org.babashka/http-client {:mvn/version "0.4.26"}
+        org.clojure/core.async {:mvn/version "1.8.741"}
         org.clojure/data.json {:mvn/version "2.5.2"}
         parinferish/parinferish {:mvn/version "0.8.0"}
         rewrite-clj/rewrite-clj {:mvn/version "1.3.58"}}}

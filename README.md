@@ -39,7 +39,7 @@ the native clipboard backend; older JDKs still run the app).
 
 ## Quick start
 
-Install [Babashka](https://babashka.org/) 1.13.225 or newer, then run kmet
+Install [Babashka](https://babashka.org/) 1.13.229 or newer, then run kmet
 from a checkout:
 
 ```sh

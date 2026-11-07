@@ -84,7 +84,7 @@
 
         org.clojure/data.json {:mvn/version "2.5.2"}
         ;; ^ 2.5.2 on both hosts: babashka >= 1.13.224 bundles data.json
-        ;; (2.5.2 as of 1.13.225) and the built-in wins over any declared
+        ;; (2.5.2 as of 1.13.229) and the built-in wins over any declared
         ;; copy, so the pre-bundling concern (>= 2.5 uses definterface,
         ;; json.clj InternalPBR, which SCI would not analyze) is gone;
         ;; bb.edn pins the same version.
@@ -93,15 +93,19 @@
         ;; where the JDK already provides these classes). This revision
         ;; carries the zone-aware LocalDateTime factories that close
         ;; jolt#1197 — ofInstant, and ofEpochSecond applying its offset
-        ;; (jolt-lang/time#18) — and excludes tick's dead ClojureScript
+        ;; (jolt-lang/time#18) — excludes tick's dead ClojureScript
         ;; cljs.java-time half: 11.7 MB of js-joda externs nothing on the
-        ;; jolt path loads (jolt-lang/time#19).
+        ;; jolt path loads (jolt-lang/time#19) — and escapes the quotes in
+        ;; locale-data's ns docstring, which an unescaped pair turns into an
+        ;; invalid reference clause (51de696, after the previous pin). This
+        ;; main revision also honors DateTimeFormatter/withZone and follows
+        ;; TimeZone/getDefault for ZoneId/systemDefault (PRs #25/#26).
         io.github.jolt-lang/time {:git/url "https://github.com/jolt-lang/time.git"
-                                  :git/sha "2c58d9c709a25d80608757c3026f4c656a994ef1"}
+                                  :git/sha "753905d0e694600f593b9904e880a8a8379fb7b1"}
         ;; jolt-lang/jolt-crypto — the OpenSSL-backed java.security /
         ;; javax.crypto shims (MessageDigest, Mac, Cipher, SecureRandom, EC +
         ;; RSA, RFC 0014; inert on bb/JVM) — arrives through http-client
-        ;; below at v0.0.10; no direct pin. The project-level specs above
+        ;; below at v0.2.0; no direct pin. The project-level specs above
         ;; keep its libcrypto/libssl candidates and add static archives.
         ;; babashka.http-client on Jolt: the jolt-lang/http-client library's
         ;; java.net.http shims (RFC 0014 :jolt/provides over BSD sockets +
@@ -109,8 +113,9 @@
         ;; Maven artifact unmodified. The mvn dep feeds the jolt classpath
         ;; (bb has http-client built in; plain JVM clojure gets it too).
         ;; kmet.libs.http routes direct/http-proxy traffic through it on
-        ;; Jolt — curl stays only for SOCKS/https-scheme proxies.
-        org.babashka/http-client {:mvn/version "0.4.25"}
+        ;; Jolt — curl stays only for SOCKS/https-scheme proxies. 0.4.26 is
+        ;; the copy bundled by the 1.13.229 min-bb floor.
+        org.babashka/http-client {:mvn/version "0.4.26"}
         ;; The shims behind babashka.http-client on Jolt. PR #25 dropped
         ;; the libz shims and stale java.util.zip claims; PR #27 fixed body
         ;; timeouts; PR #29 added the Windows Winsock transport (http-client
@@ -125,12 +130,14 @@
         ;; idle-timeout handling. v0.1.0 (d99af98, PR #34) removed the stale
         ;; CompletableFuture claim and set http-client's own Jolt floor to
         ;; 0.8.16; PR #33 also exits its test runners via jolt's wait and bumps
-        ;; crypto to v0.0.10 — the
-        ;; revision kmet's digest/HMAC classes ride on, no root pin. v0.0.17
-        ;; and earlier printed the dropped-claim warning on every Jolt run.
+        ;; crypto to v0.0.10. v0.0.17 and earlier printed the dropped-claim
+        ;; warning on every Jolt run. The v0.1.6 line (e9e0a39, PRs #37-#41)
+        ;; streams HttpURLConnection bodies off the wire, sends a default
+        ;; User-Agent, and moves jolt-crypto to v0.2.0 — the revision kmet's
+        ;; digest/HMAC classes ride on, still no root pin.
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
-                                         :git/tag "v0.1.2"
-                                         :git/sha "00455b8135861b2fd2ddbe3e7887a94e7aba5760"}
+                                         :git/tag "v0.1.6"
+                                         :git/sha "e9e0a39581bd8d96f0a438359599fa49a500980c"}
         ;; cljfmt / spec.alpha / rewrite-clj serve the format tasks
         ;; (kmet.tasks.format — one code path on both hosts) AND the fixed
         ;; bundled extension set (kmet.app.extensions.libs, src/kmet/extension.md §
@@ -142,7 +149,7 @@
         ;; drops cljfmt's org.clojure/clojure dep (vendored core), and
         ;; cljfmt.config requires clojure.spec.alpha. rewrite-clj is pinned
         ;; to the version the supported babashka bundles — 1.3.58 as of the
-        ;; 1.13.225 min-bb floor (bb's built-in wins over cljfmt's transitive
+        ;; 1.13.229 min-bb floor (bb's built-in wins over cljfmt's transitive
         ;; 1.2.50 there, so bb formats with it) — to keep both hosts on the
         ;; same parser — no longer a workaround, just parity.
         dev.weavejester/cljfmt {:mvn/version "0.16.6"}
@@ -158,7 +165,7 @@
         parinferish/parinferish {:mvn/version "0.8.0"}
         borkdude/edamame {:mvn/version "1.6.44"}
         ;; Boundary schemas — see bb.edn for rationale.
-        metosin/malli {:mvn/version "0.20.1"}
+        metosin/malli {:mvn/version "0.20.3"}
         ;; kmet's own RFC 0014 provider lib (jolt/ dir): the JDK classes the
         ;; jolt ecosystem lacks. Empty by design — v0.8.22 supplies every
         ;; gap it was built for, so :jolt/provides is {} and install! is a
@@ -170,7 +177,7 @@
   ;; its basis with this alias) must not drift with whatever the builder's CLI
   ;; or tools.build happens to pull — the JVM is the only host whose core the
   ;; repo names. bb and jolt bring their own runtimes.
-  :clj-pin {:override-deps {org.clojure/clojure {:mvn/version "1.12.5"}}}
+  :clj-pin {:override-deps {org.clojure/clojure {:mvn/version "1.12.6"}}}
   ;; The JVM host's runtime extras — the two libraries babashka bundles and
   ;; Jolt provides natively, but a plain JVM classpath lacks:
   ;; clojure.tools.deps (an extension's :deps are resolved in-process through
@@ -178,7 +185,7 @@
   ;; clipboard backend). `bb start-jvm`, the JVM test tasks and the JVM
   ;; packager (which resolves its basis with this alias) opt in.
   :jvm {:extra-deps {kmet/tk {:local/root "modules/tk"}
-                     org.clojure/tools.deps {:mvn/version "0.28.1569"}
+                     org.clojure/tools.deps {:mvn/version "0.31.1646"}
                      ;; The host FFI on the JVM: the Windows clipboard backend
                      ;; (kmet.libs.clipboard-win) and the Tk adapter
                      ;; (kmet.tk.tcl) both call into it — babashka bundles
@@ -205,12 +212,12 @@
   ;; The JVM nREPL server (`bb nrepl-jvm`). Dev-only like :build — the app
   ;; never loads nrepl — and dependency-free beyond the Clojure runtime, so it
   ;; adds nothing to the app classpath.
-  :nrepl {:extra-deps {nrepl/nrepl {:mvn/version "1.7.0"}}}
+  :nrepl {:extra-deps {nrepl/nrepl {:mvn/version "1.8.0"}}}
   ;; The JVM packager (`bb uberjar-jvm`, kmet.tasks.build-jvm): tools.build is
   ;; build-only — the app never loads it, and the bb test/lint classpaths stay
   ;; without it (clj-kondo's unresolved-namespace exception covers the lint
   ;; view).
-  :build {:extra-deps {io.github.clojure/tools.build {:mvn/version "0.10.12"}}}
+  :build {:extra-deps {io.github.clojure/tools.build {:mvn/version "0.10.14"}}}
   :start {:main-opts ["-m" "kmet.app.core"]}
   ;; jolt dist --test: the only source roots a test build adds — test/ and the
   ;; generated entry root (kmet.tasks.build/generate-test-main!). target/

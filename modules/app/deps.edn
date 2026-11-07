@@ -81,7 +81,7 @@
         kmet/reakt {:local/root "../reakt"}
         babashka/fs {:mvn/version "0.5.34"}
         babashka/process {:mvn/version "0.6.25"}
-        metosin/malli {:mvn/version "0.20.1"}
+        metosin/malli {:mvn/version "0.20.3"}
         ;; The bundled extension set (kmet.app.extensions.libs) requires these
         ;; so the host loads them once and extension contexts share the
         ;; namespaces by reference.

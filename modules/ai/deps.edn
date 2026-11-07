@@ -1,4 +1,4 @@
 {:paths ["src" "test"]
  :deps {kmet/libs {:local/root "../libs"}
         babashka/fs {:mvn/version "0.5.34"}
-        metosin/malli {:mvn/version "0.20.1"}}}
+        metosin/malli {:mvn/version "0.20.3"}}}

@@ -53,7 +53,7 @@ resource locations.
 
 ## Prerequisites
 
-- [Babashka](https://babashka.org/) ≥ 1.13.225 (bundles JLine 4.4.6) — the
+- [Babashka](https://babashka.org/) ≥ 1.13.229 (bundles JLine 4.4.7) — the
   primary host
 - [Jolt](https://github.com/jolt-lang/jolt) ≥ v0.8.24 — optional: the same
   code runs natively on Jolt (`jolt start`, `jolt dist`). kmet targets the

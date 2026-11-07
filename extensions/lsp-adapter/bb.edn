@@ -9,7 +9,7 @@
         ;; by bb >= 1.13.224 but declared for a standalone classpath) and
         ;; malli at load time; pinned at the root deps.edn versions.
         org.clojure/data.json {:mvn/version "2.5.2"}
-        metosin/malli {:mvn/version "0.20.1"}}
+        metosin/malli {:mvn/version "0.20.3"}}
  :tasks
  {test {:doc "Run lsp-adapter tests (args: test namespace names; defaults to the offline set; add the e2e suite to spawn the fake server)"
         :task (let [nss (or (some->> *command-line-args* (map symbol))

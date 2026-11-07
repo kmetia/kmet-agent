@@ -1,11 +1,11 @@
-{:min-bb-version "1.13.225"
+{:min-bb-version "1.13.229"
  ;; tasks/ is a second source root, not part of the app: every bb-task
  ;; implementation lives there (see AGENTS.md § File layout). Both hosts
  ;; resolve kmet.tasks.* from it, and neither artifact carries it — the
  ;; uberjar walks src/, jolt's :jolt/build :embed does too.
  :paths ["modules/reakt/src" "modules/reakt/test" "modules/hikap/src" "modules/hikap/test" "modules/libs/src" "modules/libs/test" "modules/tui/src" "modules/tui/test" "modules/ai/src" "modules/ai/test" "modules/loader/src" "modules/loader/test" "modules/srce/src" "modules/srce/test" "modules/app/src" "modules/app/test" "modules/tk/src" "modules/tk/test" "test" "tasks" "extensions/clojure/src" "extensions/clojure/test" "extensions/tree-sitter/src" "extensions/tree-sitter/test" "extensions/review/src" "extensions/review/test" "extensions/mcp-adapter/src" "extensions/mcp-adapter/test" "extensions/lsp-adapter/src" "extensions/lsp-adapter/test"]
  :deps {dev.weavejester/cljfmt {:mvn/version "0.16.6"}
-        ;; babashka >= 1.13.224 bundles data.json (2.5.2 as of 1.13.225) and
+        ;; babashka >= 1.13.224 bundles data.json (2.5.2 as of 1.13.229) and
         ;; the built-in wins over any declared copy; pinned at the bundled
         ;; version in lockstep with the jolt/JVM classpath (deps.edn).
         ;; Before the bundling, >= 2.5 could not load under SCI (definterface
@@ -18,7 +18,7 @@
         parinferish/parinferish {:mvn/version "0.8.0"}
         ;; Boundary schemas: validate files and, later,
         ;; wire records at the edges. Prefer malli.core + malli.error only.
-        metosin/malli {:mvn/version "0.20.1"}}
+        metosin/malli {:mvn/version "0.20.3"}}
  ;; Each :doc is a one-line `bb tasks` summary, a blank line, then the
  ;; details; `bb <task> --help` prints the whole text (kmet.tasks.help).
  ;; :requires here is shared by every task and only pulls in that wrapper.
