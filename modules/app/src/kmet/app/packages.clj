@@ -709,18 +709,17 @@
     (vec result)))
 
 (defn- resolve-entries
-  "Resolve ENTRIES of TYPE against BASE-DIR into enabled items: a file
-   contributes itself, a directory its discovered items. Callers pass
-   top-level settings paths or an auto-dir root. Signed/glob entries are
-   ignored — selection is the `:resources` service, not the path list.
-   METADATA carries origin, scope and source."
-  [acc type entries metadata base-dir]
+  "Resolve ENTRIES of TYPE into enabled items using METADATA's scope root
+   as BASE-DIR: a file contributes itself, a directory its discovered
+   items. Callers pass top-level settings paths or an auto-dir root.
+   Signed/glob entries are ignored — selection is the `:resources`
+   service, not the path list."
+  [acc type entries {:keys [base-dir] :as metadata}]
   (doseq [entry entries
           :let [path (resolve-path entry base-dir)]
-          item (cond
-                 (fs/regular-file? path) [path]
-                 (fs/directory? path) (discover-items-in-dir type path)
-                 :else [])]
+          item (if (fs/directory? path)
+                 (discover-items-in-dir type path)
+                 (when (fs/regular-file? path) [path]))]
     (add-resource! acc type (->PackageItem item true type metadata))))
 
 (defn- resolve-bundled-layer
@@ -817,19 +816,15 @@
    PROJECT-SCOPE? false is pi's global config view (untrusted settings
    manager): project entries and project auto dirs are skipped entirely."
   [acc user-settings project-settings agent-dir project-scope?]
-  (let [user-settings (or user-settings {})
-        project-settings (or project-settings {})
-        project-base (cfg/project-dir)
+  (let [project-base (cfg/project-dir)
         user-base (or agent-dir (cfg/get-agent-dir))]
     (when project-scope?
       (doseq [type resource-types]
         (resolve-entries acc type (get project-settings type)
-                         (top-level-metadata "local" :project project-base)
-                         project-base)))
+                         (top-level-metadata "local" :project project-base))))
     (doseq [type resource-types]
       (resolve-entries acc type (get user-settings type)
-                       (top-level-metadata "local" :user user-base)
-                       user-base))
+                       (top-level-metadata "local" :user user-base)))
     ;; Scope is decided by exact root equality, not path prefix: the agent
     ;; dir can live inside the project root (cwd = $HOME puts the agent at
     ;; $HOME/.kmet/agent under the project root $HOME/.kmet), and a prefix
@@ -842,8 +837,7 @@
             :when (= (str d) root)]
       (resolve-entries acc type [d]
                        (top-level-metadata "auto" (if project? :project :user)
-                                           scope-base)
-                       scope-base))))
+                                           scope-base)))))
 
 (declare bundled-items)
 

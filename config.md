@@ -1,22 +1,15 @@
 # Resource selection
 
-Status: steps 1–7 implemented (`kmet.app.resources`, the per-type settings
-merge, the `:resources` row and settings-schema validation; the runtime now
-reads `enabled-names :tool` and keeps only the session active-tool override;
-the builtin `/tools` session selector replaces the bundled tools extension;
-`kmet plugins` is the static plugin-row editor; the builtin `/config` resource
-selector writes both scopes and emits `:resources-change`; the package
-per-item selection writers and top-level signed selection are retired; the
-skills/prompts read-time filters are wired: the system-prompt row filters its
-skill block, `/skill:` expansion and prompt lookup/expansion/autocomplete
-honor the selection; top-level entries are discovery paths only and
-`:meta {:tools ...}` is gone from the manifest contract). Step 8 remains.
-The retired `:default-tools`/`:enabled-tools` keys and top-level signed
-entries are ignored silently: kmet is pre-1.0 and adds no migration warnings
-for them. No standalone screen edits the retired keys any more.
-This file stays at the repository root as the working design and plan until
-the migration lands; moving it beside the source and design record is a
-separate cleanup task.
+Status: complete. The runtime reads `:resources` for tool, skill and prompt
+selection; `/config` writes both scopes; `/tools` is the session-only tool
+override; `kmet plugins` is the static composition editor; and top-level
+signed entries and `:meta {:tools ...}` are retired. Migration warnings were
+intentionally omitted before 1.0. All tests pass; `bb test` still reports the
+pre-existing `mcp.edn` agent-dir write in
+`kmet.app.extensions.test-session`.
+This file stays at the repository root as the design record and migration
+plan; moving it beside the source and design record is a separate cleanup
+task.
 
 ## Three surfaces
 
@@ -381,8 +374,8 @@ selection-only path above.
   `disable-model-invocation`, prompts lookup and expansion.
 - `kmet plugins`: static plugin rows only, no extension loading, no
   `:resources` writes; CLI usage names `kmet plugins`.
-- Settings breaks and warnings; removed extension API and artifact; changed-file
-  gates.
+- Settings breaks (no migration warnings); removed extension API and
+  artifact; changed-file gates.
 
 ## Out of scope
 
