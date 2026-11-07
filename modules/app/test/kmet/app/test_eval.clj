@@ -75,6 +75,8 @@
   ;; sequential path. A definition-free call keeps the default parallel path.
   (t/is (nil? (:execution-mode eval-tool/definition))
         "eval keeps the loop's default execution mode")
+  (t/is (= :eval (:serial-group eval-tool/definition))
+        "eval calls queue in source order inside a parallel batch")
   (t/is (tool-exec/has-sequential-tool-call?
          [{:name "eval" :arguments {"code" "(defn f \"F.\" [] 1)"}}]
          {"eval" eval-tool/definition})

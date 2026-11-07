@@ -593,6 +593,63 @@
                        (filter #(= :tool (:role %)) (state/get-context agent))))
               "results are still appended to context in source order")))))
 
+(t/deftest test-loop-serial-group-queues-in-source-order
+  ;; A tool with :serial-group runs its calls in source order inside a
+  ;; parallel batch, while unrelated calls stay concurrent. A queued call is
+  ;; not prepared until its predecessor ended — its execution clock starts
+  ;; then, not while it waits (eval groups its calls on the session lock).
+  (let [events (atom [])
+        started (atom [])
+        first-running (promise)
+        free-done (promise)
+        release-first (promise)
+        agent (support/make-agent-state
+               :on-event (fn [e]
+                           (swap! events conj e)
+                           (when (and (= :tool-execution-end (:type e))
+                                      (= "c" (:tool-call-id e)))
+                             (deliver free-done true))))
+        serial-tool (tool/make-tool
+                     :name "serial"
+                     :parameters {:type "object" :properties {}}
+                     :serial-group :g
+                     :execute (fn [args]
+                                (let [n (:n args)]
+                                  (swap! started conj n)
+                                  (when (= 1 n)
+                                    (deliver first-running true)
+                                    (deref release-first 2000 :timeout))
+                                  {:content (str n) :is-error false})))
+        free-tool (tool/make-tool
+                   :name "free"
+                   :parameters {:type "object" :properties {}}
+                   :execute (fn [_] {:content "free" :is-error false}))
+        calls [{:id "a" :name "serial" :arguments {:n 1}}
+               {:id "b" :name "serial" :arguments {:n 2}}
+               {:id "c" :name "free" :arguments {}}]
+        run (future (tool-exec/execute-tool-calls!
+                     agent calls nil [serial-tool free-tool] false))]
+    (try
+      (t/is (true? (deref first-running 2000 false)))
+      (t/is (= [1] @started)
+            "the second group member waits for the first")
+      (t/is (true? (deref free-done 2000 false))
+            "an unrelated call still runs while the group queues")
+      (t/is (not-any? #(and (= :tool-execution-prepared (:type %))
+                            (= "b" (:tool-call-id %)))
+                      @events)
+            "the queued call is not prepared while it waits")
+      (finally
+        (deliver release-first true)))
+    (t/is (not= ::timeout (deref run 3000 ::timeout)))
+    (t/is (= [1 2] @started) "group members run in source order")
+    (let [trace (mapv (juxt :type :tool-call-id) @events)
+          end-a (.indexOf trace [:tool-execution-end "a"])
+          prepared-b (.indexOf trace [:tool-execution-prepared "b"])]
+      (t/is (<= 0 end-a))
+      (t/is (< end-a prepared-b)
+            "the queued call's clock starts only after its predecessor ended"))))
+
 (t/deftest test-loop-sequential-tool-execution
   (let [llm-call-count (atom 0)
         tool-count (atom 0)

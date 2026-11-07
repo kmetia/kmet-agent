@@ -136,6 +136,10 @@
    :status true
    ;; No :execution-mode: the loop's batch classifier examines the call's code
    ;; and serializes a batch only when it contains a verb definition.
+   ;; Calls to one session serialize on the service's session lock anyway; the
+   ;; group queues them in source order, so a waiting call is not "prepared" —
+   ;; and shows no Elapsed — until it actually runs.
+   :serial-group :eval
    :title title))
 
 (srce/defplugin plugin

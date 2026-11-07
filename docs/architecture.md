@@ -604,7 +604,10 @@ next. Because a call that defines a verb — persisted or live-only — makes
 later calls order-dependent, the loop examines each eval call's code before
 execution and runs a batch containing a top-level definition in source order
 instead of letting the call futures race for the session's call lock;
-definition-free eval calls keep the default parallel batch. Eval creates verbs:
+definition-free eval calls keep the default parallel batch, where the eval
+tool's `:serial-group` queues its own calls in source order. A queued eval is
+not prepared until the previous one finished, so its transcript clock does not
+run while it waits for the session lock. Eval creates verbs:
 a successful top-level definition with a non-blank docstring is written
 immediately to one of two durable layers: the global
 `<agent-dir>/eval/<ns>/<name>.clj`, or the session cwd's

@@ -4,7 +4,7 @@
 (defrecord Tool [name label description prompt-snippet prompt-guidelines
                  parameters execute render-call render-result
                  constrained-sampling render-shell prepare-arguments
-                 execution-mode streams? contextual? title status exposure])
+                 execution-mode serial-group streams? contextual? title status exposure])
 
 (def exposure-values
   "The tool record's `:exposure` — how the model reaches the tool:
@@ -80,6 +80,9 @@
 (defn make-tool
   "Create a Tool record.
    See tool/Tool for all fields. :execution-mode defaults to nil (= :parallel).
+   :serial-group, when set, makes calls to tools sharing the group run in
+   source order inside a parallel batch, while unrelated calls stay
+   concurrent.
    :parameters may be a pre-built JSON schema map (passed through as-is);
    :params is a compact alternative — a map of param keyword →
    {:type :string|:number|:boolean :description str :optional? bool} —
@@ -89,7 +92,7 @@
   [& {:keys [name label description prompt-snippet prompt-guidelines
              params parameters execute render-call render-result
              constrained-sampling render-shell prepare-arguments
-             execution-mode streams? contextual? title status exposure]}]
+             execution-mode serial-group streams? contextual? title status exposure]}]
   (map->Tool
    {:name name :label label :description description
     :prompt-snippet prompt-snippet :prompt-guidelines prompt-guidelines
@@ -100,6 +103,7 @@
     :render-shell render-shell
     :prepare-arguments prepare-arguments
     :execution-mode execution-mode
+    :serial-group serial-group
     :streams? streams?
     :contextual? contextual?
     :title title

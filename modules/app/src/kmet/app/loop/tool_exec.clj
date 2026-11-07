@@ -14,9 +14,13 @@
 
    Tool execution mode (pi: toolExecution): tools default to :parallel; if
    any tool call targets a :sequential tool the whole batch runs sequentially
-   (see :execution-mode on the Tool record). Eval is the one code tool whose
-   definitions are examined: a batch containing an eval call with a top-level
-   definition (persisted or live-only) runs sequentially too."
+   (see :execution-mode on the Tool record). A parallel batch still orders
+   calls that share a `:serial-group` (see :serial-group on the Tool record):
+   they run in source order while unrelated calls stay concurrent, so a call
+   that must wait its turn does not start its clock until it runs. Eval is
+   the one code tool whose definitions are examined: a batch containing an
+   eval call with a top-level definition (persisted or live-only) runs
+   sequentially too."
   (:require [kmet.app.eval.definitions :as eval-defs]
             [kmet.app.permissions :as permissions]
             [kmet.app.loop.state :as state]
@@ -178,9 +182,12 @@
    The start events fire sequentially in source order; each call's chain and
    body run in its own future, so a call flips to done — with its own Took
    duration — the moment it finishes (pi: emitToolExecutionEnd in the
-   concurrent closure) instead of when the slowest sibling does. Context/session
-   results are appended afterwards, in source order. Returns results in source
-   order.
+   concurrent closure) instead of when the slowest sibling does. A tool's
+   :serial-group chains its calls: each future waits for the previous group
+   member's future, and the chain opens after that call's end event, so a
+   queued call gets no :tool-execution-prepared — and no clock — until it
+   runs. Context/session results are appended afterwards, in source order.
+   Returns results in source order.
    DECLARED-TOOLS — the request's captured tool map (name → tool): the
    declared set and the dispatch of every call resolve against that one
    capture, so a tool unloaded after the request was built still runs for the
@@ -200,15 +207,29 @@
         ;; run-level binding in run-agent-turn (conveyed into these futures),
         ;; so no per-future binding is needed (invoke/execute-tool-call's
         ;; :bindings is the pool-worker path).
-        futures (into {} (map (fn [tc]
-                                [(:id tc)
-                                 (future
-                                   (let [{:keys [result args]}
-                                         (call-point! agent assistant-msg
-                                                      declared-tools tc)]
-                                     (settle! tc args result)
-                                     result))])
-                              tool-calls))
+        ;; A :serial-group chains futures in source order: a member runs only
+        ;; after its predecessor's future completed — after that call's end
+        ;; event, so preparation and the prepared event (where the UI starts
+        ;; its clock) happen when the call actually runs, not while it queues
+        ;; for the eval session lock. A failed predecessor does not skip its
+        ;; successor; await-all settles that failure separately.
+        futures (first
+                 (reduce (fn [[futures last-by-group] tc]
+                           (let [group (:serial-group (get declared-tools (:name tc)))
+                                 pred (when group (get last-by-group group))
+                                 f (future
+                                     (when pred
+                                       (try @pred (catch Throwable _ nil)))
+                                     (let [{:keys [result args]}
+                                           (call-point! agent assistant-msg
+                                                        declared-tools tc)]
+                                       (settle! tc args result)
+                                       result))]
+                             [(assoc futures (:id tc) f)
+                              (cond-> last-by-group
+                                group (assoc group f))]))
+                         [{} {}]
+                         tool-calls))
         raw-results (await-all-tool-results! futures)
         ;; A future body that threw before settling (await-all already turns
         ;; it into an error result) still records a result and emits its end
