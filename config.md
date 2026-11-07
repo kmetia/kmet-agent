@@ -4,9 +4,7 @@ Status: complete. The runtime reads `:resources` for tool, skill and prompt
 selection; `/config` writes both scopes; `/tools` is the session-only tool
 override; `kmet plugins` is the static composition editor; and top-level
 signed entries and `:meta {:tools ...}` are retired. Migration warnings were
-intentionally omitted before 1.0. All tests pass; `bb test` still reports the
-pre-existing `mcp.edn` agent-dir write in
-`kmet.app.extensions.test-session`.
+intentionally omitted before 1.0.
 This file stays at the repository root as the design record and migration
 plan; moving it beside the source and design record is a separate cleanup
 task.

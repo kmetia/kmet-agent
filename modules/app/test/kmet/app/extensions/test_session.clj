@@ -8,6 +8,7 @@
             [babashka.fs :as fs]
             [kmet.extension :as ext]
             [kmet.libs.host :as host]
+            [kmet.app.config :as cfg]
             [kmet.app.events :as events]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.registries :as registries]
@@ -22,8 +23,13 @@
             [kmet.app.tools.registry :as tools-registry]
             [kmet.test-tmp :as test-tmp]))
 
-;; The extension host is the composition's: boot one for the namespace.
-(t/use-fixtures :once support/with-composition)
+;; The extension host is the composition's: boot one for the namespace. The
+;; agent dir is a scratch dir so loading the shipped extensions (the MCP
+;; adapter scaffolds mcp.edn on init) never writes the developer's state.
+(t/use-fixtures :once
+  (fn [f]
+    (with-redefs [cfg/get-agent-dir (constantly (test-tmp/temp-dir! "agent-"))]
+      (support/with-composition f))))
 
 ;; ─── Session facades through the api ──────────────────────────────────────
 
