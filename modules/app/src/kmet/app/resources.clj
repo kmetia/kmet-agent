@@ -51,7 +51,7 @@
   "The selectable resource types."
   (set (keys type-info)))
 
-(defn- settings-key
+(defn settings-key
   "The `:resources` settings key for KIND."
   [kind]
   (get-in type-info [kind :settings]))

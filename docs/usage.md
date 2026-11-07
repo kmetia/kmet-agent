@@ -164,9 +164,9 @@ file) and it applies on the next start.
 - The **Built-in tools** group lists the base composition's tool rows; remove
   one to run without that tool (a project layer can restore a globally
   removed one). The **Bundled with kmet** group lists the app-provided bundled
-  extensions. Skills, prompts and themes are not rows here: `/tools` remains
-  the live session tool selector, while skills/prompts/themes stay discovery
-  resources.
+  extensions. Skills and prompts are not rows here: `/config` edits their
+  stored selection, while themes stay discovery resources and `/tools` remains
+  the session tool selector.
 
 ### In-TUI commands
 
@@ -180,6 +180,7 @@ file) and it applies on the next start.
 | `/scoped-models` | Enable/disable/reorder the models Ctrl+P cycles through (Ctrl+S saves to settings) |
 | `/settings` | Settings menu — thinking, display, tool display, steering/follow-up mode, HTTP transport + timeouts, auto-compact, retry, repeat guard, images, skill commands, terminal progress, clear on shrink, theme (single or automatic light/dark) |
 | `/tools` | Select tools for this session — Enter/Space toggles, search filters by name, Esc closes; the selection is not persisted |
+| `/config` | Edit the persistent resource selection — global enable/disable or project inherit/enabled/disabled, with a scope row; Enter/Space changes, search filters, Esc closes |
 | `/eval <list\|search\|describe\|drop\|move\|sources\|help> [args]` | List, search, describe or drop eval library definitions, list eval sources, or show the command's verbs; eval creates verbs from documented top-level definitions, while an undocumented one stays session-only; eval sources may contribute verbs |
 | `/units` | List the process's unit tree — one flat line per ctx and per mounted plugin fiber, with its state, what it injects and provides, its effect labels, and what a pending fiber waits for or why a failed one failed |
 | `/login [provider\|base#label]` | Configure provider auth — API key, or OAuth: Copilot device-code, Codex browser/device, Anthropic & OpenRouter browser PKCE. A `base#label` reference creates a second account alias when needed (see [Providers](providers.md#multiple-accounts)) |

@@ -740,7 +740,8 @@ with tools, a skill, and custom renderers) and `extensions/mcp-adapter/` (tool
 sources and an overlay panel).
 
 Builtin names in `kmet.app.commands/reserved-command-names` (currently
-`/tools`) cannot be registered by an extension: the registration throws
+`/tools` and `/config`) cannot be registered by an extension: the
+registration throws
 `:kmet.app.commands/reserved-command-name`, and the builtin claims the name.
 
 Tool availability has two layers. `ext/set-active-tools` changes the runtime

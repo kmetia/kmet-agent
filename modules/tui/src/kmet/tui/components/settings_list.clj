@@ -73,7 +73,12 @@
    :on-change (pi: activateItem cycles to the next value on Enter/Space).
    A value not in :values starts at the first (delta 1) or last (delta -1)
    value. A submenu item is not cyclable in any direction — :values is
-   ignored for it (the submenu owns the interaction)."
+   ignored for it (the submenu owns the interaction).
+
+   A callback that replaces the item list (a selection screen rebuilding from
+   the store) owns the row values: the list keeps them instead of overwriting
+   the changed row with the cycled value, so a no-op write cannot leave an
+   unpersisted value on screen."
   [this display selected delta]
   (let [item (nth display selected)
         ;; .indexOf is a java.util.List method: on a lazy/array SEQUENCE
@@ -86,16 +91,18 @@
             cur-idx (.indexOf possible current)
             base (if (neg? cur-idx) (if (neg? delta) 0 -1) cur-idx)
             next-idx (mod (+ base delta) (count possible))
-            new-val (nth possible next-idx)]
-        (when-let [cb @(:on-change-atom this)]
-          (cb (:id item) new-val))
-        (swap! (:items-atom this)
-               (fn [items]
-                 (mapv (fn [it]
-                         (if (= (:id it) (:id item))
-                           (assoc it :value new-val)
-                           it))
-                       items)))))))
+            new-val (nth possible next-idx)
+            items-before @(:items-atom this)
+            _ (when-let [cb @(:on-change-atom this)]
+                (cb (:id item) new-val))]
+        (when (identical? items-before @(:items-atom this))
+          (swap! (:items-atom this)
+                 (fn [items]
+                   (mapv (fn [it]
+                           (if (= (:id it) (:id item))
+                             (assoc it :value new-val)
+                             it))
+                         items))))))))
 
 (declare settings-list-set-value!)
 

@@ -54,7 +54,9 @@
   (is (contains? events/app-event-types :session-shutdown)
       "emitted outside the loop by the interactive mode, like :session-start")
   (is (contains? events/app-event-types :resources-discover)
-      "emitted outside the loop (extensions/discover-resources!)"))
+      "emitted outside the loop (extensions/discover-resources!)")
+  (is (contains? events/app-event-types :resources-change)
+      "the live selection change is an app event"))
 
 (deftest test-a-listener-hears-its-own-subtree
   ;; The kernel's rule: a listener hears emissions made at its ctx or below it,

@@ -31,11 +31,12 @@
   [:app :commands])
 
 (def reserved-command-names
-  "Command names a builtin owns. `/tools` is a builtin session selector, so
-   an extension cannot register it and a builtin registration claims it even
-   when another owner got there first. Reserved names are the app's live
-   selectors; their implementation is not an extension's to replace."
-  #{"tools"})
+  "Command names a builtin owns. `/tools` is the session tool selector and
+   `/config` the live resource selector, so an extension cannot register
+   either and a builtin registration claims the name even when another owner
+   got there first. Reserved names are the app's live selectors; their
+   implementation is not an extension's to replace."
+  #{"tools" "config"})
 
 (defn- command-for
   "The command named NAME, or nil (see `kmet.app.registry/entry` for the

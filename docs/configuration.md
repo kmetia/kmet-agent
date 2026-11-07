@@ -67,7 +67,7 @@ in a layer or toggle it in `kmet plugins`. Skills, prompts and themes remain
 settings-backed resources. Built-in tool rows (`:tool/<name>`) compose the
 same way, and `kmet plugins` removes or restores them; their live selection
 is `:resources` at runtime. The retired `:default-tools`/`:enabled-tools`
-keys below are ignored (the live `/config` screen is not implemented yet).
+keys below are ignored (`/config` edits the live `:resources` selection).
 
 ## Provider catalogs
 
@@ -147,7 +147,8 @@ content. CLI flags `--system-prompt <txt>` and `--append-system-prompt <txt>`
 > documented below are retired: the runtime ignores those keys, and the
 > standalone editor is now `kmet plugins`, which edits extension and built-in
 > tool composition rows. The builtin `/tools` command is a session-only
-> selector; `/config` (the live resource selector) is not implemented yet.
+> selector; `/config` edits the persistent `:resources` selection in global
+> and project scope.
 
 The built-in tools are `read`, `write`, `edit`, `bash`, `tool_search`,
 `run_code` and `eval`. All but the last two start enabled; `run_code` and
@@ -191,7 +192,8 @@ default-on built-in tool (extension tools stayed available). An unset
 `:default-tools` selected `default-tool-names` — every built-in row without
 `:default-enabled? false` — so `run_code` and `eval` stayed off. Those two rows
 carry that marker: they are mounted, and the retired settings selection could
-enable them, while `/tools` enables them for the current session only.
+enable them, while `/config` enables them persistently and `/tools` enables
+them for the current session only.
 
 `:enabled-tools` was the absolute selection over **every live tool**, built-in
 and extension alike, and it won over `:default-tools`:
@@ -215,10 +217,15 @@ and do not write settings, and a session switch clears the override.
 
 `kmet plugins` is the composition editor: it lists the built-in tool rows and
 the extension rows, writing `:tool/<name>` remove/restore patches and
-`:ext/<id>` rows or remove patches. The builtin `/tools` selector lists the
-live tool set and toggles the session override. The persisted `:resources`
-selection is read by the runtime and applies at startup, on a session switch
-and on `/reload`; it has no TUI editor until `/config` lands.
+`:ext/<id>` rows or remove patches. The builtin `/config` screen edits the
+persistent `:resources` selection: rows are the resources available in the
+current project run, global scope toggles enabled/disabled, project scope
+cycles inherit/enabled/disabled, and a tool write clears the `/tools` session
+override. A tool selection change refreshes the live tool set immediately; it
+does not remount providers or re-run discovery, and an unchanged write is a
+no-op. Project scope writes the `.kmet/settings.edn` of the directory kmet was
+started in; resuming a session recorded in another directory does not move it.
+The selection applies at startup, on a session switch and on `/reload`.
 
 The runtime rebuilds the prompt over the `:resources` selection at startup,
 on a session switch (`/resume`, `/import` — pi recreates the runtime from
@@ -226,7 +233,8 @@ settings there, so the outgoing session's runtime selection does not carry
 over), and on `/reload`. A
 runtime selection made with the builtin `/tools` selector is a separate
 override: `/reload` does not clear it, so it still decides the
-set until it is reset or a session switch rebuilds the runtime — the prompt is
+set until it is reset, a `/config` tool write clears it, or a session switch
+rebuilds the runtime — the prompt is
 rebuilt over that active set. A tool that is not active is also not executable
 — a call the model makes for a disabled tool settles as `Tool <name> not
 found` (pi: `prepareToolCall`) instead of running.
@@ -244,7 +252,7 @@ callable from scripts but no longer discoverable by the model. Nothing else
 can promote one, so the run warns about the orphaned sources at startup.
 
 The leading system prompt's Available-tools list is not rebuilt when a tool is
-promoted; it is rebuilt when the selection changes (`/tools`), on `/reload` and
+promoted; it is rebuilt when the selection changes (`/config`, `/tools`), on `/reload` and
 on a session switch. A promoted tool therefore appears in the conversation's
 appended source listing and in the request's tool declarations, but not in that
 list until one of those happens.

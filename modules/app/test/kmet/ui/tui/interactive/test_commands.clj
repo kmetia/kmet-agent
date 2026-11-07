@@ -108,6 +108,20 @@
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (t/is (= "Select tools for this session"
              (:description (commands/find-command "tools")))
+          "the builtin claims the name over a stale registration"))
+  (testing "the reserved /config name belongs to the builtin"
+    (commands/clear-commands!)
+    (t/is (thrown-with-msg? Exception #"reserved for a builtin"
+                            (commands/register-command!
+                             {:name "config" :description "extension version"
+                              :handler (fn [_ _] nil)}
+                             [:app :extensions :test])))
+    (commands/register-command!
+     {:name "config" :description "stale app registration"
+      :handler (fn [_ _] nil)})
+    ((var builtins/register-builtin-commands!) cfg/default-config)
+    (t/is (= "Select tools, skills, and prompts for global and project scope"
+             (:description (commands/find-command "config")))
           "the builtin claims the name over a stale registration")))
 
 (deftest test-login-logout-unmatched-reference

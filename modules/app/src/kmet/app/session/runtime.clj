@@ -62,6 +62,12 @@
   [engine]
   (some-> (agent-ctx engine) (srce/get :shell) deref))
 
+(defn resources
+  "The `:resources` service value on the engine's ctx, or nil when the
+   composition did not mount the row."
+  [engine]
+  (some-> (agent-ctx engine) (srce/get :resources)))
+
 (defn tool-table
   "The engine's tool table (name → Tool record) — the one its agent resolves
    through, from the ctx's `:tools` service. Front ends read tools here; the
@@ -390,6 +396,22 @@
   [engine names]
   (when-let [agent (agent-state engine)]
     (loop-state/set-active-tools! agent names))
+  nil)
+
+(defn refresh-resources!
+  "Apply a persisted resource-selection change to ENGINE's live agent without
+   remounting providers: a tool change clears the session override and records
+   the declared-set delta, and a skill change rebuilds the system prompt from
+   its stored options. Prompt lookup and autocomplete read the registry live,
+   so a prompt change needs no push. Emits :resources-change for KINDS when the
+   engine has an agent ctx. Returns nil."
+  [engine kinds]
+  (when-let [agent (agent-state engine)]
+    (cond
+      (some #{:tool} kinds) (loop-state/set-active-tools! agent nil)
+      (some #{:skill} kinds) (loop-state/refresh-system-prompt! agent)))
+  (when-let [ctx (agent-ctx engine)]
+    (events/emit! ctx {:type :resources-change :types (vec kinds)}))
   nil)
 
 (defn add-context-message!

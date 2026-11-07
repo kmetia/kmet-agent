@@ -9,6 +9,7 @@
             [kmet.app.commands :as commands]
             [kmet.app.compaction :as agent-compact]
             [kmet.app.config :as cfg]
+            [kmet.app.events :as events]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.loop :as agent]
             [kmet.app.loop.state :as loop-state]
@@ -290,6 +291,26 @@
         (loop-state/set-active-tools! ag nil)
         (is (= configured (set (map :name (rt/active-tools handle))))
             "nil restores the resources selection")))))
+
+(deftest test-refresh-resources-clears-only-the-tool-override
+  (with-handle
+    (fn [handle _]
+      (let [ag (rt/agent-state handle)
+            configured (set (map :name (rt/active-tools handle)))
+            emitted (atom [])]
+        (with-redefs [events/emit! (fn [_ event] (swap! emitted conj event))]
+          (loop-state/set-active-tools! ag ["read"])
+          (rt/refresh-resources! handle [:skill])
+          (is (= #{"read"} @(:active-tools ag))
+              "a non-tool selection change keeps the session override")
+          (rt/refresh-resources! handle [:tool])
+          (is (nil? @(:active-tools ag))
+              "a tool selection change clears the session override")
+          (is (= configured (set (map :name (rt/active-tools handle))))
+              "the persisted selection applies again"))
+        (is (= [{:type :resources-change :types [:skill]}
+                {:type :resources-change :types [:tool]}]
+               @emitted))))))
 
 (deftest test-add-context-message-and-bash-result
   (with-handle

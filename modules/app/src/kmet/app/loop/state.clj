@@ -976,6 +976,18 @@ Be precise and concise in your responses."}}]
                       live)]
       (record-tool-change! agent (context-tool-state agent) current))))
 
+(defn refresh-system-prompt!
+  "Rebuild the live system prompt from its stored base options over the
+   current declared tool set, without recording a tool change. A selection
+   refresh calls it when no tool was touched. Returns nil."
+  [agent]
+  (when-let [base (not-empty @(:system-prompt-opts agent))]
+    (let [opts (assoc base :tools (active-tools agent))]
+      (reset! (:system-prompt-opts agent) opts)
+      (reset! (:system agent)
+              (apply (:system-prompt-fn agent) (mapcat identity opts)))))
+  nil)
+
 (defn set-active-tools!
   "Restrict the tools sent to the LLM to NAMES (a set or seq of tool
    names); nil restores the resources selection (pi: setActiveTools). Also
@@ -1016,12 +1028,7 @@ Be precise and concise in your responses."}}]
      (reset! (:active-tools agent) enabled)
      (when record? (sync-tool-declarations! agent))
      ;; the prompt's tool list is the DECLARED set under the new selection
-     (let [valid (active-tools agent)
-           opts (assoc @(:system-prompt-opts agent) :tools valid)]
-       (when (seq @(:system-prompt-opts agent))
-         (reset! (:system-prompt-opts agent) opts)
-         (reset! (:system agent)
-                 (apply (:system-prompt-fn agent) (mapcat identity opts)))))
+     (refresh-system-prompt! agent)
      nil)))
 
 (defn add-bash-result!

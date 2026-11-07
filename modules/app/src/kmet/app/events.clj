@@ -4,7 +4,7 @@
    The mechanism is the kernel's (`srce.md` §5): the listener table, the six
    non-awaiting dispatch modes and the one exception rule are `kmet.srce.core`. This
    namespace owns exactly the two things the kernel must not know — the
-   **vocabulary** (43 names with their documentation; a kernel cannot name an
+   **vocabulary** (44 names with their documentation; a kernel cannot name an
    app event) — and the **owner** a registration carries, which is a kmet
    concept (an extension's path, the loop, nothing).
 
@@ -516,6 +516,11 @@
                         {:skill-paths [...] :prompt-paths [...] :theme-paths [...]} (paths are
                         directories); ALL handler results are collected, not reduced
                         (collect-all!)."}
+    :resources-change {:mode :emit :domain :app
+                       :doc "Fired after a persisted resource-selection change (/config). The
+                        writer has already refreshed the live consumers; the event is
+                        informational. Payload: :types — the affected resource types, a
+                        vector of :tool, :skill and/or :prompt (kmet-specific)."}
     :agent-before-settle {:mode :boundary :domain :loop
                           :doc "Actionable: fired once before the prompt settles, after the queued-message
                         continuation check, and before :agent-settled (pi: agent_before_settle,

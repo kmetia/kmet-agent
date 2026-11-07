@@ -1,9 +1,9 @@
 (ns kmet.ui.tui.interactive.builtins
   "Builtin slash commands for the interactive mode: the view-bound commands
-   (thinking handling, help, the tools selector, /session, /share, /reload, and
-   the session/selector flows) and their registration. The engine-portable
-   builtins live in kmet.app.commands.builtins and are registered by
-   register-builtin-commands! first."
+   (thinking handling, help, the tools and config selectors, /session, /share,
+   /reload, and the session/selector flows) and their registration. The
+   engine-portable builtins live in kmet.app.commands.builtins and are
+   registered by register-builtin-commands! first."
   (:require [clojure.string :as str]
             [babashka.fs :as fs]
             [babashka.process :as proc]
@@ -33,6 +33,7 @@
             [kmet.app.tools.shell :as shell]
             [kmet.ui.tui.theme-controller :as theme-ctrl]
             [kmet.ui.tui.chat-history :as chat-history]
+            [kmet.ui.tui.config-selector :as config-selector]
             [kmet.ui.tui.footer :as footer]
             [kmet.ui.tui.fork-selector :refer [show-fork-selector]]
             [kmet.ui.tui.hotkeys :as hotkeys-ui]
@@ -360,6 +361,10 @@
     {:name "tools"
      :description "Select tools for this session"
      :handler (fn [cs _] (tools-selector/show-tools-selector cs))})
+   (register-builtin-command!
+    {:name "config"
+     :description "Select tools, skills, and prompts for global and project scope"
+     :handler (fn [cs _] (config-selector/show-config cs))})
    (register-builtin-command!
     {:name "model"
      :description "Switch model"

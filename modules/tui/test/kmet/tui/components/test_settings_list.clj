@@ -86,6 +86,22 @@
     (core/handle-input s K-RIGHT)
     (t/is (= [[:theme "light"]] @changes))))
 
+(t/deftest test-settings-list-callback-replacing-items-keeps-its-rows
+  ;; A selection screen rebuilds its rows from the store on every change (a
+  ;; no-op write included): the callback owns the values it set, so the list
+  ;; must not overwrite the row with the value it cycled to.
+  (let [sl-ref (atom nil)
+        s (sl/make-settings-list
+           [{:id :a :label "A" :value "one" :values ["one" "two"]}]
+           :on-change (fn [_ _]
+                        (sl/settings-list-set-items!
+                         @sl-ref
+                         [{:id :a :label "A" :value "one" :values ["one" "two"]}])))]
+    (reset! sl-ref s)
+    (core/handle-input s K-RIGHT)
+    (t/is (= "one" (:value (sl/settings-list-get-item s :a)))
+          "the callback's rebuilt row wins over the cycled value")))
+
 (t/deftest test-settings-list-cycle-enter
   ;; pi: Enter cycles to the next value (activateItem)
   (let [changes (atom [])

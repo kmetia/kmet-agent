@@ -270,7 +270,7 @@ Missing, by pi's cli.md groups:
 | `--fork <path|id>` | fork an existing session from the CLI (kmet has `/fork` in the TUI) |
 | `--no-session` | in-memory session that is not persisted |
 | `-n/--name` | session display name at startup (kmet has `/name`) |
-| `-t/--tools`, `-xt/--exclude-tools`, `-nbt/--no-builtin-tools`, `-nt/--no-tools` | tool selection for one run (kmet has the `:resources` selection, `kmet plugins` for composition rows, and the in-TUI `/tools` selector; the CLI flags are the gap) |
+| `-t/--tools`, `-xt/--exclude-tools`, `-nbt/--no-builtin-tools`, `-nt/--no-tools` | tool selection for one run (kmet has the `:resources` selection, `kmet plugins` for composition rows, and the in-TUI `/tools` session and `/config` persistent selectors; the CLI flags are the gap) |
 | `-e/--extension`, `-ne/--no-extensions` | load extensions / disable discovered ones for one run |
 | `--no-mcp` | disable MCP for one run |
 | `--skill`, `-ns/--no-skills` | load skills / disable discovered ones for one run |

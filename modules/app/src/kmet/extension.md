@@ -307,7 +307,7 @@ by the host's `kmet.app.resources` service; there is no extension API for
 writing it.
 
 Command names in `kmet.app.commands/reserved-command-names` (currently
-`tools`) are builtins: registering one throws
+`tools` and `config`) are builtins: registering one throws
 `:kmet.app.commands/reserved-command-name`, and a builtin registration claims
 the name over any other owner.
 
@@ -681,9 +681,14 @@ Event types: `:agent-start` `:agent-end` `:agent-settled` `:turn-start`
 `:compaction-start` `:compaction-end`
 `:session-compact` `:session-compact-failed` `:context` `:context-with-system`
 `:before-provider-request` `:before-provider-headers`
-`:after-provider-response` `:resources-discover` `:loop-guard`.
+`:after-provider-response` `:resources-discover` `:resources-change`
+`:loop-guard`.
 
-Most events are notification-only. Two things extend a run:
+Most events are notification-only. `:resources-change` is informational too:
+its writer refreshes the affected consumers before emitting it, so a listener
+must not refresh them again.
+
+Two things extend a run:
 
 A message sent from an `:agent-end` handler — `send-user-message`, or
 `send-message!` with `:trigger-turn` — queues (`:steer` / `:follow-up`) and
