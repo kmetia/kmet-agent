@@ -6,12 +6,12 @@
    are the global `~/.kmet/agent/patch.edn` and the project `.kmet/patch.edn`
    (see `docs/profiles.md`); this namespace reads those layers, resolves the
    extension rows they compose, and writes the row or remove patch a
-   `kmet config` toggle needs.
+   `kmet plugins` toggle needs.
 
    Reading is data-only: a layer is an EDN map with `:rows` and `:patch`
    collections, and nothing here loads an extension. A malformed file is
    reported as `:error` on that layer's record and composes as empty, so the
-   config screen still opens (the run itself fails at compose with the usual
+   plugin screen still opens (the run itself fails at compose with the usual
    `:kmet.app/bad-patch-file`). Writing refuses to touch a malformed file.
 
    The composition mirrors `kmet.app.profile/compose` for extension rows only:
@@ -54,7 +54,7 @@
 
 (defn layers
   "The ambient layers in application order, `{:global LAYER :project LAYER}`.
-   Both are read even when missing; `kmet config` edits them by name."
+   Both are read even when missing; `kmet plugins` edits them by name."
   []
   {:global (read-layer (cfg/global-patch-path))
    :project (read-layer (cfg/project-patch-path))})
@@ -126,7 +126,7 @@
    `{:enabled bool :override-state :inherit|:load|:unload
    :inherited-enabled bool}`. `:inherited-enabled` is the global layer's
    state — what a project override inherits — and the project override state
-   is the difference from it. The config screen renders both."
+   is the difference from it. The plugin screen renders both."
   [{:keys [global project]} source scope]
   (let [global? (contains? (sources-of global) source)
         project? (contains? (sources-of project) source)]

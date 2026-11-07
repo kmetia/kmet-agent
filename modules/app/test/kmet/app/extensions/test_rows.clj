@@ -221,8 +221,6 @@
         (try
           (is (= {:tools [{:name "meta_tool"}] :anything [1 2]}
                  (:meta (rows/entry :ext/meta-valid))))
-          (is (= {:tools [{:name "meta_tool"}] :anything [1 2]}
-                 (rows/item-meta (item valid))))
           (is (nil? (:meta (rows/entry :ext/meta-bare)))
               "an absent :meta answers nil")
           (is (= "opaque" (:meta (rows/entry :ext/meta-odd)))

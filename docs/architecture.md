@@ -200,7 +200,7 @@ pass).
   composition does not.
 - Layers apply in order: the built-in table < `~/.kmet/agent/patch.edn` <
   `.kmet/patch.edn` < `--patch FILE` (repeatable). `--dump-default-config`
-  prints the built-in table alone, and `kmet config` edits the two ambient
+  prints the built-in table alone, and `kmet plugins` edits the two ambient
   layers through `kmet.app.extensions.layers`. A profile still comes only from
   the built-in table: there is no named home profile and no project-shipped
   profile table. (dsh applies its home-level patch *after* the profile's own

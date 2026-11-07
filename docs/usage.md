@@ -91,10 +91,11 @@ limits, and what happens to a client that stops reading.
 
 ### Package subcommands
 
-Install, remove, update, list and configure **packages** — extensions,
-skills, prompt templates and themes bundled in a local directory or file,
-or in a git repository (pi's `install`/`remove`/`update`/`list`/`config`;
-npm installs are not ported):
+Install, remove, update and list **packages** — extensions, skills, prompt
+templates and themes bundled in a local directory or file, or in a git
+repository (pi's `install`/`remove`/`update`/`list`/`config`; npm installs are
+not ported). `kmet plugins` replaces pi's resource `config`: it composes
+extension rows, not packages:
 
 ```sh
 kmet install ./path/to/package [-l]        # local dir/file package
@@ -103,8 +104,10 @@ kmet install git:github.com/user/repo//packages/foo  # a package dir inside it
 kmet remove <source> [-l]                  # remove it (alias: kmet uninstall)
 kmet update [source]                       # update installed git packages
 kmet list                                  # show configured packages
-kmet config [-l]                           # enable/disable resources (TUI)
+kmet plugins [-l]                          # compose extension plugin rows (TUI)
 ```
+
+`kmet config` is retired; it reports a one-line error naming `kmet plugins`.
 
 - A **file** source loads as a single extension; a **directory** loads as one
 extension (contains `extension.edn`) or scans its conventional `extensions/`,
@@ -121,7 +124,7 @@ extension (contains `extension.edn`) or scans its conventional `extensions/`,
   `git:github.com/user/repo@v1//packages/foo`. This is how a monorepo
   contributes several packages: every subdirectory source of one repository
   shares its checkout (one clone), while each `//subdir` is its own package
-  with its own settings entry, filters and config-screen row. `kmet install`
+  with its own settings entry, filters and plugin row. `kmet install`
   verifies the directory exists, listing the checkout's directories on a
   typo — a checkout cloned solely for that failed install is removed again
   (one a sibling package or an earlier install uses stays).
@@ -144,29 +147,22 @@ or `.kmet/settings.edn` with `-l` (project); local paths are stored relative
 to the settings file, git sources verbatim. Configured packages are
 **discovery**: they make extensions available to the composition, and the
 resources they contain (skills, prompts, themes) load as resources. Installing
-an extension does not load it; compose its row (`kmet config` or the patch
+an extension does not load it; compose its row (`kmet plugins` or the patch
 file) and it applies on the next start.
-- `kmet config` opens a TUI listing every discovered resource — packages,
-  top-level settings entries and the auto dirs — with a checkbox; space
-  toggles, Tab switches global/project scope, typing filters, escape closes.
-  A project with a `.kmet/` dir starts in project-local scope; `-l` forces
-  project-local. **Extensions toggle the composition**, not settings: the
-  global scope composes a row or disables it with a remove patch in
-  `~/.kmet/agent/patch.edn` (the row and its config stay, so re-enabling is
-  lossless), and the project scope writes a project row or a remove patch in
-  `.kmet/patch.edn`. The files apply on the next start; `/reload` re-applies
-  the rows already mounted. Skills, prompts and themes keep the
-  settings-backed package filter/array behaviour (`:packages` filters,
-  `:skills`/`:prompts`/`:themes` entries).
-- The **Bundled with kmet** group lists the app-provided bundled extensions
-  and, in a `Tools` subgroup before `Extensions`, the tools (`read`, `write`,
-  `edit`, `bash`, `tool_search`, and the opt-in `run_code`/`eval`). A built-in
-  row toggles `:default-tools`; names only `:enabled-tools` mentions, and the
-  static `:meta {:tools […]}` projection an installed extension declares, get
-  rows too and toggle `:enabled-tools` — so an extension tool can be turned
-  off for a project without loading a plugin. Tab switches the scope; the
-  entry shapes are the ones in [configuration](configuration.md#tools).
-  `/tools` remains the live selector.
+- `kmet plugins` is a static composition editor. It lists bundled and
+  installed extension rows (`:ext/<id>`) with a checkbox; space composes or
+  removes the selected row, Tab switches global/project scope, typing filters,
+  escape closes. A project with a `.kmet/` dir starts in project-local scope;
+  `-l` forces project-local. It never loads extension code and never edits
+  settings or `:resources`: the global scope writes a `:ext/…` row or a
+  remove patch in `~/.kmet/agent/patch.edn` (the row and its config stay, so
+  re-enabling is lossless), and the project scope writes a project row or a
+  remove patch in `.kmet/patch.edn`. The files apply on the next start;
+  `/reload` re-applies the rows already mounted.
+- The **Bundled with kmet** group lists the app-provided bundled extensions.
+  Skills, prompts, themes and tools are not rows here; `/tools` remains the
+  live session tool selector, and skills/prompts/themes stay discovery
+  resources.
 
 ### In-TUI commands
 

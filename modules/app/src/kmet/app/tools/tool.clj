@@ -20,7 +20,8 @@
      exposure a contributed tool source gets).
 
    pi's `hidden` stays out: kmet can unregister a tool and exclude it with
-   `:enabled-tools`, and pi needs it only because it cannot unregister."
+   the `:resources` selection, and pi needs it only because it cannot
+   unregister."
   #{:direct :deferred :model-only :sandbox})
 
 (defn exposure
@@ -114,7 +115,7 @@
 
    `:name` is deliberately absent. A row's id is the model's own spelling of
    the tool (`(port-name name)` → `:tool/read`), and `tool-row-name` reads it
-   back for the config screen's toggles and for `:default-tools`; a renamed
+   back for the composition's tool-name sets; a renamed
    tool would leave the row, the setting and the toggle naming three different
    tools. `:execute`, `:parameters` and the rest are the tool's behavior, which
    belongs to the plugin that wrote it."

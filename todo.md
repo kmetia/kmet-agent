@@ -317,7 +317,7 @@ derivation), **P6** (mid-conversation tool changes without a full re-prefill),
 and `tool_search`'s recorded-loadout filter), the P6 unmount/remount residual,
 **S1** (config and resolution for `:enabled-tools`), **S2** (the extension
 ABI for tool selection), **S3** (the `/tools` scope and save flow), **S4**
-(the `kmet config` tool rows), **S4.5** (the opt-in built-in defaults), **S5**
+(the retired tool rows), **S4.5** (the opt-in built-in defaults), **S5**
 (the tool selection docs) and **S6** (the tool-selection review and simplify)
 — is out of this file; it lives in git history. The context and token tracks
 are dropped too — see § Deferred.

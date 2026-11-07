@@ -1151,7 +1151,7 @@
                 ;; a thunk, not a snapshot: set-active-tools! takes effect on
                 ;; the next turn, and the script sandbox keys its context on
                 ;; the set it resolves at call time. The callable names are
-                ;; resolved (not just :enabled-tools) so a :default-tools
+                ;; resolved (not just the session override) so a :resources
                 ;; selection hides its built-ins from scripts too, and a
                 ;; :model-only tool stays unreachable however the set is
                 ;; configured (pi: the codemode callable set is the active

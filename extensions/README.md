@@ -7,7 +7,7 @@ is loaded by default.
 ## Enabling an extension
 
 The shipped set is **bundled with kmet**, so no download or install is
-needed: `kmet config` lists every extension under “Bundled with kmet” (all
+needed: `kmet plugins` lists every extension under “Bundled with kmet” (all
 off by default), and space composes the selected one into
 `~/.kmet/agent/patch.edn` (global) or `.kmet/patch.edn` (project). Write the
 row directly if you prefer:
@@ -29,12 +29,10 @@ settings — see
 [`docs/extensions.md`](../docs/extensions.md)).
 
 A directory extension's manifest may carry `:meta {:tools [{:name "…"}]}`:
-an opaque static projection `kmet config` lists so the tool can be toggled
-without loading the plugin (only a proper list of maps with non-empty string
-names produces rows). And because `run_code`
+it is opaque host metadata that nothing reads at HEAD. And because `run_code`
 is opt-in, an extension's `:sandbox` tool sources stay registered but
-unreachable from the model until `run_code` is enabled in `kmet config` or
-the `/tools` session selector.
+unreachable from the model until `run_code` is enabled through the persisted
+`:resources` selection or the `/tools` session selector.
 
 ```bash
 # one-time setup: make the shipped extension a package (user scope)
@@ -58,7 +56,7 @@ ln -s "$PWD/extensions/grep-tool.clj" .kmet/extensions/grep-tool.clj
 
 A symlink keeps the shipped copy updated with the repo; a copy is a
 snapshot you can edit locally. Either way, compose the extension's row
-(`kmet config`, or the patch file above) and restart so the new composition
+(`kmet plugins`, or the patch file above) and restart so the new composition
 mounts; `/reload` reloads an already composed extension's code with its
 config.
 

@@ -708,8 +708,8 @@
      :entry-ns (symbol (namespace plugin-sym))
      :declared-loaders declared-loaders
      :legacy-loader? legacy?
-     ;; opaque host metadata (kmet config reads :tools as a static
-     ;; projection); the loader validates nothing here
+     ;; opaque host metadata; nothing reads it at HEAD, and the loader
+     ;; validates nothing here
      :meta (:meta m)}))
 
 (defn- canonical-path

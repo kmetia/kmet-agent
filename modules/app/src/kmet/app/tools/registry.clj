@@ -455,9 +455,9 @@
   (profile/bundle (profile/builtin) :bundle/minimal))
 
 (def builtin-tool-names
-  "Names of the built-in tools, in composition order — the full set: the
-   config screen lists a row for each, a removal patch targets one, and resume
-   logic distinguishes them from extension tools. A row marked
+  "Names of the built-in tools, in composition order — the full set: a
+   removal patch targets one, and resume logic distinguishes them from
+   extension tools. A row marked
    `:default-enabled? false` is still here; only `default-tool-names` leaves it
    out of the default selection.
 
@@ -471,9 +471,9 @@
 
 (def default-tool-names
   "The default built-in tool names: `:bundle/minimal`'s tool rows without
-   `:default-enabled? false` (run_code and eval opt out). Used by the legacy
-   config screen's retired :default-tools view and `resolve-default-tools`;
-   the resources default is `default-off-tool?`."
+   `:default-enabled? false` (run_code and eval opt out). Used by
+   `default-off-tool?` and the runtime's built-in default; the resources
+   selection starts from this set."
   (bundle-default-tool-names minimal-bundle))
 
 (defn default-off-tool?
@@ -519,22 +519,3 @@
                   names))
               (vec base)
               entries))))
-
-(defn resolve-default-tools
-  "Resolve a merged :default-tools entry list to the initial built-in tool
-   selection, over `default-tool-names` (the bundle rows without
-   :default-enabled? false). The legacy config screen reads this view; the
-   runtime selection is `kmet.app.resources`. An unset or modifier-only value
-   therefore never turns an opt-in tool on; a plain or +name entry can still
-   name one."
-  [entries]
-  (resolve-selection entries default-tool-names))
-
-(defn resolve-enabled-tools
-  "Resolve a merged :enabled-tools entry list over LIVE-NAMES — the tools the
-   app can currently see (a get-all-tools key set). The same entry rules as
-   `resolve-selection`; modifier-only lists modify the live set, so a tool
-   mounted later defaults on. The legacy config screen reads this view; the
-   runtime selection is `kmet.app.resources`."
-  [entries live-names]
-  (resolve-selection entries live-names))

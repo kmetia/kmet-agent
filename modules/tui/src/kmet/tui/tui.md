@@ -493,7 +493,7 @@ An idle UI runs zero bodies.
   body that derefs the ref re-lays out in the same frame as a resize.
   A panel just re-budgets its rows (`kmet.ui.tui.tree-selector`); a
   standalone frame that must repaint cleanly rather than diff watches the
-  ref and forces a render (`kmet.ui.tui.resource-config`).
+  ref and forces a render (`kmet.ui.tui.plugins`).
 - **Error contract**: a throwing component fn crashes the render loop
   (Throwable → kmet-render-crash.log → tui-stop) — loud beats silently wrong.
 
@@ -944,7 +944,7 @@ overlay close, reconcile removal, shutdown; implementations must be
   atom, a dock entry or a test holding a dead record keeps its tree, caches
   and timers alive.
 - **Mode exit is the deterministic cleanup of last resort.** Both mode
-  owners (`kmet.ui.tui.interactive/run`, `package_manager/run-config`)
+  owners (`kmet.ui.tui.interactive/run`, `kmet.ui.tui.plugins-command/run-plugins!`)
   release the layout in a `finally`; `teardown-mode!` runs abort signals →
   extension surfaces (`ui-reset!`) → the mode tree (pending bash,
   overlays, dock, TUI children) → global runtime sinks → the theme watcher

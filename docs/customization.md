@@ -26,7 +26,8 @@ color values, installation, and live reload; complete starting points are in
   package loads with the object form — `{:source "../pkg" :extensions
   ["extensions/*.clj" "!extensions/legacy.clj"]}` (plain globs include,
   `!` excludes, `+path`/`-path` force include/exclude, `[]` disables a type)
-  or use `kmet config`. The same top-level arrays
+  `kmet plugins` composes extension rows only; package filters and the other
+  resource arrays stay settings. The same top-level arrays
   (`:extensions`/`:skills`/`:prompts`/`:themes`) name auto-root resources
   without installing a package: the skills, prompts and themes arrays select
   which ones stay enabled, while an `:extensions` path only widens the
@@ -48,12 +49,12 @@ color values, installation, and live reload; complete starting points are in
   `kmet.extension` and `kmet.srce.core`.
   **Discovery is not loading.** A run mounts exactly the extensions its
   composition names as `:ext/<id>` rows, so a file in a discovery root does
-  nothing until a row names it. `kmet config`'s Extensions group is the
-  toggle: the global scope composes a row in `~/.kmet/agent/patch.edn` and a
+  nothing until a row names it. `kmet plugins` is the editor for those rows:
+  the global scope composes a row in `~/.kmet/agent/patch.edn` and a
   disable writes a `:remove` patch that keeps the row (and its `:config`),
   while the project scope writes a project row or a remove patch in
-  `.kmet/patch.edn`, cycling inherit/load/unload as the other groups do. No
-  settings key decides whether an extension loads. A toggle lands in the layer
+  `.kmet/patch.edn`, cycling inherit/load/unload over the global composition.
+  No settings key decides whether an extension loads. A toggle lands in the layer
   file, so the next run mounts it — `/reload` re-loads the rows already
   mounted, and unloading runs the extension's shutdown then disposes
   everything it registered.

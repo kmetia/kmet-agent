@@ -1,7 +1,6 @@
 (ns kmet.app.test-tool-selection
   "The shared selection grammar: entry lists resolve over a base set (the
-   built-ins for the retired :default-tools path, the live names for
-   :resources)."
+   built-ins for the runtime default, the live names for :resources)."
   (:require [clojure.test :as t]
             [kmet.app.tools.registry :as tools]))
 
@@ -21,21 +20,6 @@
   (t/is (= ["a"] (tools/resolve-selection ["a" 42 nil] ["a" "b"]))
         "non-string entries are dropped"))
 
-(t/deftest test-resolve-default-tools-uses-the-builtin-base
-  (t/is (contains? (set (tools/resolve-default-tools ["-bash"])) "read"))
-  (t/is (not (contains? (set (tools/resolve-default-tools ["-bash"])) "bash")))
-  (t/is (= ["read"] (tools/resolve-default-tools ["read"]))))
-
-(t/deftest test-resolve-enabled-tools-uses-the-live-base
-  (t/is (= ["a" "c"] (tools/resolve-enabled-tools ["-b" "+c"] ["a" "b"])))
-  (t/is (= ["a" "b"] (tools/resolve-enabled-tools ["+a" "+b"] ["a"]))
-        "a modifier-only list amends the live set")
-  (t/is (= ["a"] (tools/resolve-enabled-tools ["a"] ["a" "b"]))
-        "a plain list is the absolute live selection")
-  (t/is (= [] (tools/resolve-enabled-tools [] ["a" "b"])))
-  (t/is (= #{"a" "late"} (set (tools/resolve-enabled-tools ["-b"] #{"a" "b" "late"})))
-        "a live tool the setting does not name stays selected"))
-
 ;; ─── S4.5: opt-in built-in tools ──────────────────────────────────────────
 
 (t/deftest test-opt-in-defaults
@@ -48,13 +32,3 @@
   (t/is (not (tools/default-off-tool? "read")))
   (t/is (not (tools/default-off-tool? "extension_tool"))
         "a name no built-in registry answers to is on (the live-set default)"))
-
-(t/deftest test-resolve-default-tools-uses-the-opt-in-base
-  (t/is (not (contains? (set (tools/resolve-default-tools ["-bash"])) "run_code"))
-        "a modifier-only list does not re-enable an opt-in")
-  (t/is (not (contains? (set (tools/resolve-default-tools ["-bash"])) "eval")))
-  (t/is (contains? (set (tools/resolve-default-tools ["+run_code"])) "run_code")
-        "an explicit +name does")
-  (t/is (= ["run_code"] (tools/resolve-default-tools ["run_code"]))
-        "a plain list names the opt-in absolutely")
-  (t/is (nil? (tools/resolve-default-tools nil))))

@@ -261,8 +261,8 @@
         ;; both raw scope maps (`read-resource-settings`); the merged config
         ;; carries no :resources key. The retired :default-tools /
         ;; :enabled-tools selection keys are dropped too: the runtime reads
-        ;; kmet.app.resources, and only the `kmet config` screen still reads
-        ;; the raw maps until it is replaced.
+        ;; kmet.app.resources, and no standalone screen edits the retired keys
+        ;; any more (`kmet plugins` edits only composition rows).
         base (dissoc (deep-merge (resolve-scope-paths default-config global-dir)
                                  (resolve-scope-paths user-config global-dir)
                                  (resolve-scope-paths project-config project-dir))

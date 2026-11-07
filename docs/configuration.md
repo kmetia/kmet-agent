@@ -63,9 +63,10 @@ Extensions are plugins: an extension loads only when a composition row names
 it (`:ext/<id>`). Settings still install and discover extensions (top-level
 `:extensions` paths, `:packages`, auto dirs) and the retired
 `:bundled-extensions` key no longer decides what loads; compose the extension
-in a layer or toggle it in `kmet config`. Skills, prompts and themes remain
-settings-backed resources. `:default-tools` still selects built-in tools in
-settings (see [Tools](#tools)).
+in a layer or toggle it in `kmet plugins`. Skills, prompts and themes remain
+settings-backed resources. Tool selection is `:resources` at runtime; the
+retired `:default-tools`/`:enabled-tools` keys below are ignored (the live
+`/config` screen is not implemented yet).
 
 ## Provider catalogs
 
@@ -142,9 +143,10 @@ content. CLI flags `--system-prompt <txt>` and `--append-system-prompt <txt>`
 
 > **Migration note:** the runtime selection is now `kmet.app.resources`, fed by
 > the `:resources` settings key. The `:default-tools` / `:enabled-tools` shapes
-> documented below describe the legacy `kmet config` screen, which still
-> writes them until steps 4–5 of the migration in `config.md`; the runtime
-> ignores those keys. The builtin `/tools` command is a session-only selector.
+> documented below are retired: the runtime ignores those keys, and the
+> standalone editor is now `kmet plugins`, which edits extension composition
+> rows only. The builtin `/tools` command is a session-only selector; `/config`
+> (the live resource selector) is not implemented yet.
 
 The built-in tools are `read`, `write`, `edit`, `bash`, `tool_search`,
 `run_code` and `eval`. All but the last two start enabled; `run_code` and
@@ -152,9 +154,8 @@ The built-in tools are `read`, `write`, `edit`, `bash`, `tool_search`,
 Each is a composition row — `:tool/read`, `:tool/bash`, … in the built-in
 bundle — so a profile or a patch layer can take one out of the run entirely
 (`{:id :tool/bash :remove true}`: the tool is not in the model's schema and not
-in the `run_code` surface). In the legacy screen, `:default-tools` is the
-selection on top of that: it selects among the mounted built-in tools;
-extension tools stay enabled either way.
+in the `run_code` surface). The retired `:default-tools` key was the selection
+on top of that; the runtime now applies the `:resources` selection instead.
 
 A tool row's `:config` changes what the model **reads**, never what the tool
 does. Four keys are accepted — `:label`, `:description`, `:prompt-snippet` and
@@ -171,64 +172,51 @@ spelling of the tool), its parameters and its execution are not configurable. An
 unknown key or a wrongly shaped value fails the mount by name rather than
 leaving the default in place as if the override had applied.
 
+### Retired selection shapes
+
+The `:default-tools` and `:enabled-tools` keys are ignored. For migration
+reference, they used to resolve as follows.
+
 ```clojure
 :default-tools ["read" "bash"]   ; plain names: only these built-ins
 :default-tools ["-bash"]         ; +name/-name modify the built-in set
 :default-tools ["read" "+bash"]  ; mixed: plain names form the selection first
 ```
 
-Plain names replace the built-in selection; `+name` adds a tool and `-name`
-removes one, applied in list order. A mixed list uses its plain names as the
-selection and then applies the modifiers. An empty list disables every
-default-on built-in tool (extension tools stay available). An unset
-`:default-tools` selects `default-tool-names` — every built-in row without
-`:default-enabled? false` — so `run_code` and `eval` stay off. Those two rows
-carry that marker: they are mounted, and the legacy config screen can enable
-them, while `/tools` enables them for the current session only, but an unset or
-modifier-only value never resolves them in. A plain
-list, or an explicit `+run_code`/`+eval`, does. The built-in `run_code`
-sandbox only exposes the tools that are active.
+Plain names replaced the built-in selection; `+name` added a tool and `-name`
+removed one, applied in list order. A mixed list used its plain names as the
+selection and then applied the modifiers. An empty list disabled every
+default-on built-in tool (extension tools stayed available). An unset
+`:default-tools` selected `default-tool-names` — every built-in row without
+`:default-enabled? false` — so `run_code` and `eval` stayed off. Those two rows
+carry that marker: they are mounted, and the retired settings selection could
+enable them, while `/tools` enables them for the current session only.
 
-`:enabled-tools` is the legacy screen's absolute selection over **every live
-tool**, built-in and extension alike, and it wins over `:default-tools`:
+`:enabled-tools` was the absolute selection over **every live tool**, built-in
+and extension alike, and it won over `:default-tools`:
 
 ```clojure
 :enabled-tools ["read" "grep"]       ; only these live tools
 :enabled-tools ["-bash" "+my_tool"]  ; the live set, minus bash, plus my_tool
 ```
 
-A plain list is absolute: a tool that mounts later is not added. A
-modifier-only list is re-resolved against the live table, so a tool that mounts
-later defaults on (an extension or MCP catalog that connects after startup is
-not silently dropped). An empty list selects no model-facing tools (a
-`:sandbox` source's tools stay callable from `run_code`). `:enabled-tools`
-wins over `:default-tools`, the opt-in default included: once the key is set,
-the mounted `run_code` and `eval` are on unless a `-name` entry removes them.
+A plain list was absolute: a tool that mounted later was not added. A
+modifier-only list was re-resolved against the live table, so a tool that
+mounted later defaulted on (an extension or MCP catalog that connects after
+startup was not silently dropped). An empty list selected no model-facing tools
+(a `:sandbox` source's tools stay callable from `run_code`). Project settings
+layered over user settings for both keys: a `.kmet/settings.edn` list of only
+`+name`/`-name` entries modified the user's list, while a list containing a
+plain name replaced it.
+
 The builtin `/tools` selector is session-only: its toggles apply immediately
 and do not write settings, and a session switch clears the override.
 
-Project settings layer over user settings for both keys: a `.kmet/settings.edn`
-list of only `+name`/`-name` entries modifies the user's list, while a list
-containing a plain name replaces it.
-
-`kmet config` (the resource TUI) lists the built-in tools in the
-**Bundled with kmet** group, under a `Tools` subgroup before `Extensions`.
-A built-in row toggles `:default-tools` in the global/project shapes above; an
-opt-in row is shown off until the same toggle enables it. Each item names its
-row (`:tool/bash`), and a tool whose row
-the ambient patch layers removed shows as off — the run does not mount it, so
-the setting cannot bring it back; leave the row in and turn it off here, or
-restore the row and re-enable it.
-
-The tools listing also includes the names no built-in registry answers to:
-every name either scope's `:enabled-tools` names, and every name an installed
-extension declares under its opaque manifest `:meta {:tools [{:name "…"}]}`
-([manifest validity](extensions.md)). Those rows write `:enabled-tools` with
-the same global/project shapes, not `:default-tools`; a projected tool groups
-with the extension that declares it, while a settings-only name lands in a
-`Tools` group. The projection loads no plugin, so a dynamically registered
-tool stays invisible here until a settings scope names it. `/tools`, which
-runs with the live registry, remains the authoritative selector.
+`kmet plugins` is the composition editor: it lists extension rows and writes
+`:ext/<id>` rows and remove patches, not tools. The builtin `/tools` selector
+lists the live tool set and toggles the session override. The persisted
+`:resources` selection is read by the runtime and applies at startup, on a
+session switch and on `/reload`; it has no TUI editor until `/config` lands.
 
 The runtime rebuilds the prompt over the `:resources` selection at startup,
 on a session switch (`/resume`, `/import` — pi recreates the runtime from

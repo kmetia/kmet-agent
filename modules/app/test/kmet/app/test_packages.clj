@@ -568,22 +568,19 @@
         (spit file "(ns x)\n")
         (t/testing "a file source resolves to one available extension"
           (let [item (first (:extensions (with-stubbed-cwd #(pkgs/resolve-package-items {:packages [file]} nil))))]
-            (t/is (pkgs/single-extension-item? item))
-            (t/is (true? (:enabled item)))
-            (t/testing "the settings toggles refuse an extension item"
-              (t/is (false? (pkgs/apply-global-toggle! item false)))
-              (t/is (false? (pkgs/apply-project-override! item :unload)))
-              (t/is (empty? (:packages (pkgs/user-settings-map)))))))
-        (t/testing "an extension.edn directory too"
-          (let [dir (tmp-dir)]
-            (spit (str dir "/extension.edn") "{:name \"pkg-ext\" :plugin pkg.ext/plugin}\n")
-            (let [item (first (:extensions (with-stubbed-cwd #(pkgs/resolve-package-items {:packages [dir]} nil))))]
-              (t/is (pkgs/single-extension-item? item))
-              (t/is (false? (pkgs/apply-global-toggle! item false))))))
-        (t/testing "conventional package resources stay toggleable"
-          (let [pkg (make-package (tmp-dir))]
-            (t/is (not (pkgs/single-extension-item? (first (:extensions
-                                                            (with-stubbed-cwd #(pkgs/resolve-package-items {:packages [pkg]} nil)))))))))))))
+            (t/is (true? (get-in item [:metadata :single-extension])))
+            (t/is (true? (:enabled item))))
+          (t/testing "an extension.edn directory too"
+            (let [dir (tmp-dir)]
+              (spit (str dir "/extension.edn") "{:name \"pkg-ext\" :plugin pkg.ext/plugin}\n")
+              (let [item (first (:extensions (with-stubbed-cwd #(pkgs/resolve-package-items {:packages [dir]} nil))))]
+                (t/is (true? (get-in item [:metadata :single-extension]))))))
+          (t/testing "conventional package resources are not single-extension units"
+            (let [pkg (make-package (tmp-dir))
+                  item (first (:extensions
+                               (with-stubbed-cwd
+                                 #(pkgs/resolve-package-items {:packages [pkg]} nil))))]
+              (t/is (not (get-in item [:metadata :single-extension]))))))))))
 
 ;; ─── Top-level settings entries (pi: resolveLocalEntries) ─────────────────
 
@@ -713,56 +710,6 @@
                   fs/cwd (fn [] proj)]
       (let [res (pkgs/resolve-package-items nil {:extensions [(str proj "/shared.clj")]})]
         (t/is (some #(= (slash shared) (slash (:path %))) (:extensions res)))))))
-
-;; ─── Top-level toggle writes ──────────────────────────────────────────────
-
-(t/deftest test-top-level-toggle-writes-array
-  (with-isolated-settings
-    (fn [{:keys [global-dir]}]
-      (let [dir (str global-dir "/prompts")]
-        (fs/create-dirs dir)
-        (spit (str dir "/a.md") "# a\n")
-        (let [item (first (:prompts (pkgs/resolve-package-items nil nil)))]
-          (t/is (pkgs/top-level-item? item))
-          (t/is (= "prompts/a.md" (pkgs/top-level-pattern item)))
-          (t/is (true? (pkgs/apply-global-toggle! item false)))
-          (t/is (= ["-prompts/a.md"] (:prompts (edn/read-string (slurp (str global-dir "/settings.edn"))))))
-          (t/is (true? (pkgs/apply-global-toggle! item true)))
-          (t/is (= ["+prompts/a.md"] (:prompts (edn/read-string (slurp (str global-dir "/settings.edn")))))))))))
-
-(t/deftest test-project-top-level-override-cycle
-  (with-isolated-settings
-    (fn [{:keys [global-dir]}]
-      (let [dir (str global-dir "/prompts")]
-        (fs/create-dirs dir)
-        (spit (str dir "/a.md") "# a\n")
-        (let [item (first (:prompts (pkgs/resolve-package-items nil nil)))]
-          (t/is (= :inherit (pkgs/top-level-override-state-of item)))
-          (t/is (true? (pkgs/apply-project-override! item :unload)))
-          (t/is (= :unload (pkgs/top-level-override-state-of item)))
-          (t/is (true? (pkgs/apply-project-override! item :load)))
-          (t/is (= :load (pkgs/top-level-override-state-of item)))
-          (t/is (true? (pkgs/apply-project-override! item :inherit)))
-          (t/is (= :inherit (pkgs/top-level-override-state-of item))))))))
-
-(t/deftest test-top-level-override-patterns-project-item-dedupes
-  ;; a project item's own base dir IS the project scope root, so the
-  ;; relative pattern forms collapse to one string — building the set must
-  ;; not throw (babashka/SCI rejects duplicate evaluated set-literal
-  ;; elements)
-  (let [proj (tmp-dir)
-        file (str proj "/.kmet/prompts/test.md")]
-    (fs/create-dirs (str proj "/.kmet/prompts"))
-    (spit file "# t\n")
-    (with-redefs [cfg/get-agent-dir (fn [] (tmp-dir))
-                  cfg/project-dir (fn [] (str proj "/.kmet"))
-                  fs/cwd (fn [] proj)]
-      (let [item (first (:prompts (pkgs/resolve-package-items nil nil)))
-            patterns (pkgs/top-level-override-patterns item :project)]
-        (t/is (contains? patterns "prompts/test.md"))
-        (t/is (contains? (slash patterns) (slash file)))
-        (t/is (= :inherit (pkgs/top-level-override-state-of item)))
-        (t/is (= "prompts/test.md" (pkgs/top-level-pattern item)))))))
 
 (t/deftest test-user-view-excludes-project-scope
   ;; PROJECT-SCOPE? false is pi's global config view (untrusted settings

@@ -403,29 +403,29 @@
     (is (str/includes? out "--session-dir <dir>"))
     (is (str/includes? out "install <source>")
         "the package subcommands the entry dispatches are listed too")
-    (is (str/includes? out "config             Compose extensions / toggle resources"))))
+    (is (str/includes? out "plugins            Compose extension plugin rows (TUI)"))))
 
 (deftest package-subcommands-run-the-shared-cli
-  ;; `config` is a command, not a profile: the entry hands the args to the
-  ;; package CLI kmet1 uses, and injects the config screen it cannot require.
+  ;; `plugins` is a command, not a profile: the entry hands the args to the
+  ;; package CLI kmet1 uses, and injects the plugin screen it cannot require.
   (let [seen (atom nil)]
-    (with-redefs [core/run-config (fn [opts] (reset! seen opts) 0)]
-      (let [{:keys [code err]} (support/run-main ["config" "-l"])]
+    (with-redefs [core/run-plugins (fn [opts] (reset! seen opts) 0)]
+      (let [{:keys [code err]} (support/run-main ["plugins" "-l"])]
         (is (zero? code) err)
         (is (true? (:local @seen))
             "the parsed -l reaches the injected screen"))))
-  (let [{:keys [code out]} (support/run-main ["config" "--help"])]
+  (let [{:keys [code out]} (support/run-main ["plugins" "--help"])]
     (is (zero? code))
-    (is (str/includes? out "kmet config [-l]"))
-    (is (str/includes? out "resource configuration TUI")))
+    (is (str/includes? out "kmet plugins [-l]"))
+    (is (str/includes? out "composition TUI")))
   (let [{:keys [code out]} (support/run-main ["install" "--help"])]
     (is (zero? code))
     (is (str/includes? out "kmet install <source>")
         "every package subcommand comes from the same CLI"))
-  (let [{:keys [code err]} (support/run-main ["config" "--nope"])]
+  (let [{:keys [code err]} (support/run-main ["plugins" "--nope"])]
     (is (= 1 code))
     (is (str/includes? err "Unknown option --nope"))
-    (is (str/includes? err "kmet config")
+    (is (str/includes? err "kmet plugins")
         "a command's bad option names the command's usage")))
 
 (deftest dump-config-prints-the-built-in-composition

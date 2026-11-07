@@ -1,6 +1,7 @@
 (ns kmet.app.packages-cli
   "CLI entry for the package subcommands (pi: package-manager-cli.ts —
-   `pi install/remove/uninstall/list/update/config`): local directory/file
+   install/remove/uninstall/list/update, plus kmet's `plugins` composition
+   editor in place of pi's resource `config`): local directory/file
    sources and git repositories (managed checkouts; npm is not ported, and
    `update` covers git packages only). Usage and error texts mirror pi's
    with the kmet naming; exit code 1 on errors, 0 on success (pi
@@ -16,15 +17,24 @@
 ;; ─── Parsing (pi: parsePackageCommand — the install/remove/list subset) ───
 
 (def ^:private commands
-  "Recognized first-argument commands (pi: install/remove/update/list/config;
-   kmet's update is git-only and has no self-update)."
-  #{"install" "remove" "uninstall" "list" "update" "config"})
+  "Recognized first-argument commands. `plugins` replaces pi's resource
+   `config`; kmet's update is git-only and has no self-update."
+  #{"install" "remove" "uninstall" "list" "update" "plugins"})
+
+(def ^:private retired-commands
+  "Commands retired in favor of a replacement. They stay recognized so the
+   CLI reports the replacement instead of treating the word as a prompt; they
+   are not aliases."
+  {"config" "plugins"})
 
 (defn package-command?
   "True when ARGS starts with a package subcommand (pi main.ts checks the
-   package commands before generic arg parsing)."
+   package commands before generic arg parsing). A retired command counts too,
+   so it reports its replacement instead of falling through to a prompt."
   [args]
-  (contains? commands (first args)))
+  (let [command (first args)]
+    (or (contains? commands command)
+        (contains? retired-commands command))))
 
 (defn- usage-for
   "pi getPackageCommandUsage."
@@ -34,7 +44,7 @@
     "remove" "kmet remove <source> [-l] [-a|--approve|--no-approve]"
     "update" "kmet update [source] [--extensions] [-a|--approve|--no-approve]"
     "list" "kmet list [-a|--approve|--no-approve]"
-    "config" "kmet config [-l] [-a|--approve|--no-approve]"))
+    "plugins" "kmet plugins [-l] [-a|--approve|--no-approve]"))
 
 (defn- print-command-help
   "pi printPackageCommandHelp."
@@ -103,20 +113,20 @@
         (println "  -a, --approve      Trust project-local files for this command")
         (println "  -na, --no-approve  Ignore project-local files for this command"))))
 
-(defn- print-config-help
-  "pi printConfigCommandHelp."
+(defn- print-plugins-help
+  "The `plugins` subcommand's help."
   []
   (println "Usage:")
-  (println "  kmet config [-l] [-a|--approve|--no-approve]")
+  (println "  kmet plugins [-l] [-a|--approve|--no-approve]")
   (println)
-  (println "Open the resource configuration TUI to compose extensions and toggle resources")
-  (println "(packages, top-level settings entries and the auto dirs). Extensions write")
-  (println "~/.kmet/agent/patch.edn or .kmet/patch.edn; the other resources use the")
-  (println "scope's settings.edn. Starts in project-local mode when .kmet/ exists,")
-  (println "global otherwise; Tab switches between the two scopes.")
+  (println "Open the composition TUI to compose bundled and installed extension")
+  (println "plugin rows. Writes :ext/… rows and remove patches to")
+  (println "~/.kmet/agent/patch.edn or .kmet/patch.edn. It loads no extension code")
+  (println "and never edits settings or :resources. Starts in project-local mode")
+  (println "when .kmet/ exists, global otherwise; Tab switches between the two scopes.")
   (println)
   (println "Options:")
-  (println "  -l, --local       Edit project overrides (.kmet/settings.edn, .kmet/patch.edn)")
+  (println "  -l, --local       Edit the project composition layer (.kmet/patch.edn)")
   (println "  -a, --approve     Trust project-local files for this command with -l")
   (println "  -na, --no-approve Ignore project-local files for this command with -l"))
 
@@ -161,7 +171,7 @@
           (recur rest (assoc opts :help true))
 
           (#{"-l" "--local"} arg)
-          (if (contains? #{"install" "remove" "config"} command)
+          (if (contains? #{"install" "remove" "plugins"} command)
             (recur rest (assoc opts :local true))
             (recur rest (assoc opts :invalid-option (or (:invalid-option opts) arg))))
 
@@ -432,28 +442,31 @@
 
 (defn run-package-command
   "Run a package subcommand (args includes the command word). OPTS carries
-   :run-config!, the `config` subcommand's terminal UI injected by the CLI
-   composition root (kmet.ui.tui.config-command/run-config!) — the
-   package manager itself stays headless. Returns the process exit code
+   :run-plugins!, the `plugins` subcommand's terminal UI injected by the CLI
+   composition root (kmet.ui.tui.plugins-command/run-plugins!) — the package
+   manager itself stays headless. Returns the process exit code
    (pi: the CLI prints and sets process.exitCode; a command error prints
    `Error: …` and returns 1 like pi's catch-all)."
   ([args] (run-package-command args nil))
-  ([args {:keys [run-config!]}]
+  ([args {:keys [run-plugins!]}]
    (let [[raw-command & rest] args
          command (if (= raw-command "uninstall") "remove" raw-command)]
      (try
        (cond
          (nil? command) 0
-         (= command "config")
-         (let [opts (parse-command-args "config" rest)]
+         (contains? retired-commands command)
+         (err (str "`kmet " command "` is retired; use `kmet "
+                   (get retired-commands command) "`"))
+         (= command "plugins")
+         (let [opts (parse-command-args "plugins" rest)]
            (cond
-             (:help opts) (do (print-config-help) 0)
-             (:invalid-option opts) (err-unknown-option "config" (:invalid-option opts))
-             (:invalid-argument opts) (err-usage "config"
+             (:help opts) (do (print-plugins-help) 0)
+             (:invalid-option opts) (err-unknown-option "plugins" (:invalid-option opts))
+             (:invalid-argument opts) (err-usage "plugins"
                                                  (str "Unexpected argument " (:invalid-argument opts) "."))
-             :else (if run-config!
-                     (run-config! opts)
-                     (err "config requires a terminal UI"))))
+             :else (if run-plugins!
+                     (run-plugins! opts)
+                     (err "plugins requires a terminal UI"))))
 
          :else
          (let [opts (parse-command-args command rest)]

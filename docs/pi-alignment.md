@@ -87,7 +87,7 @@ carrying its own loop stage map, with its own model, tool subset and hooks in
 the child's state, and its registrations isolate by ctx under that
 node. Missing: the child-state builder (agent state from the child's model,
 stages, tool subset and hooks), a child session setup, and the tool-subset
-rule (the child state's `:default-tools`/active set — the tool registry reads
+rule (the child state's `:resources`/active set — the tool registry reads
 the app root, so a child does not isolate it). This is the record the retired
 cells plan carried as P7.
 
@@ -155,8 +155,11 @@ scope by the EDNL-only decision.
 
 pi `core/package-manager.ts` (the full resolve pipeline) +
 `package-manager-cli.ts` + `cli/config-selector.ts`
-→ `kmet.app.packages` + `kmet.app.packages-cli` + `kmet.agent.ui.tui.resource-config`
+→ `kmet.app.packages` + `kmet.app.packages-cli` + `kmet.ui.tui.plugins`
 (+ the runner call sites in `core.clj`, `modes/interactive.clj`, `modes/print.clj`).
+The standalone screen is the composition editor `kmet plugins`; the live
+resource selector pi's `config-selector.ts` also provides is `config.md`'s
+step 5.
 
 `PackageManager.resolve()` is fully ported: top-level settings resource
 entries (`:extensions`/`:skills`/`:prompts`/`:themes`, plain paths plus
@@ -177,10 +180,11 @@ Sources are local **files** (load as one extension) or **directories**
 settings `:packages` (stored relative to the scope base dir, pi
 `normalizePackageSourceForSettings`); `remove`/`uninstall` matches by
 resolved identity (pi `packageSourcesMatch`); `list` shows user + project
-sections with installed paths; `config` opens the resource TUI — groups per
-package (scope in the label), per-type subgroups, search, space/enter
-toggles, Tab global/project scope switching with the inherit/load/unload
-tri-state and dimmed inherited rows, escape/ctrl+c close.
+sections with installed paths; `plugins` opens the static composition editor —
+extension rows grouped by origin, search, space composes/removes, Tab
+global/project scope switching with the inherit/load/unload tri-state and
+dimmed inherited rows, escape/ctrl+c close. pi's resource rows (per-package
+and per-type toggles) are not ported yet; see `config.md` steps 5–6.
 
 Object entries are fully supported with pi's semantics:
 `{:source ... :extensions [...] :skills [...] :prompts [...] :themes [...]}`
@@ -207,7 +211,7 @@ Kmet adaptations (deliberate deviations):
 - No pi `package.json` manifest — packages use the convention subdirs only,
   and `extension.edn` dirs ignore per-type filters (the extension owns its
   bundle, pi file-source behavior); the composition decides whether the
-  extension loads, so the config screen toggles it into the patch layer.
+  extension loads, so `kmet plugins` toggles it into the patch layer.
 - Pattern matching implements minimatch's common subset (`*`, `?`, `**`,
   `[...]`; no extglobs/braces) against the same match forms as pi (relative
   path, file name, absolute path; skills also match their parent folder).
@@ -265,7 +269,7 @@ Missing, by pi's cli.md groups:
 | `--fork <path|id>` | fork an existing session from the CLI (kmet has `/fork` in the TUI) |
 | `--no-session` | in-memory session that is not persisted |
 | `-n/--name` | session display name at startup (kmet has `/name`) |
-| `-t/--tools`, `-xt/--exclude-tools`, `-nbt/--no-builtin-tools`, `-nt/--no-tools` | tool selection for one run (kmet has the `:default-tools` and absolute `:enabled-tools` settings, `kmet config`, and the in-TUI `/tools` selector; the CLI flags are the gap) |
+| `-t/--tools`, `-xt/--exclude-tools`, `-nbt/--no-builtin-tools`, `-nt/--no-tools` | tool selection for one run (kmet has the `:resources` selection, `kmet plugins` for composition rows, and the in-TUI `/tools` selector; the CLI flags are the gap) |
 | `-e/--extension`, `-ne/--no-extensions` | load extensions / disable discovered ones for one run |
 | `--no-mcp` | disable MCP for one run |
 | `--skill`, `-ns/--no-skills` | load skills / disable discovered ones for one run |
@@ -331,8 +335,8 @@ image-width-cells / clear-on-shrink), terminal progress
 (`:show-terminal-progress`), provider image blocking (`:images` — block-images),
 shell customization (`:shell-path` / `:shell-command-prefix` — applied to
 every bash execution: tool, `!` commands, and factory-built tools),
-tool selection (`:default-tools` / `:enabled-tools` — pi `defaultTools`; entry
-syntax and scope layering are in [Tools](../configuration.md#tools);
+tool selection (`:resources` — pi `defaultTools`; entry syntax and scope
+layering are in [Tools](../configuration.md#tools);
 **deliberate departure:** pi ships every `defaultToolNames` entry on, while
 kmet marks `run_code` and `eval` `:default-enabled? false`, so an unset
 selection never turns them on and only a plain/`+name` entry does),
@@ -420,7 +424,7 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
 | `sendCustomMessage` (deliverAs steer/followUp/nextTurn) | **Done** — `extensions/send-message!` → the runtime capability's pi branch logic: `:next-turn` queues for the next prompt, a streaming send queues into the run (steer/follow-up) or defers to the end of the turn (`:pending-custom`), an idle send appends and optionally starts a turn. Without a runtime binding (bare library/test use) it appends immediately via the sinks |
 | `setModel`, `getThinkingLevel`, `setThinkingLevel` | **Done** — runtime capabilities (auth-gated setModel with the position-preserving thinking switch, validated levels) |
 | `exec` | **Done** — `extensions/exec` (babashka.process, string capture) |
-| `getActiveTools`/`getAllTools`/`setActiveTools` | **Done** — runtime-bound (`get-active-tools`/`set-active-tools`): the runtime `:enabled-tools` override (pi: setActiveTools), the `:enabled-tools` settings entry (absolute over live tools) and `:default-tools` (pi: defaultTools) filter the agent state, applied to the run_code sandbox surface; the resulting declared set is recorded as `:tool-change` session entries and sent as a wire marker at its recorded position on Anthropic/Responses/Kimi (markers dropped, top-level array elsewhere). `get-active-tools` returns the effective active names, `get-all-tools` the array |
+| `getActiveTools`/`getAllTools`/`setActiveTools` | **Done** — runtime-bound (`get-active-tools`/`set-active-tools`): the session `:active-tools` override (pi: setActiveTools) and the persisted `:resources` selection filter the agent state, applied to the run_code sandbox surface; the resulting declared set is recorded as `:tool-change` session entries and sent as a wire marker at its recorded position on Anthropic/Responses/Kimi (markers dropped, top-level array elsewhere). `get-active-tools` returns the effective active names, `get-all-tools` the array |
 | `registerProvider` (`streamSimple`/`refreshModels` at 0.87; `registerNativeProvider` + virtual models at 1.3) | Partial — provider *config* registration is done (`extensions/register-provider!` / `models/register-provider-config!`); wire-layer custom provider streaming (`registerNativeProvider`), dynamic model refresh, and `registerVirtualModel`/`unregisterVirtualModel` are missing |
 | `registerToolRenderer` | Missing — kmet tools carry their own renderer; there is no resolver chain like pi's `ToolRendererResolver` (load-order resolvers choosing how tool calls draw) |
 | `registerMcpServer` / `unregisterMcpServer` / `getMcpServers` | Missing — the `mcp-adapter` extension owns its `mcp.edn` config; extensions cannot contribute servers |

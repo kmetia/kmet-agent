@@ -1,6 +1,6 @@
 (ns kmet.test-package-manager
   "Package CLI subcommand tests (pi: package-manager-cli.ts — the
-   install/remove/uninstall/list/config subset with local dir/file sources):
+   install/remove/uninstall/list/plugins subset with local dir/file sources):
    parsing, help, error messages, exit codes and output text."
   (:require [clojure.test :as t]
             [clojure.edn :as edn]
@@ -8,10 +8,10 @@
             [babashka.fs :as fs]
             [kmet.app.git-packages :as gitp]
             [kmet.app.packages-cli :as pm]
-            [kmet.ui.tui.config-command :as config-command]
+            [kmet.ui.tui.plugins-command :as plugins-command]
             [kmet.app.config :as cfg]
             [kmet.app.packages :as pkgs]
-            [kmet.ui.tui.resource-config :as resource-config]
+            [kmet.ui.tui.plugins :as plugins]
             [kmet.tui.core :as tui]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.terminal :as term]
@@ -51,7 +51,9 @@
   (t/is (pm/package-command? ["uninstall" "x"]))
   (t/is (pm/package-command? ["update"]))
   (t/is (pm/package-command? ["list"]))
-  (t/is (pm/package-command? ["config"]))
+  (t/is (pm/package-command? ["plugins"]))
+  (t/is (pm/package-command? ["config"])
+        "a retired command is recognized so it can report its replacement")
   (t/is (not (pm/package-command? ["--print" "hi"])))
   (t/is (not (pm/package-command? ["resume"]))))
 
@@ -62,14 +64,21 @@
   (t/is (= 0 (:exit (run "remove" "-h"))))
   (t/is (= 0 (:exit (run "update" "-h"))))
   (t/is (= 0 (:exit (run "list" "-h"))))
-  (t/is (= 0 (:exit (run "config" "-h"))))
+  (t/is (= 0 (:exit (run "plugins" "-h"))))
   (t/is (str/includes? (:out (run "install" "--help")) "kmet install <source>"))
   (t/is (str/includes? (:out (run "install" "--help")) "git:github.com/user/repo"))
   (t/is (str/includes? (:out (run "remove" "-h")) "kmet uninstall"))
   (t/is (str/includes? (:out (run "update" "--help")) "kmet update [source]"))
   (t/is (str/includes? (:out (run "update" "--help")) "kmet cannot self-update"))
-  (t/is (str/includes? (:out (run "config" "-h")) "~/.kmet/agent/patch.edn"))
-  (t/is (str/includes? (:out (run "config" "-h")) "scope's settings.edn")))
+  (t/is (str/includes? (:out (run "plugins" "-h")) "~/.kmet/agent/patch.edn"))
+  (t/is (not (str/includes? (:out (run "plugins" "-h")) "settings.edn"))
+        "the plugin screen never edits settings"))
+
+(t/deftest test-retired-config-command
+  (let [r (run "config")]
+    (t/is (= 1 (:exit r)))
+    (t/is (str/includes? (:err r) "`kmet config` is retired"))
+    (t/is (str/includes? (:err r) "`kmet plugins`"))))
 
 ;; ─── Parse errors (pi exit-code-1 conventions) ────────────────────────────
 
@@ -433,9 +442,9 @@
           (t/is (str/includes? (slash out) (str "    " (slash pkg))))
           (t/is (str/includes? out "  ../proj")))))))
 
-(t/deftest config-disposes-its-screen-on-every-exit-path
-  (t/testing "finding 5: run-config disposes the screen (the terminal-size
-            watch cancel) on the normal path and when tui-start throws"
+(t/deftest plugins-disposes-its-screen-on-every-exit-path
+  (t/testing "run-plugins disposes the screen (the terminal-size watch
+            cancel) on the normal path and when tui-start throws"
     (let [disposed (atom 0)
           size-ref (atom {:rows 24})
           screen (reify protocols/IComponent
@@ -450,7 +459,7 @@
                   #'tui/create-tui (fn [_] {:components (atom [])})
                   #'theme/init-theme! (fn [_] nil)
                   #'cfg/get-theme-name (fn [_] "dark")
-                  #'resource-config/make-resource-config-screen (fn [& _] screen)
+                  #'plugins/make-plugins-screen (fn [& _] screen)
                   #'tui/tui-terminal-size-ref (fn [_] size-ref)
                   #'tui/tui-add-child (fn [& _] nil)
                   #'tui/tui-set-focus (fn [& _] nil)
@@ -458,25 +467,25 @@
       (with-redefs-fn (assoc redefs #'tui/tui-start
                              (fn [_] (throw (ex-info "boom" {}))))
         (fn []
-          (t/is (thrown? Exception ((deref #'config-command/run-config!) nil)))
+          (t/is (thrown? Exception ((deref #'plugins-command/run-plugins!) nil)))
           (t/is (= 1 @disposed) "disposed on the throw path")))
       (reset! disposed 0)
       (with-redefs-fn (assoc redefs #'tui/tui-start (fn [_] nil))
         (fn []
-          (t/is (= 0 ((deref #'config-command/run-config!) nil)))
+          (t/is (= 0 ((deref #'plugins-command/run-plugins!) nil)))
           (t/is (= 1 @disposed) "disposed on the normal path"))))))
 
-(t/deftest run-config-is-injected-by-the-caller
-  (t/testing "the config subcommand's terminal UI is injected; the package
-            manager itself stays headless (kmet.ui.tui.config-command)"
+(t/deftest run-plugins-is-injected-by-the-caller
+  (t/testing "the plugins subcommand's terminal UI is injected; the package
+            manager itself stays headless (kmet.ui.tui.plugins-command)"
     (let [seen (atom nil)]
-      (t/is (= 0 (pm/run-package-command ["config" "-l"]
-                                         {:run-config! (fn [opts]
-                                                         (reset! seen opts)
-                                                         0)})))
+      (t/is (= 0 (pm/run-package-command ["plugins" "-l"]
+                                         {:run-plugins! (fn [opts]
+                                                          (reset! seen opts)
+                                                          0)})))
       (t/is (true? (:local @seen)) "the parsed options reach the injected UI"))
-    (let [{:keys [exit err]} (run "config")]
+    (let [{:keys [exit err]} (run "plugins")]
       (t/is (= 1 exit))
       (t/is (str/includes? err "requires a terminal UI")
-            "without the injection the config command reports the missing UI"))))
+            "without the injection the plugins command reports the missing UI"))))
 

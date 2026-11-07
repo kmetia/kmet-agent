@@ -59,7 +59,7 @@
      (when ctx (root/publish! ctx))
      ;; Extensions are plugins: the composition's `:ext/…` rows loaded them
      ;; when they mounted (kmet.app.extensions.rows). Nothing here loads an
-     ;; extension from settings; `kmet config` composes rows into the patch
+     ;; extension from settings; `kmet plugins` composes rows into the patch
      ;; layers instead.
      (theme/load-theme-paths! (packages/resolve-theme-paths))
      ;; Extension CLI flags: the collected --flags become readable via

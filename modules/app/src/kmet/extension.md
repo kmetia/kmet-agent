@@ -303,8 +303,8 @@ the wrappers below or directly.
 
 `set-active-tools` is the **session** selection: it changes what this agent
 sends now and is not persisted. Persistent global/project selection is owned
-by the host's `kmet.app.resources` service and the config screen; there is no
-extension API for writing it.
+by the host's `kmet.app.resources` service; there is no extension API for
+writing it.
 
 Command names in `kmet.app.commands/reserved-command-names` (currently
 `tools`) are builtins: registering one throws
@@ -342,8 +342,9 @@ stays a growing prefix.
 `run_code` is a mounted but opt-in row (`:default-enabled? false`; see
 [Tools](../../../../docs/configuration.md#tools)): while it is off, `:sandbox`
 sources stay registered and their tools are absent from the model's script
-surface, not unregistered. Enabling `run_code` with the config screen or
-`/tools` makes them callable immediately, and unloading the extension is what
+surface, not unregistered. Enabling `run_code` through the persisted
+`:resources` selection or `/tools` makes them callable immediately, and
+unloading the extension is what
 removes them. The same holds for `:deferred` sources and a disabled `tool_search` —
 the sources remain, but nothing can promote them (the run warns; see
 [Tools](../../../../docs/configuration.md#tools)).

@@ -426,18 +426,19 @@
 
 ;; ── package subcommands ──────────────────────────────────────────────────
 
-(defn run-config
-  "The `config` subcommand's terminal UI: the resource-config screen, resolved
-   when the command runs. The screen is a front end, not a row, so a process
-   that never runs `config` loads no TUI. Returns the screen's exit code."
+(defn run-plugins
+  "The `plugins` subcommand's terminal UI: the plugin-composition screen,
+   resolved when the command runs. The screen is a front end, not a row, so a
+   process that never runs `plugins` loads no TUI. Returns the screen's exit
+   code."
   [opts]
-  ((requiring-resolve 'kmet.ui.tui.config-command/run-config!) opts))
+  ((requiring-resolve 'kmet.ui.tui.plugins-command/run-plugins!) opts))
 
 (defn- package-command
   "ARGS start with a package subcommand: the shared CLI runs it, with the
-   config screen it cannot require injected."
+   plugin screen it cannot require injected."
   [args]
-  (packages-cli/run-package-command args {:run-config! run-config}))
+  (packages-cli/run-package-command args {:run-plugins! run-plugins}))
 
 ;; ── entry ─────────────────────────────────────────────────────────────────
 
@@ -485,7 +486,7 @@
   (println "  remove <source>    Remove a package (alias: uninstall)")
   (println "  update [source]    Update installed git packages (all, or one source)")
   (println "  list               List installed packages")
-  (println "  config             Compose extensions / toggle resources (TUI)")
+  (println "  plugins            Compose extension plugin rows (TUI)")
   (println)
   (println "  kmet --profile print \"list the files\"   run one prompt and exit"))
 

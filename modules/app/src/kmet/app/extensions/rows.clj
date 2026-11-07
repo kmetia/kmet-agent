@@ -78,18 +78,6 @@
   (when (source? source)
     (resolve-id (id-of source))))
 
-(defn item-meta
-  "The manifest `:meta` map of the extension ITEM answers to, or nil when the
-   item has no manifest or cannot be resolved. Opaque to the loader —
-   `kmet config` reads `:tools` from it as a static projection."
-  [item]
-  (try
-    (:meta (resolve-item item))
-    (catch Exception e
-      (debug/log "extension item meta: cannot resolve " (:path item) ": "
-                 (ex-message e))
-      nil)))
-
 (defn item-source
   "The `:ext/<id>` source ITEM (a resolved package item) answers to, or nil
    when its manifest cannot be read. The id rules are the resolver's: the

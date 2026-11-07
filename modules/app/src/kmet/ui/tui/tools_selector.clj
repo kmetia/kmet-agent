@@ -6,7 +6,7 @@
    with the session-only selector: every row is a live model-facing tool, a
    toggle updates `set-active-tools!`, and nothing here writes settings. The
    rows start from the current effective selection; persistent selection
-   belongs to `kmet.app.resources` and the config screen."
+   belongs to `kmet.app.resources`."
   (:require [kmet.app.session.runtime :as runtime]
             [kmet.hikap.core :as engine]
             [kmet.libs.theme :as th]

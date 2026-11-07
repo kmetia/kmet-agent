@@ -108,19 +108,19 @@ is discovery: the fixed auto roots — `~/.kmet/agent/extensions` plus
 `KMET_CODING_AGENT_DIR` env override (pi: `ENV_AGENT_DIR`). Top-level
 `:extensions` entries are files or directories resolved against the settings
 scope root; `!glob` excludes, `+path`/`-path` force include/exclude exact
-paths. Discovery feeds `kmet config` and the `:ext/<id>` resolver; it does not
+paths. Discovery feeds `kmet plugins` and the `:ext/<id>` resolver; it does not
 load.
 
 Per-type package filters (`:extensions [...]`) and auto-dir `-path`
 overrides still shape the discovered list, but they no longer decide whether
 an extension loads: compose or remove its row. (Skills, prompts and themes
-keep their filter/array toggles.)
+keep their settings-based filter/array resolution.)
 
 An extension that was enabled only through settings after an upgrade is not
-migrated automatically: `kmet config` lists it unchecked, so compose it once.
+migrated automatically: `kmet plugins` lists it unchecked, so compose it once.
 
 Compose an extension in the global or project layer, or through
-`kmet config` (space toggles the selected row; Tab switches scope; a
+`kmet plugins` (space toggles the selected row; Tab switches scope; a
 disable is a remove patch, so the row's config survives):
 
 ```edn
@@ -144,7 +144,7 @@ restart. See [Profiles and composition](profiles.md#extensions-as-rows).
 The repo ships a set of opt-in extensions in `extensions/` — nothing there is
 loaded by default. They are **bundled with the application**: every run mode
 (`bb start`, `jolt start`, and the built binaries) offers the whole set in
-`kmet config` under “Bundled with kmet”, and composing a row enables it in any
+`kmet plugins` under “Bundled with kmet”, and composing a row enables it in any
 scope:
 
 ```edn
@@ -154,7 +154,7 @@ scope:
 
 The retired `:bundled-extensions` settings key is no longer read; a settings
 file that still has it needs the row composed instead (or re-toggle the row
-in `kmet config`).
+in `kmet plugins`).
 
 Bundled extensions are not packages: `kmet install`/`remove`/`list` cannot
 see or affect them, and they are never extracted to disk. The artifact root
@@ -235,8 +235,7 @@ underscores, dots → slashes; `.clj` → `.cljc` → `.bb` fallback):
 {:name   "my-ext"
  :plugin my-ext.main/plugin
  :loader [:jolt :sci]
- ;; optional, opaque host metadata: `kmet config` reads :tools as a static
- ;; projection of the tools this extension provides (see below)
+ ;; optional, opaque host metadata; nothing reads it at HEAD
  :meta   {:tools [{:name "my_tool"}]}}
 ```
 
@@ -255,15 +254,9 @@ init function: the plugin map's `:apply` **is** the extension body, and its
 either key fails the load with the replacement spelled out.
 
 `:meta` is optional and opaque to the loader: it is carried through
-resolution verbatim and never validated. The one reader today is `kmet config`,
-which treats `:meta {:tools [{:name "…"}]}` as a **static projection** of the
-tools the extension provides, so the screen can list and toggle them without
-loading the extension. Only a sequential `:tools` list of maps with a non-empty
-string `:name` produces rows; invalid entries are dropped, and an
-absent/malformed/empty value means none. `/tools` runs with the live registry
-and remains authoritative — a tool registered at runtime is invisible to the
-config screen until a settings scope names it. Other keys under `:meta` are
-ignored; `:meta` may also be absent (a single-file extension has no manifest).
+resolution verbatim and never validated. Nothing reads it at HEAD; other keys
+under `:meta` are ignored, and `:meta` may also be absent (a single-file
+extension has no manifest).
 
 ```clojure
 ;; my_ext/main.clj
@@ -753,14 +746,15 @@ Builtin names in `kmet.app.commands/reserved-command-names` (currently
 Tool availability has two layers. `ext/set-active-tools` changes the runtime
 selection for the current agent and is not persisted. The persistent
 selection — global and project lists of enabled tools — belongs to the host's
-resource service (`kmet.app.resources`) and the config screen; the extension
+resource service (`kmet.app.resources`); the extension
 API deliberately exposes no settings writer. An extension that contributes a
 tool makes it available; whether it is selected is the user's choice.
 
 `run_code` and `eval` are mounted but opt-in (`:default-enabled? false`; see
 [Tools](configuration.md#tools)). While no script tool is on, `:sandbox` tool
 sources stay registered — their tools are simply absent from the model's script
-surface until the config screen or the `/tools` session selector enables one
+surface until the persisted `:resources` selection or the `/tools` session
+selector enables one
 of them. A disabled `tool_search` likewise leaves `:deferred` sources registered but
 unpromotable (the run warns about the orphaned sources; see
 [Tools](configuration.md#tools)).

@@ -120,21 +120,20 @@ it is the entry's, not the boot's — so an appended layer already follows);
 disposing the row unloads the extension, and `/reload` reloads each mounted
 row's extension with the same config (a changed composition needs a restart).
 
-`kmet config` is the editor for these rows: space composes the selected
+`kmet plugins` is the editor for these rows: space composes the selected
 extension in `~/.kmet/agent/patch.edn` or disables it with a remove patch
 (the row and its `:config` stay, so re-enabling is lossless); the project
 scope writes a project row or a remove patch in `.kmet/patch.edn`. A write
 re-renders the file's EDN and keeps its leading comments (inline comments
-inside the map are not preserved). The config screen also lists skills,
-prompts, themes and built-in tools, but those keep their settings-backed
-toggles.
+inside the map are not preserved). The screen lists extension rows only;
+skills, prompts, themes and tools keep their settings/resource resolution.
 
 The extension's own plugin still mounts under the host ctx, so an `:ext/…` row
 belongs to a root profile, not an agent preset. Built-in tools are rows too
 (`:tool/read`, `:tool/bash`, … in the built-in bundle), so a layer can remove
-one from the composition; their runtime selection is still `:default-tools` in
-`settings.edn`, which `kmet config` toggles and which only filters the tools the
-composition mounted.
+one from the composition; their runtime selection is `:resources` in
+`settings.edn` (the retired `:default-tools` key is ignored), and only the
+mounted tools count.
 
 A row-mounted extension initializes during boot, before the process world loads
 its provider catalogs and `models.edn`; the world then recomposes provider
@@ -144,7 +143,7 @@ not.
 A patch that targets an id an earlier layer *removed* is a no-op (a project
 layer disabling a row the global layer already disabled does not fail); an id
 that was never present is still an error. A `:remove` patch therefore needs a
-row to target somewhere earlier in the composition: `kmet config` keeps a
+row to target somewhere earlier in the composition: `kmet plugins` keeps a
 disabled extension's row (with its config) and only adds the remove patch, so
 if you delete that row by hand, delete its remove patch too.
 
