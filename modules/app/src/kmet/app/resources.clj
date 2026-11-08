@@ -29,6 +29,14 @@
    the provider again makes the same entry apply, with no pruning and no
    cleanup.
 
+   **Unavailable entries stay visible to the selector.** `unavailable` reports
+   the stored names a scope mentions that no mounted provider offers, so
+   `/config` can show them in a dimmed group and let the user forget them.
+   Forgetting a global entry removes its plain or modifier form and clears the
+   type key when the list empties (the type falls back to its defaults);
+   forgetting a project entry clears that delta, so the project inherits
+   global again.
+
    The service value is a map of fns (`(catalog kind)`, `(enabled-names kind)`,
    `(set-project! kind name state)`, …); the kind is `:tool`, `:skill` or
    `:prompt`, and its settings key is the plural (`:tools`, `:skills`,
@@ -64,6 +72,18 @@
 (def states
   "The project-scope states a resource can take."
   #{:inherit :enabled :disabled})
+
+(def scopes
+  "The two settings scopes a persisted entry can live in."
+  #{:global :project})
+
+(defn- check-scope
+  "SCOPE when it is a settings scope; otherwise throw."
+  [scope]
+  (when-not (contains? scopes scope)
+    (throw (ex-info (str "scope must be one of " (pr-str (vec (sort scopes))))
+                    {:type ::bad-scope :scope scope})))
+  scope)
 
 (defn- check-kind
   "KIND when it is a selectable resource type; otherwise throw."
@@ -117,10 +137,18 @@
   (and (modifier? entry)
        (> (count entry) 1)))
 
-(defn- entry-names
-  "The names ENTRIES target, modifier prefixes stripped."
+(defn- stored-entry-names
+  "The names ENTRIES target, keeping a plain name and stripping a modifier's
+   prefix. Blank and non-string entries are dropped."
   [entries]
-  (into #{} (keep (fn [e] (when (modifier? e) (modifier-name e)))) entries))
+  (into []
+        (keep (fn [entry]
+                (when (string? entry)
+                  (let [name (if (modifier? entry)
+                               (when (< 1 (count entry)) (modifier-name entry))
+                               entry)]
+                    (when (and name (seq name)) name)))))
+        entries))
 
 ;; ─── Project list validation ───────────────────────────────────────────────
 
@@ -257,21 +285,27 @@
 
 (defn- snapshot
   "The current selection view for KIND: availability, the resolved global
-   vector and set, and the project override map."
+   vector and set, the project override map, and the names each scope's raw
+   entry list mentions."
   [handles kind]
   (let [{:keys [global project]} (cfg/read-resource-settings)
         global-list (global-entries global kind)
         project-list (raw-entries project kind)
         available (available-names handles kind)
         universe (vec (distinct (concat available
-                                        (entry-names global-list)
-                                        (entry-names
-                                         (when (sequential? project-list)
+                                        (stored-entry-names global-list)
+                                        (stored-entry-names
+                                         (when (valid-project-list? project-list)
                                            project-list)))))
         global-vector (resolve-global kind global-list universe)]
     {:available available
      :available-set (set available)
      :global-set (set global-vector)
+     :global-stored (vec (distinct (stored-entry-names global-list)))
+     :project-stored (vec (distinct
+                           (stored-entry-names
+                            (when (valid-project-list? project-list)
+                              project-list))))
      :project (project-states kind project-list)}))
 
 (defn- selected-in
@@ -283,6 +317,22 @@
     :disabled false
     (contains? global-set name)))
 
+(defn- resource-row
+  "One row for KIND's NAME in SNAP. AVAILABLE? tells whether a mounted
+   provider offers it; PROVIDER is the provider metadata or the unavailable
+   marker."
+  [snap kind name provider available?]
+  (let [selected? (selected-in snap name)]
+    {:kind :resource
+     :type kind
+     :name name
+     :available? available?
+     :provider provider
+     :global? (contains? (:global-set snap) name)
+     :project-state (get (:project snap) name :inherit)
+     :selected? selected?
+     :enabled? (and available? selected?)}))
+
 (defn- catalog-rows
   "The available rows for KIND with both scope states and the effective
    result, sorted by name."
@@ -292,15 +342,24 @@
                      (some-> (:tools handles) tools/get-all-tools))]
     (->> available
          (map (fn [name]
-                (let [selected? (selected-in snap name)]
-                  {:kind :resource
-                   :type kind
-                   :name name
-                   :provider (provider handles kind name tool-table)
-                   :global? (contains? (:global-set snap) name)
-                   :project-state (get (:project snap) name :inherit)
-                   :selected? selected?
-                   :enabled? selected?})))
+                (resource-row snap kind name
+                              (provider handles kind name tool-table) true)))
+         (sort-by :name)
+         vec)))
+
+(defn- unavailable-rows
+  "The rows for KIND's stored entries in SCOPE that no mounted provider
+   offers, sorted by name. A project list that is not a valid delta is
+   already ignored by `project-states`, so it contributes none."
+  [handles kind scope]
+  (let [{:keys [available-set global-stored project-stored] :as snap}
+        (snapshot handles kind)
+        names (remove available-set
+                      (if (= scope :global) global-stored project-stored))]
+    (->> names
+         (map (fn [name]
+                (resource-row snap kind name
+                              {:kind :unavailable :id nil} false)))
          (sort-by :name)
          vec)))
 
@@ -330,6 +389,25 @@
     (if (nil? entries)
       (cfg/remove-project-setting! path)
       (cfg/save-project-setting! path entries))))
+
+(defn- forget-global!
+  "Drop every global entry targeting NAME, plain or modifier. An emptied type
+   list clears its key, so the type falls back to its defaults. Returns the
+   stored entries (unchanged when NAME is not mentioned)."
+  [kind name]
+  (let [global (:global (cfg/read-resource-settings))
+        current (global-entries global kind)]
+    (if (empty? current)
+      current
+      (let [target (fn [entry]
+                     (if (modifier? entry) (modifier-name entry) entry))
+            kept (filterv #(not (and (string? %) (= name (target %))))
+                          current)]
+        (if (= kept current)
+          current
+          (let [updated (not-empty kept)]
+            (save-global! kind updated)
+            updated))))))
 
 (defn- write-global!
   "Write NAME's ENABLED? state into KIND's global list. A missing or
@@ -407,7 +485,8 @@
      (selected? kind name)           ; effective persisted selection
      (enabled? kind name)            ; available and selected
      (enabled-names kind)            ; available and selected names
-     (set-global! kind name enabled?)
+     (unavailable kind scope)        ; stored entries no provider offers
+     (set-global! kind name enabled-or-:inherit)
      (set-project! kind name state)"
   [handles]
   (letfn [(snap [kind] (snapshot handles kind))]
@@ -449,14 +528,27 @@
        (let [{:keys [available] :as state} (snap kind)]
          (into #{} (filter #(selected-in state %)) available)))
 
+     :unavailable
+     (fn [kind scope]
+       (check-kind kind)
+       (check-scope scope)
+       (unavailable-rows handles kind scope))
+
      :set-global!
-     (fn [kind name enabled?]
+     (fn [kind name enabled-or-inherit]
        (check-kind kind)
        (check-name name)
-       (when-not (boolean? enabled?)
-         (throw (ex-info "enabled? must be true or false"
-                         {:type ::bad-enabled :name name :enabled enabled?})))
-       (write-global! kind name enabled?))
+       (cond
+         (= :inherit enabled-or-inherit)
+         (forget-global! kind name)
+
+         (boolean? enabled-or-inherit)
+         (write-global! kind name enabled-or-inherit)
+
+         :else
+         (throw (ex-info "enabled? must be true, false, or :inherit"
+                         {:type ::bad-enabled :name name
+                          :enabled enabled-or-inherit}))))
 
      :set-project!
      (fn [kind name state]

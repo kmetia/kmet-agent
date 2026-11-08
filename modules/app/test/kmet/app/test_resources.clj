@@ -209,6 +209,46 @@
         (is (some? (row ((:catalog after) :tool) "ghost")))
         (is (= #{"read" "ghost"} (enabled after :tool)))))))
 
+(deftest unavailable-rows-follow-the-scope
+  (let [s (service [["read" :tool/read]])]
+    (with-settings {:resources {:tools ["ghost" "-read" "run_code"]}}
+      {:resources {:tools ["+project-ghost"]}}
+      (fn [_ _]
+        (let [global-rows ((:unavailable s) :tool :global)
+              project-rows ((:unavailable s) :tool :project)]
+          (is (= ["ghost" "run_code"] (mapv :name global-rows))
+              "stored global names no provider offers are reported")
+          (is (= ["project-ghost"] (mapv :name project-rows))
+              "project rows come from the project delta only")
+          (is (every? #(false? (:available? %))
+                      (concat global-rows project-rows)))
+          (is (every? #(= {:kind :unavailable :id nil} (:provider %))
+                      (concat global-rows project-rows)))
+          (is (every? #(false? (:enabled? %))
+                      (concat global-rows project-rows)))
+          (is (= {:global? true :project-state :inherit :selected? true}
+                 (select-keys (row global-rows "ghost")
+                              [:global? :project-state :selected?])))
+          (is (= {:global? false :project-state :enabled :selected? true}
+                 (select-keys (row project-rows "project-ghost")
+                              [:global? :project-state :selected?]))))))
+    (with-settings {:resources {:tools ["ghost"]}} nil
+      (fn [_ _]
+        (is (empty? ((:unavailable s) :tool :project))
+            "with no project delta there are no project rows")))))
+
+(deftest an-invalid-project-list-has-no-unavailable-rows
+  (let [s (service [])]
+    (with-settings nil {:resources {:tools ["ghost"]}}
+      (fn [_ _]
+        (is (empty? ((:unavailable s) :tool :project))
+            "a plain project entry invalidates the whole list")))))
+
+(deftest unavailable-reader-checks-its-arguments
+  (let [s (service [])]
+    (is (thrown? clojure.lang.ExceptionInfo ((:unavailable s) :bogus :global)))
+    (is (thrown? clojure.lang.ExceptionInfo ((:unavailable s) :tool :bogus)))))
+
 ;; ─── Writers ───────────────────────────────────────────────────────────────
 
 (deftest global-writer-keeps-modifier-shape
@@ -242,6 +282,41 @@
         (is (= [] (:tools (:resources @global))))
         (is (= ["new"] ((:set-global! s) :tool "new" true)))
         (is (= ["new"] (:tools (:resources @global))))))))
+
+(deftest forgetting-a-global-entry-preserves-the-list-shape
+  (with-settings {:resources {:tools ["read" "ghost"]}} nil
+    (fn [global _]
+      (let [s (service [])]
+        (is (= ["read"] ((:set-global! s) :tool "ghost" :inherit)))
+        (is (= ["read"] (get-in @global [:resources :tools]))))))
+  (with-settings {:resources {:tools ["-ghost" "+read"]}} nil
+    (fn [global _]
+      (let [s (service [])]
+        (is (= ["+read"] ((:set-global! s) :tool "ghost" :inherit)))
+        (is (= ["+read"] (get-in @global [:resources :tools]))))))
+  (with-settings {:resources {:tools ["ghost"]}} nil
+    (fn [global _]
+      (let [s (service [])]
+        (is (nil? ((:set-global! s) :tool "ghost" :inherit)))
+        (is (= {} @global)
+            "an emptied list clears the key and restores defaults"))))
+  (with-settings {:resources {:tools []}} nil
+    (fn [global _]
+      (let [s (service [])]
+        (is (= [] ((:set-global! s) :tool "ghost" :inherit)))
+        (is (= [] (get-in @global [:resources :tools]))
+            "an empty list is left alone, not reset to defaults"))))
+  (with-settings {:resources {:tools ["-read"]}} nil
+    (fn [_ _]
+      (let [s (service [["read" :tool/read]])]
+        (is (nil? ((:set-global! s) :tool "read" :inherit)))
+        (is (selected? s :tool "read")
+            "forgetting a disable restores the default selection"))))
+  (with-settings nil nil
+    (fn [_ _]
+      (let [s (service [])]
+        (is (thrown? clojure.lang.ExceptionInfo
+                     ((:set-global! s) :tool "read" :bogus)))))))
 
 (deftest project-writer-drops-plain-entries
   (with-settings nil {:resources {:skills ["plain" "-read"]}}

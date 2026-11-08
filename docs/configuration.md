@@ -192,14 +192,18 @@ tools are on. A modifier-only or unset selection never turns `run_code` or
 Availability is separate from selection. A resource is available when a
 provider mounted and active in the current project run registers it (a tool
 row, an extension, a package or a discovery path). A consumer uses it only
-when it is both available and selected. `/config` lists available rows only; a
-stored entry for a provider that is not mounted in this run is inert and not
-shown, but it stays in settings and applies again when the provider returns. A
-built-in tool whose composition row was removed is unavailable until the row
-is restored with `kmet plugins`. A package filter shapes availability too: a
-resource it excludes has no `/config` row and cannot be selected. `:sandbox`
-tool sources are not selectable: their tools stay callable from scripts,
-including MCP tools.
+when it is both available and selected. `/config` lists available rows, plus a
+dimmed `Stored, unavailable` group for the stored entries no mounted provider
+offers (a removed tool row, an uninstalled extension, a package-filtered
+resource, a `:sandbox` source). Such a row is inert, but Space forgets its
+entry from the scope being edited: a forgotten global entry that empties the
+list clears the type key (defaults apply again), while a forgotten project
+entry falls back to inheriting global. A stored entry that is not forgotten
+applies again when the provider returns. A built-in tool whose composition row
+was removed is unavailable until the row is restored with `kmet plugins`. A
+package filter shapes availability too: a resource it excludes has no
+available row and cannot be selected. `:sandbox` tool sources are not
+selectable: their tools stay callable from scripts, including MCP tools.
 
 The three surfaces are:
 
@@ -211,8 +215,10 @@ The three surfaces are:
   providers available in the current run. Rows are grouped by provider and
   labelled `type/name`; it starts in project scope, and Tab switches between
   project and global. Project rows cycle inherit/enabled/disabled, global rows
-  toggle enabled/disabled. A tool write clears the `/tools` session override
-  and refreshes the live tool set; a skill write rebuilds the prompt;
+  toggle enabled/disabled. Stored entries whose provider is unavailable this
+  run appear dimmed in `Stored, unavailable`; Space forgets them from the
+  current scope. A tool write clears the `/tools` session override and
+  refreshes the live tool set; a skill write rebuilds the prompt;
   prompt-template lookup reads the selection live. An unchanged write is a
   no-op, and a write does not remount providers or re-run discovery.
 - `/tools` — session-only absolute tool set. It never writes settings and

@@ -27,6 +27,30 @@
   [kind]
   (resources/settings-key kind))
 
+(defn- entry-name
+  "The resource NAME an entry targets, plain or modifier."
+  [entry]
+  (when (string? entry)
+    (if (and (seq entry) (re-find #"^[+-]" entry))
+      (subs entry 1)
+      entry)))
+
+(defn- global-selected?
+  "The fake global selection for KIND's NAME: a plain list is absolute, then
+   modifier entries apply in order."
+  [settings kind name]
+  (let [entries (get-in @settings [:global (settings-key kind)])]
+    (when (sequential? entries)
+      (let [modifier? #(and (string? %) (re-find #"^[+-]" %))
+            plain (filterv (complement modifier?) entries)
+            base (boolean (some #(= name (entry-name %)) plain))]
+        (reduce (fn [selected entry]
+                  (if (= name (entry-name entry))
+                    (case (first entry) \+ true \- false selected)
+                    selected))
+                base
+                entries)))))
+
 (defn- project-state
   "KIND's project override for NAME: the last `+name`/`-name` entry wins."
   [settings kind name]
@@ -52,11 +76,49 @@
     {:kind :resource
      :type type
      :name name
+     :available? true
      :provider provider
      :global? global?
      :project-state project
      :selected? selected?
      :enabled? selected?}))
+
+(defn- unavailable-row
+  "One stored-but-unavailable row read back from SETTINGS."
+  [settings kind name]
+  (let [project (project-state settings kind name)
+        global? (boolean (global-selected? settings kind name))
+        selected? (case project :enabled true :disabled false global?)]
+    {:kind :resource
+     :type kind
+     :name name
+     :available? false
+     :provider {:kind :unavailable :id nil}
+     :global? global?
+     :project-state project
+     :selected? selected?
+     :enabled? false}))
+
+(defn- stored-unavailable
+  "The fake service's stored-but-unavailable rows in SCOPE. Like the real
+   service, an invalid project list contributes none."
+  [settings kind scope]
+  (let [entries (get-in @settings [scope (settings-key kind)])
+        project-valid? (and (sequential? entries)
+                            (every? #(and (string? %)
+                                          (re-find #"^[+-].+" %))
+                                    entries))
+        names (case scope
+                :global (keep entry-name entries)
+                :project (when project-valid? (keep entry-name entries)))
+        available (set (map :name (get base-rows kind)))]
+    (->> names
+         (remove nil?)
+         distinct
+         (remove available)
+         (mapv #(unavailable-row settings kind %))
+         (sort-by :name)
+         vec)))
 
 (defn- fake-service
   "The resources service shape the selector reads, over SETTINGS in
@@ -64,13 +126,16 @@
    and `+name`/`-name` project deltas."
   [settings]
   {:catalog (fn [kind] (mapv #(catalog-row settings %) (get base-rows kind)))
+   :unavailable (fn [kind scope] (stored-unavailable settings kind scope))
    :set-global!
    (fn [kind name enabled?]
      (let [k (settings-key kind)
            current (vec (get-in @settings [:global k]))
-           updated (if enabled?
-                     (if (some #{name} current) current (conj current name))
-                     (filterv #(not= name %) current))]
+           updated (if (= :inherit enabled?)
+                     (filterv #(not= name (entry-name %)) current)
+                     (if enabled?
+                       (if (some #{name} current) current (conj current name))
+                       (filterv #(not= name %) current)))]
        (swap! settings assoc-in [:global k] updated)))
    :set-project!
    (fn [kind name state]
@@ -116,14 +181,14 @@
 
 (deftest resource-items-form-provider-groups
   (let [service (fake-service (atom {}))
-        items (#'sut/items service)]
+        items (#'sut/items service :project)]
     (testing "the catalog items carry their [type name] identity"
       (is (= [[:tool "bash"] [:tool "read"] [:skill "review"]]
              (mapv :id items)))
       (is (= "tool/bash" (:label (first items))))
       (is (= [:tool "bash"] (:id (#'sut/row (first (:tool base-rows))))))))
   (testing "groups are providers with type/name rows inside"
-    (let [groups (#'sut/groups (#'sut/items (fake-service (atom {}))))]
+    (let [groups (#'sut/groups (#'sut/items (fake-service (atom {})) :project))]
       (is (= ["Built-in tools" "ext/review"] (mapv :label groups)))
       (is (= [["tool/bash" "tool/read"] ["skill/review"]]
              (mapv #(mapv :label (:items %)) groups))))))
@@ -147,6 +212,23 @@
             ["skill/review"]
             ["prompt/summary"]]
            (mapv #(mapv :label (:items %)) (rest groups))))))
+
+(deftest groups-sort-unavailable-last
+  (let [items (mapv #(#'sut/row %)
+                    [{:type :tool :name "bash"
+                      :available? true
+                      :provider {:kind :builtin :id :tool/bash}}
+                     {:type :skill :name "review"
+                      :available? true
+                      :provider {:kind :extension :id :ext/review}}
+                     {:type :prompt :name "summary"
+                      :available? true
+                      :provider {:kind :app :id nil}}
+                     {:type :tool :name "ghost"
+                      :available? false
+                      :provider {:kind :unavailable :id nil}}])]
+    (is (= ["Built-in tools" "ext/review" "kmet app" "Stored, unavailable"]
+           (mapv :label (#'sut/groups items))))))
 
 (deftest screen-shows-groups-and-switches-scope
   (let [settings (atom {})
@@ -309,6 +391,56 @@
       (let [screen (dock/top-component @(:dock-stack cs))]
         (protocols/handle-input screen "\u001b")
         (is (empty? @(:dock-stack cs)))))))
+
+(deftest stored-unavailable-rows-show-and-forget
+  (testing "global scope"
+    (let [settings (atom {:global {:tools ["read" "ghost"]} :project {}})
+          service (fake-service settings)
+          refreshed (atom [])
+          cs {:engine ::engine :dock-stack (atom []) :tui nil}]
+      (with-redefs [cfg/read-resource-settings (fn [] @settings)
+                    runtime/resources (fn [_] service)
+                    runtime/refresh-resources! (fn [_ kinds]
+                                                 (swap! refreshed conj kinds))
+                    core/tui-set-focus (fn [_ _] nil)
+                    core/tui-request-render (fn [_] nil)]
+        (sut/show-config cs)
+        (let [screen (dock/top-component @(:dock-stack cs))]
+          (protocols/handle-input screen "\t")
+          (grouped/screen-set-query! screen "ghost")
+          (let [item (item-by-id screen [:tool "ghost"])]
+            (is (some? item))
+            (is (false? (:available? item)))
+            (is (= "Stored, unavailable"
+                   (->> (grouped/screen-rows screen)
+                        (filter #(= :group (:kind %)))
+                        first :group :label)))
+            (is (some #(str/includes? % "unavailable")
+                      (render-lines screen 120))))
+          (protocols/handle-input screen " ")
+          (is (nil? (item-by-id screen [:tool "ghost"])))
+          (is (= ["read"] (get-in @settings [:global :tools])))
+          (is (empty? @refreshed)
+              "forgetting an unavailable row refreshes no consumer")))))
+  (testing "project scope"
+    (let [settings (atom {:global {} :project {:skills ["+ghost"]}})
+          service (fake-service settings)
+          refreshed (atom [])
+          cs {:engine ::engine :dock-stack (atom []) :tui nil}]
+      (with-redefs [cfg/read-resource-settings (fn [] @settings)
+                    runtime/resources (fn [_] service)
+                    runtime/refresh-resources! (fn [_ kinds]
+                                                 (swap! refreshed conj kinds))
+                    core/tui-set-focus (fn [_ _] nil)
+                    core/tui-request-render (fn [_] nil)]
+        (sut/show-config cs)
+        (let [screen (dock/top-component @(:dock-stack cs))]
+          (grouped/screen-set-query! screen "ghost")
+          (is (some? (item-by-id screen [:skill "ghost"])))
+          (protocols/handle-input screen " ")
+          (is (nil? (item-by-id screen [:skill "ghost"])))
+          (is (empty? (get-in @settings [:project :skills])))
+          (is (empty? @refreshed)))))))
 
 (deftest a-normalized-no-op-write-is-not-a-change
   (let [settings (atom {:global {:tools ["bash"]} :project {}})

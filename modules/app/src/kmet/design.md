@@ -179,5 +179,5 @@ the process install — which is why a connection must not take the slot.
   `kmet plugins` is composition. Per-command, per-eval-source and per-theme
   selection, project-scope absolute lists, live composition recomposition and
   a generic extension API for persisted selection stay unbuilt; there is no
-  offline selection or unavailable-resource cleanup, and MCP tools are
-  `:sandbox` sources, not `/config` rows.
+  offline selection (an unavailable stored entry can be forgotten, not
+  edited), and MCP tools are `:sandbox` sources, not `/config` rows.

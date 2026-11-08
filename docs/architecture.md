@@ -243,7 +243,7 @@ schema-validated at load).
 | `:llm` | `{:send-message (fn [opts])}` | `kmet.app.llm/plugin`; builtin `kmet.ai.llm/send-message` |
 | `:tools` | a `Registry` handle (tag + name) | `kmet.app.registries/tools`; each tool row registers through it |
 | `:commands` `:prompts` `:skills` | a `Registry` handle each | `kmet.app.registries/{commands,prompts,skills}` |
-| `:resources` | `{:catalog :available? :global-selected? :project-state :selected? :enabled? :enabled-names :set-global! :set-project!}` — selection over the three registries, read through the scoped `:resources` settings | `kmet.app.resources/plugin` |
+| `:resources` | `{:catalog :unavailable :available? :global-selected? :project-state :selected? :enabled? :enabled-names :set-global! :set-project!}` — selection over the three registries, read through the scoped `:resources` settings; `:unavailable` reports stored entries no provider offers, and `:set-global!` accepts `:inherit` to forget one | `kmet.app.resources/plugin` |
 | `:events` | the event vocabulary registry | `kmet.app.events/plugin` |
 | `:systemPrompt` | ordered sections assembled over `:skills`, filtered by the `:resources` selection | `kmet.app.system-prompt/plugin` |
 | `:sessionPersistence` | `{:create! :load :paths :append! :entries :delete! :header}` | `kmet.app.session.backend/plugin` (EDNL files) |
