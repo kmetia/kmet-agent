@@ -242,9 +242,16 @@
                       :error nil}
                      {:provider nil :model-id nil :thinking-level nil :warning nil
                       :error (str "Model \"" cli-model "\" not found.")}))))
-             ;; Provider context — parse within its candidates
+             ;; Provider context — an exact provider/id lookup comes first: a
+             ;; catalog model id may itself contain a slash (CommandCode's
+             ;; deepseek/deepseek-v4.1-flash), and parse-model-pattern's slash
+             ;; branch would misread that id as provider/id and fall through to
+             ;; the fuzzy match (which picked the -fast sibling).
              (let [candidates (models/get-models provider-id)
-                   result (parse-model-pattern pat candidates {:strict? true})]
+                   exact (models/get-model provider-id pat)
+                   result (if exact
+                            {:model exact :thinking-level nil :warning nil}
+                            (parse-model-pattern pat candidates {:strict? true}))]
                (if-let [m (:model result)]
                  {:provider (:provider m)
                   :model-id (:id m)

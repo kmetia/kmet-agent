@@ -219,3 +219,18 @@
     (let [r (r/resolve-cli-model nil "nope" (m/get-models))]
       (t/is (nil? (:model-id r)))
       (t/is (= "Model \"nope\" not found." (:error r))))))
+
+(t/deftest test-resolve-cli-model-exact-id-with-slash
+  ;; CommandCode's model ids carry a slash; the provider-context lookup must
+  ;; prefer the exact id over the fuzzy sibling (-fast).
+  (m/clear-providers!)
+  (let [models [(test-model :gamma "vendor/model")
+                (test-model :gamma "vendor/model-fast")]]
+    (m/register-provider!
+     (m/map->Provider {:id :gamma :name "gamma"
+                       :api-types #{:openai-completions}
+                       :models models :env-vars [] :default-model nil}))
+    (let [r (r/resolve-cli-model :gamma "vendor/model" (m/get-models))]
+      (t/is (= :gamma (:provider r)))
+      (t/is (= "vendor/model" (:model-id r)))
+      (t/is (nil? (:error r))))))
