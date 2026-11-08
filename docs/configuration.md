@@ -229,8 +229,17 @@ The selection applies at startup, on `/reload`, and on a session switch
 (`/resume`, `/import`), where the runtime is recreated from settings and the
 outgoing session's `/tools` override does not carry over. A tool that is not
 active is not executable: a call the model makes for it settles as
-`Tool <name> not found`. kmet has no CLI equivalent of pi's
-`--tools`/`--exclude-tools`/`--no-tools`/`--no-builtin-tools` yet.
+`Tool <name> not found`.
+
+`--tools <list>` is the command line's session override (pi's flag of the same
+name): a comma-separated list of exact tool names. A plain list is an absolute
+allowlist (`--tools read,edit,bash`); a list of only `+name`/`-name` entries
+changes the effective persisted selection (`--tools -bash,+eval` keeps the
+other selected tools, removes `bash`, and turns on the opt-in `eval`). Mixing
+plain names with modifiers is a usage error, as in pi. The override is applied
+like `/tools`: it is not written to settings, it survives `/reload`, and a
+session switch or a `/config` tool write clears it. `--exclude-tools`,
+`--no-tools` and `--no-builtin-tools` have no kmet flag yet.
 
 A disabled skill is left out of the prompt's `<available_skills>` block and
 `/skill:name` does not expand it; a disabled prompt template is neither

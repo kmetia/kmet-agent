@@ -98,7 +98,8 @@
    "--thinking" :thinking
    "--system-prompt" :system-prompt
    "--append-system-prompt" :append-system-prompt
-   "--session-dir" :session-dir})
+   "--session-dir" :session-dir
+   "--tools" :tools})
 
 (def ^:private text-flags
   "Value flags whose value is free text, so the argument after them may start
@@ -107,7 +108,7 @@
    starts. Every other value flag keeps the stricter rule, which is what turns
    `--model --thinking` into a usage error instead of a model named
    \"--thinking\"."
-  #{"--system-prompt" "--append-system-prompt"})
+  #{"--system-prompt" "--append-system-prompt" "--tools"})
 
 (def ^:private retired-flags
   "Flags whose meaning moved away, answered by name instead of falling through
@@ -195,14 +196,33 @@
                  [value (next in)])]
     [(assoc opts :list-models v) in]))
 
+(defn- tool-selection-entries
+  "Parse a `--tools` value into its comma-separated entries. Either a plain
+   allowlist or only `+name`/`-name` modifiers — pi refuses a mixed list, and
+   a modifier needs a name."
+  [flag v]
+  (let [entries (->> (str/split v #",")
+                     (mapv str/trim)
+                     (remove str/blank?)
+                     vec)
+        modifiers (filterv #(contains? #{\+ \-} (first %)) entries)]
+    (when (empty? entries)
+      (throw (bad-args (str flag " needs a tool name"))))
+    (when (and (seq modifiers) (not= (count modifiers) (count entries)))
+      (throw (bad-args (str flag ": tool names cannot be mixed with +name or -name entries"))))
+    (when-let [entry (some #{"+" "-"} entries)]
+      (throw (bad-args (str flag " needs a name after " (pr-str entry)))))
+    entries))
+
 (defn- read-value-flag
   "A value flag (`value-flags`), coerced by key: `--patch` accumulates, the
-   scope keywords become keywords, `--models` is kmet1's comma-separated list
-   (`invocation/resolve-overrides` resolves it before the run), the repeatable
-   append-prompt collects its pieces (`cfg/get-append-system-prompt` joins
-   them like pi), and the server's port and its three caps are parsed here —
-   so a non-number is a usage error now rather than a mode serving without a
-   cap. The rest is free text."
+   scope keywords become keywords, `--models` and `--tools` are
+   comma-separated lists (`invocation/resolve-overrides` resolves the model
+   patterns before the run; the tool entries are a session override), the
+   repeatable append-prompt collects its pieces
+   (`cfg/get-append-system-prompt` joins them like pi), and the server's port
+   and its three caps are parsed here — so a non-number is a usage error now
+   rather than a mode serving without a cap. The rest is free text."
   [opts in _arg flag value]
   (let [k (value-flags flag)
         [v in] (flag-value flag value in)]
@@ -210,6 +230,7 @@
        :patch (update opts :patch conj v)
        (:profile :provider :thinking) (assoc opts k (keyword v))
        :models (assoc opts k (mapv str/trim (str/split v #",")))
+       :tools (assoc opts k (tool-selection-entries flag v))
        :append-system-prompt (update opts k (fnil conj []) v)
        (:port :max-sessions :queue-depth :idle-timeout)
        (assoc opts k (or (parse-long v)
@@ -328,16 +349,19 @@
 (defn parse-args
   "Parse kmet2's argv → `{:profile kw :patch [path …] :args [rest …] :version?
    :help? :dump-config? :dump-default-config? :dump-state? :format kw :model str
-   :provider kw :thinking kw :models [pattern …] :system-prompt str
-   :append-system-prompt [str …] :session-dir path :continue? :resume?
+   :provider kw :thinking kw :models [pattern …] :tools [entry …]
+   :system-prompt str :append-system-prompt [str …] :session-dir path
+   :continue? :resume?
    :session str :debug :generate-models :list-models str-or-true
    :token str :socket path :max-sessions long :queue-depth long
    :idle-timeout long :ext-flags {name value-or-true}}`.
    `:profile` defaults to `profile/default-profile`; `--mode` is kmet1's spelling
    of it (`resolve-mode`), and the run flags are kmet1's: `--model`/`--provider`
    are the agent's overrides, `--thinking`/`--system-prompt`/
-   `--append-system-prompt`/`--models`/`--session-dir` the run's (resolved and
-   then applied by the mode — `kmet.app.invocation`). An `@file` argument is
+   `--append-system-prompt`/`--models`/`--tools`/`--session-dir` the run's
+   (resolved and then applied by the mode — `kmet.app.invocation`). `--tools`
+   is a plain allowlist or only `+name`/`-name` modifiers; mixing the two is a
+   usage error, as in pi. An `@file` argument is
    read into `:args` as kmet1 reads it. An unsupported `--flag` is an extension
    flag (`:ext-flags`), kmet1's three forms; a single-dash unknown flag stays a
    usage error. The three dumps are different views of one composition, so
@@ -461,6 +485,8 @@
   (println "  --model <id>       Model the run's agent uses, over its settings")
   (println "  --provider <name>  Provider the run's agent uses, over its settings")
   (println "  --models <a,b>     Models the session's scope offers (comma separated)")
+  (println "  --tools <list>     Session-only tool selection (comma separated; plain names")
+  (println "                     or only +name/-name modifiers)")
   (println "  -t, --thinking <level>  Thinking level (off, minimal, low, medium, high, xhigh, max)")
   (println "  --system-prompt <text>  Replace the system prompt (text, or a path to a file)")
   (println "  --append-system-prompt <text>  Append to the system prompt (repeatable)")
@@ -532,8 +558,9 @@
   "What the command line asks a mode for: the prompt and where to report, plus
    what the mode hands its run — the output `:format`, the agent's
    `:model`/`:provider`/`:thinking` overrides, the scope it offers
-   (`:models`), its prompt and session-dir overrides (`:system-prompt`,
-   `:append-system-prompt`, `:session-dir`), the socket `:port`, the server's
+   (`:models`), its session tool selection (`:tools`), its prompt and
+   session-dir overrides (`:system-prompt`, `:append-system-prompt`,
+   `:session-dir`), the socket `:port`, the server's
    transport and limits (`:socket`, `:token`, `:max-sessions`, `:queue-depth`,
    `:idle-timeout`), the session the run opens (`:session`, `:resume`,
    `:continue`, in kmet1's spelling because the TUI row hands them to kmet1's
@@ -543,7 +570,7 @@
    map of every option it could have been told."
   [opts config prompt on-result]
   (cond-> (assoc (select-keys opts [:format :model :provider :thinking :models
-                                    :system-prompt :append-system-prompt
+                                    :tools :system-prompt :append-system-prompt
                                     :session-dir :port :socket :token
                                     :max-sessions :queue-depth :idle-timeout
                                     :session])

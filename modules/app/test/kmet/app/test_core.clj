@@ -327,6 +327,23 @@
   (is (not (contains? (core/parse-args ["-p" "hi"]) :thinking))
       "a flag the invocation did not give stays absent"))
 
+(deftest parse-args-takes-a-tool-selection
+  ;; `--tools` is pi's session tool selection. A modifier-only list starts
+  ;; with `-`, so the flag is free text like the prompt overrides; plain names
+  ;; and modifiers cannot mix, and a modifier needs a name.
+  (is (= ["-bash" "+eval"] (:tools (core/parse-args ["--tools" "-bash,+eval"]))))
+  (is (= ["read" "bash"] (:tools (core/parse-args ["--tools=read, bash"])))
+      "the --flag=value form, comma-separated and trimmed")
+  (is (= :kmet.app/bad-args (error-type #(core/parse-args ["--tools"])))
+      "the flag needs a value")
+  (is (= :kmet.app/bad-args
+         (error-type #(core/parse-args ["--tools" "read,-bash"])))
+      "plain names and modifiers cannot mix")
+  (is (= :kmet.app/bad-args (error-type #(core/parse-args ["--tools" "+"])))
+      "a modifier needs a name")
+  (is (= :kmet.app/bad-args (error-type #(core/parse-args ["--tools" ","])))
+      "an empty selection is not a tool selection"))
+
 (deftest the-invocations-run-flags-reach-the-mode-row
   ;; The hand-off is the entry's: the mode's row config carries what the
   ;; command line asked for, and a mode applies it (the TUI row hands the map
@@ -339,11 +356,12 @@
                                "--system-prompt" "SYS"
                                "--append-system-prompt" "MORE"
                                "--session-dir" "target/sessions"
-                               "--models" "a,b"])]
+                               "--models" "a,b"
+                               "--tools" "-bash,+eval"])]
     (is (= {:format :text :thinking :high :system-prompt "SYS"
             :append-system-prompt ["MORE"] :session-dir "target/sessions"
-            :models ["a" "b"] :prompt "hi" :on-result :result
-            :config {:model "x"}}
+            :models ["a" "b"] :tools ["-bash" "+eval"] :prompt "hi"
+            :on-result :result :config {:model "x"}}
            (mode-input opts {:model "x"} "hi" :result))))
   (is (= {:format :text :on-result :result :config {}}
          (@#'core/mode-input (core/parse-args ["-p"]) {} "" :result))
@@ -400,6 +418,7 @@
     (is (str/includes? out "--system-prompt <text>"))
     (is (str/includes? out "--append-system-prompt <text>"))
     (is (str/includes? out "--models <a,b>"))
+    (is (str/includes? out "--tools <list>"))
     (is (str/includes? out "--session-dir <dir>"))
     (is (str/includes? out "install <source>")
         "the package subcommands the entry dispatches are listed too")

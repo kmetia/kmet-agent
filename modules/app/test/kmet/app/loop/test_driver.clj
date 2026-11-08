@@ -13,6 +13,7 @@
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]
             [kmet.app.tools.bash :as bash-tool]
+            [kmet.app.tools.registry :as tools]
             [kmet.app.tools.shell :as shell]
             [kmet.ai.llm :as llm]
             [kmet.ai.models :as models]
@@ -93,9 +94,11 @@
       (f calls))))
 
 (defn- create!
-  "An agent created through the registry, run over TEST-CONFIG."
-  [{:keys [root agents]}]
-  ((:create! agents) root {:config test-config}))
+  "An agent created through the registry, run over TEST-CONFIG with OPTS
+   merged over the create options."
+  ([mounted] (create! mounted nil))
+  ([{:keys [root agents]} opts]
+   ((:create! agents) root (merge {:config test-config} opts))))
 
 (defn- user-texts
   "AGENT's user messages, as their text: one per message."
@@ -383,6 +386,31 @@
     (is (= test-config (runtime/config handle)))
     (is (= (:agent handle) ((:get agents) root (:id handle)))
         "the contract's bare agent is the state the handle runs")))
+
+(deftest a-tools-selection-overrides-the-session
+  ;; `--tools` arrives as a run config key and is applied like `/tools`: a
+  ;; modifier-only list changes the effective selection, a plain list is an
+  ;; absolute allowlist, and neither writes the resources settings.
+  (let [{:keys [root agents]} (mounted)
+        reg (srce/get root :tools)]
+    (doseq [name ["alpha" "bash" "run_code"]]
+      (tools/register-tool! reg {:name name :description name
+                                 :execute (fn [_] {:content name})}))
+    (let [handle (create! {:root root :agents agents}
+                          {:config (assoc test-config
+                                          :tools ["-bash" "+run_code"])})]
+      (is (= #{"alpha" "run_code"}
+             (runtime/enabled-tool-names handle))
+          "the persisted selection minus bash plus the opt-in run_code"))
+    (let [handle (create! {:root root :agents agents}
+                          {:config (assoc test-config :tools ["alpha"])})]
+      (is (= #{"alpha"} (runtime/enabled-tool-names handle))
+          "a plain list is an absolute allowlist"))
+    (let [handle (create! {:root root :agents agents}
+                          {:config (assoc test-config
+                                          :tools ["alpha" "ghost"])})]
+      (is (= #{"alpha"} (runtime/enabled-tool-names handle))
+          "an unknown name selects nothing"))))
 
 (deftest a-setting-writes-one-agents-state
   ;; Every op lands on the handle it was called with: two agents of one process

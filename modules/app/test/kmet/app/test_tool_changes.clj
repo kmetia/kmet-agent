@@ -120,6 +120,28 @@
               "a runtime override re-adds it"))
       (finally (fs/delete-tree dir)))))
 
+(t/deftest test-a-run-tool-selection-reaches-a-resumed-loadout
+  ;; `--tools +eval` on a resumed session must declare the opt-in built-in the
+  ;; transcript never held. The context is restored first, as the driver does,
+  ;; so the delta is recorded against the session's own loadout.
+  (let [{:keys [session dir]} (temp-session)
+        fresh (support/make-agent-state :session session)]
+    (try
+      (state/sync-tool-declarations! fresh)
+      (t/is (= #{"bash" "edit" "read" "write"}
+               (names (state/active-tools fresh))))
+      (let [resumed (support/make-agent-state :session session)]
+        (state/restore-session-context! resumed)
+        (state/set-active-tools! resumed #{"read" "eval"})
+        (t/is (= #{"eval" "read"} (names (state/active-tools resumed)))
+              "the run selection wins over the recorded loadout")
+        (let [entry (peek (changes session))]
+          (t/is (= ["eval"] (mapv :name (:added entry)))
+                "the opt-in built-in is declared")
+          (t/is (= ["bash" "edit" "write"] (:removed entry))
+                "and the tools the selection drops are removed")))
+      (finally (fs/delete-tree dir)))))
+
 (t/deftest test-a-persisted-selection-filters-a-resumed-record
   (let [{:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session)]

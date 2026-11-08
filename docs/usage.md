@@ -34,6 +34,8 @@ bb start @tasks.md "summarize the tasks"
   --model <id>          Model the run's agent uses, over its settings
   --provider <name>     Provider the run's agent uses, over its settings
   --models <a,b>        Models the session's scope offers (comma separated)
+  --tools <list>        Session-only tool selection (comma separated; plain names
+                        or only +name/-name modifiers)
   -t, --thinking <level> Thinking level (off, minimal, low, medium, high, xhigh, max)
   --system-prompt <txt> Replace the system prompt (text, or a path to a file)
   --append-system-prompt <txt> Append to the system prompt (repeatable)

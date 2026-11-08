@@ -23,8 +23,10 @@
    `create!` options and the driver applies them over the config it loads
    (`cfg/apply-cli-overrides`). `--model` is the one the factory resolves
    itself, per creation, so an agent's model is an option of the agent; the
-   entry has already resolved it for a mode that runs kmet1's front end."
-  [:model :provider :thinking :models :session-dir :system-prompt
+   entry has already resolved it for a mode that runs kmet1's front end.
+   `--tools` rides here as a session override: the driver applies it to the
+   created agent exactly as `/tools` does, never to the persisted selection."
+  [:model :provider :thinking :models :tools :session-dir :system-prompt
    :append-system-prompt])
 
 (defn create-opts

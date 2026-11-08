@@ -257,8 +257,9 @@ arg parsing. Still missing:
 
 **Flags** — kmet covers `--mode text|edn|rpc`, `-p/--print`, `-c/--continue`,
 `-r/--resume`, `--session <id|path>`, `--session-dir`, `--model`, `--provider`,
-`--models`, `--list-models`, `--system-prompt`, `--append-system-prompt`,
-`-t/--thinking` (pi 1.3 moved `-t` to `--tools` — see below), `-d/--debug`,
+`--models`, `--tools`, `--list-models`, `--system-prompt`,
+`--append-system-prompt`, `-t/--thinking` (pi 1.3 moved `-t` to `--tools`, so
+kmet spells the tool flag `--tools` only — see below), `-d/--debug`,
 `-h/--help`, `-v/--version`, `--generate-models`, `@files`, and positional
 messages (`modules/agent/src/kmet/agent/core.clj` vs pi `cli/args.ts`).
 Missing, by pi's cli.md groups:
@@ -270,7 +271,7 @@ Missing, by pi's cli.md groups:
 | `--fork <path|id>` | fork an existing session from the CLI (kmet has `/fork` in the TUI) |
 | `--no-session` | in-memory session that is not persisted |
 | `-n/--name` | session display name at startup (kmet has `/name`) |
-| `-t/--tools`, `-xt/--exclude-tools`, `-nbt/--no-builtin-tools`, `-nt/--no-tools` | tool selection for one run (kmet has the `:resources` selection, `kmet plugins` for composition rows, and the in-TUI `/tools` session and `/config` persistent selectors; the CLI flags are the gap) |
+| `-xt/--exclude-tools`, `-nbt/--no-builtin-tools`, `-nt/--no-tools` | tool selection for one run (`--tools` is ported as a session override; kmet also has the `:resources` selection, `kmet plugins` for composition rows, and the in-TUI `/tools` session and `/config` persistent selectors; these three flags are the gap) |
 | `-e/--extension`, `-ne/--no-extensions` | load extensions / disable discovered ones for one run |
 | `--no-mcp` | disable MCP for one run |
 | `--skill`, `-ns/--no-skills` | load skills / disable discovered ones for one run |

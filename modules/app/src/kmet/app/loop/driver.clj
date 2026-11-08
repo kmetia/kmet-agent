@@ -31,6 +31,7 @@
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]
             [kmet.app.session.submission :as submission]
+            [kmet.app.tools.registry :as tools]
             [kmet.app.tools.shell :as shell]
             [kmet.ai.models :as models]
             [kmet.srce.core :as srce]))
@@ -159,6 +160,16 @@
                               ;; the state reads the ctx resolved above, so its
                               ;; tool table and the prompt's are the same table
                               {:ctx ctx})))]
+    ;; `--tools` is the run's session override, applied as `/tools` applies one:
+    ;; a plain list is absolute over the live table, and a modifier-only list
+    ;; changes the effective persisted selection. The context is restored first
+    ;; so the recorded delta is the resumed session's own (`+eval` declares);
+    ;; the next turn rebuilds it from the session again.
+    (when-let [entries (:tools config)]
+      (loop-state/restore-session-context! state)
+      (loop-state/set-active-tools!
+       state
+       (tools/resolve-selection entries (loop-state/enabled-tool-names state))))
     ;; the session's scoped-model list is the config's (pi: resolveModelScope at
     ;; runtime creation): seeded here, so kmet1's engine and every handle start
     ;; with the same scope rather than only the bootstrapped one

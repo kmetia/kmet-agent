@@ -822,10 +822,11 @@
 
 (defn apply-cli-overrides
   "Apply CLI opts onto a config map (pi: CLI flags override settings).
-   Handles :model, :provider, :thinking, :models (scoped list), :system-prompt
-   (last wins), :session-dir, and :append-system-prompt (repeatable; each
-   piece is resolved and they are joined with blank lines by
-   `get-append-system-prompt`, like pi)."
+   Handles :model, :provider, :thinking, :models (scoped list), :tools (the
+   session tool selection: a plain allowlist or +name/-name entries over the
+   effective persisted selection), :system-prompt (last wins), :session-dir,
+   and :append-system-prompt (repeatable; each piece is resolved and they are
+   joined with blank lines by `get-append-system-prompt`, like pi)."
   [config opts]
   (cond-> config
     (:model opts) (assoc :model (:model opts))
@@ -833,6 +834,7 @@
     (:thinking opts) (assoc :thinking (:thinking opts))
     (:models opts) (assoc :models (:models opts))
     (:session-dir opts) (assoc :session-dir (:session-dir opts))
+    (:tools opts) (assoc :tools (:tools opts))
     (:system-prompt opts) (assoc :system-prompt (:system-prompt opts))
     ;; repeatable: the pieces stay separate until
     ;; `get-append-system-prompt` resolves each one and joins, so a piece that

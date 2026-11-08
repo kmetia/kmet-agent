@@ -343,10 +343,14 @@
   (let [base {:model "a" :provider :openai}
         opts {:model "b"
               :provider :anthropic
+              :tools ["-bash" "+eval"]
               :system-prompt "Custom"
               :append-system-prompt ["One" "Two"]}]
     (t/is (= "b" (:model (cfg/apply-cli-overrides base opts))))
     (t/is (= :anthropic (:provider (cfg/apply-cli-overrides base opts))))
+    (t/testing "the session tool selection rides the run config"
+      (t/is (= ["-bash" "+eval"]
+               (:tools (cfg/apply-cli-overrides base opts)))))
     (t/is (= "Custom" (:system-prompt (cfg/apply-cli-overrides base opts))))
     (t/testing "repeatable append-system-prompt stays a list for the resolver"
       (t/is (= ["One" "Two"]
