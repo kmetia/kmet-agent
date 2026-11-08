@@ -47,6 +47,20 @@
     (t/is (not (contains? (tools/get-all-tools b) "probe"))
           "and no other handle does")))
 
+(t/deftest deferred-tools-name-their-source-owner
+  (let [r (registry/atom-registry)
+        a [:app :extensions "a"]
+        b [:app :extensions "b"]]
+    (tools/register-tool-source! r :one (fn [] {"t1" {:name "t1"}})
+                                 {:exposure :deferred :owner a})
+    (tools/register-tool-source! r :two (fn [] {"t1" {:name "t1"}
+                                                "t2" {:name "t2"}})
+                                 {:exposure :deferred :owner b})
+    (tools/register-tool! r {:name "t2" :description "registered"}
+                          [:app :extensions "direct"])
+    (t/is (= {"t1" b} (tools/deferred-tool-owners r))
+          "the later source wins a colliding name and a registration shadows both")))
+
 (t/deftest dispatch-follows-the-handle
   (let [a (registry/atom-registry)
         b (registry/atom-registry)]

@@ -158,6 +158,17 @@
 (defn- sources-with-exposure [reg exposure]
   (filterv #(= exposure (:exposure %)) (registered-tool-sources reg)))
 
+(defn- deferred-sources
+  "REGISTRY's `:deferred` tool sources in display order."
+  [reg]
+  (sources-with-exposure reg :deferred))
+
+(defn- source-owner
+  "The owner that registered SOURCE under `:kmet/tool-source`, or nil."
+  [reg source]
+  (some (fn [[owner value]] (when (= value source) owner))
+        (registry/by-owner reg :kmet/tool-source (:id source))))
+
 (defn- merge-source-tools
   "SOURCES' catalogs merged in registration order."
   [sources]
@@ -169,10 +180,26 @@
    no `register-tool!` call installed."
   [reg]
   (into {}
-        (for [[name tool] (merge-source-tools
-                           (sources-with-exposure reg :deferred))]
+        (for [[name tool] (merge-source-tools (deferred-sources reg))]
           [name (tool/normalize-tool-definition
                  (assoc tool :name (or (:name tool) name) :exposure :deferred))])))
+
+(defn deferred-tool-owners
+  "A map of model-facing tool name -> the owner of the `:deferred`
+   source that contributes it. The resolution matches `get-all-tools`:
+   sources merge in registration order, so a later source wins a
+   colliding name, and a `:kmet/tool` registration shadows a source
+   with the same name. `/config` reads this because a deferred tool is
+   not itself a tool registration."
+  [reg]
+  (let [registered (set (keys (registered-tools reg)))]
+    (into {}
+          (mapcat (fn [source]
+                    (let [owner (source-owner reg source)]
+                      (map (fn [name] [name owner])
+                           (remove registered
+                                   (keys (source-tools source)))))))
+          (deferred-sources reg))))
 
 (defn register-tool-source!
   "Register (or replace) an extension-contributed tool source on REGISTRY. ID
@@ -242,7 +269,7 @@
                            (some #(contains? selected %)
                                  (keys (source-tools source))))
                    (select-keys source [:id :description]))))
-         (sources-with-exposure reg :deferred))))
+         (deferred-sources reg))))
 
 ;; ─── Eval sources ──────────────────────────────────────────────────────────
 ;; An eval source contributes live values to every eval environment: its

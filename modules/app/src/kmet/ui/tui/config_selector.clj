@@ -93,13 +93,18 @@
 
 (defn- item-suffix
   "The project-scope override annotation after a resource name, worded the
-   way the old config screen worded its load/unload deltas."
+   way the old config screen worded its load/unload deltas. An inherited row
+   names the effective global state, since its dimmed checkbox alone is easy
+   to miss."
   [theme scope item]
   (when (= scope :project)
     (case (:project-state item)
       :enabled (th/fg theme :muted "  project load")
       :disabled (th/fg theme :muted "  project unload")
-      (th/fg theme :dim "  inherited global"))))
+      (th/fg theme :dim
+             (str "  inherited global ("
+                  (if (:selected? item) "enabled" "disabled")
+                  ")")))))
 
 (defn- item-line
   "Render one resource row: cursor, checkbox, name, project annotation and

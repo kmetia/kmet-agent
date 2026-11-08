@@ -263,23 +263,36 @@
 
 (defn- owner-of
   "The owner that holds VALUE, the effective registration of NAME under TAG;
-   nil when no registration holds it (a deferred source's tool)."
+   nil when no registration holds it (a deferred source's tool, whose owner
+   `provider` reads from the source)."
   [handle tag name value]
   (some (fn [[owner v]] (when (= v value) owner))
         (registry/by-owner handle tag name)))
 
+(defn- tool-provider-owners
+  "The owner path for every model-facing tool name: a direct registration's
+   owner where one holds the name, otherwise the deferred source's owner.
+   Read once per catalog, so `provider` is a map lookup."
+  [handle]
+  (reduce (fn [owners [name value]]
+            (if-let [owner (owner-of handle :kmet/tool name value)]
+              (assoc owners name owner)
+              owners))
+          (tools/deferred-tool-owners handle)
+          (tools/get-all-tools handle)))
+
 (defn- provider
   "Provider metadata for KIND's NAME, read from the effective value — the
    shadowing tool for :tool, the first-wins entry for skills and prompts.
-   TOOL-TABLE is the resolved tool table when the caller already read it."
-  [handles kind name tool-table]
+   TOOL-OWNERS is the resolved name -> owner map for :tool."
+  [handles kind name tool-owners]
   (let [handle (handle-for handles kind)
         tag (registry-tag kind)
-        value (case kind
-                :tool (get tool-table name)
-                (:skill :prompt) (when handle (registry/entry handle tag name)))]
-    (provider-of (when (and handle value)
-                   (owner-of handle tag name value)))))
+        owner (if (= kind :tool)
+                (get tool-owners name)
+                (when-let [value (and handle (registry/entry handle tag name))]
+                  (owner-of handle tag name value)))]
+    (provider-of owner)))
 
 ;; ─── Selection snapshot ────────────────────────────────────────────────────
 
@@ -338,12 +351,12 @@
    result, sorted by name."
   [handles kind]
   (let [{:keys [available] :as snap} (snapshot handles kind)
-        tool-table (when (= kind :tool)
-                     (some-> (:tools handles) tools/get-all-tools))]
+        tool-owners (when (= kind :tool)
+                      (some-> (:tools handles) tool-provider-owners))]
     (->> available
          (map (fn [name]
                 (resource-row snap kind name
-                              (provider handles kind name tool-table) true)))
+                              (provider handles kind name tool-owners) true)))
          (sort-by :name)
          vec)))
 

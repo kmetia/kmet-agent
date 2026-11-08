@@ -357,6 +357,38 @@
           (is (= {:kind :extension :id :ext/demo} (:provider row))
               "a shadowing tool's row names the extension, not the shadowed row"))))))
 
+(deftest provider-follows-a-deferred-tool-source
+  (with-settings nil nil
+    (fn [_ _]
+      (let [tools (registry/atom-registry)
+            source-owner [:app :extensions "tree-sitter"]
+            direct-owner [:app :extensions "direct"]]
+        (registry/register! tools :kmet/tool "shared"
+                            {:name "shared" :description "registered"}
+                            direct-owner)
+        (registry/register! tools :kmet/tool-source ::symbols
+                            {:id ::symbols
+                             :exposure :deferred
+                             :description "symbols"
+                             :tools-fn (fn []
+                                         {"shared" {:name "shared"
+                                                    :description "source"}
+                                          "get_symbol_body"
+                                          {:name "get_symbol_body"
+                                           :description "body"}})}
+                            source-owner)
+        (let [s (resources/service
+                 {:tools tools
+                  :skills (handle :kmet/skill [])
+                  :prompts (handle :kmet/prompt [])})
+              rows ((:catalog s) :tool)]
+          (is (= {:kind :extension :id :ext/tree-sitter}
+                 (:provider (row rows "get_symbol_body")))
+              "a deferred-source tool names the extension that owns the source")
+          (is (= {:kind :extension :id :ext/direct}
+                 (:provider (row rows "shared")))
+              "a registered tool shadows the source contribution"))))))
+
 ;; ─── Settings schema ───────────────────────────────────────────────────────
 
 (deftest settings-schema

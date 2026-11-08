@@ -213,9 +213,12 @@ The three surfaces are:
   start.
 - `/config` — live selector for the persisted `:resources` selection over the
   providers available in the current run. Rows are grouped by provider and
-  labelled `type/name`; it starts in project scope, and Tab switches between
-  project and global. Project rows cycle inherit/enabled/disabled, global rows
-  toggle enabled/disabled. Stored entries whose provider is unavailable this
+  labelled `type/name` (a `:deferred` tool source's tools sit under the
+  extension that registered the source); it starts in project scope, and Tab
+  switches between project and global. Project rows cycle
+  inherit/enabled/disabled and name the inherited global state
+  (`inherited global (enabled)` or `(disabled)`); global rows toggle
+  enabled/disabled. Stored entries whose provider is unavailable this
   run appear dimmed in `Stored, unavailable`; Space forgets them from the
   current scope. A tool write clears the `/tools` session override and
   refreshes the live tool set; a skill write rebuilds the prompt;
