@@ -7,8 +7,8 @@ the last tagged release (`0.8.24`); `v0.8.23` is below what the tree needs,
 since the workarounds for the dropped tickets went with their fixes.
 
 Status checked on 2026-11-07 against the installed `v0.8.24` (tagged
-2026-11-05, `a9b24d4`). Every ticket this project filed except #1031 is fixed
-and its entry dropped: #1433 (PR #1435, follow-up PR #1437), #1453/#1454
+2026-11-05, `a9b24d4`). Every earlier ticket this project filed except #1031 is
+fixed and its entry dropped: #1433 (PR #1435, follow-up PR #1437), #1453/#1454
 (PR #1472), #1466/#1469 (PR #1478) and #1467/#1468 (PR #1477). The release
 also carries the `spit` in-place write (`83fe128e`, follow-up `3be07637`):
 mode, symlink and hard-link behaviour are verified on the installed build, so
@@ -30,3 +30,23 @@ declaring `:jolt` use Jolt's native loader and are not blocked, which is why
 `:sci` fallback. Keep the pin until the change is released by Jolt; v0.8.24
 vendors SCI at `32d62a5`, which the #1093 branch includes, so the pin still
 applies.
+
+### [jolt#1548](https://github.com/jolt-lang/jolt/issues/1548) — Array `seq` is eager
+
+Open (filed 2026-11-08; reproduces on the installed
+`v0.8.24-75-gac3934db`). `seq` on a Jolt array eagerly materializes the whole
+array through `ja->list` + `list->cseq/k`
+(`host/chez/java/natives-array.ss:820`) instead of wrapping it, at ~107 bytes
+per element, so `(take 4 huge-byte-array)` allocates in proportion to the
+entire array; a 94 MB array projects to ~10 GB. With the default ceiling this
+raises `OutOfMemoryError` rather than returning the four elements. Strings
+(`seq.ss:653`), vectors and maps are already lazy, so this is also a JVM-parity
+gap (`clojure.lang.ArraySeq` is O(1) at creation).
+
+This is what ended the 2026-11-08 jolt session: an eval did
+`(take 4 (fs/read-all-bytes "~/bin/kmet"))` on the 94,210,175-byte binary and
+the in-progress conversion hit the 2,983,138,304-byte heap ceiling at live
+2,987,243,856. It is not a kmet leak and no shipped kmet path is affected —
+`read` sniffs images with `alength`/`aget` — but eval or extension code that
+seqs a large array is exposed. Workaround: use index access (`aget`, `nth`,
+`count`) rather than `take`/`first`/`map`/`vec` on large arrays.
