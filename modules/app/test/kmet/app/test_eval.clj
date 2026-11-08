@@ -56,6 +56,14 @@
       (t/is (= "false" (:content r))
             "run_code keeps its fresh-context contract"))))
 
+(t/deftest test-the-eval-prompt-puts-one-call-first
+  (t/is (str/includes? (:description eval-tool/definition)
+                       "two eval calls never overlap"))
+  (t/is (str/includes? (:prompt-snippet eval-tool/definition)
+                       "One eval call at a time"))
+  (t/is (str/includes? (first (:prompt-guidelines eval-tool/definition))
+                       "Do not issue two eval calls")))
+
 (t/deftest test-the-sticky-namespace-is-re-entered
   (let [env (support/eval-ctx)]
     (t/is (str/starts-with? (:content (support/eval! env "(ns demo) (def x \"X.\" 41) x"))

@@ -548,6 +548,41 @@
         (t/is (= 2 (count (filter #(= :tool (:role %)) (state/get-context agent))))
               "both tool results appended to context")))))
 
+(t/deftest test-loop-nudges-a-multi-eval-batch
+  ;; Two eval calls in one assistant message serialize on the eval
+  ;; session lock. Their first result carries a note the model sees on
+  ;; its next turn: pack independent work into one call instead.
+  (let [call-count (atom 0)
+        agent (support/make-agent-state
+               :enabled-tool-names (support/tool-names ["eval"]))
+        send-message
+        (fn [opts]
+          (future
+            (if (= 1 (swap! call-count inc))
+              (do (when-let [on-tc (:on-tool-call opts)]
+                    (on-tc {:id "tc1" :name "eval"
+                            :arguments "{\"code\":\"(+ 1 2)\"}" :index 0})
+                    (on-tc {:id "tc2" :name "eval"
+                            :arguments "{\"code\":\"(+ 3 4)\"}" :index 1}))
+                  (when-let [on-done (:on-done opts)] (on-done :tool-calls)))
+              (do (when-let [on-text (:on-text opts)] (on-text "ok"))
+                  (when-let [on-done (:on-done opts)] (on-done :stop))))
+            :done))]
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message send-message
+                  state/execute-tool-for
+                  (fn [_ _ _ _] {:content "ok" :is-error false})]
+      (let [run (future
+                  (deref (loop/run-agent-turn agent {:message "run"
+                                                     :on-error (fn [_])})
+                         2000 ::timeout))]
+        (t/is (not= ::timeout @run) "the turn completes")
+        (let [tools (filter #(= :tool (:role %)) (state/get-context agent))
+              contents (mapcat #(map :content (:content %)) tools)]
+          (t/is (some #(str/includes? (str %) "this batch carried 2 eval calls")
+                      contents)
+                "the first eval result carries the nudge"))))))
+
 (t/deftest test-loop-parallel-end-events-fire-per-tool
   ;; Regression: end events for a parallel batch used to wait for every
   ;; future, so each tool showed the slowest sibling's Took duration and

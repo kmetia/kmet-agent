@@ -69,6 +69,7 @@
    :label "Eval"
    :description (str "Evaluate Clojure in this session's persistent SCI script sandbox: "
                      script/sandbox-summary
+                     " The session is single-threaded: two eval calls never overlap — the second waits for the first. Put independent work in ONE call and fan out inside it with (sandbox/spawn f), pmap, or several (tools/call …) promises; a call that defines a verb or changes eval state serializes its whole batch."
                      " Eval creates verbs: a top-level definition with a non-blank docstring is "
                      "written to the agent's eval library, so it persists across "
                      "calls and new sessions and a restart load it. A new definition "
@@ -94,17 +95,14 @@
                      "final value of a silent success); stdout and stderr are "
                      "discarded. One call runs a whole script: forms run in order, "
                      "independent work can overlap — start (sandbox/spawn f) or "
-                     "(tools/call …) and deref them to join — and a call that "
-                     "defines a verb makes its batch run in source order; the "
-                     "session still serializes eval calls, so pack a multi-step "
-                     "task into one call. This is the sandbox, not the project's "
-                     "nREPL.")
-   :prompt-snippet "Persistent Clojure/SCI sandbox (fs/sh/tools); eval creates saved verbs from documented top-level definitions; pack multi-step work in one call"
+                     "(tools/call …) and deref them to join. Prefer one call with "
+                     "fan-out; separate eval calls do not overlap. This is the "
+                     "sandbox, not the project's nREPL.")
+   :prompt-snippet "One eval call at a time: fan out with sandbox/spawn or tools/call promises; separate eval calls serialize."
    :prompt-guidelines
-   ["eval is the full script sandbox, not a bare REPL: fs, sh, slurp, tools and require work as in a babashka script; (eval/help) lists sources, loaded definitions and the surface."
+   ["Do not issue two eval calls for independent work. Make one call instead: (let [a (sandbox/spawn #(job-a)) b (sandbox/spawn #(job-b))] [(deref a) (deref b)]). Separate eval calls run one after the other, so wall time is the sum, not the max. A call that defines a verb or changes eval state serializes its whole batch. eval is the full script sandbox, not a bare REPL: fs, sh, slurp, tools and require work as in a babashka script; (eval/help) lists sources, loaded definitions and the surface."
     "Read files with (user/read-file path) or (user/read-file path offset limit); it shares the read tool's 1-indexed offset/limit and truncation. For images use (emit-image path)."
     "Call the run's tools through the `tools` namespace: (tools/list) lists them, (tools/describe \"name\") shows one declaration, and (tools/call \"name\" args) returns a promise to deref — or use (tools/call! \"name\" args) to settle and throw on failure; a plain name is a var too, @(tools/name args)."
-    "Pack independent work into one eval call: forms run in order and independent work overlaps — `(sandbox/spawn f)` for local work, and starting several `(tools/call …)` promises before dereferencing any of them. The session serializes eval calls, so a second call buys no concurrency; a call that defines a verb also makes its batch run in source order, so use one call for a multi-step task instead of one call per operation."
     "Define what should survive the call: a documented top-level definition is written to the agent's eval library as a verb, while an undocumented one stays live for this session only. Use local bindings for throwaway code."
     "Eval creates verbs: give a top-level defn/defmacro/def/etc. a non-blank docstring to save it to the library, where later calls and sessions can use it; a new definition without one is live-only and not saved. Add a docstring and re-evaluate to keep it; a defmethod is saved with its loaded multimethod. A saved definition redefined without a docstring is not written; the saved documented file is unchanged. The docstring is the interface later calls see, with its arglists; (eval/describe 'name) reads it; a patch or edit-form result cannot remove it."
     "New sessions and a restart load the library; an already-running session is a cache and does not see another session's new files. The prompt previews the saved or loaded definitions; the first eval reports any loaded definitions and files that failed. A call that ends in a normal error writes nothing; its definitions stay live and can be forgotten."

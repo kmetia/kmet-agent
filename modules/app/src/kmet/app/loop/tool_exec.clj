@@ -40,6 +40,27 @@
               (try (eval-defs/defines? code)
                    (catch Exception _ false))))))
 
+(defn- eval-batch-nudge
+  "One-line feedback for a batch with more than one eval call. It reaches
+   the model on the next turn: eval calls serialize, so independent work
+   belongs in one call with sandbox/spawn or tools/call promises."
+  [tool-calls]
+  (let [n (count (filter #(= "eval" (:name %)) tool-calls))]
+    (when (> n 1)
+      (str "[eval: this batch carried " n " eval calls; eval calls serialize. "
+           "Put independent work in one call and fan out with (sandbox/spawn f) "
+           "or several (tools/call ...) promises.]"))))
+
+(defn- add-result-nudge
+  "Append NUDGE to RESULT's content, or return RESULT unchanged when NUDGE is
+   nil. A nil result still becomes one carryable map."
+  [result nudge]
+  (if (nil? nudge)
+    result
+    (let [result (or result {})
+          content (str (:content result))]
+      (assoc result :content (str content (when (seq content) "\n") nudge)))))
+
 (defn has-sequential-tool-call?
   "True if any tool call targets a :sequential tool, or an eval call carries a
    verb definition — the whole batch then runs sequentially (pi:
@@ -236,7 +257,11 @@
         ;; event here — the fallback is settled as-is, never by re-running
         ;; the failed chain.
         _ (doseq [tc tool-calls :when (not (contains? @finalized (:id tc)))]
-            (settle! tc (:arguments tc) (get raw-results (:id tc))))]
+            (settle! tc (:arguments tc) (get raw-results (:id tc))))
+        nudge (eval-batch-nudge tool-calls)
+        first-eval-id (:id (first (filter #(= "eval" (:name %)) tool-calls)))
+        _ (when nudge
+            (swap! finalized update first-eval-id add-result-nudge nudge))]
     ;; context + session in source order (skipped when the caller appends —
     ;; the repeat-loop guard path appends everything itself in source order)
     (when (not= false append?)
@@ -255,10 +280,15 @@
    Same chain, events and captured DECLARED-TOOLS map as the parallel path;
    results in source order."
   [agent tool-calls assistant-msg declared-tools & [append?]]
-  (let [tool-results (atom [])]
+  (let [tool-results (atom [])
+        nudge (eval-batch-nudge tool-calls)
+        first-eval-id (:id (first (filter #(= "eval" (:name %)) tool-calls)))]
     (doseq [tc tool-calls]
       (begin-call! agent tc)
       (let [{:keys [result args]} (call-point! agent assistant-msg declared-tools tc)
+            result (if (and nudge (= (:id tc) first-eval-id))
+                     (add-result-nudge result nudge)
+                     result)
             result-msg (message/tool-result-message (:id tc) (:name tc) result)]
         (when (not= false append?)
           (state/append-persisted-message! agent result-msg))
