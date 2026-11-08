@@ -336,13 +336,35 @@
            (sort-by #(.toMillis (fs/last-modified-time %)) >)
            first))))
 
+(defn- header-match
+  "Scan session HEADERS for ARG. Returns {:path path} on an exact id,
+   {:prefix? true} when some id starts with ARG but none equals it, and nil
+   when ARG matches no header id. Header reads are bounded, so this cheap
+   pass keeps an unknown id out of the full info scan."
+  [candidates arg]
+  (loop [candidates candidates, prefix? false]
+    (if-let [{:keys [path]} (first candidates)]
+      (let [id (:id (read-session-header path))]
+        (cond
+          (= id arg) {:path path}
+          (and id (str/starts-with? id arg)) (recur (rest candidates) true)
+          :else (recur (rest candidates) prefix?)))
+      (when prefix? {:prefix? true}))))
+
 (defn resolve-session-path
   "Resolve a --session argument to a session file path (pi: main.ts
    resolveSessionPath). Path-like values (containing / \\ or ending with
    .ednl/.jsonl) resolve relative to the process cwd; anything else is a
    full session id or id prefix searched among all sessions under BASE-DIR
    (cwd-encoded subdirectories and legacy flat files; an exact id wins over
-   a prefix). Returns the canonical path, or nil when nothing matches."
+   a prefix). Returns the canonical path, or nil when nothing matches.
+
+   An exact id is matched against the session headers first (pi:
+   SessionManager.findById — bounded header reads), without building full
+   info: the CLI opens one session, so reading every transcript's text just
+   to resolve it made startup scale with the whole history. An id that
+   prefixes a stored id falls back to the info scan (pi's list path); an id
+   that prefixes no header resolves to nil without it."
   [arg base-dir]
   (let [arg (eds/expand-path (str arg))
         cwd (str (fs/cwd))]
@@ -353,10 +375,15 @@
       (let [p (if (fs/absolute? arg) arg (str (fs/path cwd arg)))]
         (when (fs/exists? p)
           (str (fs/canonicalize p))))
-      (let [infos (list-sessions-info base-dir)
-            exact (some #(when (= (:id %) arg) (:path %)) infos)
-            prefix (some #(when (str/starts-with? (:id %) arg) (:path %)) infos)]
-        (or exact prefix)))))
+      (let [{:keys [path prefix?]}
+            (try (header-match (session-file-candidates base-dir) arg)
+                 (catch Exception _ nil))]
+        (or path
+            (when prefix?
+              ;; HEADER-MATCH saw every header id, so no exact match remains:
+              ;; only the activity-ordered prefix lookup needs the full scan.
+              (some #(when (str/starts-with? (:id %) arg) (:path %))
+                    (list-sessions-info base-dir))))))))
 
 (defn- trash-error-hint
   "The first line of the trash CLI's stderr (capped) for a failed delete."

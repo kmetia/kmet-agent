@@ -129,6 +129,19 @@
     (te/tool-execution-set-args-complete! c)
     (mapv strip-ansi (core/render c (or width 60)))))
 
+(deftest test-render-sanitizes-control-characters
+  (testing "raw control bytes in a tool result never reach the terminal"
+    (let [content (str "ok\n" "a" \u0000 \u0007 \u000b "b" "\ntail")
+          rendered (apply str (render-tool :name "eval" :content content :width 80))]
+      (is (not (re-find #"[\u0000\u0007\u000b]" rendered)))
+      (is (str/includes? rendered "ok"))
+      (is (str/includes? rendered "tail"))))
+  (testing "the default result renderer sanitizes too"
+    (let [content (str "x" \u0000 "y")
+          rendered (apply str (render-tool :name "unknown-tool" :content content :width 80))]
+      (is (not (str/includes? rendered "\u0000")))
+      (is (str/includes? rendered "xy")))))
+
 (deftest test-read-render-hyperlink-path
   (testing "OSC 8 hyperlinked path stays on one line with contiguous visible text (pi linkPath)"
     (let [prev (timg/get-capabilities)]

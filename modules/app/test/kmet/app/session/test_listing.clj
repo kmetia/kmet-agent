@@ -83,6 +83,32 @@
             "missing dir → nil")
       (finally (fs/delete-tree dir)))))
 
+(t/deftest test-resolve-session-path-exact-id-skips-info-scan
+  ;; --session <full-id> must not build SessionInfo for every stored session:
+  ;; that reads every transcript just to find one file and made CLI resume
+  ;; scale with the whole session history. The id comes from the header, so a
+  ;; renamed file still resolves.
+  (let [dir (test-tmp/temp-dir! "test-sess-resolve-")
+        cwd-dir (s/session-dir-for-cwd dir "/home/user/proj")
+        sess (s/create-session cwd-dir {:cwd "/home/user/proj"})
+        renamed (str (fs/parent (:file sess)) "/renamed.ednl")]
+    (try
+      (s/append-entry sess {:role :assistant :content "a"})
+      (fs/move (:file sess) renamed)
+      (with-redefs [listing/list-sessions-info
+                    (fn [& _] (throw (ex-info "slow info scan" {})))]
+        (t/is (= (str (fs/canonicalize renamed))
+                 (s/resolve-session-path (:id sess) dir))
+              "an exact id resolves from the session header alone")
+        (t/is (nil? (s/resolve-session-path "no-such-id" dir))
+              "an unknown id resolves to nil without the info scan"))
+      (t/is (= (str (fs/canonicalize renamed))
+               (s/resolve-session-path (subs (:id sess) 0 10) dir))
+            "an id prefix still resolves through the info scan")
+      (t/is (nil? (s/resolve-session-path "no-such-id" nil))
+            "a missing base dir resolves to nil")
+      (finally (fs/delete-tree dir)))))
+
 (t/deftest test-find-most-recent-session-header-across-chunks
   ;; G13: the bounded header scan is chunked (4 KB) and line-oriented — a
   ;; header larger than one chunk (big :cwd) is assembled across chunk

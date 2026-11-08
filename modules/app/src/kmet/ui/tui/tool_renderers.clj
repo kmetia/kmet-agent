@@ -922,7 +922,7 @@
    strip the trailing [...] block)."
   [content theme width expanded? ended-at truncation]
   (let [full-output-path (:full-output-path truncation)
-        output (let [trimmed (str/trim (or content ""))]
+        output (let [trimmed (str/trim (sanitize-display-text (or content "")))]
                  (if (and truncation
                           (some? ended-at)
                           (str/ends-with? trimmed "]"))
@@ -1239,7 +1239,7 @@
    full. (Pi's fallback slices logical lines, so this deliberately diverges
    on the cap.)"
   [content _is-error theme width expanded? & _]
-  (let [lines (-> (or content "") str/split-lines trim-trailing-empty-lines)
+  (let [lines (-> (or content "") sanitize-display-text str/split-lines trim-trailing-empty-lines)
         total (count lines)
         {:keys [visual-lines consumed]}
         (if expanded?
