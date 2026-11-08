@@ -116,7 +116,8 @@
       (t/is (str/includes? content "user/report  defn ([x])  (cwd)"))
       (t/is (str/includes? content
                            (str "file: " (eval-files/display-path (:cwd env) path))))
-      (t/is (str/includes? content "doc: Render a report."))
+      (t/is (not (str/includes? content "doc: Render a report."))
+            "the docstring is not repeated outside the source")
       (t/is (str/includes? content source)))
     (let [[level content] (first (run env "describe user/nope"))]
       (t/is (= :warning level))
@@ -177,7 +178,8 @@
     (t/is (= "Eval" label))
     (t/is (str/includes? content "license/add!  verb ([path])  (source)"))
     (t/is (str/includes? content "file: (no file)"))
-    (t/is (str/includes? content "doc: Add a header."))
+    (t/is (not (str/includes? content "doc: Add a header."))
+          "a source-bearing entry does not repeat the docstring")
     (t/is (str/includes? content "(fn [path] ...)"))))
 
 (t/deftest search-matches-names-and-source

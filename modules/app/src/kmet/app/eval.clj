@@ -646,8 +646,9 @@
          "(eval/library) lists saved definitions. "
          "(eval/sources) lists the registered sources and their verbs; "
          "(eval/describe 'name) describes one definition or source verb "
-         "(kind, docstring, arglists, file, scope, source), and "
-         "(eval/describe 'name key) returns one field."
+         "(kind, arglists, file, scope, source); an entry with a source omits "
+         ":doc. (eval/describe 'name key) returns one field, "
+         "including :doc."
          "\nReporting: (emit value) or end on the final value; stdout and "
          "stderr are discarded."
          "\nUse (eval/library), (eval/sources), (eval/describe 'name), "
@@ -704,11 +705,23 @@
         :else
         (bad-request! (str "no eval definition named " name) {:name name})))))
 
+(defn- describe-view
+  "The default `(eval/describe 'name)` view: nil-valued fields are omitted,
+   and `:doc` is omitted from an entry with a `:source`. The full entry stays
+   reachable through an explicit key."
+  [entry]
+  (let [entry (if (str/blank? (str (:source entry)))
+                entry
+                (dissoc entry :doc))]
+    (reduce-kv (fn [view k v]
+                 (if (nil? v) view (assoc view k v)))
+               {} entry)))
+
 (defn- describe
-  ([env name] (describe-entry env name))
+  ([env name] (describe-view (describe-entry env name)))
   ([env name key]
    (let [entry (describe-entry env name)]
-     (if (nil? key) entry (get entry key)))))
+     (if (nil? key) (describe-view entry) (get entry key)))))
 
 (defn- file-source
   "The stored defining form of ADDRESS in FILE, or nil when the file is gone

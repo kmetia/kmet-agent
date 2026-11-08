@@ -686,8 +686,10 @@ parameter vector of a `defmethod`). `(eval/library)`, `(eval/help)` and
 `/eval list` show them, so an existing file gains its interface when its
 source has one. `(eval/describe 'name)` resolves a library definition, a
 source-provided key, or a live definition that was never written (a failed
-write or an errored call) and returns `{:name :kind :doc :arglists :file
-:scope :source}`; `(eval/describe 'name key)` returns one field. `:source` is
+write or an errored call) and returns `{:name :kind :arglists :file :scope
+:source}` by default: `:doc` is omitted from an entry with a `:source`, and
+nil-valued fields are omitted; `(eval/describe 'name key)` returns one field,
+including `:doc`. `:source` is
 the stored defining form for a written definition (no generated `(ns …)`
 header) or the retained in-memory form for an unwritten one, and a source
 verb's `:source` metadata when the source supplies it. `:file` is nil for

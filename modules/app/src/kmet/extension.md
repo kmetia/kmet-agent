@@ -425,9 +425,11 @@ first call), so the contribution is current, not a snapshot:
   keys a var uses, plus the implementation text, since a source verb has no
   library file). `normalize-source` keeps them, `(eval/sources)` and
   `(eval/help)` list each verb with its doc and arglists, and
-  `(eval/describe 'license/add!)` returns its `:kind`, `:doc`, `:arglists`,
-  `:file` (nil), `:scope` (nil) and `:source`.
-  `(eval/describe 'license/add! :source)` returns the source text. A value
+  `(eval/describe 'license/add!)` returns its `:kind`, `:arglists`, `:source`
+  and, when it has no source, `:doc` (a source-bearing entry omits the
+  docstring; nil `:file` and `:scope` are omitted).
+  `(eval/describe 'license/add! :doc)` and
+  `(eval/describe 'license/add! :source)` return one field each. A value
   without metadata is still valid and lists as `(no docstring)`. `:commands`
   entries add verbs to `/eval`; a command's `:run` receives
   `{:args :session :cwd :service}` and returns nil or a string, which `/eval`

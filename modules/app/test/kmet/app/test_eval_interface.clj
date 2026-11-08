@@ -80,14 +80,15 @@
         described (describe-map env "(eval/describe 'user/report)")]
     (t/is (= {:name "user/report"
               :kind :defn
-              :doc "Render a report."
               :arglists '([x])
               :file path
               :scope :cwd
               :source source}
              described))
+    (t/is (not (contains? described :doc))
+          "the default view omits the docstring when the entry has a source")
     (t/is (= described (describe-map env "(eval/describe 'user/report nil)"))
-          "a nil key returns the full map")
+          "a nil key returns the default view")
     (t/is (= described (describe-map env "(eval/describe 'report)"))
           "an unqualified name resolves in the sticky namespace")
     (t/is (str/includes? (:content (support/eval! env "(eval/describe 'report :doc)"))
@@ -239,6 +240,9 @@
                                          {:doc "Add a header."
                                           :arglists '([path])
                                           :source "(fn [path] ...)"})
+                                 'doc-only (with-meta
+                                             (fn [] :doc-only)
+                                             {:doc "Doc only."})
                                  'bare (fn [] :bare)}}
                   :macros {'license {'twice (with-meta
                                               (fn [_ _ form] (list 'do form form))
@@ -247,11 +251,18 @@
     (let [described (describe-map env "(eval/describe 'license/add!)")]
       (t/is (= "license/add!" (:name described)))
       (t/is (= :verb (:kind described)))
-      (t/is (= "Add a header." (:doc described)))
       (t/is (= '([path]) (:arglists described)))
-      (t/is (nil? (:file described)))
-      (t/is (nil? (:scope described)))
-      (t/is (= "(fn [path] ...)" (:source described))))
+      (t/is (= "(fn [path] ...)" (:source described)))
+      (t/is (not (contains? described :doc)))
+      (t/is (not (contains? described :file)) "a nil file is omitted")
+      (t/is (not (contains? described :scope)) "a nil scope is omitted")
+      (t/is (= "Add a header."
+               (:content (support/eval! env
+                                        "(eval/describe 'license/add! :doc)")))))
+    (let [described (describe-map env "(eval/describe 'license/doc-only)")]
+      (t/is (= "Doc only." (:doc described))
+            "doc is kept when there is no source to carry it")
+      (t/is (not (contains? described :source))))
     (t/is (= "[\"Add a header.\" ([path])]"
              (:content (support/eval! env
                                       "(emit [(-> (meta #'license/add!) :doc) (-> (meta #'license/add!) :arglists)])"))))
