@@ -44,7 +44,7 @@
   [dir]
   (let [now (System/currentTimeMillis)]
     (if-let [[_ ms] (re-matches #"run-(\d+)-[0-9a-f]+" (fs/file-name dir))]
-      (< (- now (Long/parseLong ms)) stale-ms)
+      (> (- now (Long/parseLong ms)) stale-ms)
       false)))
 
 (defn root
