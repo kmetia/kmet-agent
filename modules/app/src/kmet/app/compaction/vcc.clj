@@ -75,12 +75,12 @@
   (str/trim (str/replace (sanitize s) #"\s+" " ")))
 
 (defn- clip
-  "One line, clipped head/tail to MAX characters."
-  [s max]
+  "One line, clipped head/tail to LIMIT characters."
+  [s limit]
   (let [s (one-line s)]
-    (if (<= (count s) max)
+    (if (<= (count s) limit)
       s
-      (let [head (max 1 (- max 20))]
+      (let [head (clojure.core/max 1 (- limit 20))]
         (str (subs s 0 head) " ... " (subs s (- (count s) 15)))))))
 
 (defn- clip-block

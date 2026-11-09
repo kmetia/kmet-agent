@@ -287,3 +287,15 @@
                                          :arguments {:command command}}])
                             (tool-result "c1" "[master abc1234] subject")]))]
     (t/is (not (str/includes? summary "[Commits]")))))
+
+(t/deftest long-tool-values-are-clipped
+  (let [long-path (str "/src/" (apply str (repeat 300 "a")) ".clj")
+        summary (:summary (summarize
+                           [(assistant "read"
+                                       [{:id "r1" :name "read"
+                                         :arguments {:path long-path}}])
+                            (tool-result "r1" "data")
+                            (user "next")]))]
+    (t/is (str/includes? summary "* read \""))
+    (t/is (str/includes? summary " ... ")
+          "a long tool value is clipped instead of calling the limit as a function")))
