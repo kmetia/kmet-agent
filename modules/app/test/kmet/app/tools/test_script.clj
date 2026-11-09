@@ -61,25 +61,29 @@
                           (script/run {:code "1"}))))
 
 (defn- write-cancel-fixture!
-  "Write a parent/child fixture in DIR whose child writes MARKER after about
-   a second while the parent blocks; return the argv that starts the parent.
-   The script name is relative and the caller sets :dir, so a checkout path
-   with spaces never reaches cmd's /c quoting. The child is a descendant, so a
-   leftover marker means the tree survived, not just the direct child."
-  [dir marker]
+  "Write a parent/child fixture in DIR whose child writes MARKER after a few
+   seconds while the parent blocks; the parent writes STARTED once the child
+   is running, so the caller fires its signal against a live tree. Return the
+   argv that starts the parent. The script name is relative and the caller
+   sets :dir, so a checkout path with spaces never reaches cmd's /c quoting.
+   The child is a descendant, so a leftover marker means the tree survived,
+   not just the direct child."
+  [dir marker started]
   (if kprocess/windows-os?
     (let [child (str (fs/path dir "child.cmd"))
           parent (str (fs/path dir "parent.cmd"))]
       (spit child (str "@echo off\r\n"
-                       "ping -n 2 127.0.0.1 >NUL\r\n"
+                       "ping -n 4 127.0.0.1 >NUL\r\n"
                        "echo alive>\"" marker "\"\r\n"))
       (spit parent (str "@echo off\r\n"
                         "start /b \"\" \"" child "\"\r\n"
+                        "echo ready>\"" started "\"\r\n"
                         "ping -n 30 127.0.0.1 >NUL\r\n"))
       ["cmd.exe" "/c" "parent.cmd"])
     (let [script (str (fs/path dir "cancel.sh"))]
       (spit script (str "#!/bin/sh\n"
-                        "(sleep 1; echo alive > " (pr-str marker) ") &\n"
+                        "(sleep 3; echo alive > " (pr-str marker) ") &\n"
+                        "echo ready > " (pr-str started) "\n"
                         "sleep 30\n"))
       ["sh" "cancel.sh"])))
 
@@ -99,25 +103,36 @@
 
 (defn- run-cancelled-process
   "Run WRAP's code with the fixture's argv — a parent that blocks while a
-   child writes a marker after a short sleep — firing the call's signal after
-   100ms. Returns {:returned? bool :marker-exists? bool}, the marker checked
-   after the write would have landed."
+   child writes a marker after a few seconds. Wait for the fixture's child to
+   be running, then fire the call's signal; a signal before the spawn would
+   race the kill against a fork it never saw. Returns {:started? bool
+   :returned? bool :marker-exists? bool}, the marker checked after the write
+   would have landed."
   [wrap]
   (let [dir (test-tmp/temp-dir! "script-cancel-")
         marker (str (fs/path dir "marker"))
-        argv (write-cancel-fixture! dir marker)
+        started (str (fs/path dir "started"))
+        argv (write-cancel-fixture! dir marker started)
         s (kept-context)
         signal (atom false)
         fut (future (script/run (assoc (run-opts {} (wrap argv dir))
                                        :timeout 10
                                        :signal signal
                                        :sci-ctx (:ctx s)
-                                       :interrupt (:holder s))))]
-    (Thread/sleep 100)
-    (reset! signal true)
-    (let [returned? (not= ::timeout (deref fut 5000 ::timeout))]
-      (Thread/sleep 2000)
-      {:returned? returned? :marker-exists? (fs/exists? marker)})))
+                                       :interrupt (:holder s))))
+        deadline (+ (concurrent/monotonic-ms) 10000)]
+    (loop []
+      (when (and (not (fs/exists? started))
+                 (< (concurrent/monotonic-ms) deadline))
+        (Thread/sleep 10)
+        (recur)))
+    (let [started? (fs/exists? started)]
+      (reset! signal true)
+      (let [returned? (not= ::timeout (deref fut 5000 ::timeout))]
+        (Thread/sleep 4000)
+        {:started? started?
+         :returned? returned?
+         :marker-exists? (fs/exists? marker)}))))
 
 (t/deftest ^:slow test-a-timeout-leaves-the-next-call-clean
   (let [s (kept-context)
@@ -159,21 +174,23 @@
     (t/is (= :timeout (#'script/await-script (promise) (atom false) 1)))))
 
 (t/deftest ^:slow test-cancellation-kills-a-bare-sh-process
-  (let [{:keys [returned? marker-exists?]}
+  (let [{:keys [started? returned? marker-exists?]}
         (run-cancelled-process
          (fn [argv dir]
            (str "(core/sh " (str/join " " (map pr-str argv))
                 " :dir " (pr-str dir) ")")))]
+    (t/is started? "the fixture's parent and child were running")
     (t/is returned? "the call returns on Escape")
     (t/is (not marker-exists?)
           "the spawned shell was killed, not left writing after the call")))
 
 (t/deftest ^:slow test-cancellation-kills-a-bare-shell-process
-  (let [{:keys [returned? marker-exists?]}
+  (let [{:keys [started? returned? marker-exists?]}
         (run-cancelled-process
          (fn [argv dir]
            (str "(p/shell {:out :string :err :string :dir " (pr-str dir)
                 "} " (pr-str argv) ")")))]
+    (t/is started? "the fixture's parent and child were running")
     (t/is returned? "the call returns on Escape")
     (t/is (not marker-exists?)
           "the spawned shell was killed, not left writing after the call")))
@@ -195,10 +212,11 @@
     (t/is (= "3" (:content (run continue-code))))))
 
 (t/deftest ^:slow test-cancellation-kills-a-background-process
-  (let [{:keys [marker-exists?]}
+  (let [{:keys [started? marker-exists?]}
         (run-cancelled-process
          (fn [argv dir]
            (str "(p/process " (pr-str argv) " {:dir " (pr-str dir) "})")))]
+    (t/is started? "the fixture's parent and child were running")
     (t/is (not marker-exists?)
           "Escape kills a process spawned by an already-finished script")))
 

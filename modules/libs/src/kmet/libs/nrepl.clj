@@ -245,7 +245,7 @@
   "A unique-for-this-process nREPL message id. Not random-uuid: SCI's
    clojure.core has no random-uuid."
   []
-  (str (System/currentTimeMillis) "-" (swap! id-counter inc)))
+  (str (concurrent/monotonic-ms) "-" (swap! id-counter inc)))
 
 (defn parse-long*
   "parse-long for both hosts: SCI's clojure.core has no parse-long. Returns

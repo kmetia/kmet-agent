@@ -996,17 +996,21 @@
                  :execute (fn [_] {:content tag :is-error false})})
         run (fn [ctx]
               (let [events (atom [])
+                    calls (atom 0)
                     agent (support/make-agent-state :ctx ctx
                                                     :on-event (fn [e] (swap! events conj e)))]
                 (with-redefs [cfg/get-api-key (fn [_] "test-key")
                               llm/send-message
                               (fn [opts]
                                 (future
-                                  (when-let [on-tc (:on-tool-call opts)]
-                                    (on-tc {:id "tc1" :name "probe"
-                                            :arguments "{}" :index 0}))
-                                  (when-let [on-done (:on-done opts)]
-                                    (on-done :tool-calls))
+                                  (if (= 1 (swap! calls inc))
+                                    (do (when-let [on-tc (:on-tool-call opts)]
+                                          (on-tc {:id "tc1" :name "probe"
+                                                  :arguments "{}" :index 0}))
+                                        (when-let [on-done (:on-done opts)]
+                                          (on-done :tool-calls)))
+                                    (when-let [on-done (:on-done opts)]
+                                      (on-done :stop)))
                                   :done))]
                   @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
                 (->> @events

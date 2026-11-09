@@ -64,6 +64,10 @@
    the model asking for CALLS first."
   [agents handle calls]
   (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                ;; the resources selection reads the settings files directly,
+                ;; so a developer's tool selection would otherwise decide this
+                ;; run's declared set
+                cfg/read-resource-settings (fn [] {:global nil :project nil})
                 llm/send-message (stub-model calls)]
     ((:send! agents) handle "go" {:target :next-turn})
     ((:when-idle agents) handle)))

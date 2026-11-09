@@ -105,7 +105,10 @@
    The entry's ambient composition layers are dropped (`patch-paths` empty):
    the run would otherwise mount whatever extension rows the agent dir's or the
    checkout's own `.kmet/patch.edn` names, which is the developer's machine,
-   not the test — and each of those rows is an extension load per boot."
+   not the test — and each of those rows is an extension load per boot. The
+   resources selection is stubbed empty for the same reason: it reads the
+   settings files directly (not through `load-config`), and a developer's tool
+   selection must not decide which tools a test's agent declares."
   [send-message f]
   (let [dir (test-tmp/temp-dir! "mode-run-")
         settings (settings dir)]
@@ -113,6 +116,7 @@
       (with-redefs [cfg/load-config (fn [& _] settings)
                     cfg/get-api-key (fn [_] "test-key")
                     cfg/patch-paths (fn [] [])
+                    cfg/read-resource-settings (fn [] {:global nil :project nil})
                     llm/send-message send-message]
         (f)))))
 
