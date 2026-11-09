@@ -58,11 +58,11 @@
 
 (t/deftest test-the-eval-prompt-puts-one-call-first
   (t/is (str/includes? (:description eval-tool/definition)
-                       "two eval calls never overlap"))
+                       "Calls serialize"))
   (t/is (str/includes? (:prompt-snippet eval-tool/definition)
-                       "One eval call at a time"))
-  (t/is (str/includes? (first (:prompt-guidelines eval-tool/definition))
-                       "Do not issue two eval calls")))
+                       "one call per batch"))
+  (t/is (empty? (:prompt-guidelines eval-tool/definition))
+        "details live in (eval/help), not per-request guidelines"))
 
 (t/deftest test-the-sticky-namespace-is-re-entered
   (let [env (support/eval-ctx)]
@@ -147,6 +147,9 @@
     (t/is (str/includes? text "(eval/help)"))
     (t/is (str/includes? text "serialize"))
     (t/is (str/includes? text "(sandbox/spawn f)"))
+    (t/is (empty? prompt-guidelines)
+          "details live in (eval/help), not per-request guidelines")
+    (t/is (<= (count text) 900) "the per-request prompt stays compact")
     (t/is (not (str/includes? text "codemode"))
           "eval's prompt must stand alone when codemode is not selected")
     (t/is (not (str/includes? text "Jolt")))

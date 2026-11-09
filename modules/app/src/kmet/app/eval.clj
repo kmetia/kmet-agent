@@ -38,12 +38,10 @@
             [kmet.app.extensions.core :as extensions]
             [kmet.app.session.store :as session-store]
             [kmet.app.tools.bash :as bash-tool]
-            [kmet.app.tools.edit :as edit-tool]
             [kmet.app.tools.read :as read-tool]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
             [kmet.app.tools.util :as tool-util]
-            [kmet.app.tools.write :as write-tool]
             [kmet.libs.clj-edit :as clj-edit]
             [kmet.libs.concurrent :as concurrent]
             [kmet.srce.core :as srce]
@@ -336,36 +334,20 @@
     (registry/get-eval-sources handle)
     []))
 
-(defn- read-file-verb
-  "Read PATH as text through the read tool, with its 1-indexed OFFSET and
-   LIMIT. An image read is refused because a source verb cannot attach
-   :images."
-  [path offset limit signal]
-  (let [{:keys [content is-error images]}
-        (read-tool/execute {:path (str path) :offset offset :limit limit} nil signal nil)]
-    (cond
-      (seq images)
-      (throw (ex-info (str "read-file reads text; use (emit-image "
-                           (pr-str (str path)) ") for images")
-                      {:type :eval/read-file-image :path (str path)}))
-      is-error
-      (throw (ex-info (str content) {:type :eval/read-file-error :path (str path)}))
-      :else content)))
-
 (defn- source-verbs
   "The per-call verb table a `sources-fn` receives. The functions are the
    shared file operations; cwd resolution comes from the dynamic bindings
    around the eval thread (and around the source call itself)."
   [signal]
   {:edit (fn [path old-text new-text]
-           (edit-tool/edit-file path [{:old-text (str old-text) :new-text (str new-text)}]
-                                signal))
+           (script/edit-result path old-text new-text signal))
    :write-file (fn [path content]
-                 (write-tool/write-file path (str content) signal))
+                 (script/write-result path content signal))
    :read-file (fn
-                ([path] (read-file-verb path nil nil signal))
-                ([path offset] (read-file-verb path offset nil signal))
-                ([path offset limit] (read-file-verb path offset limit signal)))})
+                ([path] (script/read-text path nil signal))
+                ([path offset] (script/read-text path {:offset offset} signal))
+                ([path offset limit]
+                 (script/read-text path {:offset offset :limit limit} signal)))})
 
 (defn- call-source
   [service source cwd signal]
@@ -606,59 +588,31 @@
        (sort-by :name)
        vec))
 
-(defn- environment-help
-  "The `(eval/help)` text: sources and their verbs, the loaded library with
-   each definition's interface, the session-only live definitions, the common
-   script surface, and the persistence/reporting rules."
-  [env]
-  (let [sources @(:source-info env)
-        entries (library-entries env)
-        session-only (session-only-entries env)]
-    (str "Eval sources:\n"
-         (if (seq sources)
-           (str/join "\n" (map #(eval-format/source-line % :keyword) sources))
-           "  (none)")
-         "\nLibrary definitions: " (count entries)
-         (when (seq entries)
-           (str "\n" (str/join "\n" (map definition-line entries))))
-         "\nSession-only definitions (live, not saved): " (count session-only)
-         (when (seq session-only)
-           (str "\n" (str/join "\n" (map definition-line session-only))))
-         "\nScope: cwd " (get-in env [:roots :cwd])
-         " (shadows the global layer)"
-         "\n       global " (get-in env [:roots :global])
-         "\nNew definitions write to cwd; pass :scope :global for a new global "
-         "name. A redefinition keeps the active layer."
-         "\nFailures: " (count @(:failures env))
-         "\nSandbox: Clojure/SCI — " script/sandbox-summary
-         "\nPersistence: eval creates verbs. A top-level definition with a "
-         "non-blank docstring is written to the library and loads in later sessions; a "
-         "new definition without one stays live for this session only and is "
-         "not saved. Add a docstring and re-evaluate to keep it; a defmethod is "
-         "saved with its loaded multimethod. A saved "
-         "definition redefined without a docstring is not written; the saved "
-         "file is unchanged. A call that "
-         "ends in a normal error writes nothing; its definitions stay live and "
-         "can be forgotten. Drop/forget resolve unqualified names in the "
-         "namespace the call ends in; a file that also defines other addresses "
-         "must be dropped with all of them. The prompt previews the saved or "
-         "loaded definitions; the first eval reports any loaded definitions "
-         "and files that failed."
-         "\nDiscover: (all-ns) lists namespaces, (ns-publics 'ns) lists a "
-         "namespace's vars (including session-only definitions), and "
-         "(eval/library) lists saved definitions. "
-         "(eval/sources) lists the registered sources and their verbs; "
-         "(eval/describe 'name) describes one definition or source verb "
-         "(kind, arglists, file, scope, source); an entry with a source omits "
-         ":doc. (eval/describe 'name key) returns one field, "
-         "including :doc."
-         "\nReporting: (emit value) or end on the final value; stdout and "
-         "stderr are discarded."
-         "\nUse (eval/library), (eval/sources), (eval/describe 'name), "
-         "(eval/forget 'name), (eval/patch 'name old new), "
-         "(eval/edit-form 'name new-source), "
-         "(eval/move 'name :global|:cwd). A patch or edit-form result must keep a "
-         "docstring.")))
+(def ^:private builtin-verb-help
+  {"user/read" {:name "user/read" :kind :verb
+                :doc "Read PATH with the read tool's implementation; OPTS may carry :offset and :limit."
+                :arglists '([path] [path opts])}
+   "user/write" {:name "user/write" :kind :verb
+                 :doc "Write CONTENT to PATH with the write tool's implementation."
+                 :arglists '([path content])}
+   "user/edit" {:name "user/edit" :kind :verb
+                :doc "Replace OLD-TEXT with NEW-TEXT in PATH with the edit tool's implementation."
+                :arglists '([path old-text new-text])}
+   "user/bash" {:name "user/bash" :kind :verb
+                :doc "Run COMMAND with the bash tool's implementation; OPTS may carry the tool's command options."
+                :arglists '([command] [command opts])}
+   "user/sh" {:name "user/sh" :kind :verb
+              :doc "Run COMMAND through the process shell; OPTS may carry :in, :dir, or :out."
+              :arglists '([command] [command opts])}
+   "clj/edit-form" {:name "clj/edit-form" :kind :verb
+                    :doc "Apply a structured whole-form edit (same arguments as the clojure_edit tool)."
+                    :arglists '([args])}
+   "clj/replace-sexp" {:name "clj/replace-sexp" :kind :verb
+                       :doc "Replace one form with another (same arguments as clojure_edit_replace_sexp)."
+                       :arglists '([args])}
+   "clj/paren-repair" {:name "clj/paren-repair" :kind :verb
+                       :doc "Repair unbalanced delimiters (same arguments as clojure_paren_repair)."
+                       :arglists '([args])}})
 
 (defn- describe-entry
   "The interface and implementation of RAW-NAME, resolved against the same
@@ -706,7 +660,9 @@
          :source (:source source-entry)}
 
         :else
-        (bad-request! (str "no eval definition named " name) {:name name})))))
+        (or (get builtin-verb-help name)
+            (bad-request! (str "no eval definition named " name)
+                          {:name name}))))))
 
 (defn- describe-view
   "The default `(eval/describe 'name)` view: nil-valued fields are omitted,
@@ -725,6 +681,99 @@
   ([env name key]
    (let [entry (describe-entry env name)]
      (if (nil? key) (describe-view entry) (get entry key)))))
+
+(defn- builtin-help-line [] "Built-in verbs: user/read, user/write, user/edit, user/bash and user/sh call the tool implementations directly; clj/edit-form, clj/replace-sexp and clj/paren-repair call kmet.libs.clj-edit directly (they do not depend on the tool selection or the clojure extension); tools/call, tools/list, tools/describe use the active tool surface; (emit v), (emit-image x); (sandbox/spawn f).")
+
+(defn- indent-text "TEXT with every line indented four spaces." [text] (str/join "\n" (map (fn [line] (str "    " line)) (str/split-lines (str text)))))
+
+(defn- source-help [env] (let [sources (clojure.core/deref (:source-info env))] (str "Eval sources:\n" (if (seq sources) (str/join "\n" (map (fn [source] (eval-format/source-line source :keyword)) sources)) "  (none)"))))
+
+(defn- library-help
+  [env]
+  (let [entries (library-entries env)
+        session-only (session-only-entries env)]
+    (str "Library definitions: " (count entries)
+         (when (seq entries)
+           (str "\n" (str/join "\n" (map definition-line entries))))
+         "\nSession-only definitions (live, not saved): " (count session-only)
+         (when (seq session-only)
+           (str "\n" (str/join "\n" (map definition-line session-only)))))))
+
+(defn- scope-help [env] (str "Scope: cwd " (get-in env [:roots :cwd]) " (shadows the global layer)" "\n       global " (get-in env [:roots :global]) "\nNew definitions write to cwd; pass :scope :global for a new global " "name. A redefinition keeps the active layer."))
+
+(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate to keep it; a defmethod is " "saved with its loaded multimethod. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. Drop/forget resolve unqualified names in the " "namespace the call ends in; a file that also defines other addresses " "must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed."))
+
+(defn- sandbox-help
+  []
+  (str "Sandbox: Clojure/SCI — " script/sandbox-summary
+       "\n" (builtin-help-line)
+       "\nFor stdin or process options, pass a command vector and an opts map: "
+       "(sh [\"cmd\" \"arg\"] {:in text})."
+       "\nLocal let/fn bindings are scratch; the next call starts in the "
+       "namespace the previous call ended in."
+       "\nEval verbs: (eval/library), (eval/sources), (eval/describe 'name), "
+       "(eval/describe 'name key), (eval/forget 'name), "
+       "(eval/patch 'name old new), (eval/edit-form 'name new-source), "
+       "(eval/move 'name :global|:cwd)."
+       "\nDiscovery: (all-ns) lists namespaces; (ns-publics 'ns) lists a "
+       "namespace's vars, including session-only definitions. A patch or "
+       "edit-form result must keep a docstring."
+       "\nReporting: (emit value) or end on the final value; stdout and "
+       "stderr are discarded."))
+
+(defn- help-entry-text
+  [entry]
+  (let [{:keys [kind doc arglists file scope source] entry-name :name} entry
+        arg (eval-format/arglists-text arglists)
+        scope-label (cond
+                      scope (str "(" (name scope) ")")
+                      (str/blank? (str source)) "(built-in)"
+                      :else "(source)")
+        doc-line (or (eval-format/doc-line doc) "(no docstring)")]
+    (str entry-name " " (when kind (name kind)) (or arg "") " " scope-label
+         "\n  doc: " doc-line
+         (when file (str "\n  file: " file))
+         (when-not (str/blank? (str source))
+           (str "\n  source:\n" (indent-text source))))))
+
+(defn- help-topic-text
+  [env topic]
+  (case topic
+    :library (library-help env)
+    :persistence (persistence-help)
+    :sandbox (sandbox-help)
+    (bad-request! (str "unknown eval help topic " (pr-str topic)
+                       "; use :library, :persistence, :sandbox")
+                  {:topic topic})))
+
+(defn- help-index
+  [env]
+  (let [entries (library-entries env)
+        session-only (session-only-entries env)]
+    (str "Eval help: (eval/help), (eval/help :library), "
+         "(eval/help :persistence), (eval/help :sandbox), "
+         "or (eval/help 'name)."
+         "\n" (source-help env)
+         "\n" (builtin-help-line)
+         "\nLibrary: " (count entries) " saved, "
+         (count session-only) " session-only; (eval/help :library) lists both."
+         "\n" (scope-help env)
+         "\nFailures: " (count @(:failures env))
+         "\n(eval/help 'name) describes one definition or verb.")))
+
+(defn- environment-help
+  "The `(eval/help)` text: an index, a topic, or one definition's interface.
+   Topics: :library, :persistence, :sandbox."
+  ([env] (help-index env))
+  ([env what]
+   (cond
+     (nil? what) (help-index env)
+     (keyword? what) (help-topic-text env what)
+     (or (symbol? what) (string? what))
+     (help-entry-text (describe-entry env what))
+     :else (bad-request! (str "eval help needs a topic or name, got "
+                              (pr-str what))
+                         {:help what}))))
 
 (defn- file-source
   "The stored defining form of ADDRESS in FILE, or nil when the file is gone
@@ -1097,7 +1146,7 @@
         library-fn (fn [] (library-entries @env-ref))
         forget-fn (fn [name] (request-forget! @env-ref name))
         sources-fn (fn [] @(:source-info @env-ref))
-        help-fn (fn [] (environment-help @env-ref))
+        help-fn (fn [& [what]] (environment-help @env-ref what))
         sci-ctx (script/context
                   (assoc (script/base-namespaces)
                          'eval {'library library-fn
@@ -1944,7 +1993,7 @@
 (defn- describe-request
   "The service's `:describe` reader: NAME as `(eval/describe)` resolves it in
    the session's built environment, else the saved disk index, else a mounted
-   source's verb. Never builds an environment."
+   source's verb, else a built-in user verb. Never builds an environment."
   [service {:keys [session cwd name]}]
   (let [session (resolve-session session)
         env (when session (get @(:envs service) (:id session)))
@@ -1963,6 +2012,7 @@
     (or env-entry
         (describe-indexed service session cwd raw-name)
         (describe-source service cwd raw-name)
+        (get builtin-verb-help (str raw-name))
         (bad-request! (str "no eval definition named " raw-name)
                       {:name raw-name}))))
 

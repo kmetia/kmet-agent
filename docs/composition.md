@@ -370,7 +370,7 @@ Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) na
 
 **Description:**
 
-Evaluate Clojure in this session's persistent SCI sandbox: the babashka script surface (fs, sh, slurp, spit, require, tools) The session is single-threaded: two eval calls never overlap — the second waits for the first. Put independent work in ONE call and fan out with (sandbox/spawn f), pmap, or tools/call promises; a call that defines a verb or changes eval state serializes its batch. Eval creates verbs: a documented top-level definition persists in the eval library; without a docstring it is live-only. Local let/fn bindings are scratch. A successful call's namespace is re-entered; output is (emit value) or the final value, while stdout and stderr are discarded. (eval/help) lists sources, the library, and the full verb surface; this is the sandbox, not the project's nREPL.
+Evaluate Clojure in this session's persistent SCI sandbox (babashka surface: fs, sh, slurp, spit, require, tools). Calls serialize: put independent work in one call and fan out with (sandbox/spawn f), pmap, or tools/call promises. Eval creates verbs: a documented top-level definition with a docstring is saved to the eval library; an undocumented one is live-only. Local let/fn bindings are scratch. Report with (emit value) or the final value; stdout and stderr are discarded. (eval/help) lists the surface.
 
 ---
 

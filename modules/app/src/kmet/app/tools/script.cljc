@@ -23,9 +23,12 @@
             [kmet.app.sandbox :as sandbox]
             [kmet.app.tools.bash-output :as bash-out]
             [kmet.app.tools.bash :as bash-tool]
+            [kmet.app.tools.edit :as edit-tool]
             [kmet.app.tools.invoke :as invoke]
             [kmet.app.tools.read :as read-tool]
             [kmet.app.tools.util :as tool-util]
+            [kmet.app.tools.write :as write-tool]
+            [kmet.libs.clj-edit :as clj-edit]
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.host :as host]
             [kmet.libs.process :as kprocess]
@@ -866,15 +869,71 @@
   (require-host-namespaces!)
   (full-babashka-namespaces))
 
-(declare tools-namespace)
+(defn- verb-failed!
+  [verb result]
+  (throw (ex-info (str (:content result))
+                  {:type :script/verb-failed :verb verb :result result})))
 
-(declare tool-content!)
+(defn read-text
+  "Read PATH through the read tool's implementation; OPTS may carry :offset
+   and :limit. Throws on a read error; use emit-image for images."
+  [path opts signal]
+  (let [{:keys [content is-error images]}
+        (read-tool/execute (merge {:path (str path)} opts) nil signal nil)]
+    (cond
+      (seq images)
+      (throw (ex-info (str "read reads text; use (emit-image "
+                           (pr-str (str path)) ") for images")
+                      {:type :script/read-image :path (str path)}))
+      is-error
+      (throw (ex-info (str content) {:type :script/read-error :path (str path)}))
+      :else content)))
+
+(defn write-result
+  "Write CONTENT to PATH through the write tool's implementation; returns its
+   result map."
+  [path content signal]
+  (write-tool/write-file path (str content) signal))
+
+(defn edit-result
+  "Replace OLD-TEXT with NEW-TEXT in PATH through the edit tool's
+   implementation; returns its result map."
+  [path old-text new-text signal]
+  (edit-tool/edit-file path [{:old-text (str old-text)
+                              :new-text (str new-text)}] signal))
+
+(defn write-text
+  "Write CONTENT to PATH and return the result content, throwing on error."
+  [path content signal]
+  (let [result (write-result path content signal)]
+    (if (:is-error result) (verb-failed! "write" result) (:content result))))
+
+(defn edit-text
+  "Replace OLD-TEXT with NEW-TEXT in PATH and return the result content,
+   throwing on error."
+  [path old-text new-text signal]
+  (let [result (edit-result path old-text new-text signal)]
+    (if (:is-error result) (verb-failed! "edit" result) (:content result))))
+
+(defn bash-text
+  "Run COMMAND through the bash tool's implementation; OPTS may carry
+   :timeout. Throws on error."
+  [command opts signal]
+  (binding [bash-tool/*cancel-signal* signal]
+    (let [result (bash-tool/run-bash (merge {:command (str command)} opts) nil {})]
+      (if (:is-error result) (verb-failed! "bash" result) (:content result)))))
+
+(declare tools-namespace)
 
 (defn call-namespaces
   "The per-call half of the sandbox namespaces: SCI core patches
    (slurp/spit/file-seq/pmap), the cwd/pid-tracking process wrappers,
    the `tools` namespace (discovery, dispatch, the result readers and one var
-   per active tool), the cwd/emit/spawn helpers, and the bare `emit`/`sh`.
+   per active tool), the cwd/emit/spawn helpers, the bare `emit`/`sh`, the
+   direct `user/read`, `user/write`, `user/edit` and `user/bash` verbs (they
+   call the tool implementations, not the tool bridge), and the direct
+   `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` verbs (they call
+   `kmet.libs.clj-edit` directly).
    The functions read `*call-state*` at call time, so a kept context's
    definitions follow the current call; `seed!` layers them over
    `base-namespaces` for the call. `:source-namespaces` — the eval source
@@ -889,19 +948,26 @@
                             'babashka.process process
                             'sandbox sandbox
                             'tools (tools-namespace (or surface {}))
+                            'clj {'edit-form (fn [args]
+                                               (clj-edit/edit-form
+                                                (assoc args :cwd (call-cwd))))
+                                  'replace-sexp (fn [args]
+                                                  (clj-edit/replace-sexp
+                                                   (assoc args :cwd (call-cwd))))
+                                  'paren-repair (fn [args]
+                                                  (clj-edit/paren-repair
+                                                   (assoc args :cwd (call-cwd))))}
                             'user {'emit emit-with-state
                                    'emit-image emit-image-with-state
                                    'read (fn [path & [opts]]
-                                           (tool-content! "read" (merge {:path path} opts)))
+                                           (read-text path opts (:cancelled *call-state*)))
                                    'write (fn [path content]
-                                            (tool-content! "write" {:path path :content content}))
+                                            (write-text path content (:cancelled *call-state*)))
                                    'edit (fn [path old-text new-text]
-                                           (tool-content! "edit"
-                                                          {:path path
-                                                           :edits [{:oldText old-text
-                                                                    :newText new-text}]}))
+                                           (edit-text path old-text new-text
+                                                      (:cancelled *call-state*)))
                                    'bash (fn [command & [opts]]
-                                           (tool-content! "bash" (merge {:command command} opts)))}}
+                                           (bash-text command opts (:cancelled *call-state*)))}}
                      ;; the cwd-defaulting sh is preloaded bare alongside the aliases
                      (contains? process 'sh) (assoc-in ['user 'sh] (get process 'sh)))]
     (reduce-kv (fn [acc ns-name ns-map]
@@ -1090,20 +1156,6 @@
       (deliver p {:is-error true
                   :content "tools are not available outside a script call"})
       p)))
-
-(defn- tool-content!
-  "Settle a tool call and return its :content. Throws the tool's own message on
-   failure, so a bare (read ...)/(write ...)/(edit ...)/(bash ...) stops the
-   script instead of silently continuing."
-  [name args]
-  (let [result @(dispatch-current! name args)]
-    (if (:is-error result)
-      (throw (ex-info (str name ": " (:content result))
-                      {:type (tool-error-type (or (:tool *call-state*) "codemode")
-                                              "tool-call-failed")
-                       :tool name
-                       :result result}))
-      (:content result))))
 
 (defn- tools-namespace
   "The `tools` namespace a script sees: discovery, the dispatch fns and the

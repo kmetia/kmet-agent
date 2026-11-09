@@ -416,9 +416,8 @@ first call), so the contribution is current, not a snapshot:
 
 - The fn receives the call's `:cwd`, `:project-dir`, `:agent-dir`, the cancel
   `:signal`, and `:verbs` — keyword-keyed (`{:read-file f :edit g
-  :write-file h}`) values of the same file operations the environment
-  exposes as `user/read-file`, `user/edit` and `user/write-file`, built for
-  that call.
+  :write-file h}`) values of the same file operations the sandbox exposes as
+  `user/read` (with opts), `user/edit` and `user/write`, built for that call.
 - `:ns` and `:macros` contribute values to the environment. `:macros` entries
   are host macro fns (they receive SCI's form and environment before their
   arguments). A value may carry `:doc`, `:arglists` and `:source` metadata (the
@@ -438,15 +437,19 @@ first call), so the contribution is current, not a snapshot:
   capturing one past the call that produced it is unsupported.
 - The source fn runs synchronously on the eval build/call thread and has no
   timeout. Keep it fast; a slow source delays every eval call.
-- `user` and `clj` are reserved for the built-in sources, as are the eval
-  layer's own namespaces (`eval`, `clojure.core`, `clojure`, `sandbox`,
-  `tools`, `babashka.process`, `kmet.libs.http`, `kmet.libs.json`,
-  `kmet.libs.markdown`, `kmet.libs.yaml`). The `:core` source ships
-  `user/read-file` (backed by the read tool), `clj/edit-form`,
-  `clj/replace-sexp` and `clj/paren-repair` from `kmet.libs.clj-edit`; an
-  extension source cannot replace them. Namespace what you contribute
-  (`license/add!`); a source that contributes a reserved namespace, a built-in
-  key, or a built-in `/eval` verb is refused as a whole.
+- `user` and `clj` are reserved for the sandbox's built-in helpers, as are
+  the eval layer's own namespaces (`eval`, `clojure.core`, `clojure`,
+  `sandbox`, `tools`, `babashka.process`, `kmet.libs.http`, `kmet.libs.json`,
+  `kmet.libs.markdown`, `kmet.libs.yaml`). The sandbox provides `user/read`,
+  `user/write`, `user/edit`, `user/bash` and `user/sh`; the file verbs call the
+  tool implementations directly, so they do not depend on the tool selection.
+  The `clj` namespace provides `edit-form`, `replace-sexp` and `paren-repair`
+  from `kmet.libs.clj-edit`; they also call the engine directly and do not
+  require the clojure extension. The `tools` bridge reaches every active tool
+  (`tools/clojure_edit`, `tools/call`, ...) and honours the tool chain; an
+  extension source cannot replace either surface. Namespace what you
+  contribute (`license/add!`); a source that contributes a reserved
+  namespace, a built-in key, or a built-in `/eval` verb is refused as a whole.
 - A source-provided key is never written to the eval library. A model can
   redefine it live (the call line says `source; not stored`); `:drop` and
   `(eval/forget …)` restore the source value while the source is mounted and
@@ -458,7 +461,8 @@ first call), so the contribution is current, not a snapshot:
   cached prefix). If the model should know about the capability unprompted,
   register a skill instead. Discovery is `(eval/sources)` for the source and
   verb listing, `(eval/describe 'name)` for one verb's interface and
-  implementation, and `(eval/help)` for both plus the library.
+  implementation, `(eval/help)` for the index, and `(eval/help :library)` for
+  the library.
 
 ### Tool execute contract
 

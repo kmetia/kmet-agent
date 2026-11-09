@@ -38,6 +38,14 @@
     (t/is (str/includes? (:content (support/eval! env "(eval/library)"))
                          "user/report"))))
 
+(t/deftest test-a-library-definition-can-use-the-built-in-user-verbs (let [env (support/eval-ctx) path (library-file env "user" "uses-read.clj")] (fs/create-dirs (fs/parent path)) (spit path "(ns user)\n(defn uses-read \"Read with the built-in.\" [path] (user/read path))\n") (spit (str (fs/path (:cwd env) "marker.txt")) "MARKER") (let [result (support/eval! env "(uses-read \"marker.txt\")")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "MARKER")) (t/is (some (fn [entry] (= "user/uses-read" (:name entry))) (support/eval-library env)) "the library definition loaded"))))
+
+(t/deftest test-user-file-verbs-do-not-depend-on-the-tool-surface (let [env (support/eval-ctx) marker (str (fs/path (:cwd env) "marker.txt"))] (spit marker "MARKER") (binding [script/*enabled-tools-fn* (constantly #{})] (t/is (= "MARKER" (:content (support/eval! env "(user/read \"marker.txt\")")))) (support/eval! env "(user/write \"out.txt\" \"alpha\")") (support/eval! env "(user/edit \"out.txt\" \"alpha\" \"beta\")") (t/is (= "beta" (slurp (str (fs/path (:cwd env) "out.txt"))))))))
+
+(t/deftest test-user-bash-does-not-depend-on-the-tool-surface (let [env (support/eval-ctx)] (binding [script/*enabled-tools-fn* (constantly #{})] (let [result (support/eval! env "(user/bash \"printf hi\")")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "hi"))))))
+
+(t/deftest test-clj-structure-verbs-do-not-depend-on-the-tool-surface (let [env (support/eval-ctx) path (str (fs/path (:cwd env) "edit-me.clj"))] (spit path "(ns edit-me)\n\n(defn f [] 1)\n") (binding [script/*enabled-tools-fn* (constantly #{})] (let [result (support/eval! env (str "(:content (clj/edit-form {:file_path \"edit-me.clj\" " ":form_type \"defn\" :form_identifier \"f\" " ":operation \"replace\" " ":content \"(defn f [] 2)\"}))"))] (t/is (= "Edit applied." (:content result))) (t/is (str/includes? (slurp path) "(defn f [] 2)"))) (let [result (support/eval! env (str "(:content (clj/replace-sexp {:file_path \"edit-me.clj\" " ":match_form \"(defn f [] 2)\" " ":new_form \"(defn f [] 3)\" " ":operation \"replace\"}))"))] (t/is (= "Edit applied." (:content result))) (t/is (str/includes? (slurp path) "(defn f [] 3)"))) (spit path "(defn f []\n") (let [result (support/eval! env "(:content (clj/paren-repair {:file_path \"edit-me.clj\" :format false}))")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "Fixed"))))))
+
 (t/deftest test-a-redefinition-overwrites-its-file
   (let [env (support/eval-ctx)
         path (library-file env "user" "f.clj")

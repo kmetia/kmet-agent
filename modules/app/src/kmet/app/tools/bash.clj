@@ -84,7 +84,7 @@
   ;; Pi: bashToolSystemPromptContribution.guidelines (PI_* → KMET_*)
   "You can inspect KMET_* environment variables for current model and session details.")
 
-(defn- run-bash
+(defn run-bash
   "Execute through the shared executor with the tool's spawn options (pi: the
    BashToolOptions an execute closure closes over)."
   [args on-update {:keys [shell-args temp-file-prefix spawn-hook

@@ -633,10 +633,15 @@ calls, so it can expose current state instead of a snapshot:
 - Values live under the namespace you return; `user`, `clj`, `eval` and the
   sandbox's fixed namespaces (`clojure.core`, `clojure`, `sandbox`, `tools`,
   `babashka.process`, `kmet.libs.http`, `kmet.libs.json`, `kmet.libs.markdown`,
-  `kmet.libs.yaml`) are reserved for the built-in sources.
-  The `:core` source ships `user/read-file` (backed by the read tool),
-  `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` from the shared
-  `kmet.libs.clj-edit` engine; use `license/add!`, not `add!` or `user/add!`.
+  `kmet.libs.yaml`) are reserved for the built-in sandbox helpers. The
+  `user` namespace provides `read`, `write`, `edit`, `bash` and `sh`; the file
+  verbs call the tool implementations directly, so they do not depend on the
+  tool selection. The `clj` namespace provides `edit-form`, `replace-sexp` and
+  `paren-repair` from `kmet.libs.clj-edit`; they also call the engine directly
+  and do not require the clojure extension. The `tools` namespace is the tool
+  bridge: it reaches every active tool (`tools/clojure_edit`, `tools/call`,
+  ...) and honours the tool chain. Use `license/add!`, not `add!` or
+  `user/add!`.
 - `:verbs` carries the call's `:read-file`, `:edit` and `:write-file`
   operations. They read that call's cwd and cancel signal; use them within
   the call, never keep them.

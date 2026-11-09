@@ -1,11 +1,10 @@
 (ns kmet.app.test-eval-sources
-  "Eval sources: per-call values, the core file verbs, source-key ownership,
+  "Eval sources: per-call values, the built-in file verbs, source-key ownership,
    refusal and unload."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
             [kmet.app.test-eval-support :as support]
-            [kmet.app.tools.read :as read-tool]
             [kmet.app.tools.registry :as tools]))
 
 (defn- register!
@@ -47,7 +46,7 @@
                                        'edit! (fn [path old new]
                                                 ((:edit verbs) path old new))}}}))]
     (support/eval! env "(license/write! \"source.txt\" \"alpha\")")
-    (support/eval! env "(user/write-file \"tool.txt\" \"alpha\")")
+    (support/eval! env "(user/write \"tool.txt\" \"alpha\")")
     (t/is (= (slurp (str (:cwd env) "/source.txt"))
              (slurp (str (:cwd env) "/tool.txt"))))
     (support/eval! env "(license/edit! \"source.txt\" \"alpha\" \"beta\")")
@@ -56,28 +55,14 @@
     (t/is (= (slurp (str (:cwd env) "/source.txt"))
              (slurp (str (:cwd env) "/tool.txt"))))))
 
-(t/deftest read-file-shares-the-read-tool
-  (let [env (support/eval-ctx)
-        calls (atom [])]
-    (with-redefs [read-tool/execute
-                  (fn [args _on-update _signal _ctx]
-                    (swap! calls conj args)
-                    {:content "stub"})]
-      (t/is (= "stub" (:content (support/eval! env "(user/read-file \"x\" 2 3)")))))
-    (t/is (= [{:path "x" :offset 2 :limit 3}] @calls))
+(t/deftest user-read-shares-the-read-tool
+  (let [env (support/eval-ctx)]
     (spit (str (fs/path (:cwd env) "lines.txt")) "alpha\nbeta\ngamma")
     (t/is (= "beta\ngamma"
-             (:content (support/eval! env "(user/read-file \"lines.txt\" 2 2)"))))
-    (let [missing (support/eval! env "(user/read-file \"nope.txt\")")]
+             (:content (support/eval! env "(user/read \"lines.txt\" {:offset 2 :limit 2})"))))
+    (let [missing (support/eval! env "(user/read \"nope.txt\")")]
       (t/is (:is-error missing))
-      (t/is (str/includes? (:content missing) "File not found")))
-    (with-redefs [read-tool/execute
-                  (fn [_ _ _ _]
-                    {:content "Read image file [image/png]"
-                     :images [{:data "x" :mime-type "image/png"}]})]
-      (let [image (support/eval! env "(user/read-file \"x.png\")")]
-        (t/is (:is-error image))
-        (t/is (str/includes? (:content image) "read-file reads text"))))))
+      (t/is (str/includes? (:content missing) "File not found")))))
 
 (t/deftest unloading-removes-source-names-and-keeps-model-definitions
   (let [env (support/eval-ctx)
@@ -254,15 +239,16 @@
                (fn [_] {:doc "License helpers"
                         :ns {'license {'add! (fn [] :added)}}}))
     (let [sources (:content (support/eval! env "(eval/sources)"))
-          help (:content (support/eval! env "(eval/help)"))]
+          help (:content (support/eval! env "(eval/help)"))
+          sandbox (:content (support/eval! env "(eval/help :sandbox)"))]
       (t/is (str/includes? sources ":license"))
       (t/is (str/includes? sources "License helpers"))
-      (t/is (str/includes? sources ":core"))
+      (t/is (not (str/includes? sources ":core")))
       (t/is (str/includes? help "Eval sources"))
-      (t/is (str/includes? help "Library definitions"))
-      (t/is (str/includes? help "Sandbox:"))
-      (t/is (str/includes? help "Discover:"))
-      (t/is (str/includes? help "(emit value)")))))
+      (t/is (str/includes? help "Library:"))
+      (t/is (str/includes? help "Built-in verbs:"))
+      (t/is (str/includes? sandbox "Sandbox:"))
+      (t/is (str/includes? sandbox "(emit value)")))))
 
 (t/deftest a-source-can-contribute-an-explicit-macro
   (let [env (support/eval-ctx)]
@@ -285,26 +271,3 @@
     (t/is (= "2" (:content (support/eval! env "counter/value"))))
     (t/is (= 2 @reads))))
 
-(t/deftest core-ships-the-clojure-editing-verbs
-  (let [env (support/eval-ctx)
-        path (str (:cwd env) "/edit-me.clj")]
-    (spit path "(ns edit-me)\n\n(defn f [] 1)\n")
-    (let [result (support/eval! env
-                                (str "(:content (clj/edit-form {:file_path \"edit-me.clj\" "
-                                     ":form_type \"defn\" :form_identifier \"f\" "
-                                     ":operation \"replace\" "
-                                     ":content \"(defn f [] 2)\"}))"))]
-      (t/is (= "Edit applied." (:content result)))
-      (t/is (str/includes? (slurp path) "(defn f [] 2)")))
-    (let [result (support/eval! env
-                                (str "(:content (clj/replace-sexp {:file_path \"edit-me.clj\" "
-                                     ":match_form \"(defn f [] 2)\" "
-                                     ":new_form \"(defn f [] 3)\" "
-                                     ":operation \"replace\"}))"))]
-      (t/is (= "Edit applied." (:content result)))
-      (t/is (str/includes? (slurp path) "(defn f [] 3)")))
-    (spit path "(defn f []\n")
-    (let [result (support/eval! env
-                                "(:content (clj/paren-repair {:file_path \"edit-me.clj\" :format false}))")]
-      (t/is (not (:is-error result)) (:content result))
-      (t/is (str/includes? (:content result) "Fixed")))))

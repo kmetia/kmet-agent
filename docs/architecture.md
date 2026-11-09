@@ -412,9 +412,10 @@ declares its family's entry point directly (`clojure_edit`,
 `:deferred` source, so a default composition declares 6 schemas fewer and
 announces the two sources instead. The clojure extension's edit-family tool records are
 schema/render wrappers over the shared `kmet.libs.clj-edit` engine; the same
-engine backs eval's core `clj/edit-form`, `clj/replace-sexp` and
-`clj/paren-repair` verbs, so structural editing does not require
-`:ext/clojure`. The
+engine backs the sandbox's direct `clj/edit-form`, `clj/replace-sexp` and
+`clj/paren-repair` verbs and is reachable through the `tools` bridge
+(`tools/clojure_edit`, `tools/clojure_edit_replace_sexp`,
+`tools/clojure_paren_repair`) when the extension is selected. The
 advertised set is a session fact. The selection mutation (`set-active-tools!`)
 records the live selection with `sync-tool-declarations!`;
 the loop reconciles the recorded loadout before every request with
@@ -659,14 +660,15 @@ builtins register `/eval` (`list`, `search`, `describe`, `drop`, `move`,
 independent of the `:tool/eval` row, so removing the row leaves the command
 and its service. An unknown leading
 name that resolves to a definition or source verb is a `describe` shorthand;
-an unresolvable one keeps the unknown-verb hint. The row also
-registers the `:core` eval source (the shared
-`read-file`/`edit`/`write-file` ops under `user`, and `clj/edit-form`,
-`clj/replace-sexp`, `clj/paren-repair` from the shared `kmet.libs.clj-edit`
-engine), so removing it leaves the command
-without those verbs. The clojure extension's tools wrap the same engine; the
-core Clojure verbs do not require the extension. The eval tool's description,
-guidelines and `(eval/help)` name the shared script surface (aliases, the
+an unresolvable one keeps the unknown-verb hint. The sandbox already provides the
+`user/read`, `user/write`, `user/edit`, `user/bash` and `user/sh` helpers and
+the `tools` bridge to every active tool; the row does not mount a separate
+eval source for them. The clojure extension's tools wrap the shared
+`kmet.libs.clj-edit` engine; an eval script can use the direct `clj/edit-form`,
+`clj/replace-sexp` and `clj/paren-repair` verbs without the extension, or
+reach the same engine through `tools/clojure_edit` when the extension is
+selected. The eval tool's
+description and `(eval/help)` name the shared script surface (aliases, the
 `tools` namespace, require-able namespaces and bundled libs) without depending
 on `codemode`, since either row can be selected alone; host-specific sandbox
 differences stay in this section, not in the model-facing text. `list` and

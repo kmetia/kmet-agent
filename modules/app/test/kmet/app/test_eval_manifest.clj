@@ -59,11 +59,11 @@
     (t/is (= 1 (count (re-seq #"Eval creates verbs" text)))
           "the rule is stated once")
     (t/is (str/includes? text "undocumented one stays session-only"))
-    (t/is (str/includes? text "- user/report ([x]) (cwd) — Render x."))
-    (t/is (not (str/includes? text "More detail."))
-          "only the first doc line is previewed")
-    (t/is (str/includes? text "(eval/library) lists them"))
-    (t/is (str/includes? text "(eval/help) lists the source verbs")))
+    (t/is (str/includes? text "- user/report ([x]) (cwd)"))
+    (t/is (not (str/includes? text "Render x."))
+          "docstrings stay behind (eval/describe 'name)")
+    (t/is (str/includes? text "(eval/library) lists all"))
+    (t/is (str/includes? text "(eval/describe 'name) describes one")))
   (let [saved (session/eval-library-listing
                {:loaded? false
                 :entries [{:name "user/a" :scope :global :active true
@@ -72,19 +72,19 @@
     (t/is (str/includes? saved "1 definition saved"))
     (t/is (str/includes? saved "it loads on this session's first eval"))
     (t/is (not (str/includes? saved "loaded in this session")))
-    (t/is (str/includes? saved "- user/a ([]) (global) — Saved."))
+    (t/is (str/includes? saved "- user/a ([]) (global)"))
     (t/is (str/includes?
            (session/eval-library-listing
             {:loaded? true
              :entries [{:name "user/plain" :scope :cwd :active true}]})
-           "- user/plain (cwd) — (no docstring)"))
+           "- user/plain (cwd)"))
     (t/is (str/includes? saved "saved")))
   (t/is (str/includes?
          (session/eval-library-listing
           {:loaded? true
            :entries [{:name "user/shadowed" :scope :global :active false
                       :arglists '([x]) :doc "Old."}]})
-         "- user/shadowed ([x]) (global, shadowed) — Old."))
+         "- user/shadowed ([x]) (global, shadowed)"))
   (let [empty-text (session/eval-library-listing {:loaded? true :entries []})]
     (t/is (str/includes? empty-text "Eval creates verbs"))
     (t/is (str/includes? empty-text "The eval library is empty.")))
@@ -97,7 +97,7 @@
                       (range 400))
         text (session/eval-library-listing {:loaded? true :entries entries})]
     (t/is (<= (count text) 4096))
-    (t/is (str/includes? text "more; (eval/library) lists them"))
+    (t/is (str/includes? text "more; (eval/describe 'name) describes one; (eval/library) lists all"))
     (t/is (not (str/includes? text "user/definition-399")))))
 
 (t/deftest a-saved-library-is-announced-once-and-corrected

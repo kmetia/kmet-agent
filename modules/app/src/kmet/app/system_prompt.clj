@@ -108,7 +108,10 @@
                   "Use bash for file operations like ls, rg, find")))
         (into (map (fn [g] (str/trim (str g)))
                    (filter (fn [g] (seq (str/trim (str g)))) guidelines)))
-        (conj "When a turn needs several tool calls, batch the independent ones into one message — they run in parallel; wait for a call's result only before using it.")
+        (conj (str "When a turn needs several tool calls, batch the independent ones "
+                   "into one message — they run in parallel, except eval calls, "
+                   "which serialize; put eval work in one call. Wait for a call's "
+                   "result only before using it."))
         (conj "Be concise in your responses")
         (conj "Show file paths clearly when working with files")
         distinct)))

@@ -327,9 +327,9 @@
       (t/is (= :info level))
       (t/is (str/includes? content "No eval sources."))
       (t/is (str/includes? content "0 definitions loaded")))
-    (let [with-source (eval-env {:service-sources [{:id :core :doc "Core verbs"}]})
+    (let [with-source (eval-env {:service-sources [{:id :license :doc "License verbs"}]})
           [[_ _ content]] (run with-source "sources")]
-      (t/is (str/includes? content "- core: Core verbs"))
+      (t/is (str/includes? content "- license: License verbs"))
       (t/is (str/includes? content "0 definitions loaded")))
     (let [[_ _ help] (first (run env "help"))]
       (t/is (str/includes? help "/eval list [pattern]"))
@@ -421,11 +421,12 @@
               @got)]
     (t/is (= [[:info "Eval" "linted x"]] (run "license-lint x")))
     (let [[[_ _ content]] (run "sources")]
-      (t/is (str/includes? content "- core"))
       (t/is (str/includes? content "- license: License helpers")))
     (let [[[_ _ content]] (run "help")]
       (t/is (str/includes? content "/eval license-lint"))
       (t/is (str/includes? content "Lint licenses")))))
+
+(t/deftest a-built-in-verb-describes-without-a-source (let [env (support/eval-ctx) got (atom []) engine {:agent-state (atom {:ctx (:ctx env)}), :session (atom (:session env)), :cwd (atom (:cwd env))} run (fn [args] (reset! got []) ((:handler eval-command/command) {:runtime engine, :ui {:info (fn [label content] (swap! got conj [:info label content])), :warning (fn [text] (swap! got conj [:warning text]))}} args) (clojure.core/deref got)) [[level _ content]] (run "describe user/read")] (t/is (= :info level)) (t/is (str/includes? content "(built-in)")) (t/is (not (str/includes? content "source: (not recorded)"))) (t/is (str/includes? content "read tool"))))
 
 (t/deftest runtime-builtins-register-eval
   (builtins/register-runtime-commands! (constantly nil))

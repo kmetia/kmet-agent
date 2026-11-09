@@ -157,22 +157,14 @@
    manifest can be found and compared."
   :eval-library)
 
-(def ^:private max-eval-doc-chars
-  "Characters of one definition's first doc line in the manifest."
-  160)
-
 (defn- eval-listing-line
-  "One manifest line: `- name [arglists] (scope[, shadowed]) — first doc
-   line`, or `(no docstring)` for a legacy undocumented entry."
+  "One manifest line: `- name [arglists] (scope[, shadowed])`. Docstrings
+   stay behind `(eval/describe 'name)`."
   [entry]
   (str "- " (:name entry)
        (eval-format/arglists-text (:arglists entry))
        " (" (name (or (:scope entry) :global))
-       (when (false? (:active entry)) ", shadowed") ")"
-       " — "
-       (if-let [line (eval-format/doc-line (:doc entry))]
-         (truncate line max-eval-doc-chars)
-         "(no docstring)")))
+       (when (false? (:active entry)) ", shadowed") ")"))
 
 (defn- eval-listing-text
   "INTRO plus definition LINES, dropping whole lines from the end until the
@@ -187,7 +179,7 @@
                       "\n"
                       (when (pos? omitted)
                         (str "… " omitted " more; "))
-                      "(eval/library) lists them; (eval/help) lists the source verbs.")]
+                      "(eval/describe 'name) describes one; (eval/library) lists all.")]
         (if (or (<= (count text) max-listing-chars) (zero? kept))
           text
           (recur (dec kept)))))))
@@ -199,8 +191,8 @@
 
 (defn eval-library-listing
   "The `:eval-library` manifest text for MANIFEST (`{:loaded? :entries}`):
-   the save rule, then one line per definition with its arglists, scope and
-   first doc line, or an empty-library correction. LOADED? distinguishes this
+   the save rule, then one line per definition with its arglists and scope,
+   or an empty-library correction. LOADED? distinguishes this
    session's built environment from the files a first eval will load; the text
    says which. Bounded and deterministic, so `sync-eval-library-listing!` can
    compare it with the branch's previous manifest byte for byte."

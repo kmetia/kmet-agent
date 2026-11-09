@@ -86,7 +86,7 @@
                (:file (:global by-scope)))))
     (t/is (= ":cwd"
              (:content (support/eval! env "(eval/describe 'f :scope)"))))
-    (let [help (:content (support/eval! env "(eval/help)"))]
+    (let [help (:content (support/eval! env "(eval/help :library)"))]
       (t/is (str/includes? help "user/f defn ([]) (cwd)"))
       (t/is (str/includes? help "user/f defn ([]) (global, shadowed)")))
     (let [restarted (support/restart-service env)]

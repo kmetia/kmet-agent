@@ -70,21 +70,7 @@
   [text]
   (str/join "\n" (map #(str "    " %) (str/split-lines (str text)))))
 
-(defn- describe-text
-  "The human view of one `(eval/describe)` entry: its interface, file, source,
-   and the docstring only when the entry has no source."
-  [cwd {:keys [name kind doc arglists file scope source]}]
-  (let [arg (eval-format/arglists-text arglists)
-        scope (if (some? scope)
-                (str "(" (clojure.core/name scope) ")")
-                "(source)")
-        has-source? (not (str/blank? (str source)))
-        source (if has-source? source "(not recorded)")
-        doc (when (and doc (not has-source?)) doc)]
-    (str name "  " (kind-name kind) (or arg "") "  " scope
-         "\n  file: " (entry-path cwd file)
-         (when doc (str "\n  doc: " doc))
-         "\n  source:\n" (indented source))))
+(defn- describe-text "The human view of one `(eval/describe)` entry: its interface, file, source,\n   and the docstring only when the entry has no source." [cwd {:keys [name kind doc arglists file scope source]}] (let [arg (eval-format/arglists-text arglists) has-source? (not (str/blank? (str source))) scope-label (cond (some? scope) (str "(" (clojure.core/name scope) ")") has-source? "(source)" :else "(built-in)") doc (when (and doc (not has-source?)) doc)] (str name "  " (kind-name kind) (or arg "") "  " scope-label "\n  file: " (entry-path cwd file) (when doc (str "\n  doc: " doc)) (when has-source? (str "\n  source:\n" (indented source))))))
 
 (defn- describe-outcome
   "Resolve NAME for `/eval`: `{:text ...}` when it is defined, `{:not-found

@@ -1,21 +1,16 @@
 (ns kmet.app.eval.sources
-  "The `:core` eval source and the validation rules for every source.
+  "Validation rules for eval sources.
 
    A source is data plus values, read when an eval environment is built and on
    later calls. Validation happens here so `kmet.app.eval` only wires the
    values into SCI: a bad shape, a reserved namespace or key, or a reserved
    `/eval` verb refuses the whole source, never the eval call."
-  (:require [clojure.string :as str]
-            [kmet.libs.clj-edit :as clj-edit]))
-
-(def core-source-id
-  "The one source allowed to contribute to the `user` namespace."
-  :core)
+  (:require [clojure.string :as str]))
 
 (def reserved-source-namespaces
-  "Namespaces an extension source may not contribute to: the core source's
-   `user` and `clj`, the eval namespace itself, and the fixed namespaces the
-   sandbox installs around it."
+  "Namespaces an extension source may not contribute to: the sandbox's
+   `user` and `clj` helpers, the eval namespace itself, and the fixed
+   namespaces the sandbox installs around it."
   #{"user" "clj" "eval" "clojure" "clojure.core"
     "sandbox" "tools" "babashka.process"
     "kmet.libs.http" "kmet.libs.json"
@@ -25,7 +20,8 @@
   "Built-in keys refused even when a namespace check would allow them. A
    source that contributes one is refused as a whole."
   #{"eval/library" "eval/forget" "eval/sources" "eval/help" "eval/describe"
-    "eval/move" "user/edit" "user/write-file" "user/read-file"
+    "eval/move" "user/read" "user/write" "user/edit" "user/bash"
+    "user/sh" "user/emit" "user/emit-image"
     "clj/edit-form" "clj/replace-sexp" "clj/paren-repair"})
 
 (def ^:private reserved-command-names
@@ -33,61 +29,13 @@
   #{"list" "search" "describe" "drop" "move" "reload" "sources" "help"
     "--help" "-h"})
 
-(defn- described
-  "Attach a verb's model-facing interface to its function value. The keys are
-   the ones a var uses; `:source` is the wrapper's implementation text, since
-   a source verb has no library file."
-  [f doc arglists source]
-  (with-meta f {:doc doc :arglists arglists :source source}))
-
-(defn core-source
-  "The `:core` source's contribution: the shared file verbs under `user` and the
-   Clojure editing verbs under `clj`. CWD is the call's source cwd, so a
-   relative path in a verb resolves like the tool it mirrors."
-  [{:keys [verbs cwd]}]
-  (let [with-cwd #(assoc % :cwd cwd)]
-    {:doc (str "Core file verbs: (read-file path [offset limit]), "
-               "(edit path old new), (write-file path content); "
-               "Clojure editing: (clj/edit-form args), (clj/replace-sexp args), "
-               "(clj/paren-repair args).")
-     :ns {'user {'edit (described
-                        (:edit verbs)
-                        "Replace OLD-TEXT with NEW-TEXT in PATH; returns the shared edit result."
-                        '([path old-text new-text])
-                        "(fn [path old-text new-text] (edit-tool/edit-file path [{:old-text (str old-text) :new-text (str new-text)}] signal))")
-                 'read-file (described
-                             (:read-file verbs)
-                             "Read PATH as text with the read tool's 1-indexed OFFSET and LIMIT; returns the selected text, truncated like the read tool. Throws on a read error; use (emit-image ...) for images."
-                             '([path] [path offset] [path offset limit])
-                             "(fn [path offset limit] (read-tool/execute {:path (str path) :offset offset :limit limit} nil signal nil))")
-                 'write-file (described
-                              (:write-file verbs)
-                              "Write CONTENT to PATH; returns the shared write result."
-                              '([path content])
-                              "(fn [path content] (write-tool/write-file path (str content) signal))")}
-          'clj {'edit-form (described
-                            (fn [args] (clj-edit/edit-form (with-cwd args)))
-                            "Apply a structured whole-form edit (same arguments as the clojure_edit tool)."
-                            '([args])
-                            "(fn [args] (clj-edit/edit-form (assoc args :cwd cwd)))")
-                'replace-sexp (described
-                               (fn [args] (clj-edit/replace-sexp (with-cwd args)))
-                               "Replace one form with another (same arguments as clojure_edit_replace_sexp)."
-                               '([args])
-                               "(fn [args] (clj-edit/replace-sexp (assoc args :cwd cwd)))")
-                'paren-repair (described
-                               (fn [args] (clj-edit/paren-repair (with-cwd args)))
-                               "Repair unbalanced delimiters (same arguments as clojure_paren_repair)."
-                               '([args])
-                               "(fn [args] (clj-edit/paren-repair (assoc args :cwd cwd)))")}}}))
-
 (defn source-key
   "The address of one contributed value — `user/edit`, `license/add!`."
   [namespace name]
   (str namespace "/" name))
 
 (defn reserved-namespace?
-  "Is NAMESPACE reserved for a built-in source?"
+  "Is NAMESPACE reserved for the sandbox?"
   [namespace]
   (contains? reserved-source-namespaces (str namespace)))
 
@@ -95,11 +43,6 @@
   "Is KEY a built-in key an extension source may not contribute?"
   [key]
   (contains? reserved-source-keys key))
-
-(defn core-source?
-  "Is SOURCE-ID the core source?"
-  [source-id]
-  (= core-source-id source-id))
 
 (defn source-doc
   "A source's one-line description, when it is a string."
@@ -177,14 +120,13 @@
 
 (defn- check-reserved!
   [id ns-map macros contributed]
-  (when-not (core-source? id)
-    (when-let [namespace (first (filter reserved-namespace?
-                                        (concat (keys ns-map) (keys macros))))]
-      (bad-source! id (str "eval source " (pr-str id)
-                           " may not contribute to " namespace)))
-    (when-let [key (first (filter reserved-key? contributed))]
-      (bad-source! id (str "eval source " (pr-str id)
-                           " may not contribute the built-in key " key)))))
+  (when-let [namespace (first (filter reserved-namespace?
+                                      (concat (keys ns-map) (keys macros))))]
+    (bad-source! id (str "eval source " (pr-str id)
+                         " may not contribute to " namespace)))
+  (when-let [key (first (filter reserved-key? contributed))]
+    (bad-source! id (str "eval source " (pr-str id)
+                         " may not contribute the built-in key " key))))
 
 (defn- check-meta!
   "Refuse an optional value-metadata field that is present but invalid."

@@ -1,6 +1,6 @@
 ---
 name: clojure-edit
-description: Choose the right Clojure editing surface — clojure_edit, clojure_edit_replace_sexp, clojure_paren_repair, clojure_eval, the generic edit tool, or the eval clj/* verbs. Use when editing Clojure files to keep edits structure-aware and avoid paren errors.
+description: Choose the right Clojure editing surface — clojure_edit, clojure_edit_replace_sexp, clojure_paren_repair, clojure_eval, the generic edit tool, or the eval tools bridge. Use when editing Clojure files to keep edits structure-aware and avoid paren errors.
 ---
 
 # Editing Clojure Files
@@ -10,7 +10,7 @@ description: Choose the right Clojure editing surface — clojure_edit, clojure_
 The form-editing tools (`clojure_edit`, `clojure_edit_replace_sexp`) match
 forms or expressions rather than exact text, validate delimiters, and refuse
 duplicate top-level definitions. The generic `edit` tool is better for small
-text changes and several disjoint hunks in one call; the eval `clj/*` verbs are
+text changes and several disjoint hunks in one call; the eval `tools` bridge is
 better when the edit belongs in a script.
 
 | Change | Surface |
@@ -19,15 +19,15 @@ better when the edit belongs in a script.
 | Change an expression inside a form, or rename a symbol everywhere | `clojure_edit_replace_sexp` |
 | Fix unbalanced delimiters after a broken edit | `clojure_paren_repair` |
 | Small text changes, comments, several disjoint hunks | `edit` |
-| Edit as part of a script or batch | `eval` with `clj/edit-form`, `clj/replace-sexp` or `clj/paren-repair` |
+| Edit as part of a script or batch | `eval` with `clj/edit-form`, `clj/replace-sexp` or `clj/paren-repair` (direct), or `tools/clojure_edit*` when the tool bridge is wanted |
 | Edit a definition already in the eval library | `eval` with `eval/edit-form` or `eval/patch` |
 | Verify a change in a running nREPL | `clojure_eval` |
 
 `clojure_edit_replace_sexp`, `clojure_paren_repair` and `clojure_eval` are
 deferred: load them with `tool_search` when they are not declared. The eval
-verbs are reached through the `eval` tool; the editing tools above do not
+bridge is reached through the `eval` tool; the editing tools above do not
 require it. When both are available, use the tool for a direct edit and the
-verb when the edit belongs in a script — do not apply the same edit twice.
+bridge when the edit belongs in a script — do not apply the same edit twice.
 
 ## clojure_edit
 
@@ -64,11 +64,18 @@ verb when the edit belongs in a script — do not apply the same edit twice.
 - An empty `new_form` with `operation: "replace"` deletes the matched
   expression(s).
 
-## eval verbs
+## eval bridge
 
-- `(clj/edit-form args)`, `(clj/replace-sexp args)` and `(clj/paren-repair args)`
-  take the same argument maps and return the same result shape as the tool
-  calls; relative paths resolve against the eval call's cwd.
+- The eval sandbox ships direct verbs over `kmet.libs.clj-edit`:
+  `(clj/edit-form args)`, `(clj/replace-sexp args)` and
+  `(clj/paren-repair args)`. They take the same argument maps and return the
+  same result shape as the tool calls, resolve relative paths against the eval
+  call's cwd, and do not require this extension.
+- When this extension is selected, the same implementations are also reachable
+  through the sandbox's `tools` namespace: `(tools/clojure_edit args)`,
+  `(tools/clojure_edit_replace_sexp args)` and
+  `(tools/clojure_paren_repair args)`. Those go through the active tool surface
+  and its chain. Load a deferred tool with `tool_search` before calling it.
 - `(eval/edit-form 'name new-source)` replaces a definition already in the eval
   library and re-evaluates it; `(eval/patch 'name old new)` replaces the first
   structurally equal subform. Both write only after a successful re-evaluation.

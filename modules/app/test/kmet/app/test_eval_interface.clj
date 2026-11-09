@@ -155,7 +155,7 @@
     (support/eval! env "(defn documented \"Doc line.\\nMore.\" [x] x)")
     (support/eval! env "(defn undocumented [x] x)")
     (let [library (:content (support/eval! env "(eval/library)"))
-          help (:content (support/eval! env "(eval/help)"))]
+          help (:content (support/eval! env "(eval/help :library)"))]
       (t/is (str/includes? library ":doc \"Doc line.\\nMore.\""))
       (t/is (str/includes? library ":arglists ([x])"))
       (t/is (str/includes? help "user/documented defn ([x]) (cwd) — Doc line."))
@@ -167,9 +167,36 @@
 (t/deftest test-help-omits-the-definition-file
   (let [env (support/eval-ctx)]
     (support/eval! env "(def plain 1)")
-    (let [help (:content (support/eval! env "(eval/help)"))]
+    (let [help (:content (support/eval! env "(eval/help :library)"))]
       (t/is (str/includes? help "user/plain def (cwd) — (no docstring)"))
       (t/is (not (str/includes? help "plain.clj"))))))
+
+(t/deftest test-help-index-topics-and-one-definition
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(defn documented \"Doc.\" [x] x)")
+    (let [index (:content (support/eval! env "(eval/help)"))
+          library (:content (support/eval! env "(eval/help :library)"))
+          sandbox (:content (support/eval! env "(eval/help :sandbox)"))
+          persistence (:content (support/eval! env "(eval/help :persistence)"))
+          one (:content (support/eval! env "(eval/help 'user/documented)"))]
+      (t/is (str/includes? index "Eval help:"))
+      (t/is (str/includes? index "Library: 1 saved, 0 session-only"))
+      (t/is (str/includes? library "user/documented defn ([x]) (cwd) — Doc."))
+      (t/is (str/includes? sandbox "Sandbox:"))
+      (t/is (str/includes? persistence "Persistence:"))
+      (t/is (str/includes? (:content (support/eval! env "(eval/help :sandbox)"))
+                           "eval/forget"))
+      (t/is (str/includes? one "user/documented defn ([x]) (cwd)"))
+      (t/is (str/includes? one "doc: Doc."))
+      (t/is (str/includes? one "source:"))
+      (t/is (str/includes? (:content (support/eval! env "(eval/help 'user/read)"))
+                           "user/read verb ([path] [path opts]) (built-in)"))
+      (t/is (str/includes? (:content (support/eval! env "(eval/describe 'user/read :doc)"))
+                           "read tool"))
+      (t/is (str/includes? (:content (support/eval! env "(eval/help 'clj/edit-form)"))
+                           "clj/edit-form verb ([args]) (built-in)"))
+      (t/is (str/includes? (:content (support/eval! env "(eval/describe 'clj/edit-form :doc)"))
+                           "structured whole-form edit")))))
 
 (t/deftest test-an-unwritten-definition-is-described
   (let [env (support/eval-ctx)
@@ -274,24 +301,13 @@
     (let [help (:content (support/eval! env "(eval/help)"))]
       (t/is (str/includes? help "license/add! ([path]) — Add a header."))
       (t/is (str/includes? help "license/bare — (no docstring)")))
+    (let [help (:content (support/eval! env "(eval/help 'license/add!)"))]
+      (t/is (str/includes? help "license/add! verb ([path]) (source)"))
+      (t/is (str/includes? help "doc: Add a header.")))
     (let [sources (:content (support/eval! env "(eval/sources)"))]
       (t/is (str/includes? sources ":license"))
       (t/is (str/includes? sources "license/add!"))
-      (t/is (str/includes? sources "(no docstring)")))
-    (t/is (= ":verb"
-             (:content (support/eval! env "(emit (eval/describe 'user/edit :kind))"))))
-    (t/is (str/includes? (:content (support/eval! env "(eval/describe 'user/edit :source)"))
-                         "edit-file"))))
-
-(t/deftest test-core-ships-read-file
-  (let [env (support/eval-ctx)]
-    (t/is (= "([path] [path offset] [path offset limit])"
-             (:content (support/eval! env "(emit (eval/describe 'user/read-file :arglists))"))))
-    (t/is (str/includes?
-           (:content (support/eval! env "(eval/describe 'user/read-file :source)"))
-           "read-tool/execute"))
-    (t/is (str/includes? (:content (support/eval! env "(eval/help)"))
-                         "user/read-file ([path] [path offset] [path offset limit])"))))
+      (t/is (str/includes? sources "(no docstring)")))))
 
 (t/deftest test-an-undocumented-definition-stays-live-only
   (let [env (support/eval-ctx)
@@ -304,7 +320,7 @@
     (t/is (not (fs/exists? path)))
     (t/is (= "1" (:content (support/eval! env "(undocumented)")))
           "the definition stays live in the session")
-    (let [help (:content (support/eval! env "(eval/help)"))]
+    (let [help (:content (support/eval! env "(eval/help :library)"))]
       (t/is (str/includes? help "Session-only definitions (live, not saved): 1"))
       (t/is (str/includes? help "user/undocumented defn ([]) (cwd) — (no docstring)")))
     (t/is (= "true"

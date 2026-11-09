@@ -9,10 +9,12 @@ Clojure-aware tools for kmet, ported from [clojure-mcp](https://github.com/bhaum
 
 Structure-aware form editing. Finds Clojure definitions by type and name, then replaces or inserts around them.
 
-The same engine backs eval's core `clj/edit-form`, `clj/replace-sexp` and
-`clj/paren-repair` verbs, so structural editing does not require this
-extension; the tools here are the model-facing schemas and renderers over
-`kmet.libs.clj-edit`.
+The tools here are the model-facing schemas and renderers over
+`kmet.libs.clj-edit`. The same engine backs eval's direct `clj/edit-form`,
+`clj/replace-sexp` and `clj/paren-repair` verbs, which do not require this
+extension; when it is selected, an eval script can also reach it through
+`tools/clojure_edit`, `tools/clojure_edit_replace_sexp` and
+`tools/clojure_paren_repair`.
 
 ```
 clojure_edit:
@@ -171,7 +173,7 @@ stays loadable in `jolt dist` builds.
 ### `clojure-edit`
 
 Editing guidelines pulled on demand when working with Clojure files. Covers:
-- Choosing between the tools, generic `edit`, and the eval `clj/*` verbs
+- Choosing between the tools, generic `edit`, and the eval `tools` bridge
 - "Smaller edits = higher success rate"
 - Parenthesis error handling
 - Creating new files workflow
@@ -186,13 +188,13 @@ Editing guidelines pulled on demand when working with Clojure files. Covers:
 | Rename a symbol everywhere in a file | `clojure_edit_replace_sexp` with `replace_all` |
 | Fix unbalanced delimiters after an errant edit | `clojure_paren_repair` |
 | Small text changes or several disjoint hunks | `edit` |
-| Scripted or batch edits | `eval` with `clj/edit-form`, `clj/replace-sexp` or `clj/paren-repair` |
+| Scripted or batch edits | `eval` with `clj/edit-form`, `clj/replace-sexp` or `clj/paren-repair` (direct), or `tools/clojure_edit*` when the tool bridge is wanted |
 | Verify a change in a running nREPL | `clojure_eval` |
 
 `clojure_edit_replace_sexp`, `clojure_paren_repair` and `clojure_eval` are
 deferred: when they are not declared, load them with `tool_search` first. The
-eval verbs share `kmet.libs.clj-edit` with the tools and are reached through
-the `eval` tool's environment.
+eval bridge shares `kmet.libs.clj-edit` with the tools and is reached
+through the `eval` tool's environment.
 
 ## Dependencies
 
