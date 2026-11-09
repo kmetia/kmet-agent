@@ -172,7 +172,7 @@
                             REASONING_LEVEL) and the matching prompt guideline
                             (default true; false disables both — pi:
                             exposeSessionEnvironment)
-     :command-prefix      — line prepended to every command (pi:
+     :command-prefix      — command prepended to every command (pi:
                             commandPrefix; default: the :shell-command-prefix
                             setting)
      :shell-path          — custom shell binary (pi: shellPath; default: the

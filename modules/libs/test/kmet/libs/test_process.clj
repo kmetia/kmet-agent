@@ -51,13 +51,13 @@
         started (str (fs/path dir "started"))
         spawned (atom nil)]
     (try
-      (let [parent (if process/windows-os?
-                     (write-windows-parent! dir)
-                     (write-unix-parent! dir))
+      (let [_ (if process/windows-os?
+                (write-windows-parent! dir)
+                (write-unix-parent! dir))
             p (proc/process (if process/windows-os?
-                              ["cmd.exe" "/c" (str parent) marker started]
-                              ["sh" (str parent) marker started])
-                            {:out :discard :err :discard})]
+                              ["cmd.exe" "/c" "parent.cmd" marker started]
+                              ["sh" "parent.sh" marker started])
+                            {:dir dir :out :discard :err :discard})]
         (reset! spawned p)
         (let [pid (process/process-pid p)]
           (t/is (some? pid) "the spawned shell exposes its pid")

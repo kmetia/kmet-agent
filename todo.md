@@ -21,8 +21,16 @@ Unix), so the marker proves the descendant tree died, not just the direct
 child. The `taskkill /T` branch of `kmet.libs.process/kill-process-tree!` and
 the watcher's cancel-kill are exercised on Windows by all three, and
 `kmet.app.test-eval` gained the eval counterpart of codemode's timed
-host-blocked Escape test. Verified on Windows with `bb test-ext` and
-`jolt test-ext` for the script, eval, codemode and process namespaces.
+host-blocked Escape test. The same pass unskipped the shell-semantics and
+trailing-`:in` cases and added the bash executor's Windows cases (`cmd /c`,
+NUL stdin, timeout/cancel tree kill, spill, missing cwd, spawn hook/env, an
+explicit shell-args template, the detached-descendant drain and the WSL
+`bash -s` argv); a cmd shell now joins its command prefix with `&`, because
+cmd ignores a second line in a `/c` argument. The cancel fixtures run their
+scripts with `:dir` and a relative name, so a checkout path with spaces no
+longer breaks `cmd /c`. Verified on Windows with `bb test-ext` and
+`jolt test-ext` for the script, bash-executor, eval, codemode and process
+namespaces.
 
 ## Task: eval library interface discovery (10a, 2026-11-05)
 

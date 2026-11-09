@@ -63,8 +63,9 @@
 (defn- write-cancel-fixture!
   "Write a parent/child fixture in DIR whose child writes MARKER after about
    a second while the parent blocks; return the argv that starts the parent.
-   The child is a descendant, so a leftover marker means the tree survived,
-   not just the direct child."
+   The script name is relative and the caller sets :dir, so a checkout path
+   with spaces never reaches cmd's /c quoting. The child is a descendant, so a
+   leftover marker means the tree survived, not just the direct child."
   [dir marker]
   (if kprocess/windows-os?
     (let [child (str (fs/path dir "child.cmd"))
@@ -75,12 +76,26 @@
       (spit parent (str "@echo off\r\n"
                         "start /b \"\" \"" child "\"\r\n"
                         "ping -n 30 127.0.0.1 >NUL\r\n"))
-      ["cmd.exe" "/c" parent])
+      ["cmd.exe" "/c" "parent.cmd"])
     (let [script (str (fs/path dir "cancel.sh"))]
       (spit script (str "#!/bin/sh\n"
                         "(sleep 1; echo alive > " (pr-str marker) ") &\n"
                         "sleep 30\n"))
-      ["sh" script])))
+      ["sh" "cancel.sh"])))
+
+(defn- shell-argv
+  "The host shell's argv that runs COMMAND."
+  [command]
+  (if kprocess/windows-os?
+    ["cmd.exe" "/c" command]
+    ["sh" "-c" command]))
+
+(defn- read-stdin-argv
+  "The host shell's argv that copies one stdin line to stdout."
+  []
+  (if kprocess/windows-os?
+    ["cmd.exe" "/v:on" "/c" "set /p x= & echo !x!"]
+    ["sh" "-c" "read x; echo $x"]))
 
 (defn- run-cancelled-process
   "Run WRAP's code with the fixture's argv — a parent that blocks while a
@@ -93,7 +108,7 @@
         argv (write-cancel-fixture! dir marker)
         s (kept-context)
         signal (atom false)
-        fut (future (script/run (assoc (run-opts {} (wrap argv))
+        fut (future (script/run (assoc (run-opts {} (wrap argv dir))
                                        :timeout 10
                                        :signal signal
                                        :sci-ctx (:ctx s)
@@ -146,8 +161,9 @@
 (t/deftest ^:slow test-cancellation-kills-a-bare-sh-process
   (let [{:keys [returned? marker-exists?]}
         (run-cancelled-process
-         (fn [argv]
-           (str "(core/sh " (str/join " " (map pr-str argv)) ")")))]
+         (fn [argv dir]
+           (str "(core/sh " (str/join " " (map pr-str argv))
+                " :dir " (pr-str dir) ")")))]
     (t/is returned? "the call returns on Escape")
     (t/is (not marker-exists?)
           "the spawned shell was killed, not left writing after the call")))
@@ -155,36 +171,43 @@
 (t/deftest ^:slow test-cancellation-kills-a-bare-shell-process
   (let [{:keys [returned? marker-exists?]}
         (run-cancelled-process
-         (fn [argv]
-           (str "(p/shell {:out :string :err :string} " (pr-str argv) ")")))]
+         (fn [argv dir]
+           (str "(p/shell {:out :string :err :string :dir " (pr-str dir)
+                "} " (pr-str argv) ")")))]
     (t/is returned? "the call returns on Escape")
     (t/is (not marker-exists?)
           "the spawned shell was killed, not left writing after the call")))
 
 (t/deftest ^:slow test-shell-keeps-babashka-process-semantics
-  (when-not kprocess/windows-os?
-    (let [s (kept-context)
-          run #(run-in s {} %)]
-      (t/is (= "hi\n"
-               (:content (run "(core/emit (:out (p/shell {:out :string :err :string} [\"echo\" \"hi\"])))"))))
-      (t/is (= ":exit-3"
-               (:content (run "(core/emit (try (p/shell {:out :string :err :string} [\"sh\" \"-c\" \"exit 3\"]) :ok (catch Exception _ :exit-3)))"))))
-      (t/is (= "3"
-               (:content (run "(core/emit (:exit (p/shell {:out :string :err :string :continue true} [\"sh\" \"-c\" \"exit 3\"])))")))))))
+  (let [s (kept-context)
+        run #(run-in s {} %)
+        echo-argv (shell-argv "echo hi")
+        exit-argv (shell-argv "exit 3")
+        echo-code (str "(core/emit (:out (p/shell {:out :string :err :string} "
+                       (pr-str echo-argv) ")))")
+        exit-code (str "(core/emit (try (p/shell {:out :string :err :string} "
+                       (pr-str exit-argv)
+                       ") :ok (catch Exception _ :exit-3)))")
+        continue-code (str "(core/emit (:exit (p/shell {:out :string :err :string :continue true} "
+                           (pr-str exit-argv) ")))")]
+    (t/is (= "hi" (str/trim (:content (run echo-code)))))
+    (t/is (= ":exit-3" (:content (run exit-code))))
+    (t/is (= "3" (:content (run continue-code))))))
 
 (t/deftest ^:slow test-cancellation-kills-a-background-process
   (let [{:keys [marker-exists?]}
         (run-cancelled-process
-         (fn [argv]
-           (str "(p/process " (pr-str argv) ")")))]
+         (fn [argv dir]
+           (str "(p/process " (pr-str argv) " {:dir " (pr-str dir) "})")))]
     (t/is (not marker-exists?)
           "Escape kills a process spawned by an already-finished script")))
 
 (t/deftest test-bare-sh-accepts-trailing-keyword-options
-  (let [s (kept-context)]
-    (t/is (= "hi\n"
-             (:content (run-in s {}
-                               "(core/emit (:out (core/sh \"sh\" \"-c\" \"read x; echo $x\" :in \"hi\\n\")))"))))))
+  (let [s (kept-context)
+        code (str "(core/emit (:out (core/sh "
+                  (str/join " " (map pr-str (read-stdin-argv)))
+                  " :in \"hi\\n\")))")]
+    (t/is (= "hi" (str/trim (:content (run-in s {} code)))))))
 
 (defn- run-with-dispatch
   "Run CODE with TOOLS dispatched through the bridge, so the bare tool wrappers

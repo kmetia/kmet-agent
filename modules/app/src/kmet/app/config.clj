@@ -49,7 +49,7 @@
    ;; where possible, curl fallback) or :curl (everything through curl)
    :http-transport :platform
    ;; pi: shellPath / shellCommandPrefix — a custom shell binary for bash
-   ;; execution and a line prepended to every bash command (settings.edn)
+   ;; execution and a command prepended to every bash command (settings.edn)
    :shell-path nil
    :shell-command-prefix nil
    :show-cache-miss-notices false

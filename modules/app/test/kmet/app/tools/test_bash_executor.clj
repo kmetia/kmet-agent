@@ -176,6 +176,143 @@
                       :shell-path "/definitely/not/a/shell"))
             "the constructor validates, not the first spawn"))))
 
+(defn- windows-cmd
+  "The absolute cmd.exe path: create-default-ops validates an explicit
+   shell-path as an existing file, so the bare fallback name will not do."
+  []
+  (str (fs/which "cmd.exe")))
+
+;; The executors Windows paths: an explicit cmd /c transport, NUL stdin, the
+;; pipe-close drain and the taskkill tree kill. The cases above drive a POSIX
+;; shell and stay absent here; these cover the fallback shell the runner uses
+;; when no Git Bash is installed.
+(when process/windows-os?
+  (t/deftest ^:slow windows-cmd-runs-a-command
+    (let [r (execute! {:command "echo hello" :shell-path (windows-cmd)})]
+      (t/is (= 0 (:exit-code r)))
+      (t/is (= "hello" (str/trim (:output r))))
+      (t/is (not (:cancelled r)))
+      (t/is (not (:truncated r)))))
+
+  (t/deftest ^:slow windows-cmd-captures-stderr
+    (let [r (execute! {:command "echo out & echo err 1>&2"
+                       :shell-path (windows-cmd)})]
+      (t/is (= 0 (:exit-code r)))
+      (t/is (str/includes? (:output r) "out"))
+      (t/is (str/includes? (:output r) "err"))))
+
+  (t/deftest ^:slow windows-cmd-reports-a-nonzero-exit
+    (let [r (execute! {:command "echo before & exit /b 3"
+                       :shell-path (windows-cmd)})]
+      (t/is (= 3 (:exit-code r)))
+      (t/is (str/includes? (:output r) "before"))))
+
+  (t/deftest ^:slow windows-cmd-truncates-and-spills
+    (let [r (execute! {:command "for /L %i in (1,1,200) do @echo %i"
+                       :shell-path (windows-cmd)
+                       :max-lines 5})]
+      (t/is (:truncated r))
+      (t/is (= 0 (:exit-code r)))
+      (t/is (= 5 (count (str/split-lines (str/trim (:output r))))))
+      (t/is (str/ends-with? (str/trim (:output r)) "200"))
+      (let [path (:full-output-path r)]
+        (t/is (some? path))
+        (t/is (fs/exists? path))
+        (t/is (= 200 (count (str/split-lines (str/trim (slurp path))))))
+        (fs/delete path))))
+
+  (t/deftest ^:slow windows-cmd-times-out-and-kills-the-tree
+    (let [started (System/currentTimeMillis)
+          r (execute! {:command "ping -n 10 127.0.0.1 >NUL"
+                       :shell-path (windows-cmd)
+                       :timeout 0.2})
+          elapsed (- (System/currentTimeMillis) started)]
+      (t/is (true? (:timed-out r)))
+      (t/is (< elapsed 4000)
+            "the wait did not run to the command's own length")))
+
+  (t/deftest ^:slow windows-cmd-cancel-signal-aborts
+    (let [r (execute! {:command "ping -n 10 127.0.0.1 >NUL"
+                       :shell-path (windows-cmd)
+                       :signal (atom true)})]
+      (t/is (true? (:cancelled r)))
+      (t/is (not (:timed-out r)))))
+
+  (t/deftest ^:slow windows-cmd-stdin-is-nul
+    (let [started (System/currentTimeMillis)
+          r (execute! {:command "more" :shell-path (windows-cmd) :timeout 5})
+          elapsed (- (System/currentTimeMillis) started)]
+      (t/is (= 0 (:exit-code r)))
+      (t/is (not (:timed-out r)))
+      (t/is (< elapsed 4000)
+            "stdin hit EOF instead of inheriting the terminal")))
+
+  (t/deftest ^:slow windows-cmd-missing-working-directory-is-an-error
+    (let [r (execute! {:command "echo hi"
+                       :shell-path (windows-cmd)
+                       :cwd "C:\\definitely\\not\\a\\directory\\kmet-test"})]
+      (t/is (str/includes? (str (:output r)) "Working directory does not exist"))
+      (t/is (true? (:failed r)) "flagged, so the tool reports :is-error")
+      (t/is (nil? (:exit-code r)))))
+
+  (t/deftest ^:slow windows-cmd-spawn-hook-and-env-merge-reach-the-command
+    (let [r (execute! {:command "echo %KMET_TEST_ENV%"
+                       :shell-path (windows-cmd)
+                       :env {"KMET_TEST_ENV" "merged"}
+                       :spawn-hook (fn [{:keys [command cwd env]}]
+                                     {:command command :cwd cwd
+                                      :env (assoc env "KMET_TEST_ENV" "hooked")})})]
+      (t/is (= 0 (:exit-code r)))
+      (t/is (= "hooked" (str/trim (:output r))))))
+
+  (t/deftest ^:slow windows-cmd-explicit-shell-args
+    (let [r (execute! {:command "echo hi"
+                       :shell-path (windows-cmd)
+                       :shell-args ["/d" "/s" "/c"]})]
+      (t/is (= 0 (:exit-code r)))
+      (t/is (= "hi" (str/trim (:output r))))))
+
+  (t/deftest ^:slow windows-cmd-command-prefix
+    ;; cmd ignores a second line in a /c argument, so the prefix joins with &
+    (let [r (execute! {:command "if defined KMET_PREFIXED echo yes"
+                       :shell-path (windows-cmd)
+                       :command-prefix "set KMET_PREFIXED=yes"})]
+      (t/is (= 0 (:exit-code r)))
+      (t/is (= "yes" (str/trim (:output r))))))
+
+  (t/deftest ^:slow windows-cmd-drain-does-not-wait-for-a-detached-descendant
+    ;; start /b leaves ping holding the stdout pipe after cmd exits; the
+    ;; bounded drain closes it instead of waiting out the ping.
+    (let [started (System/currentTimeMillis)
+          r (execute! {:command "start /b ping -n 4 127.0.0.1"
+                       :shell-path (windows-cmd)
+                       :timeout 10})
+          elapsed (- (System/currentTimeMillis) started)]
+      (t/is (= 0 (:exit-code r)))
+      (t/is (< elapsed 4000)
+            "the drain closed the pipe held by the detached descendant"))))
+
+(t/deftest windows-shell-transports
+  ;; Pure argv checks for the Windows transports, runnable on every host: the
+  ;; cmd /c form, the WSL `bash -s` stdin form and the explicit shell-args
+  ;; template. No subprocess is spawned.
+  (with-redefs [process/windows-os? true
+                process/setsid-path (delay nil)]
+    (t/is (= ["cmd.exe" "/c" "echo hi"]
+             (#'exec/shell-argv "cmd.exe" nil "echo hi" false))
+          "cmd uses /c")
+    (t/is (true? (#'exec/stdin-transport? "C:\\Windows\\System32\\bash.exe" nil)))
+    (t/is (true? (#'exec/stdin-transport? "C:\\Windows\\WindowsApps\\bash.exe" nil)))
+    (t/is (false? (#'exec/stdin-transport? "sh" nil)))
+    (t/is (= ["C:\\Windows\\System32\\bash.exe" "-s"]
+             (#'exec/shell-argv "C:\\Windows\\System32\\bash.exe" nil "echo hi" true))
+          "a WSL launcher gets the command on stdin")
+    (t/is (= ["sh" "-c" "echo hi"]
+             (#'exec/shell-argv "sh" nil "echo hi" false)))
+    (t/is (= ["custom" "--flag" "the-command"]
+             (#'exec/shell-argv "custom" ["--flag"] "the-command" false))
+          "an explicit template appends the command as the final element")))
+
 (t/deftest settle-grace-is-capped
   ;; Regression: each growth of the tail bought another 100 ms with no total
   ;; cap, so a command that kept writing after its operations completed (a

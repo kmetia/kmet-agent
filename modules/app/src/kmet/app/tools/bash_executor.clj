@@ -564,6 +564,22 @@
    :max-lines max-lines
    :temp-file-prefix temp-file-prefix})
 
+(defn- cmd-shell?
+  "True when SHELL is cmd.exe (bare or a path), the one shell that ignores a
+   second line in a /c argument."
+  [shell]
+  (boolean (re-find #"(?i)(?:^|[\\/])cmd(?:\.exe)?$" (str shell))))
+
+(defn- command-separator
+  "The separator between COMMAND-PREFIX and COMMAND. sh and PowerShell accept
+   a newline (pi: commandPrefix); cmd.exe executes only the first line of a /c
+   argument, so a cmd fallback shell joins with &. A custom operations
+   executor keeps the newline: its command language is its own."
+  [shell-path operations]
+  (if (and (nil? operations) (cmd-shell? (or shell-path (resolve-shell))))
+    " & "
+    "\n"))
+
 (defn execute-bash
   [{:keys [command cwd env on-chunk signal timeout spawn-hook
            operations shell-path shell-args command-prefix temp-file-prefix
@@ -578,7 +594,9 @@
         ;; about which shell they got (docs/architecture.md § Service catalog).
         ;; Resolve command with prefix (pi: commandPrefix)
         resolved-command (if command-prefix
-                           (str command-prefix "\n" command)
+                           (str command-prefix
+                                (command-separator shell-path operations)
+                                command)
                            command)
         ;; Use provided operations or default (pi: BashOperations)
         exec-ops (or operations (create-default-ops :shell-path shell-path

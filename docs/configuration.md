@@ -35,7 +35,7 @@ Example `~/.kmet/agent/settings.edn`:
  :http-total-timeout-ms 0       ; whole-request deadline in ms; 0 disables, nil follows idle
  :steering-mode :all
  :follow-up-mode :one-at-a-time
- :shell-command-prefix nil      ; line prepended to every bash command, e.g. "shopt -s expand_aliases"; nil = none
+ :shell-command-prefix nil      ; command prepended to every bash command, e.g. "shopt -s expand_aliases"; cmd.exe joins it with &; nil = none
  :shell-path nil                ; custom shell binary for bash execution (e.g. Cygwin/Git Bash on Windows); a leading ~ expands
  :system-prompt "You are a helpful assistant."   ; replaces the default system prompt
  :append-system-prompt "Follow the project conventions." ; appended after it}

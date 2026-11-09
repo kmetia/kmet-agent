@@ -203,7 +203,7 @@
                             replaces the built-in tool)
      :label               — display label (default \"Execute command\")
      :description         — provider-facing description (default: pi's)
-     :command-prefix      — line prepended to every command (pi: commandPrefix;
+     :command-prefix      — command prepended to every command (pi: commandPrefix;
                             default: the run's :shell service)
      :shell-path          — custom shell binary (pi: shellPath; default: the
                             run's :shell service)
