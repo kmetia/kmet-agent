@@ -633,7 +633,52 @@
                        :arglists '([args])}
    "clj/paren-repair" {:name "clj/paren-repair" :kind :verb
                        :doc "Repair unbalanced delimiters (same arguments as clojure_paren_repair)."
-                       :arglists '([args])}})
+                       :arglists '([args])}
+   "tools/call" {:name "tools/call" :kind :verb
+                 :doc "Call a tool by name and return its derefable promise."
+                 :arglists '([name] [name args])}
+   "tools/call!" {:name "tools/call!" :kind :verb
+                  :doc "Call a tool, deref the result and throw when it failed."
+                  :arglists '([name] [name args])}
+   "tools/list" {:name "tools/list" :kind :verb
+                 :doc "The active tool surface."
+                 :arglists '([])}
+   "tools/describe" {:name "tools/describe" :kind :verb
+                     :doc "Describe one active tool."
+                     :arglists '([name])}
+   "tools/ok?" {:name "tools/ok?" :kind :verb
+                :doc "True when a tool result is not an error."
+                :arglists '([result])}
+   "tools/text" {:name "tools/text" :kind :verb
+                 :doc "The text content of a tool result."
+                 :arglists '([result])}
+   "tools/error" {:name "tools/error" :kind :verb
+                  :doc "The error text of a failed tool result, or nil."
+                  :arglists '([result])}
+   "eval/library" {:name "eval/library" :kind :verb
+                   :doc "List every loaded library definition with its scope."
+                   :arglists '([])}
+   "eval/sources" {:name "eval/sources" :kind :verb
+                   :doc "List the mounted eval sources and their contributed verbs."
+                   :arglists '([])}
+   "eval/describe" {:name "eval/describe" :kind :verb
+                    :doc "Describe one definition or source verb; KEY selects one field."
+                    :arglists '([name] [name key])}
+   "eval/forget" {:name "eval/forget" :kind :verb
+                  :doc "Forget a saved definition or restore a source value."
+                  :arglists '([name])}
+   "eval/patch" {:name "eval/patch" :kind :verb
+                 :doc "Replace one subform of a saved definition and keep it."
+                 :arglists '([name old new])}
+   "eval/edit-form" {:name "eval/edit-form" :kind :verb
+                     :doc "Replace a saved definition with a whole new top-level form."
+                     :arglists '([name new-source])}
+   "eval/move" {:name "eval/move" :kind :verb
+                :doc "Move a saved definition between the cwd and global scopes."
+                :arglists '([name scope])}
+   "eval/help" {:name "eval/help" :kind :verb
+                :doc "The eval manual: index, topic, or one definition."
+                :arglists '([] [what])}})
 
 (def ^:private system-namespaces
   #{"core" "clj" "tools" "eval" "clojure" "clojure.core"
@@ -727,7 +772,28 @@
    (let [entry (describe-entry env name)]
      (if (nil? key) (describe-view entry) (get entry key)))))
 
-(defn- builtin-help-line [] "Built-in verbs: core/read, core/write, core/edit, core/bash, core/sh, core/emit, core/emit-image, core/cwd, core/env, core/now, core/sleep and core/spawn call shared implementations directly (they do not depend on the tool selection); clj/edit-form, clj/replace-sexp and clj/paren-repair call kmet.libs.clj-edit directly (they do not require the clojure extension); tools/call, tools/list and tools/describe use the active tool surface; eval/* manages the eval library.")
+(defn- builtin-help-line [] "Built-in verbs: core/* runtime, clj/* structure, tools/* active tools, eval/* library. (eval/help) lists each with its summary; (eval/help 'name) shows its contract.")
+
+(defn- verb-family
+  [name]
+  (case (namespace (symbol (str name)))
+    "core" 0
+    "clj" 1
+    "tools" 2
+    "eval" 3
+    4))
+
+(defn- first-sentence
+  [text]
+  (let [s (-> (str text) (str/replace #"\s+" " ") str/trim)
+        i (str/index-of s ". ")]
+    (if i (subs s 0 (inc i)) s)))
+
+(defn- builtin-verb-lines
+  []
+  (map (fn [[name {:keys [doc]}]]
+         (str "  " name " - " (first-sentence (or doc ""))))
+       (sort-by (fn [[name _]] [(verb-family name) name]) builtin-verb-help)))
 
 (defn- indent-text "TEXT with every line indented four spaces." [text] (str/join "\n" (map (fn [line] (str "    " line)) (str/split-lines (str text)))))
 
@@ -746,7 +812,7 @@
 
 (defn- scope-help [env] (str "Scope: cwd " (get-in env [:roots :cwd]) " (shadows the global layer)" "\n       global " (get-in env [:roots :global]) "\nNew definitions write to cwd; pass :scope :global for a new global " "name. A redefinition keeps the active layer."))
 
-(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate to keep it; a defmethod is " "saved with its loaded multimethod. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. Drop/forget resolve unqualified names in the " "namespace the call ends in; a file that also defines other addresses " "must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed."))
+(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate to keep it; a defmethod is " "saved with its loaded multimethod. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. System namespaces (core, clj, tools, eval) are read-only; " "ext.* definitions stay live-only. Drop/forget resolve unqualified names in the " "namespace the call ends in; a file that also defines other addresses " "must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed."))
 
 (defn- core-help
   []
@@ -756,6 +822,8 @@
        "(core/sh [\"cmd\" \"arg\"] {:in text})."
        "\nLocal let/fn bindings are scratch; the next call starts in the "
        "namespace the previous call ended in."
+       "\nOwnership: define in user; core, clj, tools and eval are read-only; "
+       "ext.* is live-only."
        "\nEval verbs: (eval/library), (eval/sources), (eval/describe 'name), "
        "(eval/describe 'name key), (eval/forget 'name), "
        "(eval/patch 'name old new), (eval/edit-form 'name new-source), "
@@ -799,7 +867,8 @@
          "(eval/help :persistence), (eval/help :core), "
          "or (eval/help 'name)."
          "\n" (source-help env)
-         "\n" (builtin-help-line)
+         "\nBuilt-in verbs:\n" (str/join "\n" (builtin-verb-lines))
+         "\nActive tools: (tools/list) lists them; each is also a tools/<name> var."
          "\nLibrary: " (count entries) " saved, "
          (count session-only) " session-only; (eval/help :library) lists both."
          "\n" (scope-help env)

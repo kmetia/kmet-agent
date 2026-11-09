@@ -67,13 +67,15 @@
    :label "Eval"
    :description (str "Evaluate Clojure in this session's persistent SCI sandbox "
                      "(babashka surface: fs, slurp, spit, require, tools). "
+                     "File and shell verbs: core/read, core/write, core/edit, core/bash, core/sh. "
                      "Calls serialize: put independent work in one call and fan out with "
                      "(core/spawn f), pmap, or tools/call promises. Eval creates verbs: "
                      "a documented top-level definition with a docstring is saved to the "
                      "eval library; an undocumented one is live-only. Local let/fn bindings "
-                     "are scratch. Report with (core/emit value) or the final value; stdout "
+                     "are scratch. Define in user; system namespaces are read-only. Report with "
+                     "(core/emit value) or the final value; stdout "
                      "and stderr are discarded. (eval/help) lists the surface.")
-   :prompt-snippet "Persistent Clojure sandbox; one call per batch; (eval/help) for the surface."
+   :prompt-snippet "Persistent Clojure sandbox; one call per batch; core/read, core/write, core/edit, core/bash, core/sh; (eval/help) for the surface."
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"
