@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-04T11:08:57Z"
+ :generated-at "2026-11-09T15:41:34Z"
  :provider {:id :fireworks
             :name "Fireworks AI"
             :env-vars ["FIREWORKS_API_KEY"]
@@ -81,36 +81,6 @@
              :send-session-affinity-headers true
              :supports-cache-control-on-tools false
              :supports-eager-tool-input-streaming false}}
-   "accounts/fireworks/models/gpt-oss-120b"
-   {:id "accounts/fireworks/models/gpt-oss-120b"
-    :name "GPT OSS 120B"
-    :provider :fireworks
-    :api :anthropic-messages
-    :base-url "https://api.fireworks.ai/inference"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0.15 :output 0.6 :cache-read 0.015 :cache-write 0}
-    :context-window 131072
-    :max-tokens 32768
-    :compat {:supports-long-cache-retention false
-             :send-session-affinity-headers true
-             :supports-cache-control-on-tools false
-             :supports-eager-tool-input-streaming false}}
-   "accounts/fireworks/models/inkling"
-   {:id "accounts/fireworks/models/inkling"
-    :name "Inkling"
-    :provider :fireworks
-    :api :anthropic-messages
-    :base-url "https://api.fireworks.ai/inference"
-    :reasoning true
-    :input [:text :image]
-    :cost {:input 1 :output 4.05 :cache-read 0.17 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 1048576
-    :compat {:supports-long-cache-retention false
-             :send-session-affinity-headers true
-             :supports-cache-control-on-tools false
-             :supports-eager-tool-input-streaming false}}
    "accounts/fireworks/models/minimax-m3"
    {:id "accounts/fireworks/models/minimax-m3"
     :name "MiniMax-M3"
@@ -152,36 +122,6 @@
     :cost {:input 1.25 :output 4.25 :cache-read 0.15 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
-    :compat {:supports-long-cache-retention false
-             :send-session-affinity-headers true
-             :supports-cache-control-on-tools false
-             :supports-eager-tool-input-streaming false}}
-   "accounts/fireworks/models/nemotron-3-ultra-nvfp4"
-   {:id "accounts/fireworks/models/nemotron-3-ultra-nvfp4"
-    :name "Nemotron 3 Ultra 550B A55B"
-    :provider :fireworks
-    :api :anthropic-messages
-    :base-url "https://api.fireworks.ai/inference"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0.6 :output 2.4 :cache-read 0.12 :cache-write 0}
-    :context-window 262144
-    :max-tokens 128000
-    :compat {:supports-long-cache-retention false
-             :send-session-affinity-headers true
-             :supports-cache-control-on-tools false
-             :supports-eager-tool-input-streaming false}}
-   "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
-   {:id "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b"
-    :name "Nemotron 3.5 Lightning 30B A3B"
-    :provider :fireworks
-    :api :anthropic-messages
-    :base-url "https://api.fireworks.ai/inference"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0.05 :output 0.2 :cache-read 0.01 :cache-write 0}
-    :context-window 262144
-    :max-tokens 262144
     :compat {:supports-long-cache-retention false
              :send-session-affinity-headers true
              :supports-cache-control-on-tools false
@@ -240,6 +180,21 @@
     :reasoning true
     :input [:text :image]
     :cost {:input 0.21 :output 0.84 :cache-read 0.0042 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 384000
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/routers/deepseek-v4p1-flash-1017-ultrafast"
+   {:id "accounts/fireworks/routers/deepseek-v4p1-flash-1017-ultrafast"
+    :name "DeepSeek V4.1 Flash 1017 Ultra-fast"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 2.4 :output 9.6 :cache-read 0.048 :cache-write 0}
     :context-window 1000000
     :max-tokens 384000
     :compat {:supports-long-cache-retention false
@@ -413,6 +368,34 @@
                          :xhigh nil}
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:supports-store false
+             :supports-developer-role false
+             :requires-reasoning-content-on-assistant-messages true
+             :thinking-format :openai
+             :supports-long-cache-retention false
+             :supports-strict-mode true
+             :supports-mid-convo-system-messages true
+             :supports-mid-convo-tool-additions true
+             :deferred-tools-mode :kimi
+             :send-session-affinity-headers true}}
+   "accounts/fireworks/models/kimi-k3p1-pro"
+   {:id "accounts/fireworks/models/kimi-k3p1-pro"
+    :name "Kimi K3.1 Pro"
+    :provider :fireworks
+    :api :openai-completions
+    :base-url "https://api.fireworks.ai/inference/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh nil}
+    :input [:text :image]
+    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-store false

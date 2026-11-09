@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-02T16:00:52Z"
+ :generated-at "2026-11-09T15:41:34Z"
  :provider {:id :openrouter :name "OpenRouter"}
  :models
  {"black-forest-labs/flux-3-image"
@@ -308,6 +308,24 @@
    :input [:text :image]
    :cost {:input 8 :output 8 :cache-read 2 :cache-write 0}
    :output [:image]}
+  "openai/gpt-image-2.6-flare"
+  {:id "openai/gpt-image-2.6-flare"
+   :name "OpenAI: GPT Image 2.6 Flare"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
+   :cost {:input 8 :output 8 :cache-read 2 :cache-write 10}
+   :output [:image]}
+  "openai/gpt-image-2.6-sunburst"
+  {:id "openai/gpt-image-2.6-sunburst"
+   :name "OpenAI: GPT Image 2.6 Sunburst"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
+   :cost {:input 8 :output 8 :cache-read 2 :cache-write 10}
+   :output [:image]}
   "openrouter/auto"
   {:id "openrouter/auto"
    :name "Auto Router"
@@ -320,6 +338,15 @@
   "openrouter/auto-beta"
   {:id "openrouter/auto-beta"
    :name "Auto Router (Beta)"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
+   :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+   :output [:text :image]}
+  "openrouter/auto-code"
+  {:id "openrouter/auto-code"
+   :name "Auto Code"
    :provider :openrouter
    :api :openrouter-images
    :base-url "https://openrouter.ai/api/v1"

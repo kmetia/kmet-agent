@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-02T16:00:51Z"
+ :generated-at "2026-11-09T15:41:34Z"
  :provider {:id :nvidia
             :name "NVIDIA NIM"
             :env-vars ["NVIDIA_API_KEY"]
@@ -78,24 +78,6 @@
     :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
     :context-window 131072
     :max-tokens 16384
-    :headers {"NVCF-POLL-SECONDS" "3600"}
-    :compat {:supports-store false
-             :supports-developer-role false
-             :supports-reasoning-effort false
-             :max-tokens-field :max-tokens
-             :supports-long-cache-retention false
-             :supports-strict-mode false}}
-   "meta/llama-3.2-11b-vision-instruct"
-   {:id "meta/llama-3.2-11b-vision-instruct"
-    :name "Llama 3.2 11b Vision Instruct"
-    :provider :nvidia
-    :api :openai-completions
-    :base-url "https://integrate.api.nvidia.com/v1"
-    :reasoning false
-    :input [:text :image]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 128000
-    :max-tokens 4096
     :headers {"NVCF-POLL-SECONDS" "3600"}
     :compat {:supports-store false
              :supports-developer-role false

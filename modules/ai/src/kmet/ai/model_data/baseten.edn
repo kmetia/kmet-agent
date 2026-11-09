@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-21T10:11:51Z"
+ :generated-at "2026-11-09T15:41:34Z"
  :provider {:id :baseten
             :name "Baseten"
             :env-vars ["BASETEN_API_KEY"]
@@ -181,9 +181,26 @@
              :max-tokens-field :max-tokens
              :supports-long-cache-retention false
              :supports-strict-mode true}}
+   "moonshotai/Kimi-K3.1-Pro"
+   {:id "moonshotai/Kimi-K3.1-Pro"
+    :name "Kimi K3.1 Pro"
+    :provider :baseten
+    :api :openai-completions
+    :base-url "https://inference.baseten.co/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 262144
+    :compat {:supports-store false
+             :supports-developer-role false
+             :supports-reasoning-effort false
+             :max-tokens-field :max-tokens
+             :supports-long-cache-retention false
+             :supports-strict-mode true}}
    "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"
    {:id "nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B"
-    :name "Nemotron Ultra"
+    :name "Nemotron 3 Ultra"
     :provider :baseten
     :api :openai-completions
     :base-url "https://inference.baseten.co/v1"

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-03T18:57:42Z"
+ :generated-at "2026-11-09T15:41:34Z"
  :provider {:id :commandcode
             :name "Command Code"
             :env-vars ["CMD_API_KEY"]
@@ -414,6 +414,19 @@
     :input [:text]
     :cost {:input 0.16 :output 0.58 :cache-read 0.016 :cache-write 0}
     :context-window 1000000
+    :max-tokens 32768
+    :compat {:requires-reasoning-content-on-assistant-messages true
+             :thinking-format :deepseek}}
+   "deepseek/deepseek-v4.1-flash-ultrafast"
+   {:id "deepseek/deepseek-v4.1-flash-ultrafast"
+    :name "DeepSeek V4.1 Flash Ultrafast"
+    :provider :commandcode
+    :api :openai-completions
+    :base-url "https://api.commandcode.ai/provider/v1"
+    :reasoning false
+    :input [:text]
+    :cost {:input 2.4 :output 9.6 :cache-read 0.048 :cache-write 0}
+    :context-window 1048576
     :max-tokens 32768
     :compat {:requires-reasoning-content-on-assistant-messages true
              :thinking-format :deepseek}}
@@ -962,17 +975,6 @@
     :cost {:input 0.16 :output 0.64 :cache-read 0.02 :cache-write 0}
     :context-window 262144
     :max-tokens 32768}
-   "poolside/laguna-s-2.1-free"
-   {:id "poolside/laguna-s-2.1-free"
-    :name "Laguna S 2.1"
-    :provider :commandcode
-    :api :openai-completions
-    :base-url "https://api.commandcode.ai/provider/v1"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 256000
-    :max-tokens 131072}
    "reflection/beam:free"
    {:id "reflection/beam:free"
     :name "Beam 1.0"
@@ -1012,6 +1014,17 @@
     :context-window 1000000
     :max-tokens 128000
     :compat {:thinking-format :openrouter}}
+   "stealth/crouton-alpha"
+   {:id "stealth/crouton-alpha"
+    :name "Crouton Alpha"
+    :provider :commandcode
+    :api :openai-completions
+    :base-url "https://api.commandcode.ai/provider/v1"
+    :reasoning false
+    :input [:text]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 32768}
    "stealth/glyph-cluster:free"
    {:id "stealth/glyph-cluster:free"
     :name "Glyph Cluster"

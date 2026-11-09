@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-04T11:08:57Z"
+ :generated-at "2026-11-09T15:41:34Z"
  :provider {:id :opencode
             :name "OpenCode (Zen)"
             :env-vars ["OPENCODE_API_KEY"]
@@ -190,7 +190,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
+    :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}
     :context-window 1000000
     :max-tokens 128000
     :compat {:supports-mid-convo-system-messages true
@@ -579,6 +579,43 @@
              :supports-developer-role false
              :max-tokens-field :max-tokens
              :supports-strict-mode true}}
+   "iceman-free"
+   {:id "iceman-free"
+    :name "Iceman Free"
+    :provider :opencode
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/v1"
+    :reasoning true
+    :input [:text]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 262144
+    :max-tokens 131072
+    :compat {:supports-store false
+             :supports-developer-role false
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
+   "inkling-2-small-free"
+   {:id "inkling-2-small-free"
+    :name "Inkling 2 Small Free"
+    :provider :opencode
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal "minimal"
+                         :off "none"
+                         :xhigh nil}
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:supports-store false
+             :supports-developer-role false
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "kimi-k2.5"
    {:id "kimi-k2.5"
     :name "Kimi K2.5"
@@ -652,6 +689,21 @@
              :supports-strict-mode true
              :supports-mid-convo-system-messages true
              :supports-mid-convo-tool-additions true}}
+   "longcat-2.5-free"
+   {:id "longcat-2.5-free"
+    :name "LongCat 2.5 Free"
+    :provider :opencode
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 262144
+    :compat {:supports-store false
+             :supports-developer-role false
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "mimo-v2.6-flash-free"
    {:id "mimo-v2.6-flash-free"
     :name "MiMo-V2.6-Flash Free"
@@ -771,28 +823,6 @@
              :supports-developer-role false
              :max-tokens-field :max-tokens
              :supports-strict-mode true}}
-   "pulse-alpha-free"
-   {:id "pulse-alpha-free"
-    :name "Pulse Alpha Free"
-    :provider :opencode
-    :api :openai-completions
-    :base-url "https://opencode.ai/zen/v1"
-    :reasoning true
-    :thinking-level-map {:high "high"
-                         :low "low"
-                         :max "max"
-                         :medium nil
-                         :minimal nil
-                         :off nil
-                         :xhigh nil}
-    :input [:text :image]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 131072
-    :compat {:supports-store false
-             :supports-developer-role false
-             :max-tokens-field :max-tokens
-             :supports-strict-mode true}}
    "qwen3.8-max"
    {:id "qwen3.8-max"
     :name "Qwen3.8 Max"
@@ -816,7 +846,26 @@
              :max-tokens-field :max-tokens
              :supports-strict-mode true}}}
   :openai-responses
-  {"gpt-5"
+  {"crouton-alpha-free"
+   {:id "crouton-alpha-free"
+    :name "Crouton Alpha Free"
+    :provider :opencode
+    :api :openai-responses
+    :base-url "https://opencode.ai/zen/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal "minimal"
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 270000
+    :compat {:session-affinity-format :openai-nosession}}
+   "gpt-5"
    {:id "gpt-5"
     :name "GPT-5"
     :provider :opencode

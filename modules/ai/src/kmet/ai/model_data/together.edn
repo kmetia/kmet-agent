@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-21T10:11:51Z"
+ :generated-at "2026-11-09T15:41:34Z"
  :provider {:id :together
             :name "Together AI"
             :env-vars ["TOGETHER_API_KEY"]
@@ -149,6 +149,25 @@
     :thinking-level-map {:low nil :medium nil :minimal nil}
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:supports-store false
+             :supports-developer-role false
+             :supports-reasoning-effort false
+             :thinking-format :together
+             :max-tokens-field :max-tokens
+             :supports-long-cache-retention false
+             :supports-strict-mode false}}
+   "moonshotai/Kimi-K3.1-Pro"
+   {:id "moonshotai/Kimi-K3.1-Pro"
+    :name "Kimi K3.1 Pro"
+    :provider :together
+    :api :openai-completions
+    :base-url "https://api.together.ai/v1"
+    :reasoning true
+    :thinking-level-map {:low nil :medium nil :minimal nil}
+    :input [:text :image]
+    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-store false
