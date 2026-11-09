@@ -565,18 +565,18 @@
     (catch Throwable _ nil)))
 
 (defn run-changed!
-  "Run the test namespaces the changed files affect (kmet.tasks.changed), with
-   SLOW? selecting ^:slow vs non-slow vars — the shared body of
-   `test-changed` / `test-ext-changed` on every host (the JVM twins included;
-   `bb.edn` calls this, and `-main`'s `--changed` flag).
+  "Run the test namespaces directly changed or paired with the changed files
+   (kmet.tasks.changed), with SLOW? selecting ^:slow vs non-slow vars — the
+   shared body of `test-changed` / `test-ext-changed` on every host (the JVM
+   twins included; `bb.edn` calls this, and `-main`'s `--changed` flag).
    Prints the nothing-to-run line and exits 0 when no test namespace is
-   affected."
+   changed or paired."
   [slow?]
   (isolate-diagnostics!)
-  (let [nss ((requiring-resolve 'kmet.tasks.changed/affected-test-nss))]
+  (let [nss ((requiring-resolve 'kmet.tasks.changed/changed-test-nss))]
     (if (seq nss)
       (run-ns-syms nss slow?)
-      (println "No affected test namespaces — nothing to run."))))
+      (println "No changed test namespaces — nothing to run."))))
 
 (defn -main
   "Run the test suites.
@@ -584,9 +584,10 @@
    true; `jolt test` false, `jolt test-ext` true; the JVM tasks pass the same
    values as strings — see slow-flag). The split works on all three hosts
    because ^:slow var metadata survives jolt.
-   `--changed` as the first remaining arg selects the test namespaces the
-   changed files affect instead of the full tree (`bb test-changed`; the JVM
-   task `test-changed-jvm` is `-m kmet.tasks.runner false --changed`).
+   `--changed` as the first remaining arg selects the changed test namespaces
+   and the test namespaces directly paired with changed source namespaces
+   instead of the full tree (`bb test-changed`; the JVM task
+   `test-changed-jvm` is `-m kmet.tasks.runner false --changed`).
    Remaining args are filters: plain test var names (`bb test
    test-tool-bash`), ns/var pairs (`bb test-ext kmet.app.loop.test-turn/my-test`),
    or whole namespaces (`bb test kmet.libs.test-fuzzy`, or ns/ with a trailing

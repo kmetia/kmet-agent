@@ -421,7 +421,8 @@ first call), so the contribution is current, not a snapshot:
 - The fn receives the call's `:cwd`, `:project-dir`, `:agent-dir`, the cancel
   `:signal`, and `:verbs` — keyword-keyed (`{:read-file f :edit g
   :write-file h}`) values of the same file operations the system exposes as
-  `core/read` (with opts), `core/edit` and `core/write`, built for that call.
+  `read`/`core/read` (with opts), `edit`/`core/edit` and `write`/`core/write`,
+  built for that call.
 - `:ns` and `:macros` contribute values to the environment. `:macros` entries
   are host macro fns (they receive SCI's form and environment before their
   arguments). A value may carry `:doc`, `:arglists` and `:source` metadata (the

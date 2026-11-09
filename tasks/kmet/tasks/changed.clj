@@ -1,9 +1,11 @@
 (ns kmet.tasks.changed
   "Dev-loop helper backing the `bb changed` / `bb *-changed` tasks: finds
-   changed files and computes, via the require graph, which namespaces are
-   affected. Test namespaces map 1:1 to source namespaces (test/kmet/x/test_y.clj
+   changed files and maps them to the namespaces to test and lint. Test
+   namespaces pair with source namespaces by convention (test/kmet/x/test_y.clj
    ↔ src/kmet/x/y.clj, and test/kmet/tasks/y_test.clj ↔ tasks/kmet/tasks/y.clj),
-   so a source change must also re-run the tests that transitively require it.
+   so a source change re-runs its directly paired test namespace; dependents
+   are not pulled in. Lint still follows the require graph, because a changed
+   signature is flagged at its call sites.
 
    The source roots are src/, test/, tasks/ and extensions/ (see AGENTS.md
    § File layout — tasks/ holds the task implementations). Their files are
@@ -306,25 +308,40 @@
     (or (str/starts-with? last-seg "test-")
         (str/ends-with? last-seg "-test"))))
 
-(defn affected-test-nss-by
-  "Test namespaces affected by CHANGED-NSS: the changed ones plus every test
-   transaction closure reach test namespaces that transitively require them,
-   including the extension tests that now run through the root runner."
-  [changed-nss]
-  (let [{:keys [graph paths]} (scan-graph)
-        rev (reverse-graph graph)
-        root? (fn [ns-sym]
-                (graph ns-sym))
-        roots (filter root? changed-nss)
-        tests (set (filter (fn [ns-sym]
-                             (test-ns? ns-sym))
-                           (keys paths)))]
-    (->> (closure roots rev) (filter tests) sort)))
+(defn- direct-test-nss
+  "The test namespaces paired with SOURCE-NS by the tree's naming convention:
+   `test-` before its last segment, or `-test` appended. TEST-NSS is the set
+   of known test namespaces."
+  [source-ns test-nss]
+  (let [s (str source-ns)
+        dot (str/last-index-of s ".")
+        parent (when dot (subs s 0 dot))
+        segment (if dot (subs s (inc dot)) s)
+        candidates (cond-> [(symbol (str s "-test"))]
+                     parent (conj (symbol (str parent ".test-" segment))))]
+    (filterv test-nss candidates)))
 
-(defn affected-test-nss
-  "Test namespaces affected by the currently changed files."
+(defn changed-test-nss-by
+  "Test namespaces directly changed or directly paired with a changed source
+   namespace. Dependents are not included: a shared namespace change does not
+   re-run every test that transitively requires it."
+  [changed-nss]
+  (let [{:keys [paths]} (scan-graph)
+        test-nss (set (filter test-ns? (keys paths)))]
+    (->> changed-nss
+         (mapcat (fn [ns-sym]
+                   (if (test-ns? ns-sym)
+                     [ns-sym]
+                     (direct-test-nss ns-sym test-nss))))
+         (filter test-nss)
+         distinct
+         sort)))
+
+(defn changed-test-nss
+  "Test namespaces directly changed or paired with the currently changed
+   files."
   []
-  (affected-test-nss-by (map path->ns (changed-clj-files))))
+  (changed-test-nss-by (map path->ns (changed-clj-files))))
 
 (defn affected-lint-files-by
   "Files to lint for CHANGED-PATHS: the paths themselves, every affected

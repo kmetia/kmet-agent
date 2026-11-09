@@ -327,6 +327,16 @@
              "hi")
             "a library definition dispatches through the current call's tools"))))
 
+(t/deftest test-a-written-definition-replays-the-bare-core-refers
+  (let [env (support/eval-ctx)
+        cwd (:cwd env)]
+    (support/eval! env "(defn say-bare \"Say hi.\" [] (emit :hi-bare))")
+    (let [restarted (support/restart-service env)]
+      (t/is (= ":hi-bare"
+               (support/script-content
+                (support/eval-in! restarted (:session env) cwd "(say-bare)")))
+            "the core refers are replayed with the alias prelude"))))
+
 (t/deftest test-a-written-definition-in-another-namespace-replays-aliases
   (let [env (support/eval-ctx)
         cwd (:cwd env)]

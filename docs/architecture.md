@@ -424,8 +424,7 @@ engine backs the sandbox's direct `clj/edit-form`, `clj/replace-sexp` and
 `tools/clojure_paren_repair`) when the extension is selected. Its
 `clojure_eval` tool is likewise a schema/render wrapper: the evaluation path
 is `kmet.libs.clj-eval` over `kmet.libs.nrepl`, which an eval call exposes
-directly as `clj/nrepl-eval`. The
-advertised set is a session fact. The selection mutation (`set-active-tools!`)
+directly as `clj/nrepl-eval`. The advertised set is a session fact. The selection mutation (`set-active-tools!`)
 records the live selection with `sync-tool-declarations!`;
 the loop reconciles the recorded loadout before every request with
 `sync-resumed-declarations!`; a promotion uses the same resumed reconcile. Both
@@ -572,12 +571,12 @@ probe and no real use, and is gone;
   joins the table undeclared and becomes declared once `tool_search` loads a
   tool (`kmet.app.tools.registry/register-tool-source!`). Listing and dispatch
   therefore cannot drift.
-- **Output is `core/emit` (or a silent script's value).** `(core/emit v)` is
-  the curated text channel: strings print raw, other data `pr-str`, and it
-  returns nil. A script that emits nothing and finishes normally reports its
-  final value instead (the REPL rule, bounded like emit); stdout and stderr
-  are captured for the budget but never reported. `(core/emit-image
-  path-or-block)`
+- **Output is `emit` (or a silent script's value).** `(emit v)`, also
+  `(core/emit v)`, is the curated text channel: strings print raw, other data
+  `pr-str`, and it returns nil. A script that emits nothing and finishes
+  normally reports its final value instead (the REPL rule, bounded like
+  emit); stdout and stderr are captured for the budget but never reported.
+  `(emit-image path-or-block)`
   is the second channel, capped at 4 MiB of base64 per image and 8 images per
   call, accepting exactly what `read` accepts. Capture is bounded at 1 MiB
   (exceeding it aborts with `:output-limit`), printing is bounded
@@ -670,9 +669,10 @@ independent of the `:tool/eval` row, so removing the row leaves the command
 and its service. An unknown leading
 name that resolves to a definition or source verb is a `describe` shorthand;
 an unresolvable one keeps the unknown-verb hint. The system already provides
-`core/read`, `core/write`, `core/edit`, `core/bash` and `core/sh` and
-the `tools` bridge to every active tool; the row does not mount a separate
-eval source for them. The clojure extension's tools wrap the shared
+`read`, `write`, `edit`, `bash` and `sh` (also `core/...`) and the
+`tools` bridge to every active tool; the row does not mount a separate eval
+source for them. The alias prelude refers those verbs unqualified, so
+`(read ...)` and `(core/read ...)` are one call. The clojure extension's tools wrap the shared
 `kmet.libs.clj-edit` engine; an eval script can use the direct `clj/edit-form`,
 `clj/replace-sexp` and `clj/paren-repair` verbs without the extension, or
 reach the same engine through `tools/clojure_edit` when the extension is
@@ -690,8 +690,8 @@ definitions after the saved entries, in the order global, cwd, live, when that
 session already has a built environment. `drop` deletes the files directly
 and unbinds the live name only when that session already has an environment,
 so a drop never builds one. The environment build
-seeds the call vocabulary and the standard aliases before evaluating the
-library, and each definition's per-call primitives (`emit`, `cwd`, the process
+seeds the call vocabulary and the standard aliases and core refers before
+evaluating the library, and each definition's per-call primitives (`emit`, `cwd`, the process
 wrappers and the tool bridge) read the current call's state rather than the
 call that compiled them. Parallel calls serialize on a per-session lock, the
 deadline starts after it is taken, and `:dispose!` clears every environment;
@@ -751,8 +751,8 @@ library that has always been empty is silent; when a previously listed set
 empties, the next prompt gets one correction.
 
 Limits: a definition file is the defining form only — its `(ns …)` requires are
-not stored, so the standard aliases are replayed and anything else must be
-self-contained. A file's generated `(ns …)` form runs before the aliases.
+not stored, so the standard aliases and core refers are replayed and anything
+else must be self-contained. A file's generated `(ns …)` form runs before the aliases.
 Files load sorted by path within each layer, global before cwd; a `defmethod`
 file needs its `defmulti` file, and interdependent files can load out of
 order. A global definition cannot depend on a cwd definition (the cwd layer
@@ -1154,12 +1154,14 @@ when the JVM and Jolt servers both run, pass an explicit `port` to
 7803 and the historical defaults 7888/1667.
 
 The `*-changed` tasks are the iteration loop — they cover only the current
-changes (git diff vs HEAD + untracked, plus the namespaces/tests that
-transitively require them via the require graph); `jolt` runs the same tasks:
+changes (git diff vs HEAD + untracked): `test-changed` runs the changed test
+namespaces and the test namespaces directly paired with changed source
+namespaces, while `lint-changed` follows the require graph to reach
+dependents; `jolt` runs the same tasks:
 
 ```sh
 bb changed              # List changed files
-bb test-changed         # Tests of affected namespaces (non-slow)
+bb test-changed         # Changed/paired namespaces (non-slow)
 bb test-ext-changed     # ...only the slow ones
 bb lint-changed         # Lint changed files plus affected dependents
 bb format-check-changed # (or bb format-changed to write the fix)

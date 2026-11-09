@@ -225,6 +225,11 @@
     (t/is (not (:is-error r)) (:content r))
     (t/is (= ":from-future" (:content r)))))
 
+(t/deftest test-codemode-core-verbs-are-referred-unqualified
+  (t/is (= ":ok" (:content (run "(emit :ok)"))))
+  (t/is (= ":from-future"
+           (:content (run "@(spawn (fn [] (emit :from-future)))")))))
+
 (t/deftest test-codemode-capabilities
   (let [r (run (str "(core/emit [(fs/exists? \"deps.edn\")"
                     "  (> (count (slurp \"deps.edn\")) 0)"

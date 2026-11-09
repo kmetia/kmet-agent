@@ -635,8 +635,8 @@ calls, so it can expose current state instead of a snapshot:
   `core`, `clj`, `eval` and `tools`, and the fixed host namespaces
   (`clojure.core`, `clojure`, `babashka.process`, `kmet.libs.http`,
   `kmet.libs.json`, `kmet.libs.markdown`, `kmet.libs.yaml`) are reserved.
-  `core/read`, `core/write`, `core/edit`, `core/bash` and `core/sh` call the
-  tool implementations directly; `clj/edit-form`, `clj/replace-sexp` and
+  `read`, `write`, `edit`, `bash` and `sh` (also `core/...`) call the tool
+  implementations directly; `clj/edit-form`, `clj/replace-sexp` and
   `clj/paren-repair` call `kmet.libs.clj-edit` directly; `clj/nrepl-eval`
   calls `kmet.libs.clj-eval`, the same implementation as the clojure
   extension's `clojure_eval` tool; `tools/*` is the active tool bridge. Use

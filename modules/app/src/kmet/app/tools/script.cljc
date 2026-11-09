@@ -95,31 +95,39 @@
    tools and `(eval/help)` label it; the summary itself stays host-neutral and
    names only the common surface."
   (str "aliases fs, str, set, edn, walk, json and p; cwd-resolving slurp, "
-       "spit and file-seq; core helpers (core/cwd), (core/env k), (core/now), "
-       "(core/sleep ms) and (core/spawn f); (core/emit v) and "
-       "(core/emit-image x); the core, clj, tools and eval namespaces; "
-       "clojure.*, babashka.*, the bundled libs (rewrite-clj, cljfmt, "
-       "edamame, parinferish) and the kmet.libs ports (json, http, yaml, "
-       "markdown) are require-able."))
+       "spit and file-seq; core verbs, also referred unqualified: read, write, "
+       "edit, bash, sh, cwd, env, now, sleep, emit, emit-image and spawn "
+       "(core/<verb> stays available); the core, clj, tools and eval "
+       "namespaces; clojure.*, babashka.*, the bundled libs (rewrite-clj, "
+       "cljfmt, edamame, parinferish) and the kmet.libs ports (json, http, "
+       "yaml, markdown) are require-able."))
+
+(def core-refer-verbs
+  "The core verbs the sandbox also refers unqualified. They are the same
+   functions the `core` namespace installs, so `(emit v)` and `(core/emit v)`
+   are one call; `read` deliberately shadows `clojure.core/read`."
+  '[read write edit bash sh cwd env now sleep emit emit-image spawn])
 
 (def alias-prelude
-  "The aliases every script gets without a require — the standard Clojure and
-   babashka vocabulary. Evaluated once per fork, before the user code, as a
-   separate eval so the script's own line numbers stay intact; `require`
-   resolves the namespaces the context was built with."
+  "The aliases and core refers every script gets without its own require — the
+   standard Clojure and babashka vocabulary plus the bare core verbs.
+   Evaluated once per fork, before the user code, as a separate eval so the
+   script's own line numbers stay intact; `require` resolves the namespaces
+   the context was built with."
   (str "(require '[babashka.fs :as fs]"
        " '[clojure.string :as str]"
        " '[clojure.set :as set]"
        " '[clojure.edn :as edn]"
        " '[clojure.walk :as walk]"
        " '[kmet.libs.json :as json]"
-       " '[babashka.process :as p])"))
+       " '[babashka.process :as p])"
+       "\n(require '[core :refer " (pr-str core-refer-verbs) "])"))
 
 (defn alias-source
-  "Enter NS and install the standard aliases, for a stored definition
-   evaluated outside a real call. A rebuild replays this per definition's
-   namespace; the alias prelude a real call runs lives in the sticky
-   namespace and is not part of the kept source."
+  "Enter NS and install the standard aliases and core refers, for a stored
+   definition evaluated outside a real call. A rebuild replays this per
+   definition's namespace; the alias prelude a real call runs lives in the
+   sticky namespace and is not part of the kept source."
   [ns]
   (str "(ns " ns ")\n" alias-prelude))
 

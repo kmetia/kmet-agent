@@ -250,6 +250,7 @@
       (t/is (str/includes? help "Library:"))
       (t/is (str/includes? help "Built-in verbs:"))
       (t/is (str/includes? core "Core:"))
+      (t/is (str/includes? core "(emit value)"))
       (t/is (str/includes? core "(core/emit value)")))))
 
 (t/deftest a-source-can-contribute-an-explicit-macro

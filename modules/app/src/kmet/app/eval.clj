@@ -716,7 +716,10 @@
    no scope; an unwritten definition has no authoritative file."
   [env raw-name]
   (let [raw-name (->name raw-name)
-        name (when raw-name (qualify-name (env-ns env) raw-name))]
+        name (when raw-name (qualify-name (env-ns env) raw-name))
+        bare-core (when (and raw-name
+                             (nil? (namespace (symbol raw-name))))
+                    (get builtin-verb-help (str "core/" raw-name)))]
     (when-not name
       (bad-request! (str "describe needs a definition name, got "
                          (pr-str raw-name))
@@ -755,6 +758,7 @@
 
         :else
         (or (get builtin-verb-help name)
+            bare-core
             (bad-request! (str "no eval definition named " name)
                           {:name name}))))))
 
@@ -822,6 +826,10 @@
   []
   (str "Core: Clojure/SCI — " script/core-summary
        "\n" (builtin-help-line)
+       "\nCore verbs are also referred unqualified: read, write, edit, bash, "
+       "sh, cwd, env, now, sleep, emit, emit-image, spawn; core/<verb> stays "
+       "canonical. Unqualified read is the file reader; clojure.core/read "
+       "remains available."
        "\nFor stdin or process options, pass a command vector and an opts map: "
        "(core/sh [\"cmd\" \"arg\"] {:in text})."
        "\nLocal let/fn bindings are scratch; the next call starts in the "
@@ -835,8 +843,8 @@
        "\nDiscovery: (all-ns) lists namespaces; (ns-publics 'ns) lists a "
        "namespace's vars, including session-only definitions. A patch or "
        "edit-form result must keep a docstring."
-       "\nReporting: (core/emit value) or end on the final value; stdout and "
-       "stderr are discarded."))
+       "\nReporting: (emit value) or end on the final value; (core/emit value) "
+       "also works; stdout and stderr are discarded."))
 
 (defn- help-entry-text
   [entry]

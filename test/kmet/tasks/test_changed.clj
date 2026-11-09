@@ -48,35 +48,34 @@
     (is (= '#{} (changed/ns-requires '(ns foo (:require [clojure.string :as str])))))
     (is (nil? (changed/ns-requires '(defn foo [] 1))))))
 
-(deftest affected-test-namespaces
-  (testing "a source change reaches direct and transitive test dependents across layers"
-    (let [nss (set (changed/affected-test-nss-by '[kmet.ai.models]))]
+(deftest changed-test-namespaces
+  (testing "a source change selects its directly paired test, not dependents"
+    (let [nss (set (changed/changed-test-nss-by '[kmet.ai.models]))]
       (is (contains? nss 'kmet.ai.test-models))
-      (is (contains? nss 'kmet.ai.test-provider-composer))
-      (is (contains? nss 'kmet.app.test-model-resolver))))
+      (is (not (contains? nss 'kmet.ai.test-provider-composer)))
+      (is (not (contains? nss 'kmet.app.test-model-resolver)))))
   (testing "changing a test namespace includes itself"
-    (let [nss (set (changed/affected-test-nss-by '[kmet.tui.components.test-text]))]
+    (let [nss (set (changed/changed-test-nss-by '[kmet.tui.components.test-text]))]
       (is (contains? nss 'kmet.tui.components.test-text))))
   (testing "a -test suffix counts too (kmet.tasks.build-test mirrors its src ns)"
-    (let [nss (set (changed/affected-test-nss-by '[kmet.tasks.build]))]
+    (let [nss (set (changed/changed-test-nss-by '[kmet.tasks.build]))]
       (is (contains? nss 'kmet.tasks.build-test)))
-    (let [nss (set (changed/affected-test-nss-by '[kmet.tasks.build-jolt]))]
+    (let [nss (set (changed/changed-test-nss-by '[kmet.tasks.build-jolt]))]
       (is (contains? nss 'kmet.tasks.build-jolt-test))))
-  (testing "tasks/ is a scanned root, so a change in what task code requires reaches it
-            (the closure works across roots, not just src/)"
-    (let [nss (set (changed/affected-test-nss-by '[kmet.libs.archive]))]
-      (is (contains? nss 'kmet.tasks.build-test))
-      (is (contains? nss 'kmet.tasks.build-jolt-test))))
+  (testing "a shared source change does not reach a dependent task test"
+    (let [nss (set (changed/changed-test-nss-by '[kmet.libs.archive]))]
+      (is (contains? nss 'kmet.libs.test-archive))
+      (is (not (contains? nss 'kmet.tasks.build-test)))
+      (is (not (contains? nss 'kmet.tasks.build-jolt-test)))))
   (testing "a dev-loop task change reaches its own test"
-    (is (contains? (set (changed/affected-test-nss-by '[kmet.tasks.clean]))
+    (is (contains? (set (changed/changed-test-nss-by '[kmet.tasks.clean]))
                    'kmet.tasks.test-clean)))
   (testing "unrelated namespaces stay out"
-    (let [nss (set (changed/affected-test-nss-by '[kmet.ai.models]))]
+    (let [nss (set (changed/changed-test-nss-by '[kmet.ai.models]))]
       (is (not (contains? nss 'kmet.tui.components.test-text)))))
-  (testing "extension test namespaces now participate in root test selection"
-    (let [nss (set (changed/affected-test-nss-by '[kmet.extension extensions.tools]))]
-      (is (seq (filter #(str/starts-with? (str %) "kmet.extensions.") nss)))
-      (is (contains? nss 'kmet.app.extensions.test-api)))))
+  (testing "extension source and test namespaces pair directly"
+    (let [nss (set (changed/changed-test-nss-by '[kmet.extensions.clojure.eval-tool]))]
+      (is (contains? nss 'kmet.extensions.clojure.eval-tool-test)))))
 
 (deftest affected-lint-file-closure
   (testing "a changed file, its dependents, and their transitive dependencies are linted together

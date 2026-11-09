@@ -11,9 +11,9 @@
    sees both layers. The
    fresh-context, output-economy tool stays `codemode`.
 
-   The shared `core/read`, `core/write`, `core/edit`, `core/bash` and
-   `core/sh` verbs and the `tools` bridge are the file and tool surface; the
-   row no longer mounts a separate `:core` source for them."
+   The shared `read`, `write`, `edit`, `bash` and `sh` verbs (also
+   available as `core/...`) and the `tools` bridge are the file and tool
+   surface; the row no longer mounts a separate `:core` source for them."
   (:require [clojure.string :as str]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
@@ -67,15 +67,15 @@
    :label "Eval"
    :description (str "Evaluate Clojure in this session's persistent SCI sandbox "
                      "(babashka surface: fs, slurp, spit, require, tools). "
-                     "File and shell verbs: core/read, core/write, core/edit, core/bash, core/sh. "
+                     "File and shell verbs: read, write, edit, bash, sh (also core/<verb>). "
                      "Calls serialize: put independent work in one call and fan out with "
-                     "(core/spawn f), pmap, or tools/call promises. Eval creates verbs: "
+                     "(spawn f), pmap, or tools/call promises. Eval creates verbs: "
                      "a documented top-level definition with a docstring is saved to the "
                      "eval library; an undocumented one is live-only. Local let/fn bindings "
                      "are scratch. Define in user; system namespaces are read-only. Report with "
-                     "(core/emit value) or the final value; stdout "
+                     "(emit value) or the final value; stdout "
                      "and stderr are discarded. (eval/help) lists the surface.")
-   :prompt-snippet "Persistent Clojure sandbox; one call per batch; core/read, core/write, core/edit, core/bash, core/sh; (eval/help) for the surface."
+   :prompt-snippet "Persistent Clojure sandbox; one call per batch; read, write, edit, bash, sh (also core/<verb>); (eval/help) for the surface."
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"

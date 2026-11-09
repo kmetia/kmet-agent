@@ -63,12 +63,12 @@
                 :task (help/with-help
                         (apply p/shell "clojure" "-M:jvm:clj-pin:dev" "-m" "kmet.tasks.runner"
                                "true" *command-line-args*))}
-  test-changed-jvm {:doc "Run the non-slow JVM tests of namespaces affected by changed files\n\nSame affected-namespace set as `bb test-changed`, run under JVM Clojure; full gate: bb test-jvm. Needs the Clojure CLI."
+  test-changed-jvm {:doc "Run the non-slow JVM tests of namespaces directly changed or paired with changed source namespaces\n\nSame direct set as `bb test-changed`, run under JVM Clojure; full gate: bb test-jvm. Needs the Clojure CLI."
                     :requires ([babashka.process :as p])
                     :task (help/with-help
                             (p/shell "clojure" "-M:jvm:clj-pin:dev" "-m" "kmet.tasks.runner"
                                      "false" "--changed"))}
-  test-ext-changed-jvm {:doc "Run ONLY the slow (^:slow) JVM tests of namespaces affected by changed files\n\nFull gate: bb test-ext-jvm. Needs the Clojure CLI."
+  test-ext-changed-jvm {:doc "Run ONLY the slow (^:slow) JVM tests of namespaces directly changed or paired with changed source namespaces\n\nFull gate: bb test-ext-jvm. Needs the Clojure CLI."
                         :requires ([babashka.process :as p])
                         :task (help/with-help
                                 (p/shell "clojure" "-M:jvm:clj-pin:dev" "-m" "kmet.tasks.runner"
@@ -80,10 +80,10 @@
                     :requires ([kmet.tasks.changed :as changed])
                     :task (help/with-help (do (changed/mark-validated!)
                                               (println "Changed-files baseline updated.")))}
-  test-changed {:doc "Run the non-slow tests of namespaces affected by changed files\n\nRequire-graph closure over src/test/tasks/extensions; full gate: bb test; JVM twin: bb test-changed-jvm."
+  test-changed {:doc "Run the non-slow tests of namespaces directly changed or paired with changed source namespaces\n\nTest namespaces pair with source namespaces by convention; no dependent closure (lint-changed still follows the require graph). Full gate: bb test; JVM twin: bb test-changed-jvm."
                 :requires ([kmet.tasks.runner :as runner])
                 :task (help/with-help (runner/run-changed! false))}
-  test-ext-changed {:doc "Run ONLY the slow (^:slow) tests of namespaces affected by changed files\n\nRequire-graph closure; full gate: bb test-ext; JVM twin: bb test-ext-changed-jvm."
+  test-ext-changed {:doc "Run ONLY the slow (^:slow) tests of namespaces directly changed or paired with changed source namespaces\n\nTest namespaces pair with source namespaces by convention; no dependent closure. Full gate: bb test-ext; JVM twin: bb test-ext-changed-jvm."
                     :requires ([kmet.tasks.runner :as runner])
                     :task (help/with-help (runner/run-changed! true))}
   lint-changed {:doc "Lint changed files plus affected dependents over both reader views\n\nFull gate: bb lint (same on both hosts); lints everything when the clj-kondo config changed."

@@ -43,12 +43,12 @@
 (defn- eval-batch-nudge
   "One-line feedback for a batch with more than one eval call. It reaches
    the model on the next turn: eval calls serialize, so independent work
-   belongs in one call with core/spawn or tools/call promises."
+   belongs in one call with spawn or tools/call promises."
   [tool-calls]
   (let [n (count (filter #(= "eval" (:name %)) tool-calls))]
     (when (> n 1)
       (str "[eval: this batch carried " n " eval calls; eval calls serialize. "
-           "Put independent work in one call and fan out with (core/spawn f) "
+           "Put independent work in one call and fan out with (spawn f) "
            "or several (tools/call ...) promises.]"))))
 
 (defn- add-result-nudge

@@ -146,9 +146,9 @@
     (t/is (str/includes? text "let/fn"))
     (t/is (str/includes? text "(eval/help)"))
     (t/is (str/includes? text "serialize"))
-    (t/is (str/includes? text "(core/spawn f)"))
-    (t/is (str/includes? text "core/read"))
-    (t/is (str/includes? text "core/sh"))
+    (t/is (str/includes? text "(spawn f)"))
+    (t/is (str/includes? text "read, write, edit, bash, sh"))
+    (t/is (str/includes? text "core/<verb>"))
     (t/is (str/includes? text "Define in user"))
     (t/is (empty? prompt-guidelines)
           "details live in (eval/help), not per-request guidelines")
@@ -157,6 +157,22 @@
           "eval's prompt must stand alone when codemode is not selected")
     (t/is (not (str/includes? text "Jolt")))
     (t/is (not (str/includes? text "JVM")))))
+
+(t/deftest test-core-verbs-are-referred-unqualified
+  (let [env (support/eval-ctx)
+        cwd (:cwd env)]
+    (spit (str (fs/path cwd "note.txt")) "bare")
+    (t/is (= ":ok" (:content (support/eval! env "(emit :ok)"))))
+    (t/is (= "bare" (:content (support/eval! env "(read \"note.txt\")"))))
+    (support/eval! env "(write \"out.txt\" \"alpha\")")
+    (support/eval! env "(edit \"out.txt\" \"alpha\" \"beta\")")
+    (t/is (= "beta" (slurp (str (fs/path cwd "out.txt")))))
+    (t/is (str/includes? (:content (support/eval! env "(bash \"printf bare-bash\")"))
+                         "bare-bash"))
+    (t/is (str/includes? (:content (support/eval! env "(str (:out (sh [\"printf\" \"bare-sh\"])))"))
+                         "bare-sh"))
+    (t/is (= ":spawned"
+             (:content (support/eval! env "@(spawn (fn [] (emit :spawned)))"))))))
 
 (t/deftest test-the-tool-schema-exposes-both-scopes
   (t/is (= ["cwd" "global"]
