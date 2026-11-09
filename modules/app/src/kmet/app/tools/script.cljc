@@ -412,6 +412,18 @@
    'spit (fn [f content & opts] (apply spit (path-in-cwd (call-cwd) f) content opts))
    'file-seq (fn [dir] (file-seq (fs/file (path-in-cwd (call-cwd) dir))))})
 
+(defn- split-token-options
+  "Normalize token-form arguments with trailing keyword options into a trailing
+   opts map, so `(sh \"cmd\" :in text)` reaches babashka.process as options
+   rather than command tokens. Returns ARGS unchanged without a keyword."
+  [args]
+  (let [idx (first (keep-indexed (fn [i a] (when (keyword? a) i)) args))]
+    (when (and idx (not (even? (- (count args) idx))))
+      (throw (ex-info "options need a value after the last option" {})))
+    (if idx
+      (concat (take idx args) [(apply hash-map (drop idx args))])
+      args)))
+
 (defn- process-fns
   "babashka.process with the current call's cwd as the default :dir, pid
    tracking (kmet's shutdown kills tracked children) and cancel-signal
@@ -444,7 +456,8 @@
 
                          ;; (f token & tokens), with a trailing opts map hoisted
                          :else
-                         (let [last-arg (last args)]
+                         (let [args (split-token-options args)
+                               last-arg (last args)]
                            (if (map? last-arg)
                              (apply f (merge {:dir cwd} last-arg) (butlast args))
                              (apply f {:dir cwd} args)))))))

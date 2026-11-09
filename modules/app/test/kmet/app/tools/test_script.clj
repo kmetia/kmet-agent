@@ -158,3 +158,9 @@
              (str "(p/process [\"sh\" \"-c\" " (pr-str command) "])")))]
       (t/is (not marker-exists?)
             "Escape kills a process spawned by an already-finished script"))))
+
+(t/deftest test-bare-sh-accepts-trailing-keyword-options
+  (let [s (kept-context)]
+    (t/is (= "hi\n"
+             (:content (run-in s {}
+                               "(emit (:out (sh \"sh\" \"-c\" \"read x; echo $x\" :in \"hi\\n\")))"))))))

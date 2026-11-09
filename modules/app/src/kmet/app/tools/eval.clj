@@ -76,6 +76,7 @@
    :prompt-guidelines
    ["Do not issue two eval calls for independent work. Make one call and fan out with (sandbox/spawn f), pmap, or tools/call promises; separate eval calls run one after the other, so wall time is the sum, not the max."
     "The sandbox is the babashka script surface, not a bare REPL: fs, sh, slurp, spit, require, tools, and user/read-file work. (eval/help) lists sources, verbs, and the library."
+    "For stdin or process options, pass a command vector and an opts map: (sh [\"cmd\" \"arg\"] {:in text})."
     "Eval creates verbs: a top-level defn/defmacro/def/etc. with a docstring is written to the eval library and persists; an undocumented definition is live-only. Local let/fn bindings are scratch. Use (eval/describe 'name) for one definition and (eval/sources) for the source listing."
     "Report with (emit value) or end on the value you want reported; stdout and stderr are discarded. Prefer one call with fan-out; keep definitions and order-sensitive edits in source order."]
    :parameters {:type "object"
