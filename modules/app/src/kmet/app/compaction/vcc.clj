@@ -220,9 +220,35 @@
           {:modified [] :read []}
           blocks))
 
+(def ^:private git-commit-pattern
+  #"(?:^|[;&|(\n])\s*((?:sudo\s+)?git\s+commit)(?=\s|$)")
+
 (defn- git-commit? [cmd]
-  (boolean (re-find #"(?:^|[;&|(\n])\s*(?:sudo\s+)?git\s+commit(?=\s|$)"
-                    (or cmd ""))))
+  (boolean (re-find git-commit-pattern (or cmd ""))))
+
+(defn- git-commit-start [cmd]
+  (let [m (re-matcher git-commit-pattern (or cmd ""))]
+    (when (.find m) (.start m 1))))
+
+(defn- command-end
+  "The index where the commit command ends: the next ;, &, |, or newline
+   outside single/double quotes."
+  [s start]
+  (loop [i start quote nil escaped? false]
+    (if (>= i (count s))
+      i
+      (let [c (.charAt ^String s i)]
+        (cond
+          escaped? (recur (inc i) quote false)
+          (= c \\) (recur (inc i) quote true)
+          (and quote (= c quote)) (recur (inc i) nil false)
+          (and (nil? quote) (contains? #{\; \& \| \newline} c)) i
+          (and (nil? quote) (contains? #{\" \'} c)) (recur (inc i) c false)
+          :else (recur (inc i) quote false))))))
+
+(defn- commit-segment [cmd]
+  (when-let [start (git-commit-start cmd)]
+    (subs cmd start (command-end cmd start))))
 
 (def ^:private commit-subject-patterns
   [#"-[a-zA-Z]*m\s+\"([^\"]*)\""
@@ -236,11 +262,12 @@
    #"--message\s+(\S+)"])
 
 (defn- commit-subject [cmd]
-  (when-let [subject (some #(second (re-find % cmd)) commit-subject-patterns)]
-    (let [subject (str/trim subject)]
-      (when-not (or (str/starts-with? subject "$(")
-                    (str/includes? subject "<<"))
-        subject))))
+  (when-let [segment (commit-segment cmd)]
+    (when-let [subject (some #(second (re-find % segment)) commit-subject-patterns)]
+      (let [subject (str/trim subject)]
+        (when-not (or (str/starts-with? subject "$(")
+                      (str/includes? subject "<<"))
+          subject)))))
 
 (def ^:private commit-hash-patterns
   [#"\[[^\]]*?\b([0-9a-f]{7,40})\b[^\]]*\]"

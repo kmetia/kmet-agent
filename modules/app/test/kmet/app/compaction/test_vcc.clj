@@ -251,7 +251,15 @@
                                          [{:id "c1" :name "bash"
                                            :arguments {:command "cd repo && git commit -m \"real\""}}])
                               (tool-result "c1" "[master abc1234] real")]))]
-      (t/is (str/includes? summary "abc1234: real")))))
+      (t/is (str/includes? summary "abc1234: real"))))
+  (t/testing "an -m before the commit command does not become its subject"
+    (let [summary (:summary (summarize
+                             [(assistant "commit"
+                                         [{:id "c1" :name "bash"
+                                           :arguments {:command "echo \"-m fake\" && git commit -m \"real\""}}])
+                              (tool-result "c1" "[master abc1234] real")]))]
+      (t/is (str/includes? summary "abc1234: real"))
+      (t/is (not (str/includes? summary "abc1234: fake"))))))
 
 (t/deftest heredoc-commit-messages-are-skipped
   (let [command (str "git commit -m \"$(cat <<'EOF'\n"
