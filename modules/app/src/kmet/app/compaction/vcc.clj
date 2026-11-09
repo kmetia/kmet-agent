@@ -205,8 +205,10 @@
               (reduce (fn [acc tc]
                         (let [name (tool-name tc)
                               path (some-> (arg tc :path) str)
-                              failed? (:is-error (get results (:id tc)))]
+                              result (get results (:id tc))
+                              failed? (:is-error result)]
                           (if (and (seq path)
+                                   (some? result)
                                    (not failed?)
                                    (contains? #{"read" "edit" "write"} name))
                             (update acc (if (= "read" name) :read :modified)
@@ -219,7 +221,8 @@
           blocks))
 
 (defn- git-commit? [cmd]
-  (boolean (re-find #"\bgit\s+commit(?=\s|$)" (or cmd ""))))
+  (boolean (re-find #"(?:^|[;&|(\n])\s*(?:sudo\s+)?git\s+commit(?=\s|$)"
+                    (or cmd ""))))
 
 (def ^:private commit-subject-patterns
   [#"-[a-zA-Z]*m\s+\"([^\"]*)\""
@@ -265,6 +268,7 @@
                               (let [cmd (or (arg tc :command) "")
                                     result (get results (:id tc))]
                                 (when (and (git-commit? cmd)
+                                           (some? result)
                                            (not (:is-error result)))
                                   (commit-line cmd (:text result)))))))
                     (:tool-calls b))
@@ -303,70 +307,100 @@
    "[User Messages]" :users
    "[Compaction Instructions]" :instructions
    "[Branch Summary]" :branch
-   "[Previous Summary]" :previous})
+   "[Previous Summary]" :previous
+   "[Transcript]" :brief})
+
+(def ^:private transcript-separator "\n\n[Transcript]\n\n")
+
+(defn- tagged
+  [tag text]
+  (when text (str "<" tag ">\n" text "\n</" tag ">")))
+
+(defn- extract-tag
+  "Extract the first <TAG>...</TAG> block from S, returning [content S'].
+   Content may contain section headers or separators without confusing the
+   line parser."
+  [s tag]
+  (let [pattern (re-pattern (str "(?s)<" tag ">\\s*(.*?)\\s*</" tag ">"))]
+    (if-let [[_ content] (re-find pattern s)]
+      [content (str/replace s pattern "")]
+      [nil s])))
 
 (defn- parse-previous
-  "Parse a previous VCC summary. A summary without a VCC header is preserved
-   verbatim under :previous rather than silently dropped."
+  "Parse a previous VCC summary. Multi-line sections are read from their
+   <previous-summary>/<branch-summary> tags, so their content can contain
+   headers or separators. A summary without a VCC header or tag is preserved
+   verbatim under :previous."
   [summary]
-  (let [s (sanitize summary)]
+  (let [s (sanitize summary)
+        [previous-block s1] (extract-tag s "previous-summary")
+        [branch-block s2] (extract-tag s1 "branch-summary")
+        lines (str/split-lines s2)
+        first-line (some #(when (seq (str/trim %)) (str/trim %)) lines)
+        header? (contains? section-headers first-line)]
     (when (seq s)
-      (let [lines (str/split-lines s)]
-        (if-not (some #(contains? section-headers (str/trim %)) lines)
-          {:previous (clip-block s max-previous-chars)}
-          (let [parsed
-                (reduce (fn [acc line]
-                          (let [line (str/trim line)]
-                            (cond
-                              (contains? section-headers line)
-                              (assoc acc :current (section-headers line))
+      (if-not (or header? previous-block branch-block)
+        {:previous (clip-block s max-previous-chars)}
+        (let [parsed
+              (reduce (fn [acc line]
+                        (let [line (str/trim line)]
+                          (cond
+                            (contains? section-headers line)
+                            (assoc acc :current (section-headers line))
 
-                              (and (= line "---") (:current acc))
-                              (assoc acc :current :brief)
+                            (and (= line "---") (:current acc))
+                            (assoc acc :current :brief)
 
-                              (empty? line) acc
+                            (empty? line) acc
 
-                              :else
-                              (let [current (:current acc)
-                                    value (if (str/starts-with? line "- ")
-                                            (subs line 2)
-                                            line)]
-                                (case current
-                                  :early (update acc :early conj value)
-                                  :files
-                                  (cond
-                                    (str/starts-with? line "- Modified: ")
-                                    (update-in acc [:files :modified] conj (subs line 12))
-                                    (str/starts-with? line "- Read: ")
-                                    (update-in acc [:files :read] conj (subs line 8))
-                                    :else acc)
-                                  :commits (update acc :commits conj line)
-                                  :users (update acc :users conj value)
-                                  :instructions (update acc :instructions conj value)
-                                  :branch (update acc :branch conj line)
-                                  :previous (update acc :previous conj line)
-                                  :brief (update acc :brief conj line)
-                                  acc)))))
-                        {:current nil
-                         :early []
-                         :files {:modified [] :read []}
-                         :commits []
-                         :users []
-                         :instructions []
-                         :branch []
-                         :previous []
-                         :brief []}
-                        lines)
-                previous (when (seq (:previous parsed))
-                           (clip-block (str/join "\n" (:previous parsed))
-                                       max-previous-chars))
-                branch (when (seq (:branch parsed))
-                         (clip-block (str/join "\n" (:branch parsed))
-                                     max-branch-chars))]
-            (-> parsed
-                (assoc :previous previous
-                       :branch (when branch [branch]))
-                (dissoc :current))))))))
+                            :else
+                            (let [current (:current acc)
+                                  value (if (str/starts-with? line "- ")
+                                          (subs line 2)
+                                          line)]
+                              (case current
+                                :early (update acc :early conj value)
+                                :files
+                                (cond
+                                  (str/starts-with? line "- Modified: ")
+                                  (update-in acc [:files :modified] conj (subs line 12))
+                                  (str/starts-with? line "- Read: ")
+                                  (update-in acc [:files :read] conj (subs line 8))
+                                  :else acc)
+                                :commits (update acc :commits conj line)
+                                :users (update acc :users conj value)
+                                :instructions (update acc :instructions conj value)
+                                :branch (update acc :branch conj line)
+                                :previous (update acc :previous conj line)
+                                :brief (update acc :brief conj line)
+                                acc)))))
+                      {:current nil
+                       :early []
+                       :files {:modified [] :read []}
+                       :commits []
+                       :users []
+                       :instructions []
+                       :branch []
+                       :previous []
+                       :brief []}
+                      lines)
+              previous (or (when (seq previous-block)
+                             (clip-block previous-block max-previous-chars))
+                           (when (seq (:previous parsed))
+                             (clip-block (str/join "\n" (:previous parsed))
+                                         max-previous-chars)))
+              branch (cond
+                       (seq branch-block)
+                       (clip-block branch-block max-branch-chars)
+
+                       (seq (:branch parsed))
+                       (clip-block (str/join "\n" (:branch parsed))
+                                   max-branch-chars)
+                       :else nil)]
+          (-> parsed
+              (assoc :previous previous
+                     :branch (when branch [branch]))
+              (dissoc :current)))))))
 
 (defn- merge-newest
   "Union OLD then NEW, move a repeated key to the newest position, keep CAP."
@@ -499,25 +533,33 @@
                      (section "[User Messages]"
                               (map #(str "- " %) (:users merged)))
                      (section "[Branch Summary]"
-                              (when (:branch merged) [(:branch merged)]))
+                              (when-let [branch (first (:branch merged))]
+                                [(tagged "branch-summary" branch)]))
                      (section "[Previous Summary]"
-                              (when (:previous merged) [(:previous merged)]))]))))
+                              (when-let [previous (:previous merged)]
+                                [(tagged "previous-summary" previous)]))]))))
 
 (defn- format-summary [merged brief]
   (let [body (render-sections merged)]
     (str body
          (when (seq brief)
-           (str (when (seq body) "\n\n") "---\n\n" (str/join "\n" brief))))))
+           (str (when (seq body) "\n\n") "[Transcript]\n\n"
+                (str/join "\n" brief))))))
 
 (defn- build-summary [merged brief]
   (let [sections (render-sections merged)
         budget (- max-summary-chars (count sections)
-                  (if (seq sections) 7 0))
-        brief (if (seq brief) (fit-brief brief budget) [])
-        summary (format-summary merged brief)]
-    (if (> (count summary) max-summary-chars)
-      (str (subs summary 0 (- max-summary-chars 22)) "\n...[summary truncated]")
-      summary)))
+                  (if (seq sections) (count transcript-separator) 0))
+        fitted (if (seq brief) (fit-brief brief budget) [])
+        summary (format-summary merged fitted)
+        summary (if (> (count summary) max-summary-chars)
+                  (str (subs summary 0 (- max-summary-chars 22))
+                       "\n...[summary truncated]")
+                  summary)
+        brief-text (when (seq fitted) (str/join "\n" fitted))
+        included (when (and brief-text (str/ends-with? summary brief-text))
+                   fitted)]
+    {:summary summary :brief included}))
 
 (defn- empty-summary []
   "[User Messages]\n- (no renderable user messages)")
@@ -548,13 +590,14 @@
                                max-brief-lines)
         brief (cap-lines (concat (:brief previous) fresh-brief)
                          max-brief-lines)
-        summary (build-summary merged brief)
+        built (build-summary merged brief)
+        summary (:summary built)
         empty? (str/blank? summary)
         summary (if empty? (empty-summary) summary)]
     {:summary summary
      :details {:compactor :vcc
                :version 1
-               :sections (sections-present merged brief)
+               :sections (sections-present merged (:brief built))
                :source-message-count (count messages)
                :summary-chars (count summary)
                :empty? empty?}}))

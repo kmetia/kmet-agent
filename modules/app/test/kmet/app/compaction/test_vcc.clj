@@ -34,6 +34,7 @@
                   (tool-result "r1" "file data")
                   (assistant "editing the file"
                              [{:id "e1" :name "edit" :arguments {:path "/src/b.clj"}}])
+                  (tool-result "e1" "edited")
                   (bash "git commit -m \"fix: thing\"" "[master abc1234] fix: thing" 0)
                   (user "last request")]
         result (summarize messages)
@@ -49,7 +50,7 @@
     (t/is (str/includes? summary "[user] last request"))
     (t/is (str/includes? summary "* read \"/src/a.clj\""))
     (t/is (= :vcc (get-in result [:details :compactor])))
-    (t/is (= 6 (get-in result [:details :source-message-count])))
+    (t/is (= 7 (get-in result [:details :source-message-count])))
     (t/is (= result (summarize messages))
           "the same preparation produces the same summary")))
 
@@ -60,6 +61,7 @@
                       "---\n\n[user] old line")
         messages [(user "new request")
                   (assistant "writing" [{:id "w1" :name "write" :arguments {:path "/new.clj"}}])
+                  (tool-result "w1" "written")
                   (user "newest request")]
         summary (:summary (summarize messages {:previous-summary previous}))]
     (t/is (str/includes? summary "- original request")
@@ -83,6 +85,7 @@
                                  [(assistant (str "step " i)
                                              [{:id (str "t" i) :name "read"
                                                :arguments {:path "/src/a.clj"}}])
+                                  (tool-result (str "t" i) "contents")
                                   (user (str "request " i))])
                                (range 20)))
         summary (:summary (summarize messages))]
@@ -96,7 +99,7 @@
   (let [messages (mapv #(user (str "message " % " " (apply str (repeat 200 "x"))))
                        (range 300))
         summary (:summary (summarize messages))
-        brief (second (str/split summary #"---\n\n"))]
+        brief (second (str/split summary #"\[Transcript\]\n\n"))]
     (t/is (<= (count (str/split-lines brief)) 120)
           "the brief stays within its line cap")
     (t/is (<= (count summary) 12000) "the whole summary stays within its char cap")))
@@ -208,3 +211,44 @@
     (t/is (str/includes? summary "## Goal"))
     (t/is (str/includes? summary "keep the API stable"))
     (t/is (str/includes? summary "more context"))))
+
+(t/deftest tagged-previous-summaries-survive-ambiguous-content
+  (let [noisy "## Goal\n---\n[User Messages]\nkeep this"
+        first (summarize [(user "x")] {:previous-summary noisy})
+        second (summarize [(user "y")] {:previous-summary (:summary first)})
+        summary (:summary second)]
+    (t/is (str/includes? summary "<previous-summary>"))
+    (t/is (str/includes? summary "## Goal"))
+    (t/is (str/includes? summary "keep this"))
+    (t/is (str/includes? summary "[Transcript]"))))
+
+(t/deftest tagged-branch-summaries-survive-a-reparse
+  (let [first (summarize [(user "x")
+                          {:role :branch-summary :summary "branch context"}])
+        second (summarize [(user "y")] {:previous-summary (:summary first)})
+        summary (:summary second)]
+    (t/is (str/includes? summary "<branch-summary>"))
+    (t/is (str/includes? summary "branch context"))))
+
+(t/deftest a-summary-with-a-header-after-the-first-line-is-not-vcc
+  (let [summary (:summary (summarize
+                           [(user "x")]
+                           {:previous-summary "intro\n[User Messages]\nkeep"}))]
+    (t/is (str/includes? summary "intro"))
+    (t/is (str/includes? summary "keep"))))
+
+(t/deftest commit-detection-requires-a-command-position
+  (t/testing "a commit mentioned inside an echo is not a commit"
+    (let [summary (:summary (summarize
+                             [(assistant "echo"
+                                         [{:id "c1" :name "bash"
+                                           :arguments {:command "echo \"git commit -m nope\""}}])
+                              (tool-result "c1" "[master abc1234] nope")]))]
+      (t/is (not (str/includes? summary "[Commits]")))))
+  (t/testing "a commit after a command separator is a commit"
+    (let [summary (:summary (summarize
+                             [(assistant "commit"
+                                         [{:id "c1" :name "bash"
+                                           :arguments {:command "cd repo && git commit -m \"real\""}}])
+                              (tool-result "c1" "[master abc1234] real")]))]
+      (t/is (str/includes? summary "abc1234: real")))))
