@@ -30,7 +30,7 @@
    [kmet.libs.concurrent :as concurrent]))
 
 (defn- refresh-prompt-cwd!
-  "Point the system prompt's `Current working directory` line at CWD (the
+  "Point the system prompt's <cwd> section at CWD (the
    session's runtime cwd). Project context files are NOT re-read: everything
    project-scoped — settings.edn, context files, project extensions/skills/
    prompts/themes/packages — stays with the launch directory, whatever

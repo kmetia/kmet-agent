@@ -23,9 +23,12 @@
     ctx))
 
 (def ^:private read-tool
-  "The prompt carries skills only when a read tool is in the table: a skill is
-   loaded on demand through it (pi: hasRead)."
+  "The prompt carries skills when a reader tool is in the table: read or bash
+   loads the skill file (pi: skillFileReadTool)."
   {:name "read"})
+
+(def ^:private bash-tool
+  {:name "bash"})
 
 (defn- register-skill!
   ([ctx name] (register-skill! ctx name nil))
@@ -58,7 +61,11 @@
         (is (str/includes? prompt "<available_skills>"))
         (is (str/includes? prompt "<name>clojure-edit</name>"))
         (is (str/includes? prompt "Structure-aware Clojure edits."))))
-    (testing "and no read tool means none"
+    (testing "a bash tool is a reader too"
+      (let [prompt (builder :cwd "/work" :tools [bash-tool])]
+        (is (str/includes? prompt "<available_skills>"))
+        (is (str/includes? prompt "Use bash to load a skill's file"))))
+    (testing "and no reader means none"
       (is (not (str/includes? (builder :cwd "/work" :tools []) "<available_skills>"))))
     (testing "the list is read per call, not captured at mount"
       (registry/deregister! (srce/get ctx :skills) :kmet/skill "clojure-edit" :test)
@@ -116,6 +123,16 @@
   [& opts]
   (apply system-prompt/build-system-prompt opts))
 
+(deftest the-default-prompt-is-pi-shaped
+  (let [p (prompt :cwd "/work" :date "2026-08-03" :skills []
+                  :tools [(tool "bash" "Run a command")])]
+    (is (str/starts-with? p "You are a coding assistant running inside kmet, a coding agent harness."))
+    (is (str/includes? p "<tools>\n- bash: Run a command\n\nAdditional tools may be available.\n</tools>"))
+    (is (str/includes? p "<rules>\n"))
+    (is (str/includes? p "<cwd>\n/work\n</cwd>"))
+    (is (not (str/includes? p "<docs>")) "pi's docs section is omitted")
+    (is (str/ends-with? p "\n\nCurrent date: 2026-08-03"))))
+
 (deftest the-tool-table-comes-from-the-caller
   (let [a (prompt :tools [(tool "read" "Read a file") (tool "grep" "Search files")]
                   :skills [])
@@ -125,40 +142,44 @@
     (is (not (str/includes? a "- bash:")))
     (is (str/includes? b "- bash: Run a command"))
     (is (not (str/includes? b "- read:")))
-    (is (str/includes? a "When a turn needs several tool calls")
+    (is (str/includes? a "- Be concise in your responses")
         "the always-on guidelines are not a tool's")))
 
 (deftest no-tool-table-means-no-tools
   ;; nil is the caller's "this engine has none", not "use the process's": the
   ;; builder has no registry to fall back to.
   (let [p (prompt :skills [])]
-    (is (str/includes? p "Available tools:\n(none)"))
+    (is (str/includes? p "<tools>\n(none)\n\nAdditional tools may be available.\n</tools>"))
     (is (not (str/includes? p "bash")))))
 
-(deftest the-skills-block-needs-the-read-tool
+(deftest the-skills-block-needs-a-reader
   (let [skills [{:name "deploy" :description "Ship it" :location "/tmp/deploy/SKILL.md"}
                 {:name "secret" :description "Hidden" :disable-model-invocation true}]
         with-read (prompt :tools [(tool "read" "Read a file")] :skills skills)
-        without-read (prompt :tools [(tool "bash" "Run a command")] :skills skills)]
+        with-bash (prompt :tools [(tool "bash" "Run a command")] :skills skills)
+        without-reader (prompt :tools [(tool "write" "Write a file")] :skills skills)]
     (is (str/includes? with-read "<available_skills>"))
     (is (str/includes? with-read "<name>deploy</name>"))
+    (is (str/includes? with-read "Use the read tool to load a skill's file"))
     (is (not (str/includes? with-read "secret"))
         "disable-model-invocation skills are never listed")
-    (is (not (str/includes? without-read "<available_skills>"))
-        "skills load through read, so no read tool means no block")))
+    (is (str/includes? with-bash "<available_skills>"))
+    (is (str/includes? with-bash "Use bash to load a skill's file"))
+    (is (not (str/includes? without-reader "<available_skills>"))
+        "skills load through read or bash, so no reader means no block")))
 
 (deftest the-date-line-ends-the-prompt
   (testing "the builder's default is the local date"
-    (is (re-find #"\nCurrent date: \d{4}-\d{2}-\d{2}$" (prompt :skills []))
+    (is (re-find #"\n\nCurrent date: \d{4}-\d{2}-\d{2}$" (prompt :skills []))
         "YYYY-MM-DD as the last line"))
   (testing "a caller can pin it"
     (let [p (prompt :date "2026-08-03" :cwd "/work" :skills [])]
-      (is (str/ends-with? p "\nCurrent date: 2026-08-03"))
-      (is (str/includes? p "Current working directory: /work"))
-      (is (< (.indexOf p "Current working directory:") (.indexOf p "Current date:")))))
+      (is (str/ends-with? p "\n\nCurrent date: 2026-08-03"))
+      (is (str/includes? p "<cwd>\n/work\n</cwd>"))
+      (is (< (.indexOf p "<cwd>") (.indexOf p "Current date:")))))
   (testing "a custom prompt carries it too"
     (is (str/ends-with? (prompt :custom-prompt "CUSTOM" :date "2026-08-03" :skills [])
-                        "\nCurrent date: 2026-08-03"))))
+                        "\n\nCurrent date: 2026-08-03"))))
 
 (deftest a-custom-prompt-still-carries-context-and-skills
   (let [p (prompt :custom-prompt "CUSTOM"
@@ -168,9 +189,10 @@
                   :tools [(tool "read" "Read a file")]
                   :skills [{:name "deploy" :description "Ship it"}])]
     (is (str/starts-with? p "CUSTOM"))
-    (is (str/includes? p "APPENDED"))
+    (is (str/includes? p "<addendum>\nAPPENDED\n</addendum>"))
     (is (str/includes? p "<project_instructions path=\"AGENTS.md\">\nrules\n"))
+    (is (str/includes? p "<skills>\n"))
     (is (str/includes? p "<name>deploy</name>"))
-    (is (str/includes? p "Current working directory: /work"))
-    (is (not (str/includes? p "Available tools:"))
+    (is (str/includes? p "<cwd>\n/work\n</cwd>"))
+    (is (not (str/includes? p "<tools>"))
         "a custom prompt replaces the built one, not just its first line")))

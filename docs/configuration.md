@@ -127,9 +127,13 @@ both authenticated; see the
 ## System prompts
 
 The system prompt (pi-compatible) is built from: the default (or `:system-prompt`)
-base, the active tools with one-line snippets, guidelines, `:append-system-prompt`,
-the project context (`AGENTS.md`/`CLAUDE.md` from `~/.kmet/agent` and the cwd's
-ancestors), the `<available_skills>` block, and the current working directory.
+base, `<tools>` with one-line snippets, `<rules>` (the active tools' guidelines,
+`:prompt-guidelines`, and the always-on rules), `:append-system-prompt` as
+`<addendum>`, the project context (`AGENTS.md`/`CLAUDE.md` from
+`~/.kmet/agent` and the cwd's ancestors) as `<project_context>`, the
+`<skills>` block, and `<cwd>`. Pi's `<docs>` section is omitted; kmet appends a
+`Current date` line after `<cwd>`. Skills are listed when a reader is active —
+`read` or `bash` — and `disable-model-invocation` skills are excluded.
 Pass `-nc`/`--no-context-files` to skip project-context discovery for one run.
 
 Like pi, prompt files are discovered when the config keys are unset:

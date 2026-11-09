@@ -1064,7 +1064,7 @@
           "context files load from the launch dir, not the active session's cwd")
       (is (= runtime-cwd (get-in @(:system-prompt-opts ag) [:cwd]))
           "the rebuilt prompt options carry the runtime cwd")
-      (is (str/includes? @(:system ag) (str "Current working directory: " runtime-cwd))
+      (is (str/includes? @(:system ag) (str "<cwd>\n" runtime-cwd "\n</cwd>"))
           "the prompt's cwd line does not revert to the launch dir")
       (is (str/includes? @(:system ag) "LAUNCH CONTEXT")
           "the launch dir's context files are in the rebuilt prompt"))))

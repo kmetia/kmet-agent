@@ -1,6 +1,6 @@
 (ns kmet.app.system-prompt
   "The `:systemPrompt` row and the prompt builder it provides: the ordered
-   sections (base text, tools, guidelines, project context, the skills block —
+   sections (base text, tools, rules, addendum, project context, skills, cwd —
    pi: core/system-prompt.js buildSystemPrompt), plus the builder a loop driver
    hands its state as `:system-prompt-fn`, over the `:skills` registry.
 
@@ -16,6 +16,12 @@
    The row provides the builder itself rather than a record around it, so a
    driver reads one value and calls it — the same keyword-argument shape the
    pure builder takes, which is also the shape `:system-prompt-fn` promises.
+
+   The prompt is pi's, section for section (base, tools, rules, addendum,
+   project context, skills, cwd): same text, same tags, same order. Two
+   deliberate differences: pi's docs section is omitted because kmet ships no
+   bundled docs at those paths, and a `Current date` line follows the cwd
+   section so the model knows the date without running `date`.
 
    The only default is `:cwd`, which falls back to the process working
    directory — the right answer unless a session carries its own, in which case
@@ -42,79 +48,83 @@
   "Format skills as an <available_skills> XML block per the Agent Skills
    standard (pi: formatSkillsForPrompt). Skills with
    disable-model-invocation=true are excluded — they can only be invoked
-   explicitly. Returns \"\" when no visible skills."
-  [skill-list]
-  (let [visible (remove :disable-model-invocation skill-list)]
-    (if (empty? visible)
-      ""
-      (str "\n\nThe following skills provide specialized instructions for specific tasks.\n"
-           "Use the read tool with the skill's exact <location> path to load its SKILL.md when the task matches its description.\n"
-           "When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.\n"
-           "Extension skills (locations like `ext-name:relative/path`) are served by the read tool from memory — pass the <location> string verbatim as the read path; they have no skill directory for relative refs.\n"
-           "\n<available_skills>\n"
-           (str/join "\n"
-                     (map (fn [s]
-                            (str "  <skill>\n"
-                                 "    <name>" (escape-xml (:name s)) "</name>\n"
-                                 "    <description>" (escape-xml (:description s)) "</description>\n"
-                                 (when (or (:location s) (:file-path s))
-                                   (str "    <location>" (escape-xml (or (:location s) (:file-path s))) "</location>\n"))
-                                 "  </skill>"))
-                          visible))
-           "\n</available_skills>"))))
+   explicitly. FILE-READ-TOOL names the tool the model uses to load a skill
+   (\"read\", \"bash\", or \"indirect\" when the reader is hidden); it
+   selects the hint line. Returns \"\" when no visible skills."
+  ([skill-list] (format-skills-for-prompt skill-list "read"))
+  ([skill-list file-read-tool]
+   (let [visible (remove :disable-model-invocation skill-list)]
+     (if (empty? visible)
+       ""
+       (str "\n\nThe following skills provide specialized instructions for specific tasks.\n"
+            (case file-read-tool
+              "read" "Use the read tool to load a skill's file when the task matches its description."
+              "bash" "Use bash to load a skill's file when the task matches its description."
+              "Load a skill's file when the task matches its description.")
+            "\nResolve relative paths against the skill's directory (parent of SKILL.md). Use absolute paths in tool calls.\n"
+            "\n<available_skills>\n"
+            (str/join "\n"
+                      (map (fn [s]
+                             (str "  <skill>\n"
+                                  "    <name>" (escape-xml (:name s)) "</name>\n"
+                                  "    <description>" (escape-xml (:description s)) "</description>\n"
+                                  "    <location>" (escape-xml (or (:location s) (:file-path s))) "</location>\n"
+                                  "  </skill>"))
+                           visible))
+            "\n</available_skills>")))))
 
 ;; ─── The prompt ───────────────────────────────────────────────────────────
 
 (def ^:private default-base-prompt
   "Default base prompt when no custom prompt is configured (pi: the default
-   prompt text embedded in buildSystemPrompt, adapted for kmet)."
-  "You are an expert coding assistant operating inside kmet, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.")
+   prompt text embedded in buildSystemPrompt, with pi → kmet)."
+  "You are a coding assistant running inside kmet, a coding agent harness. Help users inspect files, run commands, and modify code.")
 
 (defn- format-project-context
-  "Wrap context files in a <project_context> block (pi: buildSystemPrompt's
-   project context section)."
+  "Render context files as pi's project_context section body
+   (pi: renderProjectContext)."
   [context-files]
-  (str "\n\n<project_context>\n\n"
-       "Project-specific instructions and guidelines:\n\n"
-       (str/join "\n"
+  (str "Project-specific instructions and guidelines:\n\n"
+       (str/join "\n\n"
                  (map (fn [{:keys [path content]}]
                         (str "<project_instructions path=\"" path "\">\n"
                              content
                              "\n</project_instructions>"))
-                      context-files))
-       "\n\n</project_context>\n"))
+                      context-files))))
+
+(defn- tagged-section
+  "Wrap CONTENT in the tag NAME, as pi's buildSystemPromptSections does."
+  [name content]
+  (str "<" name ">\n" content "\n</" name ">"))
+
+(defn- shell-rule
+  "Pi's shell file-exploration rule, or nil when a dedicated search tool makes
+   it unnecessary."
+  [tool-set]
+  (when-not (some tool-set ["grep" "find" "ls"])
+    (cond
+      (and (tool-set "bash") (tool-set "powershell"))
+      "Use bash or PowerShell for file operations like listing, searching, and finding files"
+
+      (tool-set "powershell")
+      "Use PowerShell for file operations like listing, searching, and finding files"
+
+      (tool-set "bash")
+      "Use bash for file operations like ls, rg, find")))
 
 (defn- build-guidelines
-  "Assemble the de-duplicated Guidelines list (pi: buildSystemPrompt's
-   buildRules): the shell file-exploration rule when a shell tool is selected
-   and no dedicated search tool (grep/find/ls) is, then the tool and config
-   guidelines, then the always-on ones. The parallel-batching rule is kmet's
-   addition — pi has no parallel-tool-call guidance, while kmet's loop runs a
-   batch's calls in parallel by default
-   (kmet.app.loop.tool-exec/execute-tool-calls-parallel!)."
+  "Assemble the de-duplicated rules list (pi: buildRules): the shell rule, the
+   tool and config guidelines, then the always-on ones."
   [selected-tools guidelines]
-  (let [tool-set (set selected-tools)
-        has-bash? (contains? tool-set "bash")
-        has-powershell? (contains? tool-set "powershell")
-        has-search-tool? (boolean (some tool-set ["grep" "find" "ls"]))]
-    (-> []
-        (cond-> (and (or has-bash? has-powershell?) (not has-search-tool?))
-          (conj (cond
-                  (and has-bash? has-powershell?)
-                  "Use bash or PowerShell for file operations like listing, searching, and finding files"
-                  has-powershell?
-                  "Use PowerShell for file operations like listing, searching, and finding files"
-                  :else
-                  "Use bash for file operations like ls, rg, find")))
-        (into (map (fn [g] (str/trim (str g)))
-                   (filter (fn [g] (seq (str/trim (str g)))) guidelines)))
-        (conj (str "When a turn needs several tool calls, batch the independent ones "
-                   "into one message — they run in parallel, except eval calls, "
-                   "which serialize; put eval work in one call. Wait for a call's "
-                   "result only before using it."))
-        (conj "Be concise in your responses")
-        (conj "Show file paths clearly when working with files")
-        distinct)))
+  (distinct
+   (concat
+    (when-let [rule (shell-rule (set selected-tools))] [rule])
+    (keep (fn [g]
+            (let [g (str/trim (str g))]
+              (when (seq g) g)))
+          guidelines)
+    ["Be concise in your responses"
+     "Show file paths clearly when working with files"])))
 
 (defn build-system-prompt
   "Build the system prompt with tools, guidelines, context files, and skills
@@ -131,61 +141,63 @@
      :prompt-guidelines — extra guidelines, e.g. from config
      :skills        — seq of skill maps; nil means none
 
-   The skills section is appended only when the read tool is available, since
-   skills are loaded on demand via read (pi: hasRead check). Deviations from
-   pi: no pi-docs section (kmet ships no bundled docs); the parallel-batching
-   guideline is kmet's addition (pi has no parallel-tool-call guidance); the
-   `Current date` line is kept — pi dropped it because the daily change
-   invalidates the cached prompt prefix (pi f4e9ca746, #6621), while kmet
-   wants the model to know the date without running `date`. It closes the
-   prompt and is defaulted at call time, so a prompt rebuild picks up a new
-   day."
+   The sections are pi's — preamble, <tools>, <rules>, addendum,
+   <project_context>, <skills>, <cwd> — with two differences: pi's <docs>
+   section is omitted, and the prompt ends with a `Current date` line. The
+   skills section is emitted when a reader is selected: read or bash loads the
+   skill file (pi: skillFileReadTool), so bash-only sessions see skills too."
   [& {:keys [custom-prompt append-prompt cwd context-files tools
              prompt-guidelines skills date]
       :or {cwd (str (fs/cwd))
            date (str (java.time.LocalDate/now))}}]
   (let [selected-tools (mapv :name tools)
         tool-set (set selected-tools)
-        has-read (contains? tool-set "read")
+        file-read-tool (some tool-set ["read" "bash"])
         snippets (into {} (keep (fn [t]
                                   (when (seq (:prompt-snippet t))
                                     [(:name t) (:prompt-snippet t)])))
                        tools)
         tool-guidelines (mapcat #(or (:prompt-guidelines %) []) tools)
         context-files (or context-files [])
-        append-section (if (seq append-prompt) (str "\n\n" append-prompt) "")
+        prompt-cwd (str/replace (str cwd) #"\\" "/")
         project-context (when (seq context-files)
                           (format-project-context context-files))
-        skills-block (when (and has-read (seq skills))
-                       (format-skills-for-prompt skills))
-        prompt-cwd (str/replace (str cwd) #"\\" "/")]
-    (if (seq custom-prompt)
-      (str custom-prompt
-           append-section
-           project-context
-           skills-block
-           "\nCurrent working directory: " prompt-cwd
-           "\nCurrent date: " date)
-      (let [visible-tools (filter #(contains? snippets %) selected-tools)
-            tools-list (if (seq visible-tools)
-                         (str/join "\n" (map (fn [name]
-                                               (str "- " name ": " (get snippets name)))
-                                             visible-tools))
-                         "(none)")
-            guidelines (str/join "\n"
-                                 (map #(str "- " %)
-                                      (build-guidelines selected-tools
-                                                        (concat tool-guidelines
-                                                                prompt-guidelines))))]
-        (str default-base-prompt
-             "\n\nAvailable tools:\n" tools-list
-             "\n\nIn addition to the tools above, you may have access to other custom tools depending on the project."
-             "\n\nGuidelines:\n" guidelines
-             append-section
-             project-context
-             skills-block
-             "\nCurrent working directory: " prompt-cwd
-             "\nCurrent date: " date)))))
+        skills-block (when (and file-read-tool (seq skills))
+                       (str/trim (format-skills-for-prompt skills file-read-tool)))
+        cwd-section (tagged-section "cwd" prompt-cwd)
+        date-line (str "Current date: " date)
+        common-sections [(when (seq append-prompt)
+                           (tagged-section "addendum" append-prompt))
+                         (when project-context
+                           (tagged-section "project_context" project-context))
+                         (when (seq skills-block)
+                           (tagged-section "skills" skills-block))
+                         cwd-section
+                         date-line]]
+    (str/join
+     "\n\n"
+     (remove empty?
+             (if (seq custom-prompt)
+               (into [custom-prompt] common-sections)
+               (let [visible-tools (filter #(contains? snippets %) selected-tools)
+                     tools-list (if (seq visible-tools)
+                                  (str/join "\n"
+                                            (map (fn [name]
+                                                   (str "- " name ": " (get snippets name)))
+                                                 visible-tools))
+                                  "(none)")
+                     guidelines (str/join "\n"
+                                          (map #(str "- " %)
+                                               (build-guidelines
+                                                selected-tools
+                                                (concat tool-guidelines
+                                                        prompt-guidelines))))]
+                 (into [default-base-prompt
+                        (tagged-section "tools"
+                                        (str tools-list
+                                             "\n\nAdditional tools may be available."))
+                        (tagged-section "rules" guidelines)]
+                       common-sections)))))))
 
 (defn- registered-skills
   "SKILLS' effective skills in display order — one per name, from the owner
