@@ -75,7 +75,9 @@ id prefix, or file path. A resumed session continues with its history and
 its recorded working directory. `-r/--resume` browses sessions interactively
 and is TUI-only; print refuses it by name. RPC and the server open a fresh
 session per run and refuse all three flags instead of silently starting the
-fresh session they exist to prevent.
+fresh session they exist to prevent. An explicit `--session` wins over both
+continuation flags in every profile: `--continue` and `--resume` are ignored
+when it is present.
 
 `--mode edn` (implies `--print`) writes the machine-readable variant to
 stdout: the session header line, then every public event as one EDN map

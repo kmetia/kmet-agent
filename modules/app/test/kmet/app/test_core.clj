@@ -303,7 +303,12 @@
   (is (= :kmet.app/bad-args (error-type #(core/parse-args ["--session"])))
       "--session takes a value")
   (is (= :tui (:profile (core/parse-args ["-c"])))
-      "continuing needs no mode: the default profile is the TUI, which has one"))
+      "continuing needs no mode: the default profile is the TUI, which has one")
+  (let [opts (core/parse-args ["--session" "1a001ea0a00" "--continue" "--resume"])]
+    (is (= "1a001ea0a00" (:session opts)))
+    (is (nil? (:continue? opts)))
+    (is (nil? (:resume? opts)))
+    "an explicit session wins over both continuation flags"))
 
 (deftest parse-args-takes-kmet1s-run-flags
   ;; kmet1's run flags, in kmet1's spellings: the thinking level, the prompt

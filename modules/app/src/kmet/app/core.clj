@@ -339,14 +339,25 @@
   (or (get flag-rows flag)
       (some (fn [row] (when ((:when row) arg flag) row)) shape-rows)))
 
+(defn- explicit-session-wins
+  "An explicit session is the more specific answer: `--session` suppresses
+   `-c/--continue` and `-r/--resume` in every mode, so no mode sees two answers
+   to which session it opens."
+  [opts]
+  (if (:session opts)
+    (dissoc opts :continue? :resume?)
+    opts))
+
 (defn- finish-opts
   "OPTS once every argument is read: the mode applied, the default profile
    filled in. Asking for more than one of the three dumps is a usage error —
    they are different views of one composition, so a silent pick would hide
-   the other requests."
+   the other requests. An explicit `--session` drops the two continuation
+   flags, so every mode sees one answer."
   [opts]
   (let [opts (-> (resolve-mode opts)
-                 (update :profile #(or % profile/default-profile)))]
+                 (update :profile #(or % profile/default-profile))
+                 explicit-session-wins)]
     (when (> (count (filter opts [:dump-config? :dump-default-config?
                                   :dump-state?]))
              1)
@@ -368,7 +379,8 @@
    `--append-system-prompt`/`--models`/`--tools`/`--session-dir` the run's
    (resolved and then applied by the mode — `kmet.app.invocation`). `--tools`
    is a plain allowlist or only `+name`/`-name` modifiers; mixing the two is a
-   usage error, as in pi. An `@file` argument is
+   usage error, as in pi. `--session` suppresses `-c/--continue` and
+   `-r/--resume` before any mode sees them. An `@file` argument is
    read into `:args` as kmet1 reads it. An unsupported `--flag` is an extension
    flag (`:ext-flags`), kmet1's three forms; a single-dash unknown flag stays a
    usage error. The three dumps are different views of one composition, so
