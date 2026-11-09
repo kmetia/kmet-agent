@@ -1,0 +1,4 @@
+{:id "repair-total"
+ :prompt "The project's test suite fails because calc/total drops the last element. Fix the bug, then run `bb test` until it passes."
+ :tags [:edit :test]
+ :timeout-seconds 300}

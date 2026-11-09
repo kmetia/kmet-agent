@@ -1,0 +1,4 @@
+{:id "rename-and-update"
+ :prompt "Rename app.util/old-name to summarize throughout the project, including the README. Update every caller and keep `bb test` passing."
+ :tags [:edit :search]
+ :timeout-seconds 300}

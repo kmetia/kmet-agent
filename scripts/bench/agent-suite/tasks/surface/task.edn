@@ -1,0 +1,4 @@
+{:id "surface"
+ :prompt "Reply with exactly this word and nothing else: READY"
+ :tags [:calibration]
+ :timeout-seconds 120}

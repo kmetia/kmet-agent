@@ -138,6 +138,9 @@
   check-bundled-extensions {:doc "Validate the committed bundled-extensions manifest against extensions/\n\nChecks completeness, extension.edn shape, strict ns layout and deps.edn restrictions; the same check the packagers run before staging."
                             :requires ([kmet.tasks.build :as build])
                             :task (help/with-help (build/check-bundled-extensions!))}
+  bench-tools {:doc "Benchmark agent tool modes (eval vs bash) on isolated tasks\n\nRuns each task in a clean workspace through kmet print mode, parses the session log for tokens, cost, turns, tool calls and result size, verifies it with the task's check script, and writes an EDN result plus a Markdown report. The default modes are bash-only and eval-only; `--patch` changes the prompt, guidelines or tools under test, `--repeats` gives paired samples, and `bb bench-tools compare` compares two result files.\n\nUsage: bb bench-tools [run|list|compare|analyze] [options]; `bb bench-tools --help` for the full reference. See scripts/bench/README.md."
+               :requires ([kmet.tasks.bench :as bench])
+               :task (apply bench/-main *command-line-args*)}
   slop    {:doc "SCBench-style slop metrics over a Clojure tree: verbosity, erosion\n\nOutliers only, compared to the paper's human/agent reference rows; source trees only by default (`--test` adds `test/` and `extensions/*/test`); `--dups` lists duplicate groups — the clone groups behind the clone-line count plus the shape-identical defns the clone floor misses — instead of the outlier listings; `bb slop --help` for the path argument, --top, --test and --dups."
            :requires ([kmet.tasks.slop :as slop])
            :task (apply slop/-main *command-line-args*)}

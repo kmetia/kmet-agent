@@ -1,0 +1,7 @@
+{:paths ["src" "test"]
+ :tasks {test {:task (do
+                       (require 'clojure.test)
+                       (require 'app.core-test)
+                       (let [{:keys [fail error]} (clojure.test/run-tests 'app.core-test)]
+                         (when (pos? (+ fail error))
+                           (System/exit 1))))}}}

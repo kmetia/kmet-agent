@@ -28,6 +28,7 @@ global.**
 | Application layout and contributor workflow | [`docs/architecture.md`](docs/architecture.md) |
 | Kernel: ctx tree, services, inject, fibers, effects, events | usage: [`modules/srce/README.md`](modules/srce/README.md); contracts: [`modules/srce/src/kmet/srce/srce.md`](modules/srce/src/kmet/srce/srce.md) |
 | kmet2 application: composition, services, agents, sessions, tools and the script sandbox | [`docs/architecture.md`](docs/architecture.md); open seams and declined options in [`modules/app/src/kmet/design.md`](modules/app/src/kmet/design.md) |
+| Agent efficiency benchmark (eval vs bash, prompt/guideline/tool variants) | [`scripts/bench/README.md`](scripts/bench/README.md) |
 | TUI, components, Hiccup, reactivity, input, and rendering | [`modules/tui/src/kmet/tui/tui.md`](modules/tui/src/kmet/tui/tui.md) |
 | Tk backend and its widget sample (`kmet.tk.*`, `kmet.gui-sample.*`) | [`modules/tk/src/kmet/tk/README.md`](modules/tk/src/kmet/tk/README.md) |
 | Extension contract (`kmet.extension` API, allowed namespaces, lifecycle) | [`modules/app/src/kmet/extension.md`](modules/app/src/kmet/extension.md) |

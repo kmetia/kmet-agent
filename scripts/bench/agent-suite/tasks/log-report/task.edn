@@ -1,0 +1,4 @@
+{:id "log-report"
+ :prompt "Write report.txt with exactly two lines: ok=<count of 200 responses> and top=<most frequent request path among all requests>. If several paths tie, use the lexicographically smallest."
+ :tags [:shell :report]
+ :timeout-seconds 300}
