@@ -201,9 +201,14 @@ pass).
 - Layers apply in order: the built-in table < `~/.kmet/agent/patch.edn` <
   `.kmet/patch.edn` < `--patch FILE` (repeatable). `--dump-default-config`
   prints the built-in table alone, and `kmet plugins` edits the two ambient
-  layers through `kmet.app.extensions.layers`. A profile still comes only from
-  the built-in table: there is no named home profile and no project-shipped
-  profile table. (dsh applies its home-level patch *after* the profile's own
+  layers through `kmet.app.extensions.layers`. Before the composition is
+  described, the entry drops from the two ambient layers any row or patch
+  insert naming an `:ext/<id>` no installed extension answers to, and the
+  remove or config patches that only targeted those rows — with a warning,
+  saving the file — so a retired extension's row heals instead of failing the
+  boot; a `--patch` file keeps failing, since it is not kmet's to edit. A
+  profile still comes only from the built-in table: there is no named home
+  profile and no project-shipped profile table. (dsh applies its home-level patch *after* the profile's own
   rows and has no project layer; kmet puts both ambient layers before the
   profile's own rows and the `--patch` files, the usual project-over-user
   order.)

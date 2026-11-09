@@ -7,7 +7,10 @@
    rows and **boots** them (`kmet.app.runtime`), which is what proves a profile
    mounts. Two ambient layers apply to every profile — `~/.kmet/agent/patch.edn`
    then `.kmet/patch.edn` — and `--dump-default-config` prints the built-in
-   table without them. `--dump-state` is the other half of an inspection: it
+   table without them. A row in one of them naming an extension that is not
+   installed is removed when the run resolves the layers, with a warning and
+   the file saved: a retired extension's row heals instead of failing the
+   boot, while an explicit `--patch` file stays strict. `--dump-state` is the other half of an inspection: it
    boots the same rows and prints the ctx tree the boot produced
    (`kmet.app.inspect`), which is the one question a composition listing cannot
    answer — what is `:pending` and on what, what failed and with which error.
@@ -44,6 +47,7 @@
             [clojure.string :as str]
             [kmet.app.config :as cfg]
             [kmet.app.debug :as debug]
+            [kmet.app.extensions.layers :as layers]
             [kmet.app.packages-cli :as packages-cli]
             [kmet.app.maintenance :as maintenance]
             [kmet.app.version :as version]
@@ -408,14 +412,30 @@
         composed (profile/compose (map catalog/describe-layer layers))]
     (assoc composed :profile chosen)))
 
+(defn- heal-user-layers!
+  "Remove from the ambient layer files PATHS the rows that name an extension
+   which is not installed, warning once per removed source. The row names an
+   artifact that is gone — kmet's own retired `:ext/tools`, or a deleted dev
+   extension — so the run saves the layer without it instead of failing a boot
+   a warning cannot fix."
+  [paths]
+  (doseq [{:keys [path sources]} (layers/prune-unknown-extensions! paths)
+          source sources]
+    (binding [*out* *err*]
+      (println (str "Warning: removed " (pr-str source) " from " path
+                    " — no installed extension has that name.")))))
+
 (defn- apply-user-layers
   "OPTS with the ambient layer paths a run applies: the agent dir's patch.edn
-   then the project's. `--dump-default-config` asks for the built-in table
-   alone, so it drops them and the `--patch` flags."
+   then the project's, each healed of rows naming an extension that is not
+   installed. `--dump-default-config` asks for the built-in table alone, so it
+   drops them and the `--patch` flags."
   [opts]
   (if (:dump-default-config? opts)
     (assoc opts :user-layer-paths [] :patch [])
-    (assoc opts :user-layer-paths (cfg/patch-paths))))
+    (let [paths (cfg/patch-paths)]
+      (heal-user-layers! paths)
+      (assoc opts :user-layer-paths paths))))
 
 (defn- dump-config
   "The `--dump-config` text: the composed rows the boot would mount, without

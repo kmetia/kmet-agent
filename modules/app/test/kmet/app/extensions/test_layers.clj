@@ -1,13 +1,15 @@
 (ns kmet.app.extensions.test-layers
   "kmet.app.extensions.layers — the plugin rows of the two ambient
    composition layers: what they compose, the per-scope state the config
-   screen shows, and the writes its toggles make."
+   screen shows, the writes its toggles make, and the startup pruning of rows
+   naming an uninstalled extension."
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.app.config :as cfg]
             [kmet.app.extensions.layers :as layers]
+            [kmet.app.packages :as packages]
             [kmet.app.profile :as profile]
             [kmet.test-tmp :as test-tmp]))
 
@@ -363,3 +365,101 @@
         (is (thrown? clojure.lang.ExceptionInfo
                      (layers/enable-global! :ext/a)))
         (is (= before (slurp global)) "the write refuses to clobber it")))))
+
+;; ─── Startup healing ─────────────────────────────────────────────────────
+
+(defn- with-installed
+  "Run F with the installed extensions replaced by PATHS, so resolution never
+   reads the developer's real extensions."
+  [paths f]
+  (with-redefs [packages/resolve-configured-packages
+                (constantly {:extensions (mapv (fn [path]
+                                                 {:path path :enabled true
+                                                  :metadata {}})
+                                               paths)})]
+    (f)))
+
+(deftest prunes-rows-naming-an-unknown-extension
+  (with-installed ["test/fixtures/ext-single/hello_ext.clj"]
+    (fn []
+      (with-layers
+        (fn [{:keys [global]}]
+          (spit global (str ";; keep me\n"
+                            "{:rows [{:id :ext/hello_ext :plugin :ext/hello_ext}\n"
+                            "        {:id :gone :plugin :ext/gone}]\n"
+                            " :patch [{:id :grep :plugin :ext/grep-tool}\n"
+                            "         {:id :ext/gone :config {:a 1}}]}\n"))
+          (is (= [{:path global :sources [:ext/gone :ext/grep-tool]}]
+                 (layers/prune-unknown-extensions! [global]))
+              "the unknown sources are reported in file order, once each")
+          (is (= {:rows [{:id :ext/hello_ext :plugin :ext/hello_ext}]
+                  :patch []}
+                 (read-layer global))
+              (str "the unknown rows and inserts are gone, and so is the"
+                   " config patch that only targeted one"))
+          (is (str/starts-with? (slurp global) ";; keep me")
+              "the leading comment survives the write")
+          (is (= [] (layers/prune-unknown-extensions! [global]))
+              "a second run finds nothing to remove"))))))
+
+(deftest pruning-leaves-a-missing-or-malformed-layer-alone
+  (with-installed []
+    (fn []
+      (with-layers
+        (fn [{:keys [global project]}]
+          (is (= [] (layers/prune-unknown-extensions! [global])))
+          (is (not (fs/exists? global)) "a missing layer is not created")
+          (spit global "{:rows")
+          (is (= [] (layers/prune-unknown-extensions! [global])))
+          (is (= "{:rows" (slurp global)) "a malformed file is not rewritten")
+          (testing "a malformed layer beside a healed one is not touched"
+            (spit global (pr-str {:rows [{:id :gone :plugin :ext/gone}]
+                                  :patch []}))
+            (spit project "{:rows")
+            (is (= [{:path global :sources [:ext/gone]}]
+                   (layers/prune-unknown-extensions! [global project])))
+            (is (= "{:rows" (slurp project)))
+            (is (= {:rows [] :patch []} (read-layer global)))))))))
+
+(deftest pruning-leaves-a-row-the-compose-rejects-for-another-reason
+  (with-installed []
+    (fn []
+      (with-layers
+        (fn [{:keys [global]}]
+          (write-layer! global {:rows [{:id :ext/gone}] :patch []})
+          (is (= [] (layers/prune-unknown-extensions! [global])))
+          (is (= {:rows [{:id :ext/gone}] :patch []} (read-layer global))
+              "a row the compose rejects for another reason is not silently dropped"))))))
+
+(deftest pruning-drops-a-remove-patch-for-a-retired-extension
+  (with-installed []
+    (fn []
+      (with-layers
+        (fn [{:keys [global]}]
+          (write-layer! global {:rows [] :patch [{:id :ext/tools :remove true}]})
+          (is (= [{:path global :sources [:ext/tools]}]
+                 (layers/prune-unknown-extensions! [global]))
+              "the patch's own id names the missing extension")
+          (is (= {:rows [] :patch []} (read-layer global))))))))
+
+(deftest pruning-drops-patches-that-only-targeted-a-pruned-row
+  (with-installed ["test/fixtures/ext-single/hello_ext.clj"]
+    (fn []
+      (with-layers
+        (fn [{:keys [global project]}]
+          (write-layer! global {:rows [{:id :ext/hello_ext :plugin :ext/hello_ext}
+                                       {:id :gone :plugin :ext/gone}]
+                                :patch []})
+          (write-layer! project {:rows []
+                                 :patch [{:id :gone :remove true}
+                                         {:id :ext/hello_ext :config {:a 1}}]})
+          (is (= [{:path global :sources [:ext/gone]}]
+                 (layers/prune-unknown-extensions! [global project]))
+              "only the layer a source left is reported")
+          (is (= {:rows [{:id :ext/hello_ext :plugin :ext/hello_ext}]
+                  :patch []}
+                 (read-layer global)))
+          (is (= {:rows [] :patch [{:id :ext/hello_ext :config {:a 1}}]}
+                 (read-layer project))
+              (str "a project remove patch dies with the global row it"
+                   " targeted; a patch on a row that still composes stays")))))))

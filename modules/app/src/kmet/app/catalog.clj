@@ -12,7 +12,11 @@
    A source that does not resolve is a composition error, reported by
    `--dump-config` as well as by boot: a var source that is not there is
    `:kmet.app/unknown-plugin`, an extension id that is not installed is
-   `:kmet.app/unknown-extension` — both a typo, not a runtime condition. A var
+   `:kmet.app/unknown-extension` — both a typo, not a runtime condition. The
+   entry heals the two ambient layers first
+   (`kmet.app.extensions.layers/prune-unknown-extensions!`), so an unknown id
+   reaches this description only from a profile row or an explicit `--patch`
+   file. A var
    whose namespace **fails to load** is not a typo, so the load error travels
    with the report (the message names its file:line, `:load-error` holds it,
    and it stays the cause) instead of the row reading as absent. An `:ext/…`

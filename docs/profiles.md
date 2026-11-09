@@ -77,7 +77,12 @@ them:
 
 A missing file is not a layer; an existing one is read and validated like a
 `--patch` file, so a malformed file fails the composition by name rather than
-being ignored.
+being ignored. A row or insert patch naming an `:ext/<id>` that no installed
+extension answers to is removed when the run resolves the layer, with a
+warning, and the file is saved without it — as is a remove or config patch
+that only targeted the row. The two ambient layers are kmet's to maintain
+(`kmet plugins` writes them); an explicit `--patch` file stays strict and
+fails the composition instead.
 
 The application order is **built-in table, global, project, then each
 `--patch` flag in the order given**, so a project layer overrides a global one
@@ -108,9 +113,10 @@ The id is the manifest `:name`, or a single file's basename without `.clj`
 be omitted until another layer needs to patch the row. Resolution reads the
 installed set — top-level settings paths, `~/.kmet/agent/extensions` and
 `.kmet/extensions`, packages, and the bundled artifacts — without loading
-anything, so `--dump-config` names the row and an unknown id is a composition
-error before boot. The first copy in pi precedence wins, so a user's copy
-shadows a bundled one.
+anything, so `--dump-config` names the row. An unknown id in a profile row or
+an explicit `--patch` file is a composition error before boot; in the two
+ambient layers it is dropped with a warning instead (see *Your own layers*).
+The first copy in pi precedence wins, so a user's copy shadows a bundled one.
 
 Settings no longer enable an extension: `:extensions` paths and package
 sources are discovery, and the retired `:bundled-extensions` key does not

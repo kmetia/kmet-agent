@@ -175,8 +175,11 @@ single file defines `plugin`, strict ns-path layout, `deps.edn` with only
 `:deps` and no `:local/root`).
 
 The bundled `tools` extension was replaced by the builtin `/tools` session
-selector and removed from the manifest. Delete any `:ext/tools` row from a
-patch layer; a row naming a missing artifact fails the composition.
+selector and removed from the manifest. A stale `:ext/tools` row in an ambient
+layer (`~/.kmet/agent/patch.edn` or `.kmet/patch.edn`) is removed when a run
+starts, with a warning, and the file is saved without it — a remove or config
+patch that only targeted the row goes with it. An explicit `--patch` file
+still fails the composition, so a layer kmet does not own is never edited.
 
 To develop against an edited copy, symlink (or copy) an extension into the
 global or project extensions dir:

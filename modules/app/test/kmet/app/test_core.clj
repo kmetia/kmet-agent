@@ -3,7 +3,8 @@
    --dump-config over the composition (the same composition a boot would
    mount), and --dump-state over the tree that boot produces, including the
    errors an unreadable or malformed layer raises."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [kmet.app.config :as cfg]
@@ -486,6 +487,34 @@
         (is (str/includes? out "inject={:tools nil}"))
         (is (str/includes? out "config={:a 1, :b {:c 2}}")
             "the row's config and the patch's deep-merge"))
+      (finally (io/delete-file path true)))))
+
+(deftest dump-config-heals-an-ambient-stale-extension-row
+  ;; The motivating case: the bundled `tools` extension retired, and a global
+  ;; patch.edn still composes :ext/tools. Startup removes the row instead of
+  ;; failing a boot no warning could fix; a --patch file stays strict.
+  (let [path (scratch-patch! (str "{:rows [{:id :ext/tools :plugin :ext/tools}]\n"
+                                  " :patch []}\n"))]
+    (try
+      (with-redefs [cfg/patch-paths (fn [] [path])]
+        (let [{:keys [code out err]} (support/run-main ["--dump-config"])]
+          (is (zero? code) "the stale row no longer fails the composition")
+          (is (str/starts-with? out "profile :tui rows=28 patches=1"))
+          (is (str/includes? err "Warning: removed :ext/tools")
+              "the removal is announced on stderr")
+          (is (= {:rows [] :patch []} (edn/read-string (slurp path)))
+              "the layer is saved without the row")))
+      (finally (io/delete-file path true)))))
+
+(deftest an-explicit-patch-file-is-not-healed
+  (let [path (scratch-patch! (str "{:rows [{:id :ext/tools :plugin :ext/tools}]\n"
+                                  " :patch []}\n"))]
+    (try
+      (let [{:keys [code err]} (support/run-main ["--dump-config" "--patch" path])]
+        (is (= 1 code))
+        (is (str/includes? err "unknown extension :ext/tools"))
+        (is (str/includes? (slurp path) ":ext/tools")
+            "the caller's file is never rewritten"))
       (finally (io/delete-file path true)))))
 
 (deftest dump-config-reports-a-bad-layer

@@ -15,6 +15,10 @@
    reported as `:error` on that layer's record and composes as empty, so the
    plugin screen still opens (the run itself fails at compose with the usual
    `:kmet.app/bad-patch-file`). Writing refuses to touch a malformed file.
+   `prune-unknown-extensions!` is the one write a run makes without a toggle:
+   a row naming an extension that is not installed is dropped from the layer
+   (and the file saved) before the composition reads it, with the remove and
+   config patches left dangling.
 
    The composition mirrors `kmet.app.profile/compose` for extension rows:
    rows add, a patch with a `:plugin` adds or replaces by id, and a `:remove`
@@ -228,6 +232,81 @@
           false
           (do (write-layer! path next)
               true))))))
+
+(defn- uninstalled?
+  "True when SOURCE is an `:ext/<id>` id no installed extension answers to —
+   the source a compose would reject with `:kmet.app/unknown-extension`."
+  [source]
+  (and (rows/source? source)
+       (nil? (rows/entry source))))
+
+(defn- unknown-extension?
+  "True when ENTRY composes an extension that is not installed."
+  [entry]
+  (uninstalled? (:plugin entry)))
+
+(defn prune-unknown-extensions!
+  "Remove from the readable layer files PATHS the rows and patch inserts whose
+   `:ext/<id>` source names no installed extension, along with the remove and
+   config patches whose id is left dangling by that removal (or is itself an
+   absent `:ext/<id>`), and save each changed file. Returns
+   `[{:path path :sources [source …]} …]` for the layers a source was removed
+   from, in the order the files were read; a missing or malformed file is left
+   alone (the compose reports a malformed one). The check is `rows/entry`, the
+   resolver the compose uses, so the rows and inserts removed are exactly the
+   unknown-extension entries that would fail the composition."
+  [paths]
+  (let [readable (filterv (complement :error) (mapv read-layer paths))
+        entries (fn [layer] (concat (:rows (:data layer)) (:patch (:data layer))))
+        unknowns (into {}
+                       (map (fn [layer]
+                              [(:path layer)
+                               (filterv unknown-extension? (entries layer))]))
+                       readable)
+        ;; a remove or config patch naming an `:ext/…` id with no artifact
+        ;; behind it, or targeting the id of a row a pruned entry carried
+        stale-ids (into #{}
+                        (comp (mapcat #(:patch (:data %)))
+                              (remove :plugin)
+                              (map :id)
+                              (filter uninstalled?))
+                        readable)
+        doomed (into stale-ids (map row-id) (mapcat val unknowns))
+        composed (into #{}
+                       (comp (remove unknown-extension?)
+                             (filter :plugin)
+                             (map row-id))
+                       (mapcat entries readable))
+        dangling (into #{} (remove composed) doomed)]
+    (into []
+          (keep (fn [{:keys [path data]}]
+                  (let [unknown-sources (into []
+                                              (comp (map :plugin) (distinct))
+                                              (get unknowns path))
+                        gone (set unknown-sources)
+                        stale (into []
+                                    (comp (remove :plugin)
+                                          (filter #(contains? dangling (:id %)))
+                                          (map :id)
+                                          (filter uninstalled?)
+                                          (distinct))
+                                    (:patch data))
+                        sources (vec (distinct (concat unknown-sources stale)))
+                        drop-row? #(contains? gone (:plugin %))
+                        drop-patch? (fn [patch]
+                                      (or (contains? gone (:plugin patch))
+                                          (and (not (:plugin patch))
+                                               (contains? dangling (:id patch)))))]
+                    (when (and (or (seq sources) (seq dangling))
+                               (fs/exists? path))
+                      (update-layer!
+                       path
+                       (fn [rows patches]
+                         [(into [] (remove drop-row?) rows)
+                          (into [] (remove drop-patch?) patches)])))
+                    (when (seq sources)
+                      {:path path :sources sources})))
+                readable))))
 
 (defn- without-source
   "ROWS/PATCHES with this layer's own enablement of SOURCE removed, as
