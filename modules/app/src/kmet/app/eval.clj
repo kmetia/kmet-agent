@@ -524,7 +524,7 @@
          (str/join ", " (map report-entry-label
                              (take build-report-name-limit entries)))
          (when (pos? more)
-           (str "; … " more " more; (eval/library) lists them"))
+           (str "; … " more " more; (eval/library) for all"))
          "]")))
 
 (defn- failure-line
@@ -638,27 +638,6 @@
    "clj/nrepl-eval" {:name "clj/nrepl-eval" :kind :verb
                      :doc "Evaluate Clojure code in a running nREPL server (same arguments as the clojure_eval tool)."
                      :arglists '([args])}
-   "tools/call" {:name "tools/call" :kind :verb
-                 :doc "Call a tool by name and return its derefable promise."
-                 :arglists '([name] [name args])}
-   "tools/call!" {:name "tools/call!" :kind :verb
-                  :doc "Call a tool, deref the result and throw when it failed."
-                  :arglists '([name] [name args])}
-   "tools/list" {:name "tools/list" :kind :verb
-                 :doc "The active tool surface."
-                 :arglists '([])}
-   "tools/describe" {:name "tools/describe" :kind :verb
-                     :doc "Describe one active tool."
-                     :arglists '([name])}
-   "tools/ok?" {:name "tools/ok?" :kind :verb
-                :doc "True when a tool result is not an error."
-                :arglists '([result])}
-   "tools/text" {:name "tools/text" :kind :verb
-                 :doc "The text content of a tool result."
-                 :arglists '([result])}
-   "tools/error" {:name "tools/error" :kind :verb
-                  :doc "The error text of a failed tool result, or nil."
-                  :arglists '([result])}
    "eval/library" {:name "eval/library" :kind :verb
                    :doc "List every loaded library definition with its scope."
                    :arglists '([])}
@@ -685,7 +664,7 @@
                 :arglists '([] [what])}})
 
 (def ^:private system-namespaces
-  #{"core" "clj" "tools" "eval" "clojure" "clojure.core"
+  #{"core" "clj" "eval" "clojure" "clojure.core"
     "babashka.process" "kmet.libs.http" "kmet.libs.json"
     "kmet.libs.markdown" "kmet.libs.yaml"})
 
@@ -780,16 +759,15 @@
    (let [entry (describe-entry env name)]
      (if (nil? key) (describe-view entry) (get entry key)))))
 
-(defn- builtin-help-line [] "Built-in verbs: core/* runtime, clj/* Clojure helpers, tools/* active tools, eval/* library. (eval/help) lists each with its summary; (eval/help 'name) shows its contract.")
+(defn- builtin-help-line [] "Built-in verbs: core/* runtime, clj/* Clojure helpers, eval/* library. (eval/help) lists each with its summary; (eval/help 'name) shows its contract.")
 
 (defn- verb-family
   [name]
   (case (namespace (symbol (str name)))
     "core" 0
     "clj" 1
-    "tools" 2
-    "eval" 3
-    4))
+    "eval" 2
+    3))
 
 (defn- first-sentence
   [text]
@@ -820,7 +798,7 @@
 
 (defn- scope-help [env] (str "Scope: cwd " (get-in env [:roots :cwd]) " (shadows the global layer)" "\n       global " (get-in env [:roots :global]) "\nNew definitions write to cwd; pass :scope :global for a new global " "name. A redefinition keeps the active layer."))
 
-(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate to keep it; a defmethod is " "saved with its loaded multimethod. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. System namespaces (core, clj, tools, eval) are read-only; " "ext.* definitions stay live-only. Drop/forget resolve unqualified names in the " "namespace the call ends in; a file that also defines other addresses " "must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed."))
+(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate to keep it; a defmethod is " "saved with its loaded multimethod. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. System namespaces (core, clj, eval) are read-only; " "ext.* definitions stay live-only. Drop/forget resolve unqualified names in the " "namespace the call ends in; a file that also defines other addresses " "must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed."))
 
 (defn- core-help
   []
@@ -834,7 +812,7 @@
        "(core/sh [\"cmd\" \"arg\"] {:in text})."
        "\nLocal let/fn bindings are scratch; the next call starts in the "
        "namespace the previous call ended in."
-       "\nOwnership: define in user; core, clj, tools and eval are read-only; "
+       "\nOwnership: define in user; core, clj and eval are read-only; "
        "ext.* is live-only."
        "\nEval verbs: (eval/library), (eval/sources), (eval/describe 'name), "
        "(eval/describe 'name key), (eval/forget 'name), "
@@ -880,7 +858,6 @@
          "or (eval/help 'name)."
          "\n" (source-help env)
          "\nBuilt-in verbs:\n" (str/join "\n" (builtin-verb-lines))
-         "\nActive tools: (tools/list) lists them; each is also a tools/<name> var."
          "\nLibrary: " (count entries) " saved, "
          (count session-only) " session-only; (eval/help :library) lists both."
          "\n" (scope-help env)
@@ -1202,29 +1179,14 @@
           (str "[eval: moved " name " (" (scope-label current) " → " (scope-label target) ")]"))))))
 
 (defn- prime-state
-  "A prepared state for evaluating library definitions at rebuild: the current
-   tool surface is installed so a definition that names a tool var compiles,
-   with an inert dispatcher and a discarded emit channel until a real call
-   binds its state."
-  [service cwd source-namespaces]
-  (let [handle (srce/get (:agent-ctx service) :tools)]
-    (script/prepare {:tool "eval"
-                     :cwd cwd
-                     :source-namespaces source-namespaces
-                     :get-all-tools (if handle
-                                      #(registry/get-all-tools handle)
-                                      (constantly {}))
-                     :get-contributed-tools (if handle
-                                              #(registry/get-contributed-tools handle)
-                                              (constantly {}))
-                     ;; a rebuild compiles definitions, not calls them: keep
-                     ;; every registry tool in the surface so a definition
-                     ;; naming a currently-disabled tool still loads
-                     :select-tools (fn [all opts]
-                                     (registry/select-tools all (assoc opts :enabled nil)))
-                     :execute-tool (fn [& _]
-                                     {:content "tools are not callable during rebuild"
-                                      :is-error true})})))
+  "A prepared state for evaluating library definitions at rebuild: no tool
+   surface is installed, and a discarded emit channel holds until a real
+   call binds its state."
+  [cwd source-namespaces]
+  (script/prepare {:tool "eval"
+                   :cwd cwd
+                   :source-namespaces source-namespaces
+                   :tools? false}))
 
 (defn- request-forget!
   "Record `(eval/forget 'NAME)` for the caller to apply after evaluation. An
@@ -1310,7 +1272,7 @@
               bash-tool/*session-env-fn* bash-tool/*session-env-fn*
               read-tool/*skill-resolver* read-tool/*skill-resolver*]
       (script/with-prime-context
-        sci-ctx (prime-state service cwd (:namespaces sources))
+        sci-ctx (prime-state cwd (:namespaces sources))
         (fn []
           (read-library! env (:global roots) :global deadline)
           (read-library! env (:cwd roots) :cwd deadline)
@@ -1846,10 +1808,7 @@
                                    " is system-owned; define it in user or a model namespace")
                               {:name (:name bad)}))
             codemode (fn []
-                       (let [handle (or (srce/get (:agent-ctx service) :tools)
-                                        (throw (ex-info "the eval service needs the agent's :tools service"
-                                                        {:type :eval/no-tools})))
-                             sources (if (and (compare-and-set! (:fresh-sources? env) true false)
+                       (let [sources (if (and (compare-and-set! (:fresh-sources? env) true false)
                                               (= @(:source-ids env)
                                                  (mapv :id (source-registrations service))))
                                        (current-source-seed env)
@@ -1869,10 +1828,7 @@
                                       :extra-details (cond-> {:sources (:info sources)}
                                                        (seq (:errors sources))
                                                        (assoc :source-errors (:errors sources)))
-                                      :get-all-tools #(registry/get-all-tools handle)
-                                      :get-contributed-tools #(registry/get-contributed-tools handle)
-                                      :select-tools registry/select-tools
-                                      :execute-tool #(registry/execute-tool handle %1 %2 %3)})))]
+                                      :tools? false})))]
         (if error
           (error-result env (codemode) started)
           (if (str/blank? code)
@@ -2225,8 +2181,8 @@
 
 (defn value
   "The `:eval` service for AGENT-CTX. The environments are keyed by session
-   and owned here; the `:tools` handle is resolved from AGENT-CTX on the first
-   call, so the script surface is the agent's own table.
+   and owned here. The sandbox has no `tools` namespace: an eval call cannot
+   invoke any tool.
 
    OPTS: `:agent-dir` pins the agent home, hence both library roots (tests, a
    sandboxed composition); it defaults to `cfg/get-agent-dir`."

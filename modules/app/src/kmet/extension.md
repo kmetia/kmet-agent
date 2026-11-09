@@ -416,8 +416,8 @@ first call), so the contribution is current, not a snapshot:
 
 - `:ns` and `:macros` namespaces must be exactly `ext.<source-id>` or start
   with `ext.<source-id>.`; any other namespace is refused. The system
-  namespaces (`core`, `clj`, `eval`, `tools`) and the fixed host namespaces
-  are never writable by a source.
+  namespaces (`core`, `clj`, `eval`) and the fixed host namespaces are never
+  writable by a source.
 - The fn receives the call's `:cwd`, `:project-dir`, `:agent-dir`, the cancel
   `:signal`, and `:verbs` — keyword-keyed (`{:read-file f :edit g
   :write-file h}`) values of the same file operations the system exposes as
@@ -443,10 +443,10 @@ first call), so the contribution is current, not a snapshot:
 - The source fn runs synchronously on the eval build/call thread and has no
   timeout. Keep it fast; a slow source delays every eval call.
 - System surfaces are not writable by a source: `core` (runtime verbs),
-  `clj` (structure verbs), `eval` (library API), `tools` (tool bridge), the
-  model's `user`, and the fixed host namespaces (`clojure.core`, `clojure`,
-  `babashka.process`, `kmet.libs.http`, `kmet.libs.json`,
-  `kmet.libs.markdown`, `kmet.libs.yaml`). Contribute under `ext.<id>`
+  `clj` (structure verbs), `eval` (library API), the model's `user`, and the
+  fixed host namespaces (`clojure.core`, `clojure`, `babashka.process`,
+  `kmet.libs.http`, `kmet.libs.json`, `kmet.libs.markdown`,
+  `kmet.libs.yaml`). Contribute under `ext.<id>`
   (`ext.license/add!`); a source that uses another namespace, a built-in key,
   or a built-in `/eval` verb is refused as a whole.
 - A source-provided key is never written to the eval library. A model can

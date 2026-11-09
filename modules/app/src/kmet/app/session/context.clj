@@ -47,8 +47,8 @@
 (defn- omitted-line
   "The closing line standing for DROPPED sources, naming the discovery paths
    OPTS makes available (pi: the `… N more servers` line)."
-  [dropped {:keys [codemode? eval? tool-search?]}]
-  (let [script? (or codemode? eval?)]
+  [dropped {:keys [codemode? tool-search?]}]
+  (let [script? codemode?]
     (str "- … " dropped " more source" (when (not= 1 dropped) "s")
          (cond
            (and script? tool-search?)
@@ -104,30 +104,26 @@
 
 (defn- discovery-text
   "The sentence naming how OPTS lets the model reach a deferred source's tools;
-   nil when no discovery path is selected. OPTS names the paths themselves, so
-   an eval-only or codemode-only selection never mentions the other tool."
-  [{:keys [codemode? eval? tool-search?]}]
-  (let [script (cond
-                 (and codemode? eval?) "codemode or eval"
-                 codemode? "codemode"
-                 eval? "eval")]
-    (cond
-      (and script tool-search?)
-      (str "Their tools are callable from a script (" script "); "
-           "(tools/list) shows them, and tool_search loads one tool so you can "
-           "call it directly.")
+   nil when no discovery path is selected. Only `codemode` can call a tool from
+   a script, so an eval-only selection has no script path."
+  [{:keys [codemode? tool-search?]}]
+  (cond
+    (and codemode? tool-search?)
+    (str "Their tools are callable from a script (codemode); "
+         "(tools/list) shows them, and tool_search loads one tool so you can "
+         "call it directly.")
 
-      script
-      (str "Their tools are callable from a script (" script "); (tools/list) shows them.")
+    codemode?
+    "Their tools are callable from a script (codemode); (tools/list) shows them."
 
-      tool-search?
-      "tool_search loads one tool so you can call it directly.")))
+    tool-search?
+    "tool_search loads one tool so you can call it directly."))
 
 (defn deferred-sources-listing
   "The text that tells the model which deferred tool sources exist: one line per
    source (its id and its one line), and what it can do about them. OPTS names
-   the available discovery paths (`:codemode?`, `:eval?`, `:tool-search?`); with
-   none, returns nil — there is nothing the model can do with the list. Once
+   the available discovery paths (`:codemode?`, `:tool-search?`); with none,
+   returns nil — there is nothing the model can do with the list. Once
    something was listed, an empty set says so rather than leaving the stale
    message standing. The text is bounded (`max-listing-chars`) and
    deterministic — a set that did not change produces the same bytes, which is
@@ -138,7 +134,6 @@
    mid-conversation system role, so this is appended as a custom message
    (`state/sync-tool-sources-listing!`) instead of rebuilding the leading one."
   ([sources] (deferred-sources-listing sources {:codemode? true
-                                                :eval? true
                                                 :tool-search? true}))
   ([sources opts]
    (if (empty? sources)
@@ -179,7 +174,7 @@
                       "\n"
                       (when (pos? omitted)
                         (str "… " omitted " more; "))
-                      "(eval/describe 'name) describes one; (eval/library) lists all.")]
+                      "(eval/describe 'name) for one; (eval/library) for all.")]
         (if (or (<= (count text) max-listing-chars) (zero? kept))
           text
           (recur (dec kept)))))))
@@ -187,7 +182,7 @@
 (def ^:private eval-library-rule
   "The one-sentence rule the prompt manifest states: eval creates verbs, and
    only a documented top-level definition is saved."
-  "Eval creates verbs: a documented top-level definition is saved here; a new undocumented one stays session-only.\n")
+  "Eval verbs: a documented top-level definition is saved; an undocumented one is session-only.\n")
 
 (defn eval-library-listing
   "The `:eval-library` manifest text for MANIFEST (`{:loaded? :entries}`):
@@ -200,16 +195,15 @@
   (let [entries (vec entries)
         n (count entries)]
     (if (empty? entries)
-      (str eval-library-rule "The eval library is empty.")
+      (str eval-library-rule "Eval library: empty.")
       (eval-listing-text
        (str eval-library-rule
             (if loaded?
-              (str "Eval library loaded in this session: " n
-                   " definition" (when (not= 1 n) "s") ".\n")
-              (str "Eval library: " n " definition"
+              (str "Eval library: " n " loaded definition"
+                   (when (not= 1 n) "s") ".\n")
+              (str "Eval library: " n " saved definition"
                    (when (not= 1 n) "s")
-                   " saved; " (if (= 1 n) "it loads" "they load")
-                   " on this session's first eval.\n")))
+                   ", loaded on the first eval.\n")))
        (mapv eval-listing-line entries)))))
 
 (defn derive-context-settings

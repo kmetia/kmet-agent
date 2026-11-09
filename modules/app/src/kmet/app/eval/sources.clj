@@ -9,10 +9,10 @@
 
 (def reserved-source-namespaces
   "Namespaces an extension source may not contribute to: the model's
-   `user`, the system `core`, `clj`, `eval` and `tools`, and the fixed host
+   `user`, the system `core`, `clj` and `eval`, and the fixed host
    namespaces the sandbox installs around them."
   #{"user" "core" "clj" "eval" "clojure" "clojure.core"
-    "tools" "babashka.process"
+    "babashka.process"
     "kmet.libs.http" "kmet.libs.json"
     "kmet.libs.markdown" "kmet.libs.yaml"})
 

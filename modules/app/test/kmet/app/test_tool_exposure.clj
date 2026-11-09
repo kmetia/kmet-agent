@@ -498,20 +498,15 @@
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))
 
-(t/deftest test-an-eval-only-tool-selects-the-eval-intro
+(t/deftest test-an-eval-only-tool-has-no-discovery-path
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session
                                         :enabled-tool-names (support/tool-names ["eval" "deferred-a"]))]
     (try
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
-      (let [msg (state/sync-tool-sources-listing! agent)
-            content (:content msg)]
-        (t/is (some? msg))
-        (t/is (str/includes? content "eval"))
-        (t/is (not (str/includes? content "codemode")))
-        (t/is (str/includes? content "(tools/list)"))
-        (t/is (not (str/includes? content "tool_search"))))
+      (t/is (nil? (state/sync-tool-sources-listing! agent))
+            "eval cannot call a tool from a script, so it announces nothing")
       (finally
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))
@@ -521,13 +516,14 @@
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state
                :session session
-               :enabled-tool-names (support/tool-names ["codemode" "eval" "tool_search" "deferred-a"]))]
+               :enabled-tool-names (support/tool-names ["codemode" "tool_search" "deferred-a"]))]
     (try
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
       (let [msg (state/sync-tool-sources-listing! agent)
             content (:content msg)]
         (t/is (some? msg))
-        (t/is (str/includes? content "codemode or eval"))
+        (t/is (str/includes? content "codemode"))
+        (t/is (not (str/includes? content "eval")))
         (t/is (str/includes? content "(tools/list)"))
         (t/is (str/includes? content "tool_search")))
       (finally
@@ -641,7 +637,7 @@
         long-ids (mapv (fn [i] {:id (keyword (str "a-very-long-source-identifier-" i))
                                 :description "a description"})
                        (range 400))]
-    (t/is (= (str "1 deferred tool source. Their tools are callable from a script (codemode or eval);"
+    (t/is (= (str "1 deferred tool source. Their tools are callable from a script (codemode);"
                   " (tools/list) shows them, and tool_search loads one tool so you can call it directly.\n\n"
                   "- clojure: Clojure editing refinements")
              (listing small))
@@ -669,13 +665,8 @@
         listing (fn [opts] (session/deferred-sources-listing [source] opts))
         cases [[{} nil false]
                [{:codemode? true} "codemode" false]
-               [{:eval? true} "eval" false]
                [{:tool-search? true} nil true]
-               [{:codemode? true :eval? true} "codemode or eval" false]
-               [{:codemode? true :tool-search? true} "codemode" true]
-               [{:eval? true :tool-search? true} "eval" true]
-               [{:codemode? true :eval? true :tool-search? true}
-                "codemode or eval" true]]]
+               [{:codemode? true :tool-search? true} "codemode" true]]]
     (doseq [[opts label search?] cases]
       (let [text (listing opts)]
         (if label
@@ -683,9 +674,7 @@
             (t/is (str/includes? text (str "script (" label ")")))
             (t/is (= search? (str/includes? text "tool_search")))
             (when (= label "codemode")
-              (t/is (not (str/includes? text "eval"))))
-            (when (= label "eval")
-              (t/is (not (str/includes? text "codemode")))))
+              (t/is (not (str/includes? text "eval")))))
           (if search?
             (t/is (str/includes? text "tool_search"))
             (t/is (nil? text))))))))

@@ -12,8 +12,8 @@
    fresh-context, output-economy tool stays `codemode`.
 
    The shared `read`, `write`, `edit`, `bash` and `sh` verbs (also
-   available as `core/...`) and the `tools` bridge are the file and tool
-   surface; the row no longer mounts a separate `:core` source for them."
+   available as `core/...`) are the file and shell surface. The sandbox has no
+   `tools` namespace: an eval call cannot invoke any tool."
   (:require [clojure.string :as str]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
@@ -66,16 +66,15 @@
    :name "eval"
    :label "Eval"
    :description (str "Evaluate Clojure in this session's persistent SCI sandbox "
-                     "(babashka surface: fs, slurp, spit, require, tools). "
+                     "(babashka surface: fs, slurp, spit, require; no tool calls). "
                      "File and shell verbs: read, write, edit, bash, sh (also core/<verb>). "
                      "Calls serialize: put independent work in one call and fan out with "
-                     "(spawn f), pmap, or tools/call promises. Eval creates verbs: "
-                     "a documented top-level definition with a docstring is saved to the "
-                     "eval library; an undocumented one is live-only. Local let/fn bindings "
-                     "are scratch. Define in user; system namespaces are read-only. Report with "
+                     "(spawn f) or pmap. Eval verbs: a top-level definition with a docstring is "
+                     "saved; one without is live-only. Local let/fn bindings are "
+                     "scratch. Define in user; system namespaces are read-only. Report with "
                      "(emit value) or the final value; stdout "
                      "and stderr are discarded. (eval/help) lists the surface.")
-   :prompt-snippet "Persistent Clojure sandbox; one call per batch; read, write, edit, bash, sh (also core/<verb>); (eval/help) for the surface."
+   :prompt-snippet "Persistent Clojure sandbox; no tool calls; one call per batch; read, write, edit, bash, sh (also core/<verb>); (eval/help) for the surface."
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"

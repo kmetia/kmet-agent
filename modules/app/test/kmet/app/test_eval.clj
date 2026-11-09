@@ -141,7 +141,7 @@
     (t/is (str/includes? text "babashka"))
     (t/is (str/includes? text "fs"))
     (t/is (str/includes? text "top-level"))
-    (t/is (str/includes? text "Eval creates verbs"))
+    (t/is (str/includes? text "Eval verbs"))
     (t/is (str/includes? text "docstring"))
     (t/is (str/includes? text "live-only"))
     (t/is (str/includes? text "let/fn"))
@@ -150,6 +150,9 @@
     (t/is (str/includes? text "(spawn f)"))
     (t/is (str/includes? text "read, write, edit, bash, sh"))
     (t/is (str/includes? text "core/<verb>"))
+    (t/is (str/includes? text "no tool calls"))
+    (t/is (not (str/includes? text "tools/call")))
+    (t/is (not (str/includes? text "tools/list")))
     (t/is (str/includes? text "Define in user"))
     (t/is (empty? prompt-guidelines)
           "details live in (eval/help), not per-request guidelines")
@@ -238,32 +241,25 @@
 
 (t/deftest ^:slow test-a-parallel-call-waits-and-starts-its-clock-after-the-lock
   (let [env (support/eval-ctx)
-        {:keys [tools service session cwd]} env
-        started (promise)]
-    (tools/register-tool! tools {:name "eval-test-marker"
-                                 :description "Signals that the first call started"
-                                 :parameters {:type "object" :properties {}}
-                                 :execute (fn [_]
-                                            (deliver started true)
-                                            {:content "ok"})})
-    (try
-      (let [first-call (future
-                         ((:eval! service)
-                          {:code (str "(deref (tools/call \"eval-test-marker\" {}))"
-                                      " (core/sleep 300) :first")
-                           :session session :cwd cwd
-                           :limits (script/resolve-limits nil)}))
-            _ (t/is (deref started 2000 false))
-            second-call ((:eval! service)
-                         {:code ":second" :session session :cwd cwd
-                          :timeout 0.1 :limits (script/resolve-limits nil)})]
-        (t/is (not (:is-error second-call)) (:content second-call))
-        (t/is (= ":second" (:content second-call)))
-        (t/is (< (get-in second-call [:details :elapsed-ms]) 200)
-              "the clock starts after the lock, not while waiting for it")
-        (t/is (= ":first" (:content @first-call))))
-      (finally
-        (tools/unregister-tool! tools "eval-test-marker")))))
+        {:keys [service session cwd]} env
+        marker (str (fs/path cwd "started.txt"))
+        first-call (future
+                     ((:eval! service)
+                      {:code "(spit \"started.txt\" \"1\") (core/sleep 300) :first"
+                       :session session :cwd cwd
+                       :limits (script/resolve-limits nil)}))
+        _ (t/is (loop [n 0]
+                  (cond (fs/exists? marker) true
+                        (> n 200) false
+                        :else (do (Thread/sleep 10) (recur (inc n))))))
+        second-call ((:eval! service)
+                     {:code ":second" :session session :cwd cwd
+                      :timeout 0.1 :limits (script/resolve-limits nil)})]
+    (t/is (not (:is-error second-call)) (:content second-call))
+    (t/is (= ":second" (:content second-call)))
+    (t/is (< (get-in second-call [:details :elapsed-ms]) 200)
+          "the clock starts after the lock, not while waiting for it")
+    (t/is (= ":first" (:content @first-call)))))
 
 (t/deftest test-dispose-stops-the-service
   (let [env (support/eval-ctx)

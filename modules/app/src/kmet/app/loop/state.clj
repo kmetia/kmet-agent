@@ -466,15 +466,14 @@ Be precise and concise in your responses."}}]
    one-line descriptions changed since the branch's last listing. Appends one
    `:custom-message` (user-role, not displayed) and never rewrites the leading
    system prompt, which is a full prefix miss; a promotion appends nothing.
-   Selection-aware: a source is announced only when codemode/eval or
-   tool_search can reach it, and a stale listing is corrected when none can.
+   Selection-aware: a source is announced only when codemode or tool_search
+   can reach it, and a stale listing is corrected when none can.
    Returns the message, or nil when there was nothing new to say."
   [agent]
   (when-let [sess (:session agent)]
     (let [handle (srce/get (:ctx agent) :tools)
           selected (tools/select-tools (tool-table agent) (tool-selection agent))
           opts {:codemode? (contains? selected "codemode")
-                :eval? (contains? selected "eval")
                 :tool-search? (contains? selected search/tool-search-name)}
           sources (tools/get-deferred-sources handle {:selected (set (keys selected))})
           previous (last-custom-listing sess session/tool-sources-custom-type)]

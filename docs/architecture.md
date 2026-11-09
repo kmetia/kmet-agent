@@ -384,10 +384,11 @@ cancelled under the dialog with a deny rather than parking the run thread.
 ## Tools and the script sandbox
 
 The eval sandbox is split by ownership: `core` holds the runtime verbs,
-`clj` the structure verbs, `tools` the active tool bridge and `eval` the
-library API; all four are system-owned. `user` is model-owned and persisted;
-extension sources may contribute only to `ext.<id>`. A definition in a system
-namespace is refused, and a definition in `ext.*` is live-only.
+`clj` the structure verbs and `eval` the library API; all three are
+system-owned. `codemode` alone mounts the `tools` bridge; `eval` has no
+`tools` namespace and cannot call any tool. `user` is model-owned and
+persisted; extension sources may contribute only to `ext.<id>`. A definition
+in a system namespace is refused, and a definition in `ext.*` is live-only.
 
 The tool layer is `kmet.app.tools.*`: one record per tool, mounted as a row
 (`:tool/read`, `:tool/bash`, …) and dispatched through the `:tools` service. Two
@@ -486,7 +487,7 @@ descriptions shrink to share the room — every source stays listed, because bei
 listed is the point — and only the head lines outgrowing the room drops the last
 sources into one `… N more sources` line, as pi's section does. A source is
 announced only when at least one of its tools is selected, and the intro names
-only the discovery paths the selection actually has — codemode/eval
+only the discovery paths the selection actually has — `codemode`
 (`tools/list`) and/or `tool_search`; with neither, nothing is appended.
 
 **One invocation pipeline.** `kmet.app.tools.invoke` is the only
@@ -613,11 +614,12 @@ probe and no real use, and is gone;
 
 **`eval`** (`kmet.app.tools.eval`, the `:tool/eval` row) is the persistent
 counterpart. It shares `kmet.app.tools.script` — capability namespaces, capture,
-the tools bridge, deadline/abort and result assembly — but the state belongs to
-the session, not the call: `kmet.app.eval/value` owns one SCI context per
-session (built lazily on the first call), its interrupt holder, sticky namespace
-and call lock. `seed!` installs the call's namespaces into that context each
-time, so the tool surface follows the agent's registry while definitions stay.
+deadline/abort and result assembly — but not the tools bridge, and the state
+belongs to the session, not the call: `kmet.app.eval/value` owns one SCI
+context per session (built lazily on the first call), its interrupt holder,
+sticky namespace and call lock. `seed!` installs the call's namespaces into
+that context each time, while definitions stay. The sandbox has no `tools`
+namespace, so an eval call cannot invoke a tool.
 A definition from one call is visible to the next in the same session, and the
 last namespace a successful call ended in is re-entered at the start of the
 next. Because a call that defines a verb — persisted or live-only — makes
@@ -674,18 +676,17 @@ independent of the `:tool/eval` row, so removing the row leaves the command
 and its service. An unknown leading
 name that resolves to a definition or source verb is a `describe` shorthand;
 an unresolvable one keeps the unknown-verb hint. The system already provides
-`read`, `write`, `edit`, `bash` and `sh` (also `core/...`) and the
-`tools` bridge to every active tool; the row does not mount a separate eval
-source for them. The alias prelude refers those verbs unqualified, so
-`(read ...)` and `(core/read ...)` are one call. The clojure extension's tools wrap the shared
+`read`, `write`, `edit`, `bash` and `sh` (also `core/...`); the row does not
+mount a separate eval source for them, and there is no `tools` namespace. The
+alias prelude refers those verbs unqualified, so `(read ...)` and
+`(core/read ...)` are one call. The clojure extension's tools wrap the shared
 `kmet.libs.clj-edit` engine; an eval script can use the direct `clj/edit-form`,
-`clj/replace-sexp` and `clj/paren-repair` verbs without the extension, or
-reach the same engine through `tools/clojure_edit` when the extension is
-selected. The `clojure_eval` tool shares `kmet.libs.clj-eval` with the direct
+`clj/replace-sexp` and `clj/paren-repair` verbs without the extension. The
+`clojure_eval` tool shares `kmet.libs.clj-eval` with the direct
 `clj/nrepl-eval` verb, so nREPL evaluation likewise needs no extension. The
-eval tool's description and `(eval/help)` name the shared script surface (aliases, the
-`tools` namespace, require-able namespaces and bundled libs) without depending
-on `codemode`, since either row can be selected alone; host-specific sandbox
+eval tool's description and `(eval/help)` name the shared script surface
+(aliases, require-able namespaces and bundled libs) without depending on
+`codemode`, since either row can be selected alone; host-specific sandbox
 differences stay in this section, not in the model-facing text. `list` and
 `search` read the disk index across both roots (the built environment's pinned
 roots when the session has one, else the command cwd), so they show the
@@ -737,12 +738,12 @@ Prompt discovery. Prompt start appends one hidden `:eval-library` custom
 message (`kmet.app.session.context/eval-library-listing`,
 `kmet.app.loop.state/sync-eval-library-listing!`) only when its text changed
 since the branch's last one and only while the `eval` tool is selected. The
-message starts with the save rule (`Eval creates verbs: a documented top-level
-definition is saved here; a new undocumented one stays session-only.`) and is a
+message starts with the save rule (`Eval verbs: a documented top-level
+definition is saved; an undocumented one is session-only.`) and is a
 bounded, deterministic preview — `name [arglists] (scope[, shadowed]) — first
 doc line` (or `(no docstring)` for a legacy entry), with whole definitions
 dropped behind `… N more; (eval/library)
-lists them` — never a source dump and never a system-prompt
+for all` — never a source dump and never a system-prompt
 rebuild, so listing a definition costs no prefix miss. Loaded is not saved: a
 session with a built environment lists its loaded records with scope and
 active state, while one without lists the disk index as saved and says it

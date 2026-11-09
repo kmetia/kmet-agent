@@ -632,15 +632,16 @@ calls, so it can expose current state instead of a snapshot:
 
 - Values must live under `ext.<source-id>` or a subnamespace of it:
   `ext.license`, `ext.license.internal`. The model's `user`, the system
-  `core`, `clj`, `eval` and `tools`, and the fixed host namespaces
-  (`clojure.core`, `clojure`, `babashka.process`, `kmet.libs.http`,
-  `kmet.libs.json`, `kmet.libs.markdown`, `kmet.libs.yaml`) are reserved.
-  `read`, `write`, `edit`, `bash` and `sh` (also `core/...`) call the tool
-  implementations directly; `clj/edit-form`, `clj/replace-sexp` and
-  `clj/paren-repair` call `kmet.libs.clj-edit` directly; `clj/nrepl-eval`
-  calls `kmet.libs.clj-eval`, the same implementation as the clojure
-  extension's `clojure_eval` tool; `tools/*` is the active tool bridge. Use
-  `ext.license/add!`, not `add!` or `user/add!`.
+  `core`, `clj` and `eval`, and the fixed host namespaces (`clojure.core`,
+  `clojure`, `babashka.process`, `kmet.libs.http`, `kmet.libs.json`,
+  `kmet.libs.markdown`, `kmet.libs.yaml`) are reserved. `read`, `write`,
+  `edit`, `bash` and `sh` (also `core/...`) call the tool implementations
+  directly; `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` call
+  `kmet.libs.clj-edit` directly; `clj/nrepl-eval` calls
+  `kmet.libs.clj-eval`, the same implementation as the clojure extension's
+  `clojure_eval` tool. The eval sandbox has no `tools` namespace, so a source
+  verb cannot call a tool. Use `ext.license/add!`, not `add!` or
+  `user/add!`.
 - `:verbs` carries the call's `:read-file`, `:edit` and `:write-file`
   operations. They read that call's cwd and cancel signal; use them within
   the call, never keep them.

@@ -10,13 +10,15 @@
    context (`eval`) supplies `:sci-ctx` and the `:interrupt` holder it built
    the context with, and `run` re-arms and seeds it per call.
 
-   The context carries the capability namespaces, the `tools` namespace —
-   discovery (tools/list, tools/describe), the per-call bridge (async promises
-   over execute-tool, drained by a shared bounded worker pool) with its result
-   readers and one var per active tool — and the script's emit/capture
-   channels; *out*/*err* are captured to bounded temp files, streamed through
-   on-update, and assembled into the result (a 16 KiB / 2000-line default
-   budget, configurable per call, with a bounded capture tail)."
+   The context carries the capability namespaces and the script's
+   emit/capture channels; *out*/*err* are captured to bounded temp files,
+   streamed through on-update, and assembled into the result (a 16 KiB /
+   2000-line default budget, configurable per call, with a bounded capture
+   tail). Unless the caller opts out with `:tools? false`, it also carries the
+   `tools` namespace — discovery (tools/list, tools/describe), the per-call
+   bridge (async promises over execute-tool, drained by a shared bounded
+   worker pool) with its result readers and one var per active tool. `eval`
+   opts out: its sandbox has no tools namespace and cannot call a tool."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.debug :as debug]
@@ -91,14 +93,13 @@
   #{"codemode" "eval"})
 
 (def core-summary
-  "The model-facing summary of the shared script sandbox surface. Both script
-   tools and `(eval/help)` label it; the summary itself stays host-neutral and
-   names only the common surface."
+  "The model-facing summary of the eval sandbox surface, labelled by
+   `(eval/help)`; the summary itself stays host-neutral."
   (str "aliases fs, str, set, edn, walk, json and p; cwd-resolving slurp, "
        "spit and file-seq; core verbs, also referred unqualified: read, write, "
        "edit, bash, sh, cwd, env, now, sleep, emit, emit-image and spawn "
-       "(core/<verb> stays available); the core, clj, tools and eval "
-       "namespaces; clojure.*, babashka.*, the bundled libs (rewrite-clj, "
+       "(core/<verb> stays available); the core, clj and eval namespaces; "
+       "clojure.*, babashka.*, the bundled libs (rewrite-clj, "
        "cljfmt, edamame, parinferish) and the kmet.libs ports (json, http, "
        "yaml, markdown) are require-able."))
 
@@ -935,20 +936,21 @@
 
 (defn call-namespaces
   "The per-call half of the sandbox namespaces: SCI core patches
-   (slurp/spit/file-seq/pmap), the cwd/pid-tracking process wrappers,
-   the `tools` namespace (discovery, dispatch, the result readers and one var
-   per active tool), the `core` namespace (cwd/emit/spawn helpers plus the
-   direct `read`, `write`, `edit`, `bash` and `sh` verbs, which call the tool
-   implementations, not the tool bridge), and the direct `clj/edit-form`,
-   `clj/replace-sexp` and `clj/paren-repair` verbs (which call
-   `kmet.libs.clj-edit` directly).
+   (slurp/spit/file-seq/pmap), the cwd/pid-tracking process wrappers, the
+   `core` namespace (cwd/emit/spawn helpers plus the direct `read`, `write`,
+   `edit`, `bash` and `sh` verbs, which call the tool implementations, not the
+   tool bridge), the direct `clj/edit-form`, `clj/replace-sexp` and
+   `clj/paren-repair` verbs (which call `kmet.libs.clj-edit` directly), and —
+   unless the caller opted out with `:tools? false` — the `tools` namespace
+   (discovery, dispatch, the result readers and one var per active tool).
    The functions read `*call-state*` at call time, so a kept context's
    definitions follow the current call; `seed!` layers them over
    `base-namespaces` for the call. `:source-namespaces` — the eval source
    layer's current values — merges into the same namespace maps, so a source
    value and a built-in `user` helper share one namespace."
-  [{:keys [surface source-namespaces]}]
-  (let [process (process-fns)
+  [{:keys [surface source-namespaces tools?]}]
+  (let [tools? (not (false? tools?))
+        process (process-fns)
         runtime (core-namespace-fns)
         namespaces (cond-> {'clojure.core (merge {'pmap (deref #'pmap)}
                                                  (core-fns)
@@ -967,7 +969,6 @@
                                           'bash (fn [command & [opts]]
                                                   (bash-text command opts
                                                              (:cancelled *call-state*)))})
-                            'tools (tools-namespace (or surface {}))
                             'clj {'edit-form (fn [args]
                                                (clj-edit/edit-form
                                                 (assoc args :cwd (call-cwd))))
@@ -977,7 +978,8 @@
                                   'paren-repair (fn [args]
                                                   (clj-edit/paren-repair
                                                    (assoc args :cwd (call-cwd))))}}
-                     (contains? process 'sh) (assoc-in ['core 'sh] (get process 'sh)))]
+                     (contains? process 'sh) (assoc-in ['core 'sh] (get process 'sh))
+                     tools? (assoc 'tools (tools-namespace (or surface {}))))]
     (reduce-kv (fn [acc ns-name ns-map]
                  (update acc ns-name #(merge (or % {}) ns-map)))
                namespaces
@@ -994,12 +996,14 @@
   "Install STATE's per-call namespaces into CTX. The fixed namespaces merge
    into what a kept context already carries; `tools` replaces its map instead,
    because its key set follows the call's surface — a tool that left the
-   surface must not keep a var in a reused context."
+   surface must not keep a var in a reused context. A state with `:tools?
+   false` installs no `tools` namespace at all."
   [ctx state]
   (let [namespaces (call-namespaces state)]
     (doseq [[ns-name ns-map] namespaces]
       (sci/add-namespace! ctx ns-name ns-map))
-    (swap! (:env ctx) assoc-in [:namespaces 'tools] (get namespaces 'tools))
+    (when-let [tools (get namespaces 'tools)]
+      (swap! (:env ctx) assoc-in [:namespaces 'tools] tools))
     ctx))
 
 ;; ─── The callable surface ───────────────────────────────────────────────────────
@@ -1433,10 +1437,13 @@
   "Resolve the per-call state the sandbox runs on: the callable surface, the
    bridge, the emit/capture channels, the abort/trace atoms, the budgets and
    the dynamic values the loop bound for this run. CWD defaults to the
-   runtime cwd; LIMITS is `resolve-limits`' map (or the default)."
+   runtime cwd; LIMITS is `resolve-limits`' map (or the default). `:tools?
+   false` omits the surface and bridge, so the call has no `tools` namespace
+   and cannot reach a tool (the `eval` sandbox)."
   [{:keys [tool cwd timeout limits signal ctx on-update
            get-all-tools get-contributed-tools select-tools execute-tool
-           source-namespaces]}]
+           source-namespaces tools?]
+    :or {tools? true}}]
   (require-tool! tool)
   (let [cwd (or cwd (tool-util/cwd))
         timeout-ms (normalize-timeout timeout)
@@ -1444,11 +1451,11 @@
         live? (atom true)
         on-update (when on-update
                     (fn [evt] (when @live? (on-update evt))))
-        enabled (when *enabled-tools-fn* (*enabled-tools-fn*))
-        surface (active-surface select-tools
-                                (get-all-tools)
-                                (if get-contributed-tools (get-contributed-tools) {})
-                                enabled)
+        surface (when tools?
+                  (active-surface select-tools
+                                  (get-all-tools)
+                                  (if get-contributed-tools (get-contributed-tools) {})
+                                  (when *enabled-tools-fn* (*enabled-tools-fn*))))
         abort (atom nil)
         cancelled (combined-signal signal abort)
         emitted (atom [])
@@ -1463,20 +1470,21 @@
                     :on-update on-update
                     :abort abort
                     :capture-limit (:capture-bytes limits)}
-        bridge-opts {:tool tool
-                     :surface surface
-                     :execute-tool execute-tool
-                     :signal cancelled
-                     :ctx ctx
-                     :cwd cwd
-                     :session-env-fn bash-tool/*session-env-fn*
-                     :shell bash-tool/*shell*
-                     :skill-resolver read-tool/*skill-resolver*
-                     :hook *tool-hook*
-                     :check *tool-check*
-                     :assistant-message *assistant-message*
-                     :on-update on-update
-                     :trace trace}]
+        bridge-opts (when tools?
+                      {:tool tool
+                       :surface surface
+                       :execute-tool execute-tool
+                       :signal cancelled
+                       :ctx ctx
+                       :cwd cwd
+                       :session-env-fn bash-tool/*session-env-fn*
+                       :shell bash-tool/*shell*
+                       :skill-resolver read-tool/*skill-resolver*
+                       :hook *tool-hook*
+                       :check *tool-check*
+                       :assistant-message *assistant-message*
+                       :on-update on-update
+                       :trace trace})]
     {:tool tool
      :cwd cwd
      :timeout-ms timeout-ms
@@ -1485,6 +1493,7 @@
      :cancelled cancelled
      :ctx ctx
      :on-update on-update
+     :tools? tools?
      :surface surface
      :source-namespaces (or source-namespaces {})
      :abort abort
@@ -1501,8 +1510,9 @@
   "Seed CTX with the fixed call surface and the standard aliases, then run F
    with a prime call state bound. A stored definition evaluated inside F
    compiles against the same per-call vocabulary a real call gets; the prime
-   state gives top-level code a cwd, an inert tool surface and a discarded
-   emit channel until the next call binds the real state."
+   state gives top-level code a cwd, a discarded emit channel and, when the
+   sandbox has one, an inert tool surface until the next call binds the real
+   state."
   [ctx state f]
   (seed! ctx state)
   (binding [*call-state* state]
@@ -1596,7 +1606,7 @@
    into the result's :details."
   [{:keys [ctx] :as opts}]
   (require-tool! (:tool opts))
-  (let [realm (sandbox-realm ctx)
+  (let [realm (when-not (false? (:tools? opts)) (sandbox-realm ctx))
         opts (if realm (update opts :ctx assoc :srce-ctx realm) opts)]
     (try
       (run* opts)

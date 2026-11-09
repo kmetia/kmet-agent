@@ -299,16 +299,13 @@
     (t/is (not (fs/exists? broken)))
     (t/is (not (fs/exists? late)))))
 
-(t/deftest test-a-written-definition-uses-the-current-call-surface
+(t/deftest test-a-written-definition-uses-the-current-call-state
   (let [env (support/eval-ctx)
         cwd (:cwd env)]
     (spit (str (fs/path cwd "note.txt")) "library\n")
     (support/eval! env "(defn parse-json \"Parse JSON.\" [s] (json/parse-string s))")
     (support/eval! env "(defn say \"Say hi.\" [] (core/emit :hi))")
     (support/eval! env "(defn read-note \"Read the note.\" [] (str/trim (slurp \"note.txt\")))")
-    (support/eval! env (str "(defn echo-hi \"Echo hi.\" [] "
-                            "(tools/text (deref (tools/call \"bash\" "
-                            "{:command \"echo hi\"}))))"))
     (let [restarted (support/restart-service env)]
       (t/is (= "1"
                (support/script-content
@@ -321,11 +318,7 @@
       (t/is (= "library"
                (support/script-content
                 (support/eval-in! restarted (:session env) cwd "(read-note)")))
-            "slurp resolves against the current call's cwd")
-      (t/is (str/includes?
-             (:content (support/eval-in! restarted (:session env) cwd "(echo-hi)"))
-             "hi")
-            "a library definition dispatches through the current call's tools"))))
+            "slurp resolves against the current call's cwd"))))
 
 (t/deftest test-a-written-definition-replays-the-bare-core-refers
   (let [env (support/eval-ctx)
@@ -356,17 +349,29 @@
                                     cwd "(demo/join [\"c\" \"d\"])")))
               "another home reader loads the ns form before the aliases")))))
 
-(t/deftest test-a-written-definition-compiles-with-a-disabled-tool
+(t/deftest test-the-sandbox-has-no-tools-namespace
   (let [env (support/eval-ctx)]
-    (support/eval! env (str "(defn echo-hi \"Echo hi.\" [] "
-                            "(tools/text (deref (tools/bash {:command \"echo hi\"}))))"))
+    (t/is (= "false" (:content (support/eval! env "(some? (find-ns 'tools))"))))
+    (t/is (= "false" (:content (support/eval! env "(some? (resolve 'tools/call))"))))
+    (let [result (support/eval! env "(tools/call \"bash\" {})")]
+      (t/is (:is-error result))
+      (t/is (str/includes? (:content result) "tools"))
+      (t/is (not (str/includes? (:content result) "run-bash"))
+            "the form never reaches a tool implementation"))))
+
+(t/deftest test-a-saved-definition-naming-tools-fails-to-load
+  (let [env (support/eval-ctx)
+        path (library-file env "user" "echo_hi.clj")]
+    (fs/create-dirs (fs/parent path))
+    (spit path (str "(ns user)\n"
+                    "(defn echo-hi \"Echo hi.\" [] "
+                    "(tools/text (deref (tools/call \"bash\" {:command \"echo hi\"}))))\n"))
     (let [restarted (support/restart-service env)
-          result (binding [script/*enabled-tools-fn* (constantly #{})]
-                   (support/eval-in! restarted (:session env) (:cwd env)
-                                     "(core/emit :ok)"))]
+          result (support/eval-in! restarted (:session env) (:cwd env)
+                                   "(core/emit :ok)")]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (nil? (get-in result [:details :failures]))
-            "the rebuild surface keeps every registry tool, not only enabled ones"))))
+      (t/is (seq (get-in result [:details :failures]))
+            "a saved definition that names the removed tools namespace fails to load"))))
 
 (t/deftest test-a-namespace-cannot-escape-the-library-root
   (let [env (support/eval-ctx)
