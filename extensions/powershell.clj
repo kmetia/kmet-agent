@@ -88,32 +88,14 @@
     (when (and (string? cmd) (not (str/blank? cmd)))
       (str prompt " " cmd))))
 
-(defn- shell-tool
-  "The tool-facing shape both branches share: the `ps $` prompt for the
-   call line and the quiet title, the bash result body for output."
-  [tool]
-  (assoc tool
-         :prompt-snippet "Execute PowerShell commands"
-         :render-call (renderers/shell-call-renderer prompt)
-         :render-result renderers/render-bash-result
-         :title title))
-
 ;; ─── The shared execute ────────────────────────────────────────────────────
 
-(defn- run-command
-  "Run ARGS through the bash engine's TOOL when SHELL resolved — the one
-   implementation behind the tool's :execute and the eval verb. A nil SHELL
-   is pi's per-call failure: the same result either entry point reports."
-  [shell tool args on-update]
-  (if shell
-    ((:execute tool) args on-update)
-    {:content (unavailable-message) :is-error true}))
-
-(defn- build
-  "Build the powershell tool and its shared execute: the bash engine wired to
-   the resolved PowerShell (explicit shell args + UTF-8 prefix), or — when
-   PowerShell is unavailable — the same tool-facing shape whose execute
-   reports pi's error."
+(defn- make-tool
+  "Build the powershell tool; its :execute is the one implementation the eval
+   verb shares. The bash engine is wired to the resolved PowerShell (explicit
+   shell args + UTF-8 prefix), or reports the per-call unavailable error when
+   none exists. The `ps $` call line and quiet title are the bash renderers'
+   PowerShell spelling."
   [api]
   (let [shell (resolve-powershell)
         tool (ext/create-bash-tool
@@ -125,43 +107,46 @@
                              :shell-args powershell-args
                              :command-prefix utf8-output-prefix
                              :temp-file-prefix temp-file-prefix)))
-        execute (fn [args & [on-update]]
-                  (run-command shell tool args on-update))]
-    {:tool (shell-tool (assoc tool :execute execute))
-     :execute execute}))
+        execute (if shell
+                  (fn [args & [on-update]]
+                    ((:execute tool) args on-update))
+                  (fn [_args & _]
+                    {:content (unavailable-message) :is-error true}))]
+    (assoc tool
+           :execute execute
+           :prompt-snippet "Execute PowerShell commands"
+           :render-call (renderers/shell-call-renderer prompt)
+           :render-result renderers/render-bash-result
+           :title title)))
 
 ;; ─── The eval verb ─────────────────────────────────────────────────────────
 
-(defn- command-verb
-  "The `ext.powershell/run` eval verb over the tool's shared EXECUTE:
-   returns the command's output and throws on failure, like `core/bash`."
-  [execute]
-  (with-meta
-    (fn [command & [opts]]
-      (let [result (execute (merge opts {:command (str command)}) nil)]
-        (if (:is-error result)
-          (throw (ex-info (str (:content result))
-                          {:type :powershell/command-failed
-                           :result result}))
-          (:content result))))
-    {:doc (str "Run COMMAND with the powershell tool's implementation; "
-               "OPTS may carry :timeout in seconds.")
-     :arglists '([command] [command opts])}))
-
 (defn- eval-source
-  "The eval source INIT registers: one verb under the extension's own
-   namespace (an eval source may contribute only there)."
+  "The eval source INIT registers: the tool's execute as
+   `ext.powershell/run`."
   [execute]
   {:doc "PowerShell execution (Windows)."
-   :ns {'ext.powershell {'run (command-verb execute)}}})
+   :ns {'ext.powershell
+        {'run (with-meta
+                (fn [command & [opts]]
+                  (let [result (execute (merge opts {:command (str command)}) nil)]
+                    (if (:is-error result)
+                      (throw (ex-info (str (:content result))
+                                      {:type :powershell/command-failed
+                                       :result result}))
+                      (:content result))))
+                {:doc (str "Run COMMAND with the powershell tool's implementation; "
+                           "OPTS may carry :timeout in seconds.")
+                 :arglists '([command] [command opts])})}}})
 
 (defn init
   "Register the powershell tool and its eval verb — one execute behind both
    (an opt-in Windows shell surface)."
   [api]
-  (let [{:keys [tool execute]} (build api)]
+  (let [tool (make-tool api)]
     (ext/register-tool! api tool)
-    (ext/register-eval-source! api :powershell (fn [_] (eval-source execute)))))
+    (ext/register-eval-source! api :powershell
+                               (fn [_] (eval-source (:execute tool))))))
 
 ;; the plugin the loader mounts; its body is `init` above
 (srce/defplugin plugin
