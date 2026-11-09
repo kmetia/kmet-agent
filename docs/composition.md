@@ -334,7 +334,17 @@ Execute a bash command in the current working directory. Returns stdout and stde
 
 **Description:**
 
-Run one Clojure script in a fresh SCI sandbox with kmet's tools bridged in. Use it to complete a whole phase: inspect inputs, write files, run commands or tests, and emit only the compact result. Use it when the intermediate output would flood the context (several files, a search→read→verify chain, or a compute-and-summarize task), not for a single trivial command. Definitions do not persist between calls; stdout and stderr are discarded, and only the script's output reaches the conversation. Callable tools: read(path, offset?, limit?), write(path, content), edit(path, edits), bash(command, timeout?). Prefer (slurp path), (spit path text), fs/*, and (sh ...) for whole-file and shell work; bare (read path), (write path text), (edit path old new), and (bash command) are there when you need the matching tool's own behavior. (tools/list) lists every current declaration; @(tools/call "name" args) calls any other tool. Report with (emit value) or end on the value; :timeout is seconds; output is capped at 16 KiB/2000 lines, :max-output-bytes raises it to 50 KiB. Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) namespaces.
+Run a Clojure script to work over the environment and report a digest. Use it when the intermediate output would flood the context — scan or transform many files, run a search→read→verify chain, compute counts, matches or a summary — instead of chaining bash cat/head/rg. Use bash for one small command and read for one file.
+
+Every codemode call starts from a fresh context; definitions do not persist.
+
+Inside the script the local primitives return values, not rendered text; prefer them over bash/read for local work. Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. A plain name is also a var — @(tools/read {:path "x"}) — while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe "name") returns one tool's declaration.
+
+Callable tools include read(path, offset?, limit?), write(path, content), edit(path, edits), and bash(command, timeout?); bare (read path), (write path text), (edit path old new), and (bash command) settle the matching tool. Prefer (slurp path), (spit path text), fs/*, and (sh ...) for whole-file and shell work.
+
+Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image "shot.png") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.
+
+Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) namespaces. :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB.
 
 ---
 

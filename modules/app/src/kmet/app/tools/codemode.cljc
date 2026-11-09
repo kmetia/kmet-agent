@@ -21,15 +21,13 @@
 ;; ─── Tool record ──────────────────────────────────────────────────────────
 
 (def ^:private description
-  (str "Run one Clojure script in a fresh SCI sandbox with kmet's tools bridged in. "
-       "Use it to complete a whole phase: inspect inputs, write files, run commands or tests, and emit only the compact result. "
-       "Use it when the intermediate output would flood the context (several files, a search→read→verify chain, or a compute-and-summarize task), not for a single trivial command. "
-       "Definitions do not persist between calls; stdout and stderr are discarded, and only the script's output reaches the conversation. "
-       "Callable tools: read(path, offset?, limit?), write(path, content), edit(path, edits), bash(command, timeout?). "
-       "Prefer (slurp path), (spit path text), fs/*, and (sh ...) for whole-file and shell work; bare (read path), (write path text), (edit path old new), and (bash command) are there when you need the matching tool's own behavior. "
-       "(tools/list) lists every current declaration; @(tools/call \"name\" args) calls any other tool. "
-       "Report with (emit value) or end on the value; :timeout is seconds; output is capped at 16 KiB/2000 lines, :max-output-bytes raises it to 50 KiB. "
-       "Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) namespaces."))
+  (str "Run a Clojure script to work over the environment and report a digest. "
+       "Use it when the intermediate output would flood the context — scan or transform many files, run a search→read→verify chain, compute counts, matches or a summary — instead of chaining bash cat/head/rg. Use bash for one small command and read for one file.\n\n"
+       "Every codemode call starts from a fresh context; definitions do not persist.\n\n"
+       "Inside the script the local primitives return values, not rendered text; prefer them over bash/read for local work. Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. A plain name is also a var — @(tools/read {:path \"x\"}) — while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one tool's declaration.\n\n"
+       "Callable tools include read(path, offset?, limit?), write(path, content), edit(path, edits), and bash(command, timeout?); bare (read path), (write path text), (edit path old new), and (bash command) settle the matching tool. Prefer (slurp path), (spit path text), fs/*, and (sh ...) for whole-file and shell work.\n\n"
+       "Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image \"shot.png\") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.\n\n"
+       "Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) namespaces. :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB."))
 
 (defn title
   "Quiet one-liner body for the codemode tool: `codemode $ ` and the first
@@ -57,10 +55,11 @@
    :description description
    :prompt-snippet "One script per phase: read/write/run/verify, then emit only the digest."
    :prompt-guidelines
-   ["One codemode call should complete a phase: read inputs, write files, run commands/tests, and emit a compact digest. Use it when the work spans several steps or the output would flood the context; do not use it as a step-by-step REPL."
-    "Prefer one call per phase; run independent work inside it with (sandbox/spawn f), pmap, or tools/call promises."
-    "Prefer (slurp path), (spit path text), fs/*, and (sh ...) for whole-file and shell work; bare (read path), (write path text), (edit path old new), and (bash command) are available when you need the matching tool's own behavior. Use (tools/list) for other tools and full declarations."
-    "Emit only what matters: (emit value) or end on the value; stdout/stderr are discarded. Attach images with (emit-image path)."]
+   ["Use codemode for Clojure — including one-liners — instead of writing bb -e/bb -f scripts through bash, unless the code needs the project classpath or its tests."
+    "Use codemode when a fresh context matters: definitions do not persist between calls."
+    "Use codemode when a command's output would flood the context: compute inside the script and (emit) only the digest — counts, matches, the lines that matter — instead of chaining bash cat/head/rg; println is discarded (emit the digest, or end on the value you want reported)."
+    "Inside a script prefer (slurp path), fs/* and the bare (sh ...) for local work over the bash and read tools — they return values, not rendered text — and call a tool only when its result is too large to read (a web fetch, an MCP call), emitting the filtered part: @(tools/call \"name\" args), or its per-tool var @(tools/read {…}). Bare read/write/edit/bash wrappers are available when you need the matching tool's own behavior."
+    "When the answer is an image (a screenshot, a chart, a rendered page), attach it with (emit-image path) rather than describing it."]
    :params {:code {:type :string :description "One Clojure script; definitions do not persist."}
             :timeout {:type :number
                       :description "Seconds; omit or 0 = no deadline."
