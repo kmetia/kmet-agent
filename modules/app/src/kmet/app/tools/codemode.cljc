@@ -23,12 +23,13 @@
 (def ^:private description
   (str "Run one Clojure script in a fresh SCI sandbox with kmet's tools bridged in. "
        "Use it to complete a whole phase: inspect inputs, write files, run commands or tests, and emit only the compact result. "
+       "Use it when the intermediate output would flood the context (several files, a search→read→verify chain, or a compute-and-summarize task), not for a single trivial command. "
        "Definitions do not persist between calls; stdout and stderr are discarded, and only the script's output reaches the conversation. "
        "Callable tools: read(path, offset?, limit?), write(path, content), edit(path, edits), bash(command, timeout?). "
-       "Bare (read path), (write path text), (edit path old new), and (bash command) settle the matching tool; (slurp path), (spit path text), fs/*, and (sh ...) are local. "
+       "Prefer (slurp path), (spit path text), fs/*, and (sh ...) for whole-file and shell work; bare (read path), (write path text), (edit path old new), and (bash command) are there when you need the matching tool's own behavior. "
        "(tools/list) lists every current declaration; @(tools/call \"name\" args) calls any other tool. "
        "Report with (emit value) or end on the value; :timeout is seconds; output is capped at 16 KiB/2000 lines, :max-output-bytes raises it to 50 KiB. "
-       "Sandbox: " "SCI with the babashka surface; (tools/list) lists tools and (all-ns) namespaces."))
+       "Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) namespaces."))
 
 (defn title
   "Quiet one-liner body for the codemode tool: `codemode $ ` and the first
@@ -56,9 +57,9 @@
    :description description
    :prompt-snippet "One script per phase: read/write/run/verify, then emit only the digest."
    :prompt-guidelines
-   ["One codemode call should complete a phase: read inputs, write files, run commands/tests, and emit a compact digest. Do not use it as a step-by-step REPL; definitions do not persist."
+   ["One codemode call should complete a phase: read inputs, write files, run commands/tests, and emit a compact digest. Use it when the work spans several steps or the output would flood the context; do not use it as a step-by-step REPL."
     "Prefer one call per phase; run independent work inside it with (sandbox/spawn f), pmap, or tools/call promises."
-    "Prefer (slurp path), (spit path text), fs/*, and (sh ...) for local work; use bare (read path), (write path text), (edit path old new), and (bash command) for the matching tools. Use (tools/list) for other tools and full declarations."
+    "Prefer (slurp path), (spit path text), fs/*, and (sh ...) for whole-file and shell work; bare (read path), (write path text), (edit path old new), and (bash command) are available when you need the matching tool's own behavior. Use (tools/list) for other tools and full declarations."
     "Emit only what matters: (emit value) or end on the value; stdout/stderr are discarded. Attach images with (emit-image path)."]
    :params {:code {:type :string :description "One Clojure script; definitions do not persist."}
             :timeout {:type :number
