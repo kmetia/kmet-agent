@@ -221,21 +221,28 @@
 (defn- git-commit? [cmd]
   (boolean (re-find #"\bgit\s+commit(?=\s|$)" (or cmd ""))))
 
+(def ^:private commit-subject-patterns
+  [#"-[a-zA-Z]*m\s+\"([^\"]*)\""
+   #"-[a-zA-Z]*m\s+'([^']*)'"
+   #"-[a-zA-Z]*m\s+(\S+)"
+   #"--message=\s*\"([^\"]*)\""
+   #"--message=\s*'([^']*)'"
+   #"--message=\s*(\S+)"
+   #"--message\s+\"([^\"]*)\""
+   #"--message\s+'([^']*)'"
+   #"--message\s+(\S+)"])
+
 (defn- commit-subject [cmd]
-  (or (second (re-find #"-[a-zA-Z]*m\s+\"([^\"]*)\"" cmd))
-      (second (re-find #"-[a-zA-Z]*m\s+'([^']*)'" cmd))
-      (second (re-find #"-[a-zA-Z]*m\s+(\S+)" cmd))
-      (second (re-find #"--message=\s*\"([^\"]*)\"" cmd))
-      (second (re-find #"--message=\s*'([^']*)'" cmd))
-      (second (re-find #"--message=\s*(\S+)" cmd))
-      (second (re-find #"--message\s+\"([^\"]*)\"" cmd))
-      (second (re-find #"--message\s+'([^']*)'" cmd))
-      (second (re-find #"--message\s+(\S+)" cmd))))
+  (some #(second (re-find % cmd)) commit-subject-patterns))
+
+(def ^:private commit-hash-patterns
+  [#"\[[^\]]*?\b([0-9a-f]{7,40})\b[^\]]*\]"
+   #"\b([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})\b"
+   #"^\s*([0-9a-f]{7,40})\b"])
 
 (defn- commit-hash [text]
-  (or (second (re-find #"\[[^\]]*?\b([0-9a-f]{7,40})\b[^\]]*\]" (or text "")))
-      (second (re-find #"\b([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})\b" (or text "")))
-      (second (re-find #"^\s*([0-9a-f]{7,40})\b" (or text "")))))
+  (let [text (or text "")]
+    (some #(second (re-find % text)) commit-hash-patterns)))
 
 (defn- commit-line [cmd result-text]
   (when (git-commit? cmd)
@@ -299,62 +306,59 @@
    "[Previous Summary]" :previous})
 
 (defn- parse-previous
-  "Parse a previous VCC summary. A summary in another format is preserved
-   verbatim under :previous rather than silently dropped. `---` is the VCC
-   brief separator only after a VCC header; an LLM summary containing one is
-   still unparsed."
+  "Parse a previous VCC summary. A summary without a VCC header is preserved
+   verbatim under :previous rather than silently dropped."
   [summary]
   (let [s (sanitize summary)]
     (when (seq s)
-      (let [parsed
-            (reduce (fn [acc line]
-                      (let [line (str/trim line)]
-                        (cond
-                          (contains? section-headers line)
-                          (assoc acc :current (section-headers line) :recognized? true)
+      (let [lines (str/split-lines s)]
+        (if-not (some #(contains? section-headers (str/trim %)) lines)
+          {:previous (clip-block s max-previous-chars)}
+          (let [parsed
+                (reduce (fn [acc line]
+                          (let [line (str/trim line)]
+                            (cond
+                              (contains? section-headers line)
+                              (assoc acc :current (section-headers line))
 
-                          (and (= line "---") (:recognized? acc))
-                          (assoc acc :current :brief)
+                              (and (= line "---") (:current acc))
+                              (assoc acc :current :brief)
 
-                          (empty? line) acc
+                              (empty? line) acc
 
-                          :else
-                          (let [current (:current acc)
-                                value (if (str/starts-with? line "- ")
-                                        (subs line 2)
-                                        line)]
-                            (case current
-                              :early (update acc :early conj value)
-                              :files
-                              (cond
-                                (str/starts-with? line "- Modified: ")
-                                (update-in acc [:files :modified] conj (subs line 12))
-                                (str/starts-with? line "- Read: ")
-                                (update-in acc [:files :read] conj (subs line 8))
-                                :else acc)
-                              :commits (update acc :commits conj line)
-                              :users (update acc :users conj value)
-                              :instructions (update acc :instructions conj value)
-                              :branch (update acc :branch conj line)
-                              :previous (update acc :previous conj line)
-                              :brief (update acc :brief conj line)
-                              (update acc :prelude conj line))))))
-                    {:current nil
-                     :recognized? false
-                     :prelude []
-                     :early []
-                     :files {:modified [] :read []}
-                     :commits []
-                     :users []
-                     :instructions []
-                     :branch []
-                     :previous []
-                     :brief []}
-                    (str/split-lines s))]
-        (if (:recognized? parsed)
-          (let [previous-lines (concat (:prelude parsed) (:previous parsed))
-                previous (when (seq previous-lines)
-                           (clip-block (str/join "\n" previous-lines)
+                              :else
+                              (let [current (:current acc)
+                                    value (if (str/starts-with? line "- ")
+                                            (subs line 2)
+                                            line)]
+                                (case current
+                                  :early (update acc :early conj value)
+                                  :files
+                                  (cond
+                                    (str/starts-with? line "- Modified: ")
+                                    (update-in acc [:files :modified] conj (subs line 12))
+                                    (str/starts-with? line "- Read: ")
+                                    (update-in acc [:files :read] conj (subs line 8))
+                                    :else acc)
+                                  :commits (update acc :commits conj line)
+                                  :users (update acc :users conj value)
+                                  :instructions (update acc :instructions conj value)
+                                  :branch (update acc :branch conj line)
+                                  :previous (update acc :previous conj line)
+                                  :brief (update acc :brief conj line)
+                                  acc)))))
+                        {:current nil
+                         :early []
+                         :files {:modified [] :read []}
+                         :commits []
+                         :users []
+                         :instructions []
+                         :branch []
+                         :previous []
+                         :brief []}
+                        lines)
+                previous (when (seq (:previous parsed))
+                           (clip-block (str/join "\n" (:previous parsed))
                                        max-previous-chars))
                 branch (when (seq (:branch parsed))
                          (clip-block (str/join "\n" (:branch parsed))
@@ -362,8 +366,7 @@
             (-> parsed
                 (assoc :previous previous
                        :branch (when branch [branch]))
-                (dissoc :current :recognized? :prelude)))
-          {:previous (clip-block s max-previous-chars)})))))
+                (dissoc :current))))))))
 
 (defn- merge-newest
   "Union OLD then NEW, move a repeated key to the newest position, keep CAP."
@@ -410,9 +413,7 @@
               :assistant
               (let [text (:text b)
                     tcs (:tool-calls b)
-                    kept (if (> (count tcs) max-tool-lines)
-                           (take-last max-tool-lines tcs)
-                           tcs)
+                    kept (take-last max-tool-lines tcs)
                     omitted (- (count tcs) (count kept))]
                 (cond-> []
                   (seq text) (conj (str "[assistant] " (clip text 400)))

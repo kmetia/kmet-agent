@@ -384,14 +384,9 @@
                           (> (or (:tail-tokens prep 0) 0) budget))
           fallback (when too-large?
                      (prepare entries (:keep-recent-tokens settings)))]
-      (cond
-        (and too-large? fallback)
-        (assoc fallback :keep-fallback :tail-too-large)
-
-        too-large?
-        nil
-
-        :else prep))
+      (if too-large?
+        (some-> fallback (assoc :keep-fallback :tail-too-large))
+        prep))
     (prepare entries (:keep-recent-tokens settings))))
 
 ;; ─── Conversation serialization (pi: serializeConversation) ────────────────

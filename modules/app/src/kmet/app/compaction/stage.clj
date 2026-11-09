@@ -781,9 +781,8 @@
     (throw (ex-info (str "the :compaction service requires :compactor/llm "
                          "and :compactor/vcc")
                     {:type :kmet.app/missing-compactor
-                     :missing (vec (for [k [:llm :vcc]
-                                         :when (not (map? (get strategies k)))]
-                                     k))})))
+                     :missing (vec (remove #(map? (get strategies %))
+                                           [:llm :vcc]))})))
   {:maybe-compact! (fn [agent] (maybe-compact* strategies agent))
    :compact-for-overflow! (fn [agent] (compact-for-overflow* strategies agent))
    :compact-context! (fn [agent & args] (run-compact-context strategies agent args))
