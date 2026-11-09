@@ -237,3 +237,24 @@
      "keep:x")
     (t/is (= 1 (count @warnings)))
     (t/is (str/includes? (second (first @warnings)) "Usage: /compact"))))
+
+(t/deftest compact-reports-errors-through-one-arg-warning
+  (let [warnings (atom [])]
+    ((var builtins/handle-compact)
+     {:ui {:warning #(swap! warnings conj %)}
+      :runtime {:request-compaction! (fn [_ opts]
+                                       ((:on-error opts) (ex-info "boom" {}))
+                                       :started)}}
+     "keep:5")
+    (t/is (= 1 (count @warnings)))
+    (t/is (str/includes? (first @warnings) "boom"))))
+
+(t/deftest compact-reports-a-broken-request-capability
+  (let [warnings (atom [])]
+    ((var builtins/handle-compact)
+     {:ui {:warning #(swap! warnings conj %)}
+      :runtime {:request-compaction! 5}}
+     "keep:5")
+    (t/is (= 1 (count @warnings)))
+    (t/is (re-find #"IFn|Long" (first @warnings))
+          "a non-function request capability is reported, not thrown")))

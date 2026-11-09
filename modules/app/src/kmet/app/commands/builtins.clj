@@ -126,27 +126,32 @@
                                                               "Session compacted."
                                                               "Nothing to compact (session too small)."))))
                    :on-error (fn [e]
-                               (out ui :warning "Compact"
-                                    (or (ex-message e) (str e))))}]
+                               (out ui :warning
+                                    (str "Compact: "
+                                         (or (ex-message e) (str e)))))}]
     (if error
       (out ui :warning "Compact" error)
       ;; A front end always hands its commands a handle; the handle owns the
       ;; deferred-compaction queue a running prompt fills.
       (if-let [request (:request-compaction! engine)]
-        (case (request custom-instructions
-                       (assoc callbacks :keep-user-turns keep-user-turns))
-          ;; A run in flight defers the compaction (kmet's cancel is cooperative,
-          ;; so compacting under a live run would race it — pi instead aborts the
-          ;; run first).
-          :scheduled
-          (out ui :info "Compact"
-               "Compaction scheduled — it will run when the current response finishes.")
+        (try
+          (case (request custom-instructions
+                         (assoc callbacks :keep-user-turns keep-user-turns))
+            ;; A run in flight defers the compaction (kmet's cancel is cooperative,
+            ;; so compacting under a live run would race it — pi instead aborts the
+            ;; run first).
+            :scheduled
+            (out ui :info "Compact"
+                 "Compaction scheduled — it will run when the current response finishes.")
 
-          :compacting
-          (out ui :info "Compact" "Compaction already in progress.")
+            :compacting
+            (out ui :info "Compact" "Compaction already in progress.")
 
-          ;; :started — the completion reply arrives through :on-complete
-          nil)
+            ;; :started — the completion reply arrives through :on-complete
+            nil)
+          (catch Exception e
+            (out ui :warning
+                 (str "Compact: " (or (ex-message e) (str e))))))
         (out ui :warning "This front end cannot compact the session.")))))
 
 (defn- handle-units
