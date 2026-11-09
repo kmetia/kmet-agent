@@ -142,7 +142,7 @@
 (defn- escape-cwd
   "Escape a normalized path body for the session/eval directory key."
   [path]
-  (str/escape path {\~ "~~" \- "~-" \: "~:" \/ "-"}))
+  (str/escape path {\~ "~~" \- "~-" \: "~c" \/ "-"}))
 
 (defn- unescape-cwd
   "Inverse of escape-cwd: decode one escape sequence at a time so adjacent
@@ -155,17 +155,19 @@
             next-ch (when (< (inc i) (count encoded))
                       (nth encoded (inc i)))]
         (cond
-          (and (= ch \~) (contains? #{\~ \- \:} next-ch))
-          (recur (+ i 2) (conj out next-ch))
+          (and (= ch \~) (contains? #{\~ \- \c} next-ch))
+          (recur (+ i 2) (conj out (if (= \c next-ch) \: next-ch)))
           (= ch \-) (recur (inc i) (conj out \/))
           :else (recur (inc i) (conj out ch)))))))
 
 (defn encode-cwd
   "Encode a cwd path into an injective, reversible directory name: `--` +
    the normalized absolute path with its leading / stripped and ~, -, : and
-   / escaped as ~~, ~-, ~: and -, + `--`. /home/user/proj keeps the pi
+   / escaped as ~~, ~-, ~c and -, + `--`. /home/user/proj keeps the pi
    spelling --home-user-proj--, while a hyphen or colon in a path no
-   longer collides with a separator (the legacy encoder's flaw)."
+   longer collides with a separator (the legacy encoder's flaw). Colon is
+   escaped as ~c rather than ~: because `:` is illegal in a Windows file
+   name, and a drive letter heads every Windows cwd."
   [cwd]
   (str "--" (escape-cwd (str/replace (normalize-cwd cwd) #"^/" "")) "--"))
 

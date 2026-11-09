@@ -205,7 +205,9 @@
   (t/is (= "--home-user-proj~-a--" (s/encode-cwd "/home/user/proj-a"))
         "a hyphen is escaped, so it cannot collide with a slash")
   (t/is (= "--home-user-~~x--" (s/encode-cwd "/home/user/~x")))
-  (t/is (= "--home-user-a~:b--" (s/encode-cwd "/home/user/a:b")))
+  (t/is (= "--home-user-a~cb--" (s/encode-cwd "/home/user/a:b")))
+  (t/is (not (str/includes? (s/encode-cwd "/home/user/a:b") ":"))
+        "the key carries no colon: a Windows drive path must stay a legal name")
   (t/is (= "----" (s/encode-cwd "/")))
   (t/is (= (s/encode-cwd (str (fs/absolutize "a/b"))) (s/encode-cwd "a/b"))
         "a relative cwd is absolutized before encoding")
@@ -216,6 +218,15 @@
               (s/encode-cwd "/home/user/proj/a"))
         "the collision the legacy encoder had is gone"))
 
+(t/deftest test-encode-cwd-windows-drive
+  ;; a Windows cwd starts with a drive colon; the encoded key must not carry
+  ;; it, because `:` is illegal in a Windows file name
+  (with-redefs [fs/expand-home identity
+                fs/absolutize identity
+                fs/normalize identity]
+    (t/is (= "--C~c-src-my-kmet--"
+             (s/encode-cwd "C:\\src\\my\\kmet")))))
+
 (t/deftest test-decode-cwd
   (doseq [path ["/home/user/proj"
                 "/home/user/proj-a"
@@ -225,6 +236,9 @@
                 "/"]]
     (t/is (= path (s/decode-cwd (s/encode-cwd path)))
           (str path " round-trips")))
+  (t/testing "a Windows drive key decodes to its drive path"
+    (with-redefs [fs/windows? (constantly true)]
+      (t/is (= "C:/src/my/kmet" (s/decode-cwd "--C~c-src-my-kmet--")))))
   (t/is (thrown? Exception (s/decode-cwd "home-user-proj"))
         "a string without the -- wrapper is refused"))
 

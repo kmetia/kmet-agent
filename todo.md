@@ -183,7 +183,9 @@ fallback to global.
    session dirs and eval scopes:
    - normalize to an absolute path (`expand-home`, `absolutize`, `normalize`),
      separators as `/`, strip the leading `/`;
-   - escape `~` to `~~`, `-` to `~-`, `:` to `~:`, then `/` to `-`;
+   - escape `~` to `~~`, `-` to `~-`, `:` to `~c`, then `/` to `-`
+     (`~c`, not `~:`, because `:` is illegal in a Windows file name and a
+     drive letter heads every Windows cwd);
    - wrap as `--<encoded>--`; add `decode-cwd`.
    The current encoder stays as `legacy-encode-cwd` for reading old session
    dirs only. New sessions use the new key; `find-recent-session` checks the

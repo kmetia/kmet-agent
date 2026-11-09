@@ -110,7 +110,9 @@ headerless files still load with `:header nil`.
 - Files live under `~/.kmet/sessions/--<escaped-cwd>--/` with timestamped
   `.ednl` names. The key is injective and reversible: the normalized absolute
   cwd loses its leading `/`, then `~`, `-`, `:` and `/` are escaped as `~~`,
-  `~-`, `~:` and `-` before the `--` wrapper (`decode-cwd` reverses it).
+  `~-`, `~c` and `-` before the `--` wrapper (`decode-cwd` reverses it).
+  The colon is not literal: `:` is illegal in a Windows file name, and a
+  drive letter heads every Windows cwd.
   `/home/user/proj` still encodes to `--home-user-proj--`, but a hyphen or
   colon no longer collides with a separator — a named departure from pi's
   non-injective `<--cwd-->` layout. Discovery also reads the legacy encoding
