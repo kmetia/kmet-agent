@@ -46,13 +46,13 @@
     (let [retry (si/make-retry-status-indicator 1 3 2000)
           compaction (si/make-compaction-status-indicator)
           branch (si/make-branch-summary-status-indicator)]
-      (is (re-find #"^F Retrying \(1/3\) in [12]s\.\.\."
+      (is (re-find #"^F Retrying \(1/3\) in [12]s "
                    (plain (si/render-in-border retry 80)))
           "the countdown may tick 2s → 1s while the test runs")
       (is (str/includes? (plain (si/render-in-border compaction 80))
-                         "Compacting context..."))
+                         "Compacting context"))
       (is (str/includes? (plain (si/render-in-border branch 80))
-                         "Summarizing branch..."))
+                         "Summarizing branch"))
       (testing "no ellipsis — the border owns the geometry"
         (is (= "F Retr" (plain (si/render-in-border retry 6))))
         (is (= 6 (u/visible-width (si/render-in-border retry 6)))))
@@ -80,10 +80,10 @@
 (deftest test-share-spinner-embeds
   (testing "the /share status is a bare spinner, not a status record — it
             must render in the editor border like every other status"
-    (let [sp (spinner/make-spinner :text "Creating gist..." :active true)]
-      (is (= "F Creating gist..." (plain (si/render-in-border sp 40))))
+    (let [sp (spinner/make-spinner :text "Creating gist" :active true)]
+      (is (= "F Creating gist" (plain (si/render-in-border sp 40))))
       (is (= "F" (plain (si/render-spinner-in-border sp 40))))
-      (is (= "── F Creating gist... ──────────────────"
+      (is (= "── F Creating gist ─────────────────────"
              (plain (border-line sp 40 0))))
       (testing "inactive renders nothing (the editor keeps its rule)"
         (spinner/spinner-stop! sp)
@@ -195,11 +195,11 @@
             the tool boxes show themselves, so they keep one plain word"
     (let [working (si/make-status-indicator)]
       (si/status-indicator-start! working)
-      (is (= "F Working..." (working-line working)))
+      (is (= "F Working" (working-line working)))
       (si/status-indicator-set-phase! working :waiting-for-model)
-      (is (= "F Waiting for model..." (working-line working)))
+      (is (= "F Waiting for model" (working-line working)))
       (si/status-indicator-set-phase! working :working)
-      (is (= "F Working..." (working-line working))))))
+      (is (= "F Working" (working-line working))))))
 
 (deftest test-extension-working-message-wins-over-the-phase
   (testing "an extension message (setWorkingMessage) owns the line: the phase
@@ -210,7 +210,7 @@
       (si/status-indicator-set-phase! working :waiting-for-model)
       (is (= "F Fetching docs" (working-line working)))
       (si/status-indicator-set-text! working nil)
-      (is (= "F Working..." (working-line working)))
+      (is (= "F Working" (working-line working)))
       (testing "the phase transitions resume once the extension lets go"
         (si/status-indicator-set-phase! working :waiting-for-model)
-        (is (= "F Waiting for model..." (working-line working)))))))
+        (is (= "F Waiting for model" (working-line working)))))))

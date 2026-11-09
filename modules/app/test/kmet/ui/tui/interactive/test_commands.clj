@@ -551,7 +551,7 @@
   (testing "a background status (share/branch summary) releases its slot and
             gives the working spinner back while the turn still streams"
     (let [cs (support/test-status-cs)
-          share (spinner/make-spinner :text "Creating gist..." :active true)]
+          share (spinner/make-spinner :text "Creating gist" :active true)]
       ((var status/activate-working-indicator!) cs)
       ((var status/show-status-indicator!) cs :share share)
       (t/is (not (working-status? cs)))
@@ -560,14 +560,14 @@
       (t/is (working-status? cs))))
   (testing "no revive when the turn ended"
     (let [cs (support/test-status-cs)
-          share (spinner/make-spinner :text "Creating gist..." :active true)]
+          share (spinner/make-spinner :text "Creating gist" :active true)]
       (reset! (:turn-running? (:engine cs)) false)
       ((var status/show-status-indicator!) cs :share share)
       ((var status/release-background-status!) cs :share)
       (t/is (blank-status? cs))))
   (testing "a newer transient owns the slot — neither cleared nor displaced"
     (let [cs (support/test-status-cs)
-          share (spinner/make-spinner :text "Creating gist..." :active true)]
+          share (spinner/make-spinner :text "Creating gist" :active true)]
       ((var status/show-status-indicator!) cs :share share)
       ((var status/show-status-indicator!) cs :retry
                                            (status-indicator/make-retry-status-indicator 1 3 2000))
@@ -587,7 +587,7 @@
   (testing "an already-revived working spinner is not restarted (its
             animation clock survives)"
     (let [cs (support/test-status-cs)
-          share (spinner/make-spinner :text "Creating gist..." :active true)]
+          share (spinner/make-spinner :text "Creating gist" :active true)]
       ((var status/show-status-indicator!) cs :share share)
       ;; a :turn-start revived the working spinner while the background op
       ;; ran — the late release must not touch it
@@ -599,7 +599,7 @@
   (testing "a turn ending mid-revival must not leave a spinner behind (the
             post-revival re-check rolls it back)"
     (let [cs (support/test-status-cs)
-          share (spinner/make-spinner :text "Creating gist..." :active true)
+          share (spinner/make-spinner :text "Creating gist" :active true)
           real (var-get (var status/activate-working-indicator!))]
       ((var status/show-status-indicator!) cs :share share)
       (with-redefs-fn {(var status/activate-working-indicator!)

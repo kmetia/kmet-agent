@@ -39,9 +39,9 @@
   (let [cancel (str " (" (status/fmt-key-display (app-kb/key-text "app.interrupt"))
                     " to cancel)")]
     (case reason
-      :manual (str "Compacting context..." cancel)
-      :overflow (str "Context overflow detected, auto-compacting..." cancel)
-      (str "Auto-compacting..." cancel))))
+      :manual (str "Compacting context" cancel)
+      :overflow (str "Context overflow detected, auto-compacting" cancel)
+      (str "Auto-compacting" cancel))))
 
 (defn set-terminal-progress!
   "Show/clear the OSC 9;4 terminal progress indicator. Activation is gated

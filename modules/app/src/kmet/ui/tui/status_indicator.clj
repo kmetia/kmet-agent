@@ -74,8 +74,8 @@
 ;; back (pi: workingMessage ?? defaultWorkingMessage).
 
 (def ^:private phase-text
-  {:waiting-for-model "Waiting for model..."
-   :working           "Working..."})
+  {:waiting-for-model "Waiting for model"
+   :working           "Working"})
 
 (defn- phase-message [phase]
   (get phase-text phase (get phase-text :working)))
@@ -192,7 +192,7 @@
           th (theme/get-current-theme)
           frame (frame-at elapsed)
           message (str "Retrying (" @attempt-atom "/" @max-attempts-atom ") in "
-                       remaining "s... (" @cancel-hint-atom " to cancel)")
+                       remaining "s (" @cancel-hint-atom " to cancel)")
           line (str (theme/fg th :warning frame) " " (theme/fg th :muted message))]
       ["" (u/truncate-to-width line width)]))
   (invalidate [this] (reset! (:cache-atom this) nil)))
@@ -223,7 +223,7 @@
   "Compaction progress indicator (pi: CompactionStatusIndicator). The
    cancellability hint rides in MESSAGE (compaction-status-message appends
    it — escape aborts the compaction via the editor's interrupt action)."
-  [& {:keys [message] :or {message "Compacting context..."}}]
+  [& {:keys [message] :or {message "Compacting context"}}]
   (map->CompactionStatusIndicator {:start-atom (atom (System/currentTimeMillis))
                                    :message-atom (atom message)
                                    :cache-atom (atom nil)}))
@@ -244,7 +244,7 @@
    with a cancel hint — escape aborts the summarization via the editor's
    interrupt action."
   [& {:keys [message cancel-hint]
-      :or {message "Summarizing branch..." cancel-hint "Escape"}}]
+      :or {message "Summarizing branch" cancel-hint "Escape"}}]
   (map->BranchSummaryStatusIndicator {:start-atom (atom (System/currentTimeMillis))
                                       :message-atom (atom message)
                                       :cancel-hint-atom (atom cancel-hint)
@@ -294,7 +294,7 @@
                          width "")))
 
 ;; The /share flow records a bare Spinner as the active status
-;; (make-spinner :text "Creating gist..."), so the plain spinner must embed
+;; (make-spinner :text "Creating gist"), so the plain spinner must embed
 ;; too — its single animated line, without the standalone "  " prefix
 ;; (embedded status aligns with the working indicator's frame column).
 (extend-type kmet.tui.components.spinner.Spinner

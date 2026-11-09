@@ -236,7 +236,7 @@
   [cs]
   (let [sess (runtime/session (:engine cs))
         chat (:chat-history cs)
-        indicator (spinner/make-spinner :text "Creating gist..." :active true)
+        indicator (spinner/make-spinner :text "Creating gist" :active true)
         done (promise)]
     (status/show-status-indicator! cs :share indicator)
     ;; spinner animation rides the transient-indicator frame driver while

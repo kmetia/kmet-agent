@@ -1111,12 +1111,12 @@ from the api.
 (ext/ui-set-header api (fn [tui theme] comp-or-nil))
 (ext/ui-set-title api "kmet")
 (ext/ui-set-working-indicator api {:frames ["⠋" "⠙"] :interval-ms 80})
-;; the working line names the run phase by default — "Waiting for model..."
-;; while the agent waits for the model's first token, "Working..." for
+;; the working line names the run phase by default — "Waiting for model"
+;; while the agent waits for the model's first token, "Working" for
 ;; streaming and tool execution (the transcript shows those itself). A
 ;; message set here owns the line: phase changes leave it alone, nil
 ;; restores the phase's text (pi: workingMessage ?? defaultWorkingMessage)
-(ext/ui-set-working-message api "Working...")
+(ext/ui-set-working-message api "Working")
 (ext/ui-set-working-visible api true)
 (ext/ui-set-hidden-thinking-label api "…")
 (ext/ui-set-thinking-mode api :stream-last) ; :visible | :stream-last | :hidden

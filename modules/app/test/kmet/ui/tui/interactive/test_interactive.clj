@@ -7,7 +7,7 @@
    :agent-start and no :default — it threw IllegalArgumentException on the
    first event of every run, the exception was swallowed by the run future
    (its catch re-emits :error through the same handler, which also threw),
-   and the UI stayed on \"Working...\" forever while print mode kept working."
+   and the UI stayed on \"Working\" forever while print mode kept working."
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.ui.tui.interactive :as inter]
             [kmet.ui.tui.interactive.builtins :as builtins]
@@ -1528,17 +1528,17 @@
     (try
       (reset! (:turn-running? handle) true)
       (handler {:type :agent-start})
-      (is (= "F Waiting for model..." (text)) "agent-start opens the wait")
+      (is (= "F Waiting for model" (text)) "agent-start opens the wait")
       (handler {:type :message-update :message {:role :assistant :content []}
                 :delta {:type :thinking :content "hmm"}})
-      (is (= "F Working..." (text)) "the first delta ends the wait")
+      (is (= "F Working" (text)) "the first delta ends the wait")
       (handler {:type :turn-start})
-      (is (= "F Waiting for model..." (text)) "each LLM call re-opens the wait")
+      (is (= "F Waiting for model" (text)) "each LLM call re-opens the wait")
       (handler {:type :tool-execution-start :tool-call-id "t1"
                 :tool-name "bash" :args {}})
-      (is (= "F Working..." (text)) "tool execution is plain work")
+      (is (= "F Working" (text)) "tool execution is plain work")
       (handler {:type :status :status :thinking})
-      (is (= "F Waiting for model..." (text)) "the status atom names the phase too")
+      (is (= "F Waiting for model" (text)) "the status atom names the phase too")
       (handler {:type :status :status :executing :tool-calls []})
-      (is (= "F Working..." (text)))
+      (is (= "F Working" (text)))
       (finally (status/stop-anim-timer! cs)))))

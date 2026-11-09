@@ -55,7 +55,7 @@
       (t/is (= "txt" (ex/ui-get-editor-text)))
       (ex/ui-paste-to-editor "pasted")
       (ex/ui-set-working-indicator {:frames []})
-      (ex/ui-set-working-message "Working...")
+      (ex/ui-set-working-message "Working")
       (ex/ui-set-working-visible true)
       (ex/ui-set-hidden-thinking-label "Thinking…")
       (ex/ui-set-thinking-mode :stream-last)
