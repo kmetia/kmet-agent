@@ -259,6 +259,21 @@
                                            :arguments {:command "echo \"-m fake\" && git commit -m \"real\""}}])
                               (tool-result "c1" "[master abc1234] real")]))]
       (t/is (str/includes? summary "abc1234: real"))
+      (t/is (not (str/includes? summary "abc1234: fake")))))
+  (t/testing "a git commit inside a quoted echo is not a commit"
+    (let [summary (:summary (summarize
+                             [(assistant "echo"
+                                         [{:id "c1" :name "bash"
+                                           :arguments {:command "echo \"x; git commit -m fake\""}}])
+                              (tool-result "c1" "[master abc1234] fake")]))]
+      (t/is (not (str/includes? summary "[Commits]")))))
+  (t/testing "a real commit after a quoted echo is still found"
+    (let [summary (:summary (summarize
+                             [(assistant "commit"
+                                         [{:id "c1" :name "bash"
+                                           :arguments {:command "echo \"x; git commit -m fake\"; git commit -m \"real\""}}])
+                              (tool-result "c1" "[master abc1234] real")]))]
+      (t/is (str/includes? summary "abc1234: real"))
       (t/is (not (str/includes? summary "abc1234: fake"))))))
 
 (t/deftest heredoc-commit-messages-are-skipped

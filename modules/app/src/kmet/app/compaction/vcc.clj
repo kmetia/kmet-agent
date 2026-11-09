@@ -223,12 +223,33 @@
 (def ^:private git-commit-pattern
   #"(?:^|[;&|(\n])\s*((?:sudo\s+)?git\s+commit)(?=\s|$)")
 
-(defn- git-commit? [cmd]
-  (boolean (re-find git-commit-pattern (or cmd ""))))
+(defn- inside-quotes?
+  "True when POS in S is inside an unclosed single or double quote."
+  [s pos]
+  (loop [i 0 quote nil escaped? false]
+    (if (>= i pos)
+      (some? quote)
+      (let [c (.charAt ^String s i)]
+        (cond
+          escaped? (recur (inc i) quote false)
+          (= c \\) (recur (inc i) quote true)
+          (and quote (= c quote)) (recur (inc i) nil false)
+          (and (nil? quote) (or (= c \") (= c \'))) (recur (inc i) c false)
+          :else (recur (inc i) quote false))))))
 
-(defn- git-commit-start [cmd]
+(defn- git-commit-start
+  "The index of a git commit command outside shell quotes, or nil."
+  [cmd]
   (let [m (re-matcher git-commit-pattern (or cmd ""))]
-    (when (.find m) (.start m 1))))
+    (loop []
+      (when (.find m)
+        (let [start (.start m 1)]
+          (if (inside-quotes? cmd start)
+            (recur)
+            start))))))
+
+(defn- git-commit? [cmd]
+  (some? (git-commit-start cmd)))
 
 (defn- command-end
   "The index where the commit command ends: the next ;, &, |, or newline
