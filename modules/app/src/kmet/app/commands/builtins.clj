@@ -124,13 +124,9 @@
                                     ;; nothing-to-compact.
                                     (out ui :info "Compact" (if result
                                                               "Session compacted."
-                                                              "Nothing to compact (session too small)."))))
-                   :on-error (fn [e]
-                               (out ui :warning
-                                    (str "Compact: "
-                                         (or (ex-message e) (str e)))))}]
+                                                              "Nothing to compact (session too small)."))))}]
     (if error
-      (out ui :warning "Compact" error)
+      (out ui :warning (str "Compact: " error))
       ;; A front end always hands its commands a handle; the handle owns the
       ;; deferred-compaction queue a running prompt fills.
       (if-let [request (:request-compaction! engine)]

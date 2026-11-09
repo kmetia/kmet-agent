@@ -231,23 +231,26 @@
 (t/deftest compact-rejects-a-malformed-keep-prefix
   (let [warnings (atom [])]
     ((var builtins/handle-compact)
-     {:ui {:warning (fn [title message] (swap! warnings conj [title message]))}
+     {:ui {:warning #(swap! warnings conj %)}
       :runtime {:request-compaction! (fn [& _]
                                        (throw (ex-info "must not request" {})))}}
      "keep:x")
     (t/is (= 1 (count @warnings)))
-    (t/is (str/includes? (second (first @warnings)) "Usage: /compact"))))
+    (t/is (str/includes? (first @warnings) "Usage: /compact"))))
 
-(t/deftest compact-reports-errors-through-one-arg-warning
-  (let [warnings (atom [])]
+(t/deftest compact-leaves-failure-display-to-the-event
+  (let [seen (atom nil)
+        warnings (atom [])]
     ((var builtins/handle-compact)
      {:ui {:warning #(swap! warnings conj %)}
       :runtime {:request-compaction! (fn [_ opts]
-                                       ((:on-error opts) (ex-info "boom" {}))
+                                       (reset! seen opts)
                                        :started)}}
      "keep:5")
-    (t/is (= 1 (count @warnings)))
-    (t/is (str/includes? (first @warnings) "boom"))))
+    (t/is (nil? (:on-error @seen))
+          "the command relies on :compaction-end for failure display")
+    (t/is (fn? (:on-complete @seen)))
+    (t/is (empty? @warnings))))
 
 (t/deftest compact-reports-a-broken-request-capability
   (let [warnings (atom [])]
