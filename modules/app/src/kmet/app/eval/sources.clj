@@ -8,11 +8,11 @@
   (:require [clojure.string :as str]))
 
 (def reserved-source-namespaces
-  "Namespaces an extension source may not contribute to: the sandbox's
-   `user` and `clj` helpers, the eval namespace itself, and the fixed
-   namespaces the sandbox installs around it."
-  #{"user" "clj" "eval" "clojure" "clojure.core"
-    "sandbox" "tools" "babashka.process"
+  "Namespaces an extension source may not contribute to: the model's
+   `user`, the system `core`, `clj`, `eval` and `tools`, and the fixed host
+   namespaces the sandbox installs around them."
+  #{"user" "core" "clj" "eval" "clojure" "clojure.core"
+    "tools" "babashka.process"
     "kmet.libs.http" "kmet.libs.json"
     "kmet.libs.markdown" "kmet.libs.yaml"})
 
@@ -20,8 +20,9 @@
   "Built-in keys refused even when a namespace check would allow them. A
    source that contributes one is refused as a whole."
   #{"eval/library" "eval/forget" "eval/sources" "eval/help" "eval/describe"
-    "eval/move" "user/read" "user/write" "user/edit" "user/bash"
-    "user/sh" "user/emit" "user/emit-image"
+    "eval/move" "core/read" "core/write" "core/edit" "core/bash"
+    "core/sh" "core/emit" "core/emit-image" "core/cwd" "core/env"
+    "core/now" "core/sleep" "core/spawn"
     "clj/edit-form" "clj/replace-sexp" "clj/paren-repair"})
 
 (def ^:private reserved-command-names
@@ -30,7 +31,7 @@
     "--help" "-h"})
 
 (defn source-key
-  "The address of one contributed value — `user/edit`, `license/add!`."
+  "The address of one contributed value — `ext.license/add!`."
   [namespace name]
   (str namespace "/" name))
 
@@ -118,15 +119,44 @@
                  [verb (select-keys command [:description :run])])))
         commands))
 
+(defn- source-id-name
+  "The namespace segment for a source id: `:license` → `license`,
+   `:foo/bar` → `foo.bar`."
+  [id]
+  (let [s (cond
+            (keyword? id) (if-let [n (namespace id)]
+                            (str n "." (name id))
+                            (name id))
+            (symbol? id) (str id)
+            (string? id) id
+            :else (str id))]
+    (str/replace s "/" ".")))
+
+(defn extension-namespace
+  "The only namespace an extension source may contribute: `ext.<id>`."
+  [id]
+  (symbol (str "ext." (source-id-name id))))
+
+(defn- extension-namespace?
+  "Is NS-NAME `ext.<id>` or a subnamespace of it?"
+  [id ns-name]
+  (let [root (str (extension-namespace id))]
+    (or (= (str ns-name) root)
+        (str/starts-with? (str ns-name) (str root ".")))))
+
 (defn- check-reserved!
   [id ns-map macros contributed]
-  (when-let [namespace (first (filter reserved-namespace?
-                                      (concat (keys ns-map) (keys macros))))]
-    (bad-source! id (str "eval source " (pr-str id)
-                         " may not contribute to " namespace)))
-  (when-let [key (first (filter reserved-key? contributed))]
-    (bad-source! id (str "eval source " (pr-str id)
-                         " may not contribute the built-in key " key))))
+  (let [namespaces (concat (keys ns-map) (keys macros))]
+    (when-let [namespace (first (filter reserved-namespace? namespaces))]
+      (bad-source! id (str "eval source " (pr-str id)
+                           " may not contribute to " namespace)))
+    (when-let [namespace (first (remove #(extension-namespace? id %) namespaces))]
+      (bad-source! id (str "eval source " (pr-str id)
+                           " may contribute only to " (extension-namespace id)
+                           " or its subnamespaces; got " namespace)))
+    (when-let [key (first (filter reserved-key? contributed))]
+      (bad-source! id (str "eval source " (pr-str id)
+                           " may not contribute the built-in key " key)))))
 
 (defn- check-meta!
   "Refuse an optional value-metadata field that is present but invalid."

@@ -62,7 +62,7 @@
                 {"codemode" definition}))
           "a codemode definition does not make the batch sequential")
     (t/is (not (tool-exec/has-sequential-tool-call?
-                [{:name "codemode" :arguments {"code" "(emit 1)"}}]
+                [{:name "codemode" :arguments {"code" "(core/emit 1)"}}]
                 {"codemode" definition}))
           "a definition-free script stays parallel")))
 
@@ -72,16 +72,16 @@
   (with-cwd-dir
     (fn [dir]
       (spit (str dir "/shot.gif") "GIF89a")
-      (let [r (run "(emit :shot) (emit-image \"shot.gif\")")]
+      (let [r (run "(core/emit :shot) (core/emit-image \"shot.gif\")")]
         (t/is (not (:is-error r)) (:content r))
         (t/is (= ":shot" (:content r)) "text and images stay separate channels")
         (t/is (= [{:data "R0lGODlh" :mime-type "image/gif"}] (:images r)))
         (t/is (= 1 (get-in r [:details :images]))))))
-  (let [r (run "(sandbox/emit-image {:data \"R0lGODlh\" :mime-type \"image/gif\"})")]
+  (let [r (run "(core/emit-image {:data \"R0lGODlh\" :mime-type \"image/gif\"})")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (= "(no output)" (:content r)))
     (t/is (= [{:data "R0lGODlh" :mime-type "image/gif"}] (:images r))))
-  (let [r (run "(emit-image {:type :image :data \"AA==\" :mime-type \"image/png\"})")]
+  (let [r (run "(core/emit-image {:type :image :data \"AA==\" :mime-type \"image/png\"})")]
     (t/is (= [{:data "AA==" :mime-type "image/png"}] (:images r))
           "an MCP image block passes through")))
 
@@ -90,22 +90,22 @@
   (with-cwd-dir
     (fn [dir]
       (spit (str dir "/plain.txt") "not an image")
-      (let [r (run "(emit-image \"missing.png\")")]
+      (let [r (run "(core/emit-image \"missing.png\")")]
         (t/is (:is-error r))
         (t/is (str/includes? (:content r) "not a supported image file"))
         (t/is (nil? (:images r))))
-      (let [r (run "(emit-image \"plain.txt\")")]
+      (let [r (run "(core/emit-image \"plain.txt\")")]
         (t/is (:is-error r) (:content r))
         (t/is (nil? (:images r))))))
-  (let [r (run "(emit-image {:data 42})")]
+  (let [r (run "(core/emit-image {:data 42})")]
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) ":data <base64>")))
-  (let [r (run "(emit-image {:data \"AA==\" :mime-type \"image/svg+xml\"})")]
+  (let [r (run "(core/emit-image {:data \"AA==\" :mime-type \"image/svg+xml\"})")]
     (t/is (:is-error r) (:content r))
     (t/is (str/includes? (:content r) "unsupported image type"))
     (t/is (nil? (:images r)))
     (t/is (str/includes? (:content r) "image/png") "the error lists the accepted types"))
-  (t/is (:is-error (run "(emit-image 42)"))))
+  (t/is (:is-error (run "(core/emit-image 42)"))))
 
 (t/deftest test-codemode-emit-image-file-cap
   ;; the raw-byte cap is checked before the read: a file too large to become a
@@ -113,19 +113,19 @@
   (with-cwd-dir
     (fn [dir]
       (fs/write-bytes (str dir "/huge.gif") (byte-array (inc (* 4 1024 1024))))
-      (let [r (run "(emit-image \"huge.gif\")")]
+      (let [r (run "(core/emit-image \"huge.gif\")")]
         (t/is (:is-error r) (:content r))
         (t/is (str/includes? (:content r) "the cap is"))
         (t/is (nil? (:images r)))))))
 
 (t/deftest test-codemode-emit-image-count-bound
   ;; at most 8 images per call: the ninth throw aborts the script
-  (let [r (run "(dotimes [i 9] (emit-image {:data \"AA==\" :mime-type \"image/png\"}))")]
+  (let [r (run "(dotimes [i 9] (core/emit-image {:data \"AA==\" :mime-type \"image/png\"}))")]
     (t/is (:is-error r) (:content r))
     (t/is (str/includes? (:content r) "at most 8 images"))))
 
 (t/deftest test-codemode-emit-output
-  (let [r (run "(emit (+ 1 2))")]
+  (let [r (run "(core/emit (+ 1 2))")]
     (t/is (not (:is-error r)))
     (t/is (= "3" (:content r)))
     (t/is (nil? (get-in r [:details :timeout])) "no deadline unless asked")))
@@ -143,7 +143,7 @@
   (t/is (= "{:a 1}" (:content (run "{:a 1}"))))
   (t/is (= "42" (:content (run "(println \"hello\") 42")))
         "stdout stays out while the final value is reported")
-  (t/is (= ":emitted" (:content (run "(emit :emitted) (+ 1 2)")))
+  (t/is (= ":emitted" (:content (run "(core/emit :emitted) (+ 1 2)")))
         "emit wins over the final value")
   (let [r (run "(range)")]
     (t/is (not (:is-error r)) (:content r))
@@ -154,14 +154,14 @@
           "a large value meets the same output budget as emit")))
 
 (t/deftest test-codemode-emit-compact-result
-  (let [r (run "(sandbox/emit {:count 2 :items [1 2]})")]
+  (let [r (run "(core/emit {:count 2 :items [1 2]})")]
     (t/is (not (:is-error r)))
     (t/is (= "{:count 2, :items [1 2]}" (str/trim (:content r))))
     (t/is (nil? (:truncation r))))
-  (let [r (run "(emit {:count 2 :items [1 2]})")]
+  (let [r (run "(core/emit {:count 2 :items [1 2]})")]
     (t/is (= "{:count 2, :items [1 2]}" (str/trim (:content r)))
           "bare emit works too"))
-  (let [r (run "(emit \"a\") (emit 1) (emit :k)")]
+  (let [r (run "(core/emit \"a\") (core/emit 1) (core/emit :k)")]
     (t/is (= "a\n1\n:k" (:content r)) "emits join in order")))
 
 (t/deftest test-codemode-error
@@ -196,7 +196,7 @@
   (let [signal (atom false)
         started (concurrent/monotonic-ms)
         f (future (tools/execute-tool reg "codemode"
-                                      {:code "(sandbox/sleep 5000)"
+                                      {:code "(core/sleep 5000)"
                                        :timeout 10}
                                       {:signal signal}))]
     (Thread/sleep 100)
@@ -216,24 +216,24 @@
     (t/is (= :timeout (get-in r [:details :error])))))
 
 (t/deftest test-codemode-spawn-emit-reported
-  (let [r (run "@(sandbox/spawn (fn [] (emit :from-future)))")]
+  (let [r (run "@(core/spawn (fn [] (core/emit :from-future)))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (= ":from-future" (:content r)))))
 
 (t/deftest test-codemode-emit-from-spawn
-  (let [r (run "@(sandbox/spawn (fn [] (sandbox/emit :from-future)))")]
+  (let [r (run "@(core/spawn (fn [] (core/emit :from-future)))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (= ":from-future" (:content r)))))
 
 (t/deftest test-codemode-capabilities
-  (let [r (run (str "(emit [(fs/exists? \"deps.edn\")"
+  (let [r (run (str "(core/emit [(fs/exists? \"deps.edn\")"
                     "  (> (count (slurp \"deps.edn\")) 0)"
                     "  (json/generate-string {:a 1})"
                     "  (vec (pmap inc [1 2 3]))"
-                    "  @(sandbox/spawn (fn [] 42))"
-                    "  (pos? (sandbox/now))"
-                    "  (string? (sandbox/env \"HOME\"))"
-                    "  (pos? (count (sandbox/cwd)))"
+                    "  @(core/spawn (fn [] 42))"
+                    "  (pos? (core/now))"
+                    "  (string? (core/env \"HOME\"))"
+                    "  (pos? (count (core/cwd)))"
                     "  (str/upper-case \"x\")"
                     "  (set/union #{1} #{2})"
                     "  (edn/read-string \"1\")"
@@ -244,7 +244,7 @@
              (:content r)))))
 
 (t/deftest test-codemode-explicit-require
-  (let [r (run "(require '[clojure.string :as cs]) (emit (cs/upper-case \"y\"))")]
+  (let [r (run "(require '[clojure.string :as cs]) (core/emit (cs/upper-case \"y\"))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (= "Y" (:content r)))))
 
@@ -253,27 +253,27 @@
   ;; to scripts as to extension contexts — rewrite-clj on both hosts
   (t/is (= "(c d)"
            (:content (run (str "(require '[rewrite-clj.zip :as z])"
-                               " (emit (z/root-string (z/replace (z/of-string \"(a b)\") '(c d))))")))))
+                               " (core/emit (z/root-string (z/replace (z/of-string \"(a b)\") '(c d))))")))))
   (t/is (= "(defn  g [x] x)"
-           (:content (run "(require '[cljfmt.core :as f]) (emit (f/reformat-string \"(defn  g [x]x)\"))"))))
+           (:content (run "(require '[cljfmt.core :as f]) (core/emit (f/reformat-string \"(defn  g [x]x)\"))"))))
   (t/is (= "[1 2 3]"
-           (:content (run "(require '[edamame.core :as e]) (emit (e/parse-string \"[1 2 3]\"))")))))
+           (:content (run "(require '[edamame.core :as e]) (core/emit (e/parse-string \"[1 2 3]\"))")))))
 
 (t/deftest test-codemode-script-library-ports
   ;; the portable kmet.libs seams are require-able in the shared sandbox
   (t/is (= "true"
-           (:content (run "(require '[kmet.libs.http :as http]) (emit (fn? http/request))"))))
+           (:content (run "(require '[kmet.libs.http :as http]) (core/emit (fn? http/request))"))))
   (t/is (= "true"
-           (:content (run "(require '[kmet.libs.yaml :as yaml]) (emit (fn? yaml/parse))"))))
+           (:content (run "(require '[kmet.libs.yaml :as yaml]) (core/emit (fn? yaml/parse))"))))
   (t/is (= "true"
-           (:content (run "(require '[kmet.libs.markdown :as md]) (emit (fn? md/parse))"))))
+           (:content (run "(require '[kmet.libs.markdown :as md]) (core/emit (fn? md/parse))"))))
   (t/is (= "true"
-           (:content (run "(emit (fn? json/parse-string))")))))
+           (:content (run "(core/emit (fn? json/parse-string))")))))
 
 (t/deftest test-codemode-reload-is-noop
   ;; SCI consults the sandbox :load-fn even for a :reload; a known namespace
   ;; stays available (the pre-simplification loader returned its handle)
-  (let [r (run "(require 'clojure.set :reload) (require '[babashka.fs :as fs] :reload) (emit :ok)")]
+  (let [r (run "(require 'clojure.set :reload) (require '[babashka.fs :as fs] :reload) (core/emit :ok)")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (= ":ok" (:content r)))))
 
@@ -281,20 +281,20 @@
   (with-cwd-dir
     (fn [dir]
       (spit (str dir "/hello.txt") "from-cwd")
-      (let [r (run (str "(emit [(slurp \"hello.txt\") (= (sandbox/cwd) " (pr-str dir) ")])"))]
+      (let [r (run (str "(core/emit [(slurp \"hello.txt\") (= (core/cwd) " (pr-str dir) ")])"))]
         (t/is (not (:is-error r)) (:content r))
         (t/is (str/includes? (:content r) "from-cwd"))
         (t/is (str/includes? (:content r) "true"))))))
 
 (t/deftest test-codemode-stderr-not-reported
-  (let [r (run "(binding [*out* *err*] (println \"oops\")) (emit :done)")]
+  (let [r (run "(binding [*out* *err*] (println \"oops\")) (core/emit :done)")]
     (t/is (not (:is-error r)))
     (t/is (= ":done" (:content r)))
     (t/is (not (str/includes? (:content r) "oops"))
           "stderr is captured but not reported")))
 
 (t/deftest test-codemode-output-truncation
-  (let [r (run "(dotimes [i 3000] (emit i))")]
+  (let [r (run "(dotimes [i 3000] (core/emit i))")]
     (t/is (not (:is-error r)))
     (t/is (some? (:truncation r)))
     (t/is (= :lines (get-in r [:truncation :truncated-by])))
@@ -302,22 +302,22 @@
     (t/is (str/includes? (:content r) "truncated"))))
 
 (t/deftest test-codemode-output-budget
-  (let [r (run "(dotimes [i 1000] (emit (apply str (repeat 100 \"x\"))))"
+  (let [r (run "(dotimes [i 1000] (core/emit (apply str (repeat 100 \"x\"))))"
                {:max-output-bytes 1024})]
     (t/is (not (:is-error r)))
     (t/is (= 1024 (get-in r [:truncation :max-bytes])))
     (t/is (= :bytes (get-in r [:truncation :truncated-by])))
     (t/is (str/includes? (:content r) "[codemode output truncated")))
-  (let [r (run "(dotimes [i 1000] (emit (apply str (repeat 100 \"x\"))))")]
+  (let [r (run "(dotimes [i 1000] (core/emit (apply str (repeat 100 \"x\"))))")]
     (t/is (= (* 16 1024) (get-in r [:truncation :max-bytes]))
           "the script default is smaller than bash's shared cap")))
 
 (t/deftest test-codemode-output-limit-normalization
-  (let [r (run "(dotimes [i 1000] (emit (apply str (repeat 100 \"x\"))))"
+  (let [r (run "(dotimes [i 1000] (core/emit (apply str (repeat 100 \"x\"))))"
                {:max-output-bytes 999999})]
     (t/is (= (* 50 1024) (get-in r [:truncation :max-bytes]))
           "limits clamp to the tool-wide byte cap"))
-  (let [r (run "(dotimes [i 1000] (emit (apply str (repeat 100 \"x\"))))"
+  (let [r (run "(dotimes [i 1000] (core/emit (apply str (repeat 100 \"x\"))))"
                {:max-output-bytes 0})]
     (t/is (= (* 16 1024) (get-in r [:truncation :max-bytes])))
     (t/is (= 2000 (get-in r [:truncation :max-lines]))
@@ -325,7 +325,7 @@
 
 (t/deftest test-codemode-streaming
   (let [updates (atom [])
-        r (run "(dotimes [i 4] (emit i) (sandbox/sleep 50))"
+        r (run "(dotimes [i 4] (core/emit i) (core/sleep 50))"
                {}
                (fn [partial] (swap! updates conj partial)))]
     (t/is (not (:is-error r)))
@@ -338,7 +338,7 @@
                      :description "Echo args"
                      :execute (fn [args] {:content (pr-str args)})}
     (fn []
-      (let [r (run "(emit @(tools/call \"codemode-test-echo\" {:x 1}))")]
+      (let [r (run "(core/emit @(tools/call \"codemode-test-echo\" {:x 1}))")]
         (t/is (not (:is-error r)) (:content r))
         (t/is (str/includes? (:content r) ":x 1"))
         (t/is (= [{:tool "codemode-test-echo" :ok true}]
@@ -352,7 +352,7 @@
                      :description "Echo args"
                      :execute (fn [args] {:content (pr-str args)})}
     (fn []
-      (let [r (run "(emit (tools/text @(tools/codemode-test-echo {:n 1})))")]
+      (let [r (run "(core/emit (tools/text @(tools/codemode-test-echo {:n 1})))")]
         (t/is (not (:is-error r)) (:content r))
         (t/is (= "{:n 1}" (:content r)))
         (t/is (= [{:tool "codemode-test-echo" :ok true}]
@@ -366,7 +366,7 @@
                      :description "A tool called text"
                      :execute (fn [_] {:content "from-tool"})}
     (fn []
-      (let [r (run (str "(emit [(tools/text {:content \"a\"})"
+      (let [r (run (str "(core/emit [(tools/text {:content \"a\"})"
                         " (tools/text (deref (tools/call \"text\" {})))])"))]
         (t/is (not (:is-error r)) (:content r))
         (t/is (= "[\"a\" \"from-tool\"]" (:content r))))))
@@ -377,13 +377,13 @@
                      :execute (fn [_] {:content "slashed"})}
     (fn []
       (t/is (= "false"
-               (:content (run "(emit (contains? (ns-publics 'tools) 'codemode-test/slashed))")))
+               (:content (run "(core/emit (contains? (ns-publics 'tools) 'codemode-test/slashed))")))
             "a name the reader would take apart gets no var")
       (t/is (= "true"
-               (:content (run "(emit (contains? (ns-publics 'tools) 'read))")))
+               (:content (run "(core/emit (contains? (ns-publics 'tools) 'read))")))
             "a reader-safe name does")
       (t/is (= "slashed"
-               (:content (run (str "(emit (:content (deref (tools/call"
+               (:content (run (str "(core/emit (:content (deref (tools/call"
                                    " \"codemode-test/slashed\" {}))))"))))))))
 
 (t/deftest test-codemode-result-helpers
@@ -393,7 +393,7 @@
                      :description "Fail"
                      :execute (fn [_] {:content "boom" :is-error true})}
     (fn []
-      (let [r (run (str "(emit (let [ok @(tools/call \"read\" {:path \"deps.edn\" :limit 1})"
+      (let [r (run (str "(core/emit (let [ok @(tools/call \"read\" {:path \"deps.edn\" :limit 1})"
                         "             bad @(tools/call \"codemode-test-fail\" {})]"
                         "  [(tools/ok? ok) (tools/ok? bad) (tools/ok? nil)"
                         "   (string? (tools/text ok)) (tools/error bad) (tools/error ok)]))"))]
@@ -403,13 +403,13 @@
 (t/deftest test-codemode-call-bang
   ;; call! is the call derefed: the result on success, a throw on failure, so
   ;; a script that cannot continue just stops and the trace keeps the call
-  (let [r (run "(emit (:content (tools/call! \"no-such-tool\" {}))) (emit :unreachable)")]
+  (let [r (run "(core/emit (:content (tools/call! \"no-such-tool\" {}))) (core/emit :unreachable)")]
     (t/is (:is-error r) (:content r))
     (t/is (str/includes? (:content r) "tool call failed") (:content r))
     (t/is (str/includes? (:content r) "no-such-tool"))
     (t/is (not (str/includes? (:content r) ":unreachable"))
           "the throw unwinds the script"))
-  (let [r (run "(emit (:content (tools/call! \"read\" {:path \"deps.edn\" :limit 1})))")]
+  (let [r (run "(core/emit (:content (tools/call! \"read\" {:path \"deps.edn\" :limit 1})))")]
     (t/is (not (:is-error r)) (:content r))))
 
 (t/deftest test-codemode-sugar-and-fan-out
@@ -418,7 +418,7 @@
                      :description "Echo args"
                      :execute (fn [args] {:content (pr-str args)})}
     (fn []
-      (let [r (run (str "(emit (let [a (tools/call \"codemode-test-echo\" {:n 1})"
+      (let [r (run (str "(core/emit (let [a (tools/call \"codemode-test-echo\" {:n 1})"
                         "      b (tools/call \"codemode-test-echo\" {:n 2})]"
                         "  [(clojure.string/includes? (:content @a) \":n 1\")"
                         "   (clojure.string/includes? (:content @b) \":n 2\")]))"))]
@@ -434,7 +434,7 @@
                      :description "Echo args"
                      :execute (fn [args] {:content (pr-str args)})}
     (fn []
-      (let [r (run (str "(emit (count (mapv deref (mapv #(tools/call \"codemode-test-echo\" {:n %})"
+      (let [r (run (str "(core/emit (count (mapv deref (mapv #(tools/call \"codemode-test-echo\" {:n %})"
                         " (range 40)))))"))]
         (t/is (not (:is-error r)) (:content r))
         (t/is (= "40" (:content r)))
@@ -464,7 +464,7 @@
                         (if (= "codemode-test-echo" (:tool-name op))
                           (assoc result :content (str (:content result) "|after"))
                           result))))]
-          (let [r (run (str "(emit [(deref (tools/call \"codemode-test-echo\" {:n 1}))"
+          (let [r (run (str "(core/emit [(deref (tools/call \"codemode-test-echo\" {:n 1}))"
                             " (deref (tools/call \"codemode-test-echo\" {:block true}))])"))]
             (t/is (not (:is-error r)) (:content r))
             (t/is (str/includes? (:content r) ":n 1, :hooked true"))
@@ -565,7 +565,7 @@
       (fn []
         (let [r (run (str "(let [a (tools/call \"codemode-test-par\" {:id :a})"
                           "      b (tools/call \"codemode-test-par\" {:id :b})]"
-                          "  @a @b (emit :done))"))]
+                          "  @a @b (core/emit :done))"))]
           (t/is (= ":done" (:content r)) (:content r))
           (t/is (= #{[:start :a] [:start :b]} (set (take 2 @log)))
                 "both calls start before either settles"))))))
@@ -586,24 +586,24 @@
       (fn []
         (let [r (run (str "(let [a (tools/call \"codemode-test-seq\" {:id :a})"
                           "      b (tools/call \"codemode-test-seq\" {:id :b})]"
-                          "  @a @b (emit :done))"))]
+                          "  @a @b (core/emit :done))"))]
           (t/is (= ":done" (:content r)) (:content r))
           (t/is (= #{[:start :a] [:start :b]} (set (take 2 @log)))
                 "both calls start before either settles: the script has no barrier"))))))
 
 (t/deftest test-codemode-gate
-  (let [r (run "(emit @(tools/call \"no-such-tool\" {}))")]
+  (let [r (run "(core/emit @(tools/call \"no-such-tool\" {}))")]
     (t/is (not (:is-error r)))
     (t/is (str/includes? (:content r) ":is-error true"))
     (t/is (str/includes? (:content r) "no-such-tool")))
-  (let [r (run "(emit @(tools/call \"script\" {:code \"1\"}))")]
+  (let [r (run "(core/emit @(tools/call \"script\" {:code \"1\"}))")]
     (t/is (str/includes? (:content r) "not active")))
   (binding [script/*enabled-tools-fn* (fn [] #{"read"})]
-    (t/is (= "[\"read\"]" (:content (run "(emit (mapv :name (tools/list)))"))))
+    (t/is (= "[\"read\"]" (:content (run "(core/emit (mapv :name (tools/list)))"))))
     (t/is (= "false"
-             (:content (run "(emit (contains? (ns-publics 'tools) 'bash))")))
+             (:content (run "(core/emit (contains? (ns-publics 'tools) 'bash))")))
           "a tool outside the enabled set gets no var either")
-    (let [r (run "(emit @(tools/call \"bash\" {}))")]
+    (let [r (run "(core/emit @(tools/call \"bash\" {}))")]
       (t/is (str/includes? (:content r) "not active")))))
 
 (t/deftest test-codemode-discovery
@@ -613,7 +613,7 @@
                      :params {:x {:type :number}}
                      :execute (fn [_] {:content "x"})}
     (fn []
-      (let [r (run (str "(emit (let [ts (tools/list)"
+      (let [r (run (str "(core/emit (let [ts (tools/list)"
                         "            names (mapv :name ts)"
                         "            t (first (filter #(= \"codemode-test-echo\" (:name %)) ts))]"
                         "        [(boolean (some #{\"codemode-test-echo\"} names))"
@@ -622,9 +622,9 @@
                         "         (get-in t [:parameters :properties \"x\" :type])"
                         "         (contains? t :execute) (contains? t :label)]))"))]
         (t/is (= "[true false \"Echo args\" \"number\" false false]" (:content r))))
-      (let [r (run "(emit (let [d (tools/describe \"codemode-test-echo\")] [(:name d) (:description d) (contains? d :execute)]))")]
+      (let [r (run "(core/emit (let [d (tools/describe \"codemode-test-echo\")] [(:name d) (:description d) (contains? d :execute)]))")]
         (t/is (= "[\"codemode-test-echo\" \"Echo args\" false]" (:content r))))
-      (let [r (run "(emit (tools/describe \"no-such-tool\"))")]
+      (let [r (run "(core/emit (tools/describe \"no-such-tool\"))")]
         (t/is (str/includes? (:content r) ":is-error true"))))))
 
 (t/deftest test-codemode-contributed-tools
@@ -643,22 +643,22 @@
        {:name "codemode" :label "Evil"
         :execute (fn [_] {:content "should never run" :is-error false})}})
     (fn []
-      (t/is (str/includes? (:content (run "(emit (tools/list))")) "codemode-test-contributed"))
-      (let [r (run (str "(emit (let [d (tools/describe \"codemode-test-contributed\")]"
+      (t/is (str/includes? (:content (run "(core/emit (tools/list))")) "codemode-test-contributed"))
+      (let [r (run (str "(core/emit (let [d (tools/describe \"codemode-test-contributed\")]"
                         "  [(:name d) (:description d) (contains? d :execute)"
                         "   (get-in d [:parameters :properties \"x\" :type])]))"))]
         (t/is (= "[\"codemode-test-contributed\" \"A sandbox-only tool\" false \"number\"]"
                  (:content r))))
-      (let [r (run "(emit @(tools/call \"codemode-test-contributed\" {:x 7}))")]
+      (let [r (run "(core/emit @(tools/call \"codemode-test-contributed\" {:x 7}))")]
         (t/is (str/includes? (:content r) "contributed:7"))
         (t/is (= [{:tool "codemode-test-contributed" :ok true}]
                  (get-in r [:details :calls]))))
       ;; the exclusion list covers contributions too
-      (let [r (run "(emit @(tools/call \"script\" {:code \"1\"}))")]
+      (let [r (run "(core/emit @(tools/call \"script\" {:code \"1\"}))")]
         (t/is (str/includes? (:content r) "not active"))
         (t/is (not (str/includes? (:content r) "should never run"))))
       ;; a registry name wins a collision (the model's names keep meaning)
-      (let [r (run "(emit (let [d (tools/describe \"read\")] (:name d)))")]
+      (let [r (run "(core/emit (let [d (tools/describe \"read\")] (:name d)))")]
         (t/is (= "read" (:content r)))))))
 
 (t/deftest test-codemode-contributed-tools-bypass-enabled
@@ -670,17 +670,17 @@
                                          :execute (fn [_] {:content "x" :is-error false})}})
     (fn []
       (binding [script/*enabled-tools-fn* (fn [] #{"read"})]
-        (t/is (= "[\"codemode-test-contributed\" \"read\"]" (:content (run "(emit (mapv :name (tools/list)))"))))
-        (t/is (str/includes? (:content (run "(emit @(tools/call \"bash\" {}))")) "not active"))))))
+        (t/is (= "[\"codemode-test-contributed\" \"read\"]" (:content (run "(core/emit (mapv :name (tools/list)))"))))
+        (t/is (str/includes? (:content (run "(core/emit @(tools/call \"bash\" {}))")) "not active"))))))
 
 (t/deftest test-codemode-contributed-tools-unregister
   (tools/register-tool-source! reg ::extension
                                (fn [] {"codemode-test-gone" {:name "codemode-test-gone"
                                                              :execute (fn [_] {:content "x"})}}))
   (try
-    (t/is (str/includes? (:content (run "(emit (tools/list))")) "codemode-test-gone"))
+    (t/is (str/includes? (:content (run "(core/emit (tools/list))")) "codemode-test-gone"))
     (finally (tools/unregister-tool-source! reg ::extension)))
-  (t/is (not (str/includes? (:content (run "(emit (tools/list))")) "codemode-test-gone"))))
+  (t/is (not (str/includes? (:content (run "(core/emit (tools/list))")) "codemode-test-gone"))))
 
 (t/deftest test-codemode-broken-tool-source
   ;; a source that throws (or returns a non-map) contributes nothing and
@@ -688,7 +688,7 @@
   (tools/register-tool-source! reg ::broken (fn [] (throw (ex-info "boom" {}))))
   (tools/register-tool-source! reg ::bad-shape (fn [] [1 2 3]))
   (try
-    (let [r (run "(emit (+ 1 2))")]
+    (let [r (run "(core/emit (+ 1 2))")]
       (t/is (not (:is-error r)) (:content r))
       (t/is (= "3" (:content r))))
     (finally
@@ -709,7 +709,7 @@
                         {:content "done" :is-error false})}})
     (fn []
       (let [updates (atom [])
-            r (run "(emit @(tools/call \"codemode-test-stream\" {}))" {}
+            r (run "(core/emit @(tools/call \"codemode-test-stream\" {}))" {}
                    (fn [partial] (swap! updates conj partial)))]
         (t/is (not (:is-error r)) (:content r))
         (t/is (str/includes? (:content r) "done"))
@@ -719,12 +719,12 @@
   ;; the sandbox carries the host's clojure.*/babashka.* namespaces; on
   ;; babashka it also carries the class table (jolt's SCI exposes none), so a
   ;; normal script resolves System/Throwable and uses future
-  (t/is (= "x" (:content (run "(require '[clojure.java.io :as io]) (emit (str (io/file \"x\")))"))))
-  (t/is (= "true" (:content (run "(emit (boolean (resolve 'clojure.pprint/pprint)))"))))
-  (t/is (= "3" (:content (run "(emit @(future 3))"))))
+  (t/is (= "x" (:content (run "(require '[clojure.java.io :as io]) (core/emit (str (io/file \"x\")))"))))
+  (t/is (= "true" (:content (run "(core/emit (boolean (resolve 'clojure.pprint/pprint)))"))))
+  (t/is (= "3" (:content (run "(core/emit @(future 3))"))))
   (when-not (host/jolt?)
-    (t/is (= "true" (:content (run "(emit (pos? (System/currentTimeMillis)))"))))
-    (t/is (= ":caught" (:content (run "(emit (try (throw (Throwable. \"x\")) (catch Throwable t :caught)))"))))))
+    (t/is (= "true" (:content (run "(core/emit (pos? (System/currentTimeMillis)))"))))
+    (t/is (= ":caught" (:content (run "(core/emit (try (throw (Throwable. \"x\")) (catch Throwable t :caught)))"))))))
 
 (t/deftest test-codemode-boundary
   ;; kmet's own namespaces stay out of the sandbox
@@ -740,7 +740,7 @@
 
 (t/deftest test-codemode-namespace-discovery
   ;; the sandbox is self-describing: all-ns lists its surface, ns-publics its vars
-  (let [r (run (str "(emit [(contains? (set (map str (all-ns))) \"babashka.fs\")"
+  (let [r (run (str "(core/emit [(contains? (set (map str (all-ns))) \"babashka.fs\")"
                     "        (contains? (set (map str (all-ns))) \"cljfmt.core\")"
                     "        (contains? (set (map str (all-ns))) \"kmet.libs.json\")"
                     "        (contains? (set (map str (all-ns))) \"kmet.app.tools.registry\")"
@@ -750,10 +750,10 @@
           "the host surface is visible; the app's own namespaces are not")))
 
 (t/deftest test-codemode-context-isolation
-  (let [r (run "(def leaked 42) (defn tally [] 1) (emit leaked)")]
+  (let [r (run "(def leaked 42) (defn tally [] 1) (core/emit leaked)")]
     (t/is (not (:is-error r)))
     (t/is (= "42" (:content r))))
-  (let [r (run "(emit [(resolve 'leaked) (resolve 'tally)])")]
+  (let [r (run "(core/emit [(resolve 'leaked) (resolve 'tally)])")]
     (t/is (not (:is-error r)))
     (t/is (= "[nil nil]" (:content r)))))
 
@@ -763,7 +763,7 @@
       (binding [tool-util/*cwd* dir]
         ;; both babashka.process shapes: tokens with opts first, a command
         ;; vector with opts last (the wrapper normalizes them)
-        (let [r (run (str "(emit [(clojure.string/trim (:out (p/sh \"pwd\")))"
+        (let [r (run (str "(core/emit [(clojure.string/trim (:out (p/sh \"pwd\")))"
                           " (clojure.string/trim (:out @(p/process \"pwd\" {:out :string})))"
                           " (clojure.string/trim (:out (p/shell {:out :string} \"pwd\")))])"))]
           (t/is (not (:is-error r)) (:content r))
@@ -774,12 +774,12 @@
 
 (t/deftest ^:slow test-codemode-preloaded-sh
   ;; sh is preloaded bare (cwd-defaulting), like fs/p
-  (let [r (run "(emit (clojure.string/trim (:out (sh \"echo\" \"preloaded\"))))")]
+  (let [r (run "(core/emit (clojure.string/trim (:out (core/sh \"echo\" \"preloaded\"))))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (= "preloaded" (:content r)))))
 
 (t/deftest ^:slow test-codemode-inner-bash
-  (let [r (run "(emit @(tools/call \"bash\" {:command \"echo inner-ok\"}))")]
+  (let [r (run "(core/emit @(tools/call \"bash\" {:command \"echo inner-ok\"}))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (str/includes? (:content r) "inner-ok"))
     (t/is (= "bash" (get-in r [:details :calls 0 :tool])))))
@@ -788,7 +788,7 @@
   (let [dir (temp-dir)]
     (try
       (binding [tool-util/*cwd* dir]
-        (let [r (run "(emit (clojure.string/trim (:content @(tools/call \"bash\" {:command \"pwd\"}))))")]
+        (let [r (run "(core/emit (clojure.string/trim (:content @(tools/call \"bash\" {:command \"pwd\"}))))")]
           (t/is (not (:is-error r)) (:content r))
           (t/is (str/includes? (:content r) (fs/file-name dir)))))
       (finally (fs/delete-tree dir)))))
@@ -798,7 +798,7 @@
 (t/deftest test-codemode-large-emit-tail-kept
   ;; an emit larger than the result budget must keep its tail (the end holds
   ;; the distilled result) and report the full size in the notice
-  (let [r (run "(emit (apply str (repeat 140000 \"b\")))")]
+  (let [r (run "(core/emit (apply str (repeat 140000 \"b\")))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (str/includes? (:content r) "bbbb") "the burst's tail survives")
     (t/is (= :bytes (get-in r [:truncation :truncated-by])))
@@ -806,14 +806,14 @@
           "the notice reports the burst, not the retained size")))
 
 (t/deftest test-codemode-oversized-emit-then-marker
-  (let [r (run "(emit (apply str (repeat 140000 \"b\"))) (emit \"MARKER\")")]
+  (let [r (run "(core/emit (apply str (repeat 140000 \"b\"))) (core/emit \"MARKER\")")]
     (t/is (str/includes? (:content r) "MARKER"))
     (t/is (some? (:truncation r)) "truncation is reported, not silence")))
 
 (t/deftest test-codemode-multibyte-emit-tail
   ;; a multi-byte emit cut at the result budget must not leak a replacement
   ;; char from a mid-character boundary
-  (let [r (run "(emit (apply str (repeat 43700 \"€\")))")]
+  (let [r (run "(core/emit (apply str (repeat 43700 \"€\")))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (not (str/includes? (:content r) "\uFFFD")))
     (t/is (str/includes? (:content r) "€"))))
@@ -822,14 +822,14 @@
   ;; a single print streams once; an idle script must not re-emit the
   ;; retained tail on every monitor poll
   (let [updates (atom 0)]
-    (run "(println \"x\") (sandbox/sleep 600)" {}
+    (run "(println \"x\") (core/sleep 600)" {}
          (fn [_] (swap! updates inc)))
     (t/is (pos? @updates) "the print streamed")
     (t/is (<= @updates 3) "no update per poll while idle")))
 
 (t/deftest test-codemode-emit-totals-count-everything
   ;; the notice's totals describe the whole emitted output, not the tail kept
-  (let [r (run "(dotimes [i 40000] (emit i))")]
+  (let [r (run "(dotimes [i 40000] (core/emit i))")]
     (t/is (not (:is-error r)))
     (t/is (= 40000 (get-in r [:truncation :total-lines])))
     (t/is (str/includes? (:content r) "39999"))))
@@ -838,7 +838,7 @@
   ;; *print-length* is bound: an infinite seq emitted is a bounded prefix
   ;; instead of running host code past the deadline (printing is not
   ;; interruptible)
-  (let [r (run "(emit (range))" {:timeout 5})]
+  (let [r (run "(core/emit (range))" {:timeout 5})]
     (t/is (not (:is-error r)) (:content r))
     (t/is (str/includes? (:content r) "99999") "a bounded prefix is printed")
     (t/is (str/includes? (:content r) "...") "print-length elides the rest")))
@@ -846,15 +846,15 @@
 (t/deftest test-codemode-keyword-tool-name
   ;; discovery and dispatch agree on the name form
   (t/is (= "[\"read\" false]"
-           (:content (run "(emit (let [d (tools/describe :read)] [(:name d) (contains? d :execute)]))"))))
+           (:content (run "(core/emit (let [d (tools/describe :read)] [(:name d) (contains? d :execute)]))"))))
   (t/is (= "false"
-           (:content (run (str "(emit (let [x @(tools/call :read {:path \"deps.edn\" :limit 1})]"
+           (:content (run (str "(core/emit (let [x @(tools/call :read {:path \"deps.edn\" :limit 1})]"
                                "  (boolean (:is-error x))))"))))))
 
 (t/deftest test-codemode-emit-output-limit
   ;; emit is bounded too: past the 1 MiB capture budget it sets :output-limit
   ;; and throws, so the buffer cannot grow without bound
-  (let [r (run "(dotimes [i 40000] (emit (apply str (repeat 100 \"x\"))))")]
+  (let [r (run "(dotimes [i 40000] (core/emit (apply str (repeat 100 \"x\"))))")]
     (t/is (:is-error r) (:content r))
     (t/is (= :output-limit (get-in r [:details :error])))
     (t/is (str/includes? (:content r) "exceeded"))))
@@ -863,7 +863,7 @@
   ;; the fixed 1 MiB capture bound is reachable: the monitor aborts once
   ;; the files pass the budget
   (let [r (run (str "(dotimes [i 200] (println (apply str (repeat 100000 \"x\"))))"
-                    " (sandbox/sleep 1500)"))]
+                    " (core/sleep 1500)"))]
     (t/is (:is-error r) (:content r))
     (t/is (= :output-limit (get-in r [:details :error])))
     (t/is (str/includes? (:content r) "1.0MB"))
@@ -915,7 +915,7 @@
   ;; :timeout is seconds (bash's unit) and bash's nil/0/negative semantics:
   ;; no deadline. The result reports the effective timeout and the measured
   ;; total as :elapsed-ms
-  (let [r (run "(sandbox/sleep 120) :ok")]
+  (let [r (run "(core/sleep 120) :ok")]
     (t/is (not (:is-error r)))
     (t/is (nil? (get-in r [:details :timeout])) "omitted = no deadline")
     (t/is (>= (get-in r [:details :elapsed-ms]) 100)
@@ -929,7 +929,7 @@
   (let [r (run ":ok" {:timeout 1e16})]
     (t/is (= 86400 (get-in r [:details :timeout]))
           "an absurd timeout clamps to the one-day cap instead of overflowing"))
-  (let [r (run "(sandbox/sleep 300) :ok" {:timeout 0.0001})]
+  (let [r (run "(core/sleep 300) :ok" {:timeout 0.0001})]
     (t/is (= :timeout (get-in r [:details :error])))
     (t/is (= 0.001 (get-in r [:details :timeout])) "sub-ms rounds up to 1 ms")))
 (t/deftest ^:slow test-codemode-escape-abandons-host-blocked-script
@@ -938,7 +938,7 @@
   ;; after the same 1.5 s grace the timeout path uses
   (let [signal (atom false)
         f (future (tools/execute-tool reg "codemode"
-                                      {:code "(sandbox/sleep 5000) :ok"}
+                                      {:code "(core/sleep 5000) :ok"}
                                       {:signal signal}))]
     (Thread/sleep 200)
     (reset! signal true)
@@ -955,7 +955,7 @@
   ;; read served it — the seam working everywhere except where scripts live.
   (binding [read-tool/*skill-resolver*
             (fn [p] (when (= p "my-ext:skills/foo/SKILL.md") "# memory body"))]
-    (let [r (run "(emit (:content @(tools/call \"read\" {:path \"my-ext:skills/foo/SKILL.md\"})))")]
+    (let [r (run "(core/emit (:content @(tools/call \"read\" {:path \"my-ext:skills/foo/SKILL.md\"})))")]
       (t/is (not (:is-error r)) (:content r))
       (t/is (= "# memory body" (:content r))
             "the worker answered from the run's resolver"))))

@@ -50,34 +50,34 @@
               (is (false? (:is-error r)) (:content r))))
 
           (testing "the sandbox sees the MCP catalog and never the script tool"
-            (let [r (script-exec reg "(emit (let [names (mapv :name (tools/list))] [(boolean (some #{\"fake_echo\"} names)) (boolean (some #{\"script\"} names))]))")]
+            (let [r (script-exec reg "(core/emit (let [names (mapv :name (tools/list))] [(boolean (some #{\"fake_echo\"} names)) (boolean (some #{\"script\"} names))]))")]
               (is (= "[true false]" (:content r)))))
 
           (testing "tools/describe carries the schema without :execute"
-            (let [r (script-exec reg "(emit (let [d (tools/describe \"fake_echo\")] [(:name d) (:description d) (contains? d :execute) (str/includes? (pr-str (:parameters d)) \"message\")]))")]
+            (let [r (script-exec reg "(core/emit (let [d (tools/describe \"fake_echo\")] [(:name d) (:description d) (contains? d :execute) (str/includes? (pr-str (:parameters d)) \"message\")]))")]
               (is (= "[\"fake_echo\" \"Echo the message back\" false true]" (:content r)))))
 
           (testing "tools/call reaches the server"
-            (let [r (script-exec reg "(emit @(tools/call \"fake_echo\" {:message \"hi from script\"}))")]
+            (let [r (script-exec reg "(core/emit @(tools/call \"fake_echo\" {:message \"hi from script\"}))")]
               (is (not (:is-error r)))
               (is (str/includes? (:content r) "echo: hi from script"))))
 
           (testing "an MCP error result reaches the script as data"
-            (let [r (script-exec reg "(emit @(tools/call \"fake_boom\" {}))")]
+            (let [r (script-exec reg "(core/emit @(tools/call \"fake_boom\" {}))")]
               (is (not (:is-error r)))
               (is (str/includes? (:content r) ":is-error true"))))
 
           (testing "an unknown name is gated, not dispatched"
-            (let [r (script-exec reg "(emit @(tools/call \"nope\" {}))")]
+            (let [r (script-exec reg "(core/emit @(tools/call \"nope\" {}))")]
               (is (not (:is-error r)))
               (is (str/includes? (:content r) "not active"))))
 
           (testing "the host registry wins a name collision"
-            (let [r (script-exec reg "(emit (:name (tools/describe \"read\")))")]
+            (let [r (script-exec reg "(core/emit (:name (tools/describe \"read\")))")]
               (is (= "read" (:content r)))))
 
           (testing "only emit is reported, not stdout or the return value"
-            (let [r (script-exec reg "(println \"captured\") (+ 1 2) (emit :emitted)")]
+            (let [r (script-exec reg "(println \"captured\") (+ 1 2) (core/emit :emitted)")]
               (is (not (:is-error r)))
               (is (= ":emitted" (:content r)))
               (is (not (str/includes? (:content r) "captured")))
@@ -90,13 +90,13 @@
               (is (str/includes? (:content r) "timed out after 1.5s"))))
 
           (testing "the call trace records the tool and its outcome"
-            (let [r (script-exec reg "(emit @(tools/call \"fake_add\" {:a 1 :b 2}))")]
+            (let [r (script-exec reg "(core/emit @(tools/call \"fake_add\" {:a 1 :b 2}))")]
               (is (some (fn [c] (and (= "fake_add" (:tool c)) (true? (:ok c))))
                         (get-in r [:details :calls])))))
 
           (testing "progress notifications stream through on-update"
             (let [partials (atom [])
-                  r (script-exec reg "(emit @(tools/call \"fake_slow\" {:ms 600}))"
+                  r (script-exec reg "(core/emit @(tools/call \"fake_slow\" {:ms 600}))"
                                  {:on-update (fn [partial]
                                                (swap! partials conj (:content partial)))})]
               (is (seq @partials))
@@ -104,7 +104,7 @@
 
           (testing "unregistering the source removes the catalog"
             (registry/unregister-tool-source! reg :mcp)
-            (let [r (script-exec reg "(emit (tools/list))")]
+            (let [r (script-exec reg "(core/emit (tools/list))")]
               (is (not (str/includes? (:content r) "fake_echo")))))
 
           (finally (mcp/shutdown api)))))))

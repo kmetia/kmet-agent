@@ -127,9 +127,9 @@
 
 (t/deftest patch-refuses-a-source-provided-key
   (let [env (support/eval-ctx)]
-    (register! env :license (fn [_] {:ns {'license {'value 1}}}))
-    (t/is (= "1" (:content (support/eval! env "(ns license) value"))))
-    (let [result (support/eval! env "(eval/patch 'license/value 1 2)")]
+    (register! env :license (fn [_] {:ns {'ext.license {'value 1}}}))
+    (t/is (= "1" (:content (support/eval! env "(ns ext.license) value"))))
+    (let [result (support/eval! env "(eval/patch 'ext.license/value 1 2)")]
       (t/is (:is-error result))
       (t/is (str/includes? (:content result) "source-provided"))
-      (t/is (= "1" (:content (support/eval! env "(ns license) value")))))))
+      (t/is (= "1" (:content (support/eval! env "(ns ext.license) value")))))))

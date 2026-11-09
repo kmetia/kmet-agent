@@ -399,7 +399,7 @@ first call), so the contribution is current, not a snapshot:
   (fn [{:keys [cwd project-dir agent-dir signal verbs]}]
     (let [{:keys [edit]} verbs]
       {:doc "Add the SPDX header to a source file."
-       :ns {'license {'add! (with-meta
+       :ns {'ext.license {'add! (with-meta
                               (fn [path]
                                 (edit (str (fs/path cwd path))
                                       "(ns "
@@ -414,21 +414,25 @@ first call), so the contribution is current, not a snapshot:
 (ext/unregister-eval-source! api :license)
 ```
 
+- `:ns` and `:macros` namespaces must be exactly `ext.<source-id>` or start
+  with `ext.<source-id>.`; any other namespace is refused. The system
+  namespaces (`core`, `clj`, `eval`, `tools`) and the fixed host namespaces
+  are never writable by a source.
 - The fn receives the call's `:cwd`, `:project-dir`, `:agent-dir`, the cancel
   `:signal`, and `:verbs` — keyword-keyed (`{:read-file f :edit g
-  :write-file h}`) values of the same file operations the sandbox exposes as
-  `user/read` (with opts), `user/edit` and `user/write`, built for that call.
+  :write-file h}`) values of the same file operations the system exposes as
+  `core/read` (with opts), `core/edit` and `core/write`, built for that call.
 - `:ns` and `:macros` contribute values to the environment. `:macros` entries
   are host macro fns (they receive SCI's form and environment before their
   arguments). A value may carry `:doc`, `:arglists` and `:source` metadata (the
   keys a var uses, plus the implementation text, since a source verb has no
   library file). `normalize-source` keeps them, `(eval/sources)` and
   `(eval/help)` list each verb with its doc and arglists, and
-  `(eval/describe 'license/add!)` returns its `:kind`, `:arglists`, `:source`
+  `(eval/describe 'ext.license/add!)` returns its `:kind`, `:arglists`, `:source`
   and, when it has no source, `:doc` (a source-bearing entry omits the
   docstring; nil `:file` and `:scope` are omitted).
-  `(eval/describe 'license/add! :doc)` and
-  `(eval/describe 'license/add! :source)` return one field each. A value
+  `(eval/describe 'ext.license/add! :doc)` and
+  `(eval/describe 'ext.license/add! :source)` return one field each. A value
   without metadata is still valid and lists as `(no docstring)`. `:commands`
   entries add verbs to `/eval`; a command's `:run` receives
   `{:args :session :cwd :service}` and returns nil or a string, which `/eval`
@@ -437,19 +441,13 @@ first call), so the contribution is current, not a snapshot:
   capturing one past the call that produced it is unsupported.
 - The source fn runs synchronously on the eval build/call thread and has no
   timeout. Keep it fast; a slow source delays every eval call.
-- `user` and `clj` are reserved for the sandbox's built-in helpers, as are
-  the eval layer's own namespaces (`eval`, `clojure.core`, `clojure`,
-  `sandbox`, `tools`, `babashka.process`, `kmet.libs.http`, `kmet.libs.json`,
-  `kmet.libs.markdown`, `kmet.libs.yaml`). The sandbox provides `user/read`,
-  `user/write`, `user/edit`, `user/bash` and `user/sh`; the file verbs call the
-  tool implementations directly, so they do not depend on the tool selection.
-  The `clj` namespace provides `edit-form`, `replace-sexp` and `paren-repair`
-  from `kmet.libs.clj-edit`; they also call the engine directly and do not
-  require the clojure extension. The `tools` bridge reaches every active tool
-  (`tools/clojure_edit`, `tools/call`, ...) and honours the tool chain; an
-  extension source cannot replace either surface. Namespace what you
-  contribute (`license/add!`); a source that contributes a reserved
-  namespace, a built-in key, or a built-in `/eval` verb is refused as a whole.
+- System surfaces are not writable by a source: `core` (runtime verbs),
+  `clj` (structure verbs), `eval` (library API), `tools` (tool bridge), the
+  model's `user`, and the fixed host namespaces (`clojure.core`, `clojure`,
+  `babashka.process`, `kmet.libs.http`, `kmet.libs.json`,
+  `kmet.libs.markdown`, `kmet.libs.yaml`). Contribute under `ext.<id>`
+  (`ext.license/add!`); a source that uses another namespace, a built-in key,
+  or a built-in `/eval` verb is refused as a whole.
 - A source-provided key is never written to the eval library. A model can
   redefine it live (the call line says `source; not stored`); `:drop` and
   `(eval/forget …)` restore the source value while the source is mounted and

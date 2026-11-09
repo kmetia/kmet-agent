@@ -11,9 +11,9 @@
    sees both layers. The
    fresh-context, output-economy tool stays `codemode`.
 
-   The sandbox's own `user/read`, `user/write`, `user/edit` and `user/bash`
-   verbs and the `tools` bridge are the file and tool surface; the row no
-   longer mounts a separate `:core` source for them."
+   The shared `core/read`, `core/write`, `core/edit`, `core/bash` and
+   `core/sh` verbs and the `tools` bridge are the file and tool surface; the
+   row no longer mounts a separate `:core` source for them."
   (:require [clojure.string :as str]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
@@ -66,13 +66,13 @@
    :name "eval"
    :label "Eval"
    :description (str "Evaluate Clojure in this session's persistent SCI sandbox "
-                     "(babashka surface: fs, sh, slurp, spit, require, tools). "
+                     "(babashka surface: fs, slurp, spit, require, tools). "
                      "Calls serialize: put independent work in one call and fan out with "
-                     "(sandbox/spawn f), pmap, or tools/call promises. Eval creates verbs: "
+                     "(core/spawn f), pmap, or tools/call promises. Eval creates verbs: "
                      "a documented top-level definition with a docstring is saved to the "
                      "eval library; an undocumented one is live-only. Local let/fn bindings "
-                     "are scratch. Report with (emit value) or the final value; stdout and "
-                     "stderr are discarded. (eval/help) lists the surface.")
+                     "are scratch. Report with (core/emit value) or the final value; stdout "
+                     "and stderr are discarded. (eval/help) lists the surface.")
    :prompt-snippet "Persistent Clojure sandbox; one call per batch; (eval/help) for the surface."
    :parameters {:type "object"
                 :properties

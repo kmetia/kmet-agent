@@ -82,7 +82,7 @@
 
 (t/deftest test-nullable-api-eval-source
   (let [{:keys [api state]} (ext/create-nullable-api)
-        sources-fn (fn [_] {:ns {'nullable-eval {'answer 42}}})
+        sources-fn (fn [_] {:ns {'ext.nullable-eval {'answer 42}}})
         dereg (ext/register-eval-source! api :nullable-eval sources-fn)]
     (t/is (identical? sources-fn (get-in @state [:eval-sources :nullable-eval])))
     (t/is (fn? dereg))

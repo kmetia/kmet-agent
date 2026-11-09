@@ -3,6 +3,7 @@
    `seed!` replaces the tools namespace's key set per call, a timeout
    leaves the next call clean, and cancellation ends a host-blocked call."
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :as t]
             [kmet.app.tools.script :as script]
             [kmet.libs.concurrent :as concurrent]
@@ -46,10 +47,10 @@
   (let [s (kept-context)]
     (t/is (= "true"
              (:content (run-in s {"a" (tool-def "a")}
-                               "(emit (contains? (ns-publics 'tools) 'a))"))))
+                               "(core/emit (contains? (ns-publics 'tools) 'a))"))))
     (t/is (= "[false true true]"
              (:content (run-in s {"b" (tool-def "b")}
-                               (str "(emit [(contains? (ns-publics 'tools) 'a)"
+                               (str "(core/emit [(contains? (ns-publics 'tools) 'a)"
                                     " (contains? (ns-publics 'tools) 'b)"
                                     " (contains? (ns-publics 'tools) 'call)])")))))))
 
@@ -97,7 +98,7 @@
   (let [s (kept-context)
         signal (atom false)
         started (concurrent/monotonic-ms)
-        fut (future (script/run (assoc (run-opts {} "(sandbox/sleep 5000)")
+        fut (future (script/run (assoc (run-opts {} "(core/sleep 5000)")
                                        :timeout 10
                                        :signal signal
                                        :sci-ctx (:ctx s)
@@ -123,7 +124,7 @@
   (when-not kprocess/windows-os?
     (let [{:keys [returned? marker-exists?]}
           (run-cancelled-process (fn [command]
-                                   (str "(sh \"sh\" \"-c\" " (pr-str command) ")")))]
+                                   (str "(core/sh \"sh\" \"-c\" " (pr-str command) ")")))]
       (t/is returned? "the call returns on Escape")
       (t/is (not marker-exists?)
             "the spawned shell was killed, not left writing after the call"))))
@@ -144,11 +145,11 @@
     (let [s (kept-context)
           run #(run-in s {} %)]
       (t/is (= "hi\n"
-               (:content (run "(emit (:out (p/shell {:out :string :err :string} [\"echo\" \"hi\"])))"))))
+               (:content (run "(core/emit (:out (p/shell {:out :string :err :string} [\"echo\" \"hi\"])))"))))
       (t/is (= ":exit-3"
-               (:content (run "(emit (try (p/shell {:out :string :err :string} [\"sh\" \"-c\" \"exit 3\"]) :ok (catch Exception _ :exit-3)))"))))
+               (:content (run "(core/emit (try (p/shell {:out :string :err :string} [\"sh\" \"-c\" \"exit 3\"]) :ok (catch Exception _ :exit-3)))"))))
       (t/is (= "3"
-               (:content (run "(emit (:exit (p/shell {:out :string :err :string :continue true} [\"sh\" \"-c\" \"exit 3\"])))")))))))
+               (:content (run "(core/emit (:exit (p/shell {:out :string :err :string :continue true} [\"sh\" \"-c\" \"exit 3\"])))")))))))
 
 (t/deftest ^:slow test-cancellation-kills-a-background-process
   (when-not kprocess/windows-os?
@@ -163,7 +164,7 @@
   (let [s (kept-context)]
     (t/is (= "hi\n"
              (:content (run-in s {}
-                               "(emit (:out (sh \"sh\" \"-c\" \"read x; echo $x\" :in \"hi\\n\")))"))))))
+                               "(core/emit (:out (core/sh \"sh\" \"-c\" \"read x; echo $x\" :in \"hi\\n\")))"))))))
 
 (defn- run-with-dispatch
   "Run CODE with TOOLS dispatched through the bridge, so the bare tool wrappers
@@ -178,13 +179,4 @@
                                        {:content (str "Unknown tool: " name)
                                         :is-error true})))))
 
-(t/deftest test-bare-tool-wrappers-settle-the-tool
-  (let [s (kept-context)
-        tools {"read" (tool-def "read")
-               "write" (tool-def "write")
-               "edit" (tool-def "edit")
-               "bash" (tool-def "bash")}]
-    (t/is (= "read" (:content (run-with-dispatch s tools "(emit (read \"x\"))"))))
-    (t/is (= "write" (:content (run-with-dispatch s tools "(emit (write \"x\" \"body\"))"))))
-    (t/is (= "edit" (:content (run-with-dispatch s tools "(emit (edit \"x\" \"old\" \"new\"))"))))
-    (t/is (= "bash" (:content (run-with-dispatch s tools "(emit (bash \"echo hi\"))"))))))
+(t/deftest test-core-verbs-use-the-implementations-not-the-tool-bridge (let [s (kept-context) read-tools {"read" (tool-def "read")} bash-tools {"bash" (tool-def "bash")} path (str "target/test-core-verbs-" (random-uuid) ".txt")] (t/is (str/includes? (:content (run-with-dispatch s read-tools "(core/emit (core/read \"no-such-file\"))")) "File not found") "core/read calls the read implementation, not the tool stub") (t/is (= "hi\n" (:content (run-with-dispatch s bash-tools "(core/emit (core/bash \"echo hi\"))"))) "core/bash calls the bash implementation, not the tool stub") (try (run-with-dispatch s {"write" (tool-def "write")} (str "(core/write " (pr-str path) " \"old\")")) (t/is (= "old" (slurp path))) (run-with-dispatch s {"edit" (tool-def "edit")} (str "(core/edit " (pr-str path) " \"old\" \"new\")")) (t/is (= "new" (slurp path))) (finally (fs/delete-if-exists path)))))

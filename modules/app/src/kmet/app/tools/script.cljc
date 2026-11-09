@@ -90,17 +90,17 @@
    callable from inside a script."
   #{"codemode" "eval"})
 
-(def sandbox-summary
+(def core-summary
   "The model-facing summary of the shared script sandbox surface. Both script
    tools and `(eval/help)` label it; the summary itself stays host-neutral and
    names only the common surface."
-  (str "aliases fs, str, set, edn, walk, json and p; bare sh; cwd-resolving "
-       "slurp, spit and file-seq; sandbox helpers (sandbox/cwd), "
-       "(sandbox/env k), (sandbox/now), (sandbox/sleep ms) and "
-       "(sandbox/spawn f); bare (emit v) and (emit-image x); the tools and "
-       "sandbox namespaces; clojure.*, babashka.*, the bundled libs "
-       "(rewrite-clj, cljfmt, edamame, parinferish) and the kmet.libs ports "
-       "(json, http, yaml, markdown) are require-able."))
+  (str "aliases fs, str, set, edn, walk, json and p; cwd-resolving slurp, "
+       "spit and file-seq; core helpers (core/cwd), (core/env k), (core/now), "
+       "(core/sleep ms) and (core/spawn f); (core/emit v) and "
+       "(core/emit-image x); the core, clj, tools and eval namespaces; "
+       "clojure.*, babashka.*, the bundled libs (rewrite-clj, cljfmt, "
+       "edamame, parinferish) and the kmet.libs ports (json, http, yaml, "
+       "markdown) are require-able."))
 
 (def alias-prelude
   "The aliases every script gets without a require — the standard Clojure and
@@ -264,7 +264,7 @@
    the host dynamic vars, so binding those reaches the sandbox; on Jolt and on
    the JVM the standalone sci has its OWN out/err vars — bound explicitly, or
    the sandbox's printlns hit an unbound sci var (SciUnbound cannot be cast to
-   Writer) and stream nothing. Used by the eval thread and by sandbox/spawn,
+   Writer) and stream nothing. Used by the eval thread and by core/spawn,
    whose future thread would otherwise print outside the capture. Print
    length/level are bounded alongside: an infinite seq must not print host
    code past the deadline, and host printing is not interruptible."
@@ -621,7 +621,7 @@
   (when-let [state *call-state*]
     (emit-image! (:emit-state state) (:cwd state) x)))
 
-(defn- sandbox-fns []
+(defn- core-namespace-fns []
   {'cwd (fn [] (call-cwd))
    'env (fn [k] (System/getenv (str k)))
    'now (fn [] (System/currentTimeMillis))
@@ -929,10 +929,10 @@
   "The per-call half of the sandbox namespaces: SCI core patches
    (slurp/spit/file-seq/pmap), the cwd/pid-tracking process wrappers,
    the `tools` namespace (discovery, dispatch, the result readers and one var
-   per active tool), the cwd/emit/spawn helpers, the bare `emit`/`sh`, the
-   direct `user/read`, `user/write`, `user/edit` and `user/bash` verbs (they
-   call the tool implementations, not the tool bridge), and the direct
-   `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` verbs (they call
+   per active tool), the `core` namespace (cwd/emit/spawn helpers plus the
+   direct `read`, `write`, `edit`, `bash` and `sh` verbs, which call the tool
+   implementations, not the tool bridge), and the direct `clj/edit-form`,
+   `clj/replace-sexp` and `clj/paren-repair` verbs (which call
    `kmet.libs.clj-edit` directly).
    The functions read `*call-state*` at call time, so a kept context's
    definitions follow the current call; `seed!` layers them over
@@ -941,12 +941,24 @@
    value and a built-in `user` helper share one namespace."
   [{:keys [surface source-namespaces]}]
   (let [process (process-fns)
-        sandbox (sandbox-fns)
+        runtime (core-namespace-fns)
         namespaces (cond-> {'clojure.core (merge {'pmap (deref #'pmap)}
                                                  (core-fns)
                                                  (extra-core-vars-map))
                             'babashka.process process
-                            'sandbox sandbox
+                            'core (merge runtime
+                                         {'read (fn [path & [opts]]
+                                                  (read-text path opts
+                                                             (:cancelled *call-state*)))
+                                          'write (fn [path content]
+                                                   (write-text path content
+                                                               (:cancelled *call-state*)))
+                                          'edit (fn [path old-text new-text]
+                                                  (edit-text path old-text new-text
+                                                             (:cancelled *call-state*)))
+                                          'bash (fn [command & [opts]]
+                                                  (bash-text command opts
+                                                             (:cancelled *call-state*)))})
                             'tools (tools-namespace (or surface {}))
                             'clj {'edit-form (fn [args]
                                                (clj-edit/edit-form
@@ -956,20 +968,8 @@
                                                    (assoc args :cwd (call-cwd))))
                                   'paren-repair (fn [args]
                                                   (clj-edit/paren-repair
-                                                   (assoc args :cwd (call-cwd))))}
-                            'user {'emit emit-with-state
-                                   'emit-image emit-image-with-state
-                                   'read (fn [path & [opts]]
-                                           (read-text path opts (:cancelled *call-state*)))
-                                   'write (fn [path content]
-                                            (write-text path content (:cancelled *call-state*)))
-                                   'edit (fn [path old-text new-text]
-                                           (edit-text path old-text new-text
-                                                      (:cancelled *call-state*)))
-                                   'bash (fn [command & [opts]]
-                                           (bash-text command opts (:cancelled *call-state*)))}}
-                     ;; the cwd-defaulting sh is preloaded bare alongside the aliases
-                     (contains? process 'sh) (assoc-in ['user 'sh] (get process 'sh)))]
+                                                   (assoc args :cwd (call-cwd))))}}
+                     (contains? process 'sh) (assoc-in ['core 'sh] (get process 'sh)))]
     (reduce-kv (fn [acc ns-name ns-map]
                  (update acc ns-name #(merge (or % {}) ns-map)))
                namespaces

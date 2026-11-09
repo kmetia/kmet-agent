@@ -354,9 +354,9 @@ Every codemode call starts from a fresh context; definitions do not persist.
 
 Inside the script the local primitives return values, not rendered text; prefer them over bash/read for local work. Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. A plain name is also a var — @(tools/read {:path "x"}) — while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe "name") returns one tool's declaration.
 
-Callable tools include read(path, offset?, limit?), write(path, content), edit(path, edits), and bash(command, timeout?); bare (read path), (write path text), (edit path old new), and (bash command) settle the matching tool. Prefer (slurp path), (spit path text), fs/*, and (sh ...) for whole-file and shell work.
+Callable tools include read(path, offset?, limit?), write(path, content), edit(path, edits), and bash(command, timeout?); (core/read path), (core/write path text), (core/edit path old new), and (core/bash command) call the matching implementations. Prefer (slurp path), (spit path text), fs/*, and (core/sh ...) for whole-file and shell work.
 
-Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image "shot.png") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.
+Report with (core/emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (core/emit-image "shot.png") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.
 
 Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) namespaces. :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB.
 
@@ -370,7 +370,7 @@ Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) na
 
 **Description:**
 
-Evaluate Clojure in this session's persistent SCI sandbox (babashka surface: fs, sh, slurp, spit, require, tools). Calls serialize: put independent work in one call and fan out with (sandbox/spawn f), pmap, or tools/call promises. Eval creates verbs: a documented top-level definition with a docstring is saved to the eval library; an undocumented one is live-only. Local let/fn bindings are scratch. Report with (emit value) or the final value; stdout and stderr are discarded. (eval/help) lists the surface.
+Evaluate Clojure in this session's persistent SCI sandbox (babashka surface: fs, slurp, spit, require, tools). Calls serialize: put independent work in one call and fan out with (core/spawn f), pmap, or tools/call promises. Eval creates verbs: a documented top-level definition with a docstring is saved to the eval library; an undocumented one is live-only. Local let/fn bindings are scratch. Report with (core/emit value) or the final value; stdout and stderr are discarded. (eval/help) lists the surface.
 
 ---
 

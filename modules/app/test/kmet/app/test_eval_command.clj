@@ -163,20 +163,20 @@
         _ (tools/register-eval-source!
            (:tools env) :license
            (fn [_]
-             {:ns {'license {'add! (with-meta
-                                     (fn [_] :added)
-                                     {:doc "Add a header."
-                                      :arglists '([path])
-                                      :source "(fn [path] ...)"})}}}))
-        _ (support/eval! env "(emit :built)")
+             {:ns {'ext.license {'add! (with-meta
+                                         (fn [_] :added)
+                                         {:doc "Add a header."
+                                          :arglists '([path])
+                                          :source "(fn [path] ...)"})}}}))
+        _ (support/eval! env "(core/emit :built)")
         engine {:agent-state (atom {:ctx (:ctx env)})
                 :session (atom (:session env))
                 :cwd (atom (:cwd env))}
         [[level label content]]
-        (run (assoc env :engine engine) "describe license/add!")]
+        (run (assoc env :engine engine) "describe ext.license/add!")]
     (t/is (= :info level))
     (t/is (= "Eval" label))
-    (t/is (str/includes? content "license/add!  verb ([path])  (source)"))
+    (t/is (str/includes? content "ext.license/add!  verb ([path])  (source)"))
     (t/is (str/includes? content "file: (no file)"))
     (t/is (not (str/includes? content "doc: Add a header."))
           "a source-bearing entry does not repeat the docstring")
@@ -349,18 +349,18 @@
   (let [env (eval-env {:service-sources
                        [{:id :license
                          :doc "License helpers"
-                         :verbs [{:name "license/add!"
+                         :verbs [{:name "ext.license/add!"
                                   :kind :verb
                                   :doc "Add a header."
                                   :arglists '([path])}
-                                 {:name "license/bare"
+                                 {:name "ext.license/bare"
                                   :kind :verb
                                   :doc "(no docstring)"}]}]})
         [[level _ content]] (run env "sources")]
     (t/is (= :info level))
     (t/is (str/includes? content "- license: License helpers"))
-    (t/is (str/includes? content "license/add! ([path]) — Add a header."))
-    (t/is (str/includes? content "license/bare — (no docstring)"))))
+    (t/is (str/includes? content "ext.license/add! ([path]) — Add a header."))
+    (t/is (str/includes? content "ext.license/bare — (no docstring)"))))
 
 (t/deftest sources-reports-definitions-and-failures
   (let [env (eval-env {:service-failures [{:file "/tmp/broken.clj"
@@ -426,7 +426,7 @@
       (t/is (str/includes? content "/eval license-lint"))
       (t/is (str/includes? content "Lint licenses")))))
 
-(t/deftest a-built-in-verb-describes-without-a-source (let [env (support/eval-ctx) got (atom []) engine {:agent-state (atom {:ctx (:ctx env)}), :session (atom (:session env)), :cwd (atom (:cwd env))} run (fn [args] (reset! got []) ((:handler eval-command/command) {:runtime engine, :ui {:info (fn [label content] (swap! got conj [:info label content])), :warning (fn [text] (swap! got conj [:warning text]))}} args) (clojure.core/deref got)) [[level _ content]] (run "describe user/read")] (t/is (= :info level)) (t/is (str/includes? content "(built-in)")) (t/is (not (str/includes? content "source: (not recorded)"))) (t/is (str/includes? content "read tool"))))
+(t/deftest a-built-in-verb-describes-without-a-source (let [env (support/eval-ctx) got (atom []) engine {:agent-state (atom {:ctx (:ctx env)}), :session (atom (:session env)), :cwd (atom (:cwd env))} run (fn [args] (reset! got []) ((:handler eval-command/command) {:runtime engine, :ui {:info (fn [label content] (swap! got conj [:info label content])), :warning (fn [text] (swap! got conj [:warning text]))}} args) (clojure.core/deref got)) [[level _ content]] (run "describe core/read")] (t/is (= :info level)) (t/is (str/includes? content "(built-in)")) (t/is (not (str/includes? content "source: (not recorded)"))) (t/is (str/includes? content "read tool"))))
 
 (t/deftest runtime-builtins-register-eval
   (builtins/register-runtime-commands! (constantly nil))

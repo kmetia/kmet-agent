@@ -69,8 +69,8 @@ separate runtime retired into this engine):
 ;; fan out: start calls before derefing any of them
 (let [a (tools/call "server_a_query" {:q "x"})
       b (tools/call "server_b_query" {:q "y"})]
-  (emit (:content @a))
-  (emit (:content @b)))
+  (core/emit (:content @a))
+  (core/emit (:content @b)))
 ```
 
 - MCP tools appear by their prefixed names (`server_toolname`) from the
@@ -80,8 +80,8 @@ separate runtime retired into this engine):
   template's `{var}` placeholders as parameters. A server that has
   never been connected has no cache entry yet, so connect it once
   (`mcp({connect: "name"})`) before scripting it.
-- Report results with `(emit value)` (also `(sandbox/emit value)`): it
-  prints one compact result and returns `nil`. `emit` is the curated channel,
+- Report results with `(core/emit value)`: it prints one compact result and
+  returns `nil`. `core/emit` is the curated channel,
   and a script that emits nothing reports its final value instead;
   stdout/stderr are captured but not returned.
 - `timeout` (seconds; omit or 0 = no deadline, like bash) bounds the whole

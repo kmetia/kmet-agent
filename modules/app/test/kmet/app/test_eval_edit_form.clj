@@ -73,9 +73,9 @@
 
 (t/deftest edit-form-refuses-a-source-provided-key
   (let [env (support/eval-ctx)
-        _ (register! env :license (fn [_] {:ns {'license {'value 1}}}))]
-    (t/is (= "1" (:content (support/eval! env "license/value"))))
-    (let [result (edit-form! env "license/value" "(def value 2)")]
+        _ (register! env :license (fn [_] {:ns {'ext.license {'value 1}}}))]
+    (t/is (= "1" (:content (support/eval! env "ext.license/value"))))
+    (let [result (edit-form! env "ext.license/value" "(def value 2)")]
       (t/is (:is-error result))
       (t/is (str/includes? (:content result) "source-provided")))))
 

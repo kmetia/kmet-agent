@@ -614,7 +614,7 @@ calls, so it can expose current state instead of a snapshot:
   (fn [{:keys [cwd verbs]}]
     (let [{:keys [edit]} verbs]
       {:doc "Add the SPDX header to a source file."
-       :ns {'license {'add! (with-meta
+       :ns {'ext.license {'add! (with-meta
                               (fn [path]
                                 (edit (str (fs/path cwd path))
                                       "(ns "
@@ -630,29 +630,26 @@ calls, so it can expose current state instead of a snapshot:
 (ext/unregister-eval-source! api :license)
 ```
 
-- Values live under the namespace you return; `user`, `clj`, `eval` and the
-  sandbox's fixed namespaces (`clojure.core`, `clojure`, `sandbox`, `tools`,
-  `babashka.process`, `kmet.libs.http`, `kmet.libs.json`, `kmet.libs.markdown`,
-  `kmet.libs.yaml`) are reserved for the built-in sandbox helpers. The
-  `user` namespace provides `read`, `write`, `edit`, `bash` and `sh`; the file
-  verbs call the tool implementations directly, so they do not depend on the
-  tool selection. The `clj` namespace provides `edit-form`, `replace-sexp` and
-  `paren-repair` from `kmet.libs.clj-edit`; they also call the engine directly
-  and do not require the clojure extension. The `tools` namespace is the tool
-  bridge: it reaches every active tool (`tools/clojure_edit`, `tools/call`,
-  ...) and honours the tool chain. Use `license/add!`, not `add!` or
-  `user/add!`.
+- Values must live under `ext.<source-id>` or a subnamespace of it:
+  `ext.license`, `ext.license.internal`. The model's `user`, the system
+  `core`, `clj`, `eval` and `tools`, and the fixed host namespaces
+  (`clojure.core`, `clojure`, `babashka.process`, `kmet.libs.http`,
+  `kmet.libs.json`, `kmet.libs.markdown`, `kmet.libs.yaml`) are reserved.
+  `core/read`, `core/write`, `core/edit`, `core/bash` and `core/sh` call the
+  tool implementations directly; `clj/edit-form`, `clj/replace-sexp` and
+  `clj/paren-repair` call `kmet.libs.clj-edit` directly; `tools/*` is the
+  active tool bridge. Use `ext.license/add!`, not `add!` or `user/add!`.
 - `:verbs` carries the call's `:read-file`, `:edit` and `:write-file`
   operations. They read that call's cwd and cancel signal; use them within
   the call, never keep them.
 - A contributed value may carry `:doc`, `:arglists` and `:source` metadata
   (the keys a var uses, plus the implementation text, since a source verb has
   no library file). `(eval/sources)` and `(eval/help)` list each verb with its
-  doc and arglists; `(eval/describe 'license/add!)` returns its `:kind`,
+  doc and arglists; `(eval/describe 'ext.license/add!)` returns its `:kind`,
   `:arglists`, `:source` and, when it has no source, `:doc` (a source-bearing
   entry omits the docstring; nil `:file` and `:scope` are omitted).
-  `(eval/describe 'license/add! :doc)` and
-  `(eval/describe 'license/add! :source)` return one field each. A value
+  `(eval/describe 'ext.license/add! :doc)` and
+  `(eval/describe 'ext.license/add! :source)` return one field each. A value
   without metadata is still valid and lists as `(no docstring)`.
 - `:commands` adds verbs to `/eval`; its built-in verbs (`list`, `search`,
   `describe`, `drop`, `move`, `reload`, `sources`, `help`) are reserved.

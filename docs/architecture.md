@@ -378,6 +378,12 @@ cancelled under the dialog with a deny rather than parking the run thread.
 
 ## Tools and the script sandbox
 
+The eval sandbox is split by ownership: `core` holds the runtime verbs,
+`clj` the structure verbs, `tools` the active tool bridge and `eval` the
+library API; all four are system-owned. `user` is model-owned and persisted;
+extension sources may contribute only to `ext.<id>`. A definition in a system
+namespace is refused, and a definition in `ext.*` is live-only.
+
 The tool layer is `kmet.app.tools.*`: one record per tool, mounted as a row
 (`:tool/read`, `:tool/bash`, …) and dispatched through the `:tools` service. Two
 things are worth knowing before changing a tool.
@@ -563,12 +569,12 @@ probe and no real use, and is gone;
   joins the table undeclared and becomes declared once `tool_search` loads a
   tool (`kmet.app.tools.registry/register-tool-source!`). Listing and dispatch
   therefore cannot drift.
-- **Output is `emit` (or a silent script's value).** `(emit v)` (also
-  `sandbox/emit`, and the bare `emit` in the script namespace) is the curated
-  text channel: strings print raw, other data `pr-str`, and it returns nil.
-  A script that emits nothing and finishes normally reports its final value
-  instead (the REPL rule, bounded like emit); stdout and stderr are captured
-  for the budget but never reported. `(emit-image path-or-block)`
+- **Output is `core/emit` (or a silent script's value).** `(core/emit v)` is
+  the curated text channel: strings print raw, other data `pr-str`, and it
+  returns nil. A script that emits nothing and finishes normally reports its
+  final value instead (the REPL rule, bounded like emit); stdout and stderr
+  are captured for the budget but never reported. `(core/emit-image
+  path-or-block)`
   is the second channel, capped at 4 MiB of base64 per image and 8 images per
   call, accepting exactly what `read` accepts. Capture is bounded at 1 MiB
   (exceeding it aborts with `:output-limit`), printing is bounded
@@ -660,8 +666,8 @@ builtins register `/eval` (`list`, `search`, `describe`, `drop`, `move`,
 independent of the `:tool/eval` row, so removing the row leaves the command
 and its service. An unknown leading
 name that resolves to a definition or source verb is a `describe` shorthand;
-an unresolvable one keeps the unknown-verb hint. The sandbox already provides the
-`user/read`, `user/write`, `user/edit`, `user/bash` and `user/sh` helpers and
+an unresolvable one keeps the unknown-verb hint. The system already provides
+`core/read`, `core/write`, `core/edit`, `core/bash` and `core/sh` and
 the `tools` bridge to every active tool; the row does not mount a separate
 eval source for them. The clojure extension's tools wrap the shared
 `kmet.libs.clj-edit` engine; an eval script can use the direct `clj/edit-form`,
@@ -709,7 +715,7 @@ source-provided and unwritten entries; a written definition reports `:scope
 `(eval/library)` and the disk listings with `:active false`. Load, write and
 unbind failures carry `:scope` too. Source verbs carry the same keys as
 metadata on their values (`with-meta`), which `normalize-source` validates and
-`source-var` puts on the SCI var, so `(meta #'license/add!)` works; the plural
+`source-var` puts on the SCI var, so `(meta #'ext.license/add!)` works; the plural
 `(eval/sources)` stays the registered-source listing and includes each verb's
 doc and arglists. A non-blank docstring is the save contract: an undocumented new
 definition stays live for the session and is not written; its result line

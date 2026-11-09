@@ -30,7 +30,7 @@
     (t/is (str/includes? (:content (support/eval! a "only-a")) "1"))
     (t/is (= "1" (:content (support/eval! a "only-a"))))
     (t/is (= "false"
-             (:content (support/eval! b "(emit (some? (resolve 'only-a)))")))
+             (:content (support/eval! b "(core/emit (some? (resolve 'only-a)))")))
           "a definition from another agent's environment is invisible")))
 
 (t/deftest test-a-new-session-loads-the-shared-library
@@ -51,7 +51,7 @@
 (t/deftest test-a-definition-is-not-visible-to-codemode
   (let [env (support/eval-ctx)]
     (support/eval! env "(def library-only \"Library only.\" 1)")
-    (let [r (support/call-tool env "codemode" {:code "(emit (some? (resolve 'library-only)))"})]
+    (let [r (support/call-tool env "codemode" {:code "(core/emit (some? (resolve 'library-only)))"})]
       (t/is (not (:is-error r)) (:content r))
       (t/is (= "false" (:content r))
             "codemode keeps its fresh-context contract"))))
@@ -146,7 +146,7 @@
     (t/is (str/includes? text "let/fn"))
     (t/is (str/includes? text "(eval/help)"))
     (t/is (str/includes? text "serialize"))
-    (t/is (str/includes? text "(sandbox/spawn f)"))
+    (t/is (str/includes? text "(core/spawn f)"))
     (t/is (empty? prompt-guidelines)
           "details live in (eval/help), not per-request guidelines")
     (t/is (<= (count text) 900) "the per-request prompt stays compact")
@@ -172,8 +172,8 @@
         codemode (tools/get-tool (:tools env) "codemode")]
     (t/is (not= (:prompt-snippet codemode) (:prompt-snippet eval-tool/definition)))
     (t/is (not= (:description codemode) (:description eval-tool/definition)))
-    (t/is (not (str/includes? (:description codemode) script/sandbox-summary)))
-    (t/is (not (str/includes? (:description eval-tool/definition) script/sandbox-summary)))))
+    (t/is (not (str/includes? (:description codemode) script/core-summary)))
+    (t/is (not (str/includes? (:description eval-tool/definition) script/core-summary)))))
 
 (t/deftest test-the-tool-reports-a-missing-service
   (let [{:keys [tools]} (tu/tool-ctx)
@@ -212,7 +212,7 @@
       (let [first-call (future
                          ((:eval! service)
                           {:code (str "(deref (tools/call \"eval-test-marker\" {}))"
-                                      " (sandbox/sleep 300) :first")
+                                      " (core/sleep 300) :first")
                            :session session :cwd cwd
                            :limits (script/resolve-limits nil)}))
             _ (t/is (deref started 2000 false))

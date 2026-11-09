@@ -38,11 +38,13 @@
     (t/is (str/includes? (:content (support/eval! env "(eval/library)"))
                          "user/report"))))
 
-(t/deftest test-a-library-definition-can-use-the-built-in-user-verbs (let [env (support/eval-ctx) path (library-file env "user" "uses-read.clj")] (fs/create-dirs (fs/parent path)) (spit path "(ns user)\n(defn uses-read \"Read with the built-in.\" [path] (user/read path))\n") (spit (str (fs/path (:cwd env) "marker.txt")) "MARKER") (let [result (support/eval! env "(uses-read \"marker.txt\")")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "MARKER")) (t/is (some (fn [entry] (= "user/uses-read" (:name entry))) (support/eval-library env)) "the library definition loaded"))))
+(t/deftest test-a-library-definition-can-use-the-built-in-user-verbs (let [env (support/eval-ctx) path (library-file env "user" "uses-read.clj")] (fs/create-dirs (fs/parent path)) (spit path "(ns user)\n(defn uses-read \"Read with the built-in.\" [path] (core/read path))\n") (spit (str (fs/path (:cwd env) "marker.txt")) "MARKER") (let [result (support/eval! env "(uses-read \"marker.txt\")")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "MARKER")) (t/is (some (fn [entry] (= "user/uses-read" (:name entry))) (support/eval-library env)) "the library definition loaded"))))
 
-(t/deftest test-user-file-verbs-do-not-depend-on-the-tool-surface (let [env (support/eval-ctx) marker (str (fs/path (:cwd env) "marker.txt"))] (spit marker "MARKER") (binding [script/*enabled-tools-fn* (constantly #{})] (t/is (= "MARKER" (:content (support/eval! env "(user/read \"marker.txt\")")))) (support/eval! env "(user/write \"out.txt\" \"alpha\")") (support/eval! env "(user/edit \"out.txt\" \"alpha\" \"beta\")") (t/is (= "beta" (slurp (str (fs/path (:cwd env) "out.txt"))))))))
+(t/deftest test-user-file-verbs-do-not-depend-on-the-tool-surface (let [env (support/eval-ctx) marker (str (fs/path (:cwd env) "marker.txt"))] (spit marker "MARKER") (binding [script/*enabled-tools-fn* (constantly #{})] (t/is (= "MARKER" (:content (support/eval! env "(core/read \"marker.txt\")")))) (support/eval! env "(core/write \"out.txt\" \"alpha\")") (support/eval! env "(core/edit \"out.txt\" \"alpha\" \"beta\")") (t/is (= "beta" (slurp (str (fs/path (:cwd env) "out.txt"))))))))
 
-(t/deftest test-user-bash-does-not-depend-on-the-tool-surface (let [env (support/eval-ctx)] (binding [script/*enabled-tools-fn* (constantly #{})] (let [result (support/eval! env "(user/bash \"printf hi\")")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "hi"))))))
+(t/deftest test-user-bash-does-not-depend-on-the-tool-surface (let [env (support/eval-ctx)] (binding [script/*enabled-tools-fn* (constantly #{})] (let [result (support/eval! env "(core/bash \"printf hi\")")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "hi"))))))
+
+(t/deftest test-system-namespaces-are-refused-and-extension-namespaces-are-live-only (let [env (support/eval-ctx)] (let [result (support/call-tool env "eval" {:code "(ns core) (defn read \"Mine.\" [path] :mine)"})] (t/is (:is-error result)) (t/is (str/includes? (:content result) "system-owned"))) (let [result (support/call-tool env "eval" {:code "(ns clj) (defn edit-form \"Mine.\" [args] :mine)"})] (t/is (:is-error result)) (t/is (str/includes? (:content result) "system-owned"))) (let [result (support/eval! env "(ns ext.license) (defn custom \"Doc.\" [] :ok)")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "extension; live only, not saved")) (t/is (not (fs/exists? (support/library-file env :cwd "ext.license" "custom.clj")))))))
 
 (t/deftest test-clj-structure-verbs-do-not-depend-on-the-tool-surface (let [env (support/eval-ctx) path (str (fs/path (:cwd env) "edit-me.clj"))] (spit path "(ns edit-me)\n\n(defn f [] 1)\n") (binding [script/*enabled-tools-fn* (constantly #{})] (let [result (support/eval! env (str "(:content (clj/edit-form {:file_path \"edit-me.clj\" " ":form_type \"defn\" :form_identifier \"f\" " ":operation \"replace\" " ":content \"(defn f [] 2)\"}))"))] (t/is (= "Edit applied." (:content result))) (t/is (str/includes? (slurp path) "(defn f [] 2)"))) (let [result (support/eval! env (str "(:content (clj/replace-sexp {:file_path \"edit-me.clj\" " ":match_form \"(defn f [] 2)\" " ":new_form \"(defn f [] 3)\" " ":operation \"replace\"}))"))] (t/is (= "Edit applied." (:content result))) (t/is (str/includes? (slurp path) "(defn f [] 3)"))) (spit path "(defn f []\n") (let [result (support/eval! env "(:content (clj/paren-repair {:file_path \"edit-me.clj\" :format false}))")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "Fixed"))))))
 
@@ -94,23 +96,23 @@
         cwd (:cwd env)
         other (session/create-session (test-tmp/temp-dir! "eval-cache-")
                                       {:cwd cwd})]
-    (support/eval-in! service other cwd "(emit 1)")
+    (support/eval-in! service other cwd "(core/emit 1)")
     (support/eval! env "(def later \"Later.\" 7)")
     (t/is (= "false"
              (:content (support/eval-in! service other cwd
-                                         "(emit (some? (resolve 'later)))")))
+                                         "(core/emit (some? (resolve 'later)))")))
           "an environment is a runtime cache, not a live view of the library")
     (let [restarted (support/restart-service env)]
       (t/is (= "true"
                (support/script-content
                 (support/eval-in! restarted other cwd
-                                  "(emit (some? (resolve 'later)))")))
+                                  "(core/emit (some? (resolve 'later)))")))
             "a new process builds a new environment from the library"))))
 
 (t/deftest test-an-explicit-reload-refreshes-the-library
   (let [env (support/eval-ctx)
         service (:service env)
-        _ (support/eval! env "(emit 1)")
+        _ (support/eval! env "(core/emit 1)")
         _ (eval-files/write-definition!
            (support/cwd-root env)
            {:name "user/later" :ns "user" :kind :def
@@ -120,7 +122,7 @@
            {:name "user/globally" :ns "user" :kind :def
             :source "(def globally \"Global.\" :g)"})]
     (t/is (= "false"
-             (:content (support/eval! env "(emit (some? (resolve 'later)))")))
+             (:content (support/eval! env "(core/emit (some? (resolve 'later)))")))
           "automatic refresh is still off")
     (let [result ((:reload! service) {:session (:session env) :cwd (:cwd env)})]
       (t/is (not (:is-error result)) (:content result))
@@ -183,7 +185,7 @@
     (t/is (str/includes? (:content result) "[eval: forgot user/doomed (cwd)]"))
     (t/is (not (fs/exists? path)))
     (t/is (= "false"
-             (:content (support/eval! env "(emit (some? (resolve 'doomed)))")))
+             (:content (support/eval! env "(core/emit (some? (resolve 'doomed)))")))
           "the live var disappears in the same session")
     (t/is (= [] (support/eval-library env)))))
 
@@ -229,7 +231,7 @@
     (support/eval! env "(eval/forget 'f)")
     (t/is (not (fs/exists? path)) "an unqualified name resolves in the sticky ns")
     (t/is (= "false"
-             (:content (support/eval! env "(emit (some? (resolve 'f)))"))))))
+             (:content (support/eval! env "(core/emit (some? (resolve 'f)))"))))))
 
 (t/deftest test-forget-of-an-unknown-name-errors
   (let [env (support/eval-ctx)
@@ -251,7 +253,7 @@
     (t/is (not (fs/exists? rect)))
     (t/is (fs/exists? circle))
     (t/is (= "true"
-             (:content (support/eval! env "(emit (some? (resolve 'area)))")))
+             (:content (support/eval! env "(core/emit (some? (resolve 'area)))")))
           "dropping one method leaves the multimethod live")
     (t/is (= ":circle" (:content (support/eval! env "(area {:shape :circle})")))
           "the other method stays live")
@@ -269,12 +271,12 @@
         path (library-file env "user" "broken.clj")]
     (fs/create-dirs (fs/parent path))
     (spit path "(ns user)\n(throw (ex-info \"boom\" {}))\n")
-    (let [result (support/eval! env "(emit 1)")]
+    (let [result (support/eval! env "(core/emit 1)")]
       (t/is (not (:is-error result)) (:content result))
       (t/is (= "1" (support/script-content result)))
       (t/is (seq (get-in result [:details :failures])))
       (t/is (str/includes? (pr-str (get-in result [:details :failures])) path)))
-    (let [next-result (support/eval! env "(emit 2)")]
+    (let [next-result (support/eval! env "(core/emit 2)")]
       (t/is (= "2" (:content next-result)))
       (t/is (nil? (get-in next-result [:details :failures]))
             "a build failure is reported once, then cleared"))))
@@ -285,7 +287,7 @@
         late (library-file env "user" "late.clj")]
     (fs/create-dirs (fs/parent broken))
     (spit broken "(ns user)\n(throw (ex-info \"boom\" {}))\n")
-    (t/is (seq (get-in (support/eval! env "(emit :ok)")
+    (t/is (seq (get-in (support/eval! env "(core/emit :ok)")
                        [:details :failures])))
     (fs/create-dirs (fs/parent late))
     (spit late "(ns user)\n(def late 1)\n")
@@ -301,7 +303,7 @@
         cwd (:cwd env)]
     (spit (str (fs/path cwd "note.txt")) "library\n")
     (support/eval! env "(defn parse-json \"Parse JSON.\" [s] (json/parse-string s))")
-    (support/eval! env "(defn say \"Say hi.\" [] (emit :hi))")
+    (support/eval! env "(defn say \"Say hi.\" [] (core/emit :hi))")
     (support/eval! env "(defn read-note \"Read the note.\" [] (str/trim (slurp \"note.txt\")))")
     (support/eval! env (str "(defn echo-hi \"Echo hi.\" [] "
                             "(tools/text (deref (tools/call \"bash\" "
@@ -350,7 +352,7 @@
     (let [restarted (support/restart-service env)
           result (binding [script/*enabled-tools-fn* (constantly #{})]
                    (support/eval-in! restarted (:session env) (:cwd env)
-                                     "(emit :ok)"))]
+                                     "(core/emit :ok)"))]
       (t/is (not (:is-error result)) (:content result))
       (t/is (nil? (get-in result [:details :failures]))
             "the rebuild surface keeps every registry tool, not only enabled ones"))))
@@ -379,7 +381,7 @@
                                         {:cwd cwd})
           service (:service env)
           result (support/eval-in! service other cwd
-                                   "(emit [(some? (resolve 'legacy)) (some? (resolve 'entry-only))])")]
+                                   "(core/emit [(some? (resolve 'legacy)) (some? (resolve 'entry-only))])")]
       (t/is (= "[false false]" (:content result))
             "only the agent home's library roots are loaded")
       (t/is (= [] (support/library-for service other))
@@ -411,13 +413,13 @@
                  (support/eval! env "(def lost \"Lost.\" 1)"))]
     (t/is (:is-error result))
     (t/is (= "true"
-             (:content (support/eval! env "(emit (some? (resolve 'lost)))")))
+             (:content (support/eval! env "(core/emit (some? (resolve 'lost)))")))
           "the live definition remains")
     (let [dropped (support/eval! env nil :drop ["user/lost"])]
       (t/is (not (:is-error dropped)) (:content dropped))
       (t/is (str/includes? (:content dropped) "[eval: forgot user/lost (unwritten)]")))
     (t/is (= "false"
-             (:content (support/eval! env "(emit (some? (resolve 'lost)))")))
+             (:content (support/eval! env "(core/emit (some? (resolve 'lost)))")))
           "a failed write is still forgettable")))
 
 (t/deftest test-an-unqualified-drop-qualifies-the-sticky-ns
@@ -430,20 +432,20 @@
     (t/is (not (fs/exists? path)))
     (t/is (= [] (support/eval-library env)))
     (t/is (= "false"
-             (:content (support/eval! env "(emit (some? (resolve 'x)))"))))))
+             (:content (support/eval! env "(core/emit (some? (resolve 'x)))"))))))
 
 (t/deftest test-a-definition-from-an-errored-call-can-be-forgotten
   (let [env (support/eval-ctx)
         result (support/eval! env "(def z 1) (throw (ex-info \"boom\" {}))")]
     (t/is (:is-error result))
     (t/is (= "true"
-             (:content (support/eval! env "(emit (some? (resolve 'z)))")))
+             (:content (support/eval! env "(core/emit (some? (resolve 'z)))")))
           "the definition evaluated before the throw is live")
     (let [dropped (support/eval! env nil :drop ["user/z"])]
       (t/is (not (:is-error dropped)) (:content dropped))
       (t/is (str/includes? (:content dropped) "[eval: forgot user/z (unwritten)]")))
     (t/is (= "false"
-             (:content (support/eval! env "(emit (some? (resolve 'z)))")))
+             (:content (support/eval! env "(core/emit (some? (resolve 'z)))")))
           "an errored call's live definition is forgettable")))
 
 (t/deftest test-a-definition-after-an-error-is-not-forgettable
@@ -479,7 +481,7 @@
                     (if (str/includes? (str path) "b.clj")
                       (throw (ex-info "disk full" {:type :test}))
                       (delete root path)))]
-      (let [result (support/eval! env "(emit :ok)" :drop ["user/a" "user/b"])]
+      (let [result (support/eval! env "(core/emit :ok)" :drop ["user/a" "user/b"])]
         (t/is (:is-error result))
         (t/is (str/includes? (:content result) "[eval: forgot user/a (cwd)]"))
         (t/is (str/includes? (:content result) "[eval: failed: disk full]"))))))
@@ -495,7 +497,7 @@
         (t/is (seq (get-in result [:details :failures])))))
     (t/is (not (fs/exists? path)))
     (t/is (= "true"
-             (:content (support/eval! env "(emit (some? (resolve 'x)))")))
+             (:content (support/eval! env "(core/emit (some? (resolve 'x)))")))
           "the live var remains when unbinding fails")))
 
 (t/deftest test-a-code-less-drop-reports-partial-deletes
@@ -539,7 +541,7 @@
         calls (mapv (fn [i]
                       (future
                         (support/eval-in! service session cwd
-                                          (str "(sandbox/sleep 10) "
+                                          (str "(core/sleep 10) "
                                                "(def p" i " \"P" i ".\" " i ") p" i))))
                     (range 8))]
     (doseq [call calls]
@@ -548,7 +550,7 @@
       (t/is (fs/exists? (library-file env "user" (str "p" i ".clj")))))
     (t/is (= "[true true true true true true true true]"
              (:content (support/eval-in! service session cwd
-                                         (str "(emit (mapv #(some? (resolve %)) "
+                                         (str "(core/emit (mapv #(some? (resolve %)) "
                                               "'[p0 p1 p2 p3 p4 p5 p6 p7]))"))))
           "all parallel definitions are live and written")))
 
@@ -560,7 +562,7 @@
                 {:ns "user" :source "(def spin (loop [] (recur)))"}))
     (with-redefs-fn {#'eval-service/build-timeout-ms 50}
       (fn []
-        (let [result (support/eval! env "(emit :ok)")]
+        (let [result (support/eval! env "(core/emit :ok)")]
           (t/is (not (:is-error result)) (:content result))
           (t/is (seq (get-in result [:details :failures]))
                 "a looping library definition is recorded and skipped"))))))
@@ -576,7 +578,7 @@
     (with-redefs-fn {#'eval-service/build-budget-ms 50}
       (fn []
         (let [started (concurrent/monotonic-ms)
-              result (support/eval! env "(emit :ok)")]
+              result (support/eval! env "(core/emit :ok)")]
           (t/is (not (:is-error result)) (:content result))
           (t/is (>= (count (get-in result [:details :failures])) 1))
           (t/is (< (- (concurrent/monotonic-ms) started) 5000)
@@ -596,7 +598,7 @@
       (t/is (= "false"
                (support/script-content
                 (support/eval-in! restarted (:session env) (:cwd env)
-                                  "(emit (some? (resolve 'from-misc)))")))))))
+                                  "(core/emit (some? (resolve 'from-misc)))")))))))
 
 (t/deftest a-no-environment-drop-uses-the-disk-index
   (let [env (support/eval-ctx)
@@ -619,7 +621,7 @@
     (t/is (fs/exists? path))
     (t/is (= "1" (support/script-content (support/eval! env "g"))))
     (t/is (= "false"
-             (:content (support/eval! env "(emit (some? (resolve 'f)))"))))))
+             (:content (support/eval! env "(core/emit (some? (resolve 'f)))"))))))
 
 (t/deftest drop-a-qualified-defmethod-deletes-its-actual-file
   (let [env (support/eval-ctx)]
@@ -635,7 +637,7 @@
         (t/is (= "false"
                  (support/script-content
                   (support/eval-in! restarted (:session env) (:cwd env)
-                                    "(emit (some? (get-method other.ns/area :rect)))"))))))))
+                                    "(core/emit (some? (get-method other.ns/area :rect)))"))))))))
 
 (t/deftest a-broken-legacy-lossy-file-is-still-droppable
   (let [env (support/eval-ctx)
@@ -656,7 +658,7 @@
     (let [restarted (support/restart-service env)
           content (support/script-content
                    (support/eval-in! restarted (:session env) (:cwd env)
-                                     "(emit [(some? (resolve 'a?)) (some? (resolve 'a!)) a? a!])"))]
+                                     "(core/emit [(some? (resolve 'a?)) (some? (resolve 'a!)) a? a!])"))]
       (t/is (= "[true true 1 2]" content)))))
 
 (t/deftest drop-refuses-a-file-with-unrequested-siblings
@@ -664,7 +666,7 @@
         path (library-file env "user" "pair.clj")]
     (fs/create-dirs (fs/parent path))
     (spit path "(ns user)\n(def a 1)\n(def b 2)\n")
-    (t/is (= "3" (support/script-content (support/eval! env "(emit (+ a b))"))))
+    (t/is (= "3" (support/script-content (support/eval! env "(core/emit (+ a b))"))))
     (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"also defines user/b"
                             (support/eval! env nil :drop ["user/a"])))
@@ -678,14 +680,14 @@
       (t/is (= "[false false]"
                (support/script-content
                 (support/eval-in! restarted (:session env) (:cwd env)
-                                  "(emit [(some? (resolve 'a)) (some? (resolve 'b))])")))))))
+                                  "(core/emit [(some? (resolve 'a)) (some? (resolve 'b))])")))))))
 
 (t/deftest a-redefinition-keeps-a-noncanonical-file-and-its-siblings
   (let [env (support/eval-ctx)
         path (library-file env "user" "pair.clj")]
     (fs/create-dirs (fs/parent path))
     (spit path "(ns user)\n(def a 1)\n(def b 2)\n")
-    (support/eval! env "(emit (+ a b))")
+    (support/eval! env "(core/emit (+ a b))")
     (let [result (support/eval! env "(defn a \"A.\" [] :new)")]
       (t/is (not (:is-error result)) (:content result)))
     (t/is (str/includes? (slurp path) "(defn a \"A.\" [] :new)"))
@@ -694,7 +696,7 @@
       (t/is (= "[:new 2]"
                (support/script-content
                 (support/eval-in! restarted (:session env) (:cwd env)
-                                  "(emit [(a) b])")))))))
+                                  "(core/emit [(a) b])")))))))
 
 (t/deftest an-unqualified-drop-uses-the-calls-final-namespace
   (let [env (support/eval-ctx)

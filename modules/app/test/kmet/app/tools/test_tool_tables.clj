@@ -179,7 +179,7 @@
   (let [a (:tools (tu/tool-ctx))
         b (:tools (tu/tool-ctx))
         run (fn [h] (:execute (get (tools/get-all-tools h) "codemode")))
-        code "(emit (:content @(tools/call \"probe\" {})))"]
+        code "(core/emit (:content @(tools/call \"probe\" {})))"]
     (tools/register-tool! a (probe "from-a"))
     (let [from-a (:content ((run a) {:code code} nil nil nil))
           from-b (:content ((run b) {:code code} nil nil nil))]

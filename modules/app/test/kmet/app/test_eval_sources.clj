@@ -21,36 +21,36 @@
     (register! env :license
                (fn [{:keys [cwd project-dir agent-dir signal verbs]}]
                  {:doc "License helpers"
-                  :ns {'license {'where (fn [] cwd)
-                                 'project (fn [] project-dir)
-                                 'agent-home (fn [] agent-dir)
-                                 'signalled? (fn [] (some? signal))
-                                 'has-verbs? (fn [] (and (fn? (:edit verbs))
-                                                         (fn? (:write-file verbs))
-                                                         (fn? (:read-file verbs))))}}}))
+                  :ns {'ext.license {'where (fn [] cwd)
+                                     'project (fn [] project-dir)
+                                     'agent-home (fn [] agent-dir)
+                                     'signalled? (fn [] (some? signal))
+                                     'has-verbs? (fn [] (and (fn? (:edit verbs))
+                                                             (fn? (:write-file verbs))
+                                                             (fn? (:read-file verbs))))}}}))
     (t/is (= (:cwd env)
-             (:content (support/eval! env "(license/where)"))))
+             (:content (support/eval! env "(ext.license/where)"))))
     (t/is (= (str (fs/path (:cwd env) ".kmet"))
-             (:content (support/eval! env "(license/project)"))))
+             (:content (support/eval! env "(ext.license/project)"))))
     (t/is (= (:agent-dir env)
-             (:content (support/eval! env "(license/agent-home)"))))
-    (t/is (= "false" (:content (support/eval! env "(license/signalled?)"))))
-    (t/is (= "true" (:content (support/eval! env "(license/has-verbs?)"))))))
+             (:content (support/eval! env "(ext.license/agent-home)"))))
+    (t/is (= "false" (:content (support/eval! env "(ext.license/signalled?)"))))
+    (t/is (= "true" (:content (support/eval! env "(ext.license/has-verbs?)"))))))
 
 (t/deftest source-verbs-match-the-file-tools
   (let [env (support/eval-ctx)
         _ (register! env :license
                      (fn [{:keys [verbs]}]
-                       {:ns {'license {'write! (fn [path content]
-                                                 ((:write-file verbs) path content))
-                                       'edit! (fn [path old new]
-                                                ((:edit verbs) path old new))}}}))]
-    (support/eval! env "(license/write! \"source.txt\" \"alpha\")")
-    (support/eval! env "(user/write \"tool.txt\" \"alpha\")")
+                       {:ns {'ext.license {'write! (fn [path content]
+                                                     ((:write-file verbs) path content))
+                                           'edit! (fn [path old new]
+                                                    ((:edit verbs) path old new))}}}))]
+    (support/eval! env "(ext.license/write! \"source.txt\" \"alpha\")")
+    (support/eval! env "(core/write \"tool.txt\" \"alpha\")")
     (t/is (= (slurp (str (:cwd env) "/source.txt"))
              (slurp (str (:cwd env) "/tool.txt"))))
-    (support/eval! env "(license/edit! \"source.txt\" \"alpha\" \"beta\")")
-    (support/eval! env "(user/edit \"tool.txt\" \"alpha\" \"beta\")")
+    (support/eval! env "(ext.license/edit! \"source.txt\" \"alpha\" \"beta\")")
+    (support/eval! env "(core/edit \"tool.txt\" \"alpha\" \"beta\")")
     (t/is (= "beta" (slurp (str (:cwd env) "/source.txt"))))
     (t/is (= (slurp (str (:cwd env) "/source.txt"))
              (slurp (str (:cwd env) "/tool.txt"))))))
@@ -59,8 +59,8 @@
   (let [env (support/eval-ctx)]
     (spit (str (fs/path (:cwd env) "lines.txt")) "alpha\nbeta\ngamma")
     (t/is (= "beta\ngamma"
-             (:content (support/eval! env "(user/read \"lines.txt\" {:offset 2 :limit 2})"))))
-    (let [missing (support/eval! env "(user/read \"nope.txt\")")]
+             (:content (support/eval! env "(core/read \"lines.txt\" {:offset 2 :limit 2})"))))
+    (let [missing (support/eval! env "(core/read \"nope.txt\")")]
       (t/is (:is-error missing))
       (t/is (str/includes? (:content missing) "File not found")))))
 
@@ -68,12 +68,14 @@
   (let [env (support/eval-ctx)
         dereg (register! env :license
                          (fn [_]
-                           {:ns {'license {'add! (fn [] :added)}}}))]
-    (t/is (= ":added" (:content (support/eval! env "(license/add!)"))))
-    (support/eval! env "(ns license) (def keep 5)")
+                           {:ns {'ext.license {'add! (fn [] :added)}}}))]
+    (t/is (= ":added" (:content (support/eval! env "(ext.license/add!)"))))
+    (support/eval! env "(ns ext.license) (def keep 5)")
     (dereg)
     (t/is (= "[false 5]"
-             (:content (support/eval! env "(ns license) [(some? (resolve 'add!)) keep]"))))))
+             (:content (support/eval! env "(ns ext.license) [(some? (resolve 'add!)) keep]"))))))
+
+(t/deftest a-source-may-contribute-only-to-its-extension-namespace (let [env (support/eval-ctx)] (register! env :license (fn [_] {:ns {(quote nope) {(quote value) 1}}})) (let [result (support/eval! env "(+ 1 2)") errors (source-errors (:service env))] (t/is (= "3" (:content result))) (t/is (some (fn [error] (str/includes? (:error error) "may contribute only to ext.license")) errors)))))
 
 (t/deftest bad-sources-contribute-nothing-and-are-reported
   (let [env (support/eval-ctx)]
@@ -109,111 +111,111 @@
 (t/deftest a-model-redefinition-shadows-a-source-value
   (let [env (support/eval-ctx)]
     (register! env :license
-               (fn [_] {:ns {'license {'value 1}}}))
-    (let [result (support/eval! env "(ns license) (def value 2) value")
-          path (support/library-file env :cwd "license" "value.clj")]
+               (fn [_] {:ns {'ext.license {'value 1}}}))
+    (let [result (support/eval! env "(ns ext.license) (def value 2) value")
+          path (support/library-file env :cwd "ext.license" "value.clj")]
       (t/is (str/starts-with? (:content result) "2"))
       (t/is (str/includes? (:content result)
-                           "[eval: redefined license/value (source; not stored)]"))
+                           "[eval: redefined ext.license/value (source; not stored)]"))
       (t/is (not (fs/exists? path))))
-    (t/is (= "2" (:content (support/eval! env "(ns license) value"))))
-    (let [result (support/eval! env "(ns license) (eval/forget 'value)")]
-      (t/is (str/includes? (:content result) "[eval: restored license/value (source)]")))
-    (t/is (= "1" (:content (support/eval! env "(ns license) value")))
+    (t/is (= "2" (:content (support/eval! env "(ns ext.license) value"))))
+    (let [result (support/eval! env "(ns ext.license) (eval/forget 'value)")]
+      (t/is (str/includes? (:content result) "[eval: restored ext.license/value (source)]")))
+    (t/is (= "1" (:content (support/eval! env "(ns ext.license) value")))
           "forget restores the source value")
-    (t/is (not (fs/exists? (support/library-file env :cwd "license" "value.clj"))))))
+    (t/is (not (fs/exists? (support/library-file env :cwd "ext.license" "value.clj"))))))
 
 (t/deftest a-code-less-drop-restores-a-source-value
   (let [env (support/eval-ctx)]
     (register! env :license
-               (fn [_] {:ns {'license {'value 1}}}))
-    (support/eval! env "(ns license) (def value 2)")
+               (fn [_] {:ns {'ext.license {'value 1}}}))
+    (support/eval! env "(ns ext.license) (def value 2)")
     (let [result ((:drop! (:service env))
-                  {:session (:session env) :drop ["license/value"]})]
+                  {:session (:session env) :drop ["ext.license/value"]})]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (str/includes? (:content result) "[eval: restored license/value (source)]")))
-    (t/is (= "1" (:content (support/eval! env "(ns license) value"))))))
+      (t/is (str/includes? (:content result) "[eval: restored ext.license/value (source)]")))
+    (t/is (= "1" (:content (support/eval! env "(ns ext.license) value"))))))
 
 (t/deftest a-library-file-and-a-source-value-share-a-key-safely
   (let [env (support/eval-ctx)
-        path (support/library-file env :cwd "license" "value.clj")]
+        path (support/library-file env :cwd "ext.license" "value.clj")]
     (fs/create-dirs (fs/parent path))
-    (spit path "(ns license)\n(def value 2)\n")
+    (spit path "(ns ext.license)\n(def value 2)\n")
     (register! env :license
-               (fn [_] {:ns {'license {'value 1}}}))
-    (t/is (= "2" (support/script-content (support/eval! env "(ns license) value")))
+               (fn [_] {:ns {'ext.license {'value 1}}}))
+    (t/is (= "2" (support/script-content (support/eval! env "(ns ext.license) value")))
           "the saved definition wins at build")
-    (let [result (support/eval! env nil :drop ["license/value"])]
+    (let [result (support/eval! env nil :drop ["ext.license/value"])]
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result)
-                           "[eval: forgot license/value (cwd); source restored]")))
+                           "[eval: forgot ext.license/value (cwd); source restored]")))
     (t/is (not (fs/exists? path)))
-    (t/is (= "1" (:content (support/eval! env "(ns license) value"))))
+    (t/is (= "1" (:content (support/eval! env "(ns ext.license) value"))))
     (let [restarted (support/restart-service env)]
       (t/is (= "1"
                (support/script-content
                 (support/eval-in! restarted (:session env) (:cwd env)
-                                  "(ns license) value")))))))
+                                  "(ns ext.license) value")))))))
 
 (t/deftest a-source-with-two-library-layers-restores-records-before-the-source
   (let [env (support/eval-ctx)]
     (doseq [[scope value] [[:global 2] [:cwd 3]]]
-      (let [path (support/library-file env scope "license" "value.clj")]
+      (let [path (support/library-file env scope "ext.license" "value.clj")]
         (fs/create-dirs (fs/parent path))
-        (spit path (str "(ns license)\n(def value " value ")\n"))))
+        (spit path (str "(ns ext.license)\n(def value " value ")\n"))))
     (register! env :license
-               (fn [_] {:ns {'license {'value 1}}}))
-    (t/is (= "3" (support/script-content (support/eval! env "(ns license) value"))))
-    (let [result (support/eval! env nil :drop ["license/value"])]
+               (fn [_] {:ns {'ext.license {'value 1}}}))
+    (t/is (= "3" (support/script-content (support/eval! env "(ns ext.license) value"))))
+    (let [result (support/eval! env nil :drop ["ext.license/value"])]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (str/includes? (:content result) "[eval: forgot license/value (cwd)]")))
-    (t/is (= "2" (support/script-content (support/eval! env "(ns license) value")))
+      (t/is (str/includes? (:content result) "[eval: forgot ext.license/value (cwd)]")))
+    (t/is (= "2" (support/script-content (support/eval! env "(ns ext.license) value")))
           "the lower record is restored before the source value")
-    (let [result (support/eval! env nil :drop ["license/value"])]
+    (let [result (support/eval! env nil :drop ["ext.license/value"])]
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result)
-                           "[eval: forgot license/value (global); source restored]")))
-    (t/is (= "1" (:content (support/eval! env "(ns license) value"))))))
+                           "[eval: forgot ext.license/value (global); source restored]")))
+    (t/is (= "1" (:content (support/eval! env "(ns ext.license) value"))))))
 
 (t/deftest a-source-key-stays-non-storable-after-unload
   (let [env (support/eval-ctx)
         dereg (register! env :license
-                         (fn [_] {:ns {'license {'value 1}}}))
-        path (support/library-file env :cwd "license" "value.clj")]
-    (support/eval! env "(ns license) (def value 3)")
+                         (fn [_] {:ns {'ext.license {'value 1}}}))
+        path (support/library-file env :cwd "ext.license" "value.clj")]
+    (support/eval! env "(ns ext.license) (def value 3)")
     (dereg)
     (t/is (str/starts-with?
-           (:content (support/eval! env "(ns license) (def value 4) value"))
+           (:content (support/eval! env "(ns ext.license) (def value 4) value"))
            "4"))
     (t/is (not (fs/exists? path)))
-    (support/eval! env "(ns license) (eval/forget 'value)")
-    (t/is (= "false" (:content (support/eval! env "(ns license) (some? (resolve 'value))"))))))
+    (support/eval! env "(ns ext.license) (eval/forget 'value)")
+    (t/is (= "false" (:content (support/eval! env "(ns ext.license) (some? (resolve 'value))"))))))
 
 (t/deftest a-scoped-forget-of-a-source-key-still-restores-it
   (let [env (support/eval-ctx)]
     (register! env :license
-               (fn [_] {:ns {'license {'value 1}}}))
-    (support/eval! env "(ns license) (def value 2)")
-    (let [result (support/eval! env "(ns license) (eval/forget 'value)"
+               (fn [_] {:ns {'ext.license {'value 1}}}))
+    (support/eval! env "(ns ext.license) (def value 2)")
+    (let [result (support/eval! env "(ns ext.license) (eval/forget 'value)"
                                 :scope :global)]
       (t/is (not (:is-error result)) (:content result))
-      (t/is (str/includes? (:content result) "[eval: restored license/value (source)]")))
-    (t/is (= "1" (:content (support/eval! env "(ns license) value"))))))
+      (t/is (str/includes? (:content result) "[eval: restored ext.license/value (source)]")))
+    (t/is (= "1" (:content (support/eval! env "(ns ext.license) value"))))))
 
 (t/deftest a-code-less-drop-does-not-restore-an-unloaded-source
   (let [env (support/eval-ctx)
         dereg (register! env :license
-                         (fn [_] {:ns {'license {'value 1}}}))]
-    (t/is (= "1" (:content (support/eval! env "(ns license) value"))))
+                         (fn [_] {:ns {'ext.license {'value 1}}}))]
+    (t/is (= "1" (:content (support/eval! env "(ns ext.license) value"))))
     (dereg)
     (let [result ((:drop! (:service env))
                   {:session (:session env)
-                   :drop ["license/value"]
+                   :drop ["ext.license/value"]
                    :cwd (:cwd env)})]
       (t/is (not (:is-error result)) (:content result)))
     (t/is (= "false"
              (:content (support/eval! env
-                                      "(ns license) (some? (resolve 'value))")))
+                                      "(ns ext.license) (some? (resolve 'value))")))
           "the unloaded source's live value is gone, not restored")))
 
 (t/deftest source-commands-are-collected-with-their-description
@@ -237,25 +239,25 @@
   (let [env (support/eval-ctx)]
     (register! env :license
                (fn [_] {:doc "License helpers"
-                        :ns {'license {'add! (fn [] :added)}}}))
+                        :ns {'ext.license {'add! (fn [] :added)}}}))
     (let [sources (:content (support/eval! env "(eval/sources)"))
           help (:content (support/eval! env "(eval/help)"))
-          sandbox (:content (support/eval! env "(eval/help :sandbox)"))]
+          core (:content (support/eval! env "(eval/help :core)"))]
       (t/is (str/includes? sources ":license"))
       (t/is (str/includes? sources "License helpers"))
       (t/is (not (str/includes? sources ":core")))
       (t/is (str/includes? help "Eval sources"))
       (t/is (str/includes? help "Library:"))
       (t/is (str/includes? help "Built-in verbs:"))
-      (t/is (str/includes? sandbox "Sandbox:"))
-      (t/is (str/includes? sandbox "(emit value)")))))
+      (t/is (str/includes? core "Core:"))
+      (t/is (str/includes? core "(core/emit value)")))))
 
 (t/deftest a-source-can-contribute-an-explicit-macro
   (let [env (support/eval-ctx)]
     (register! env :license
                (fn [_]
-                 {:macros {'license {'twice (fn [_ _ form] (list 'do form form))}}}))
-    (t/is (= "3" (:content (support/eval! env "(license/twice (+ 1 2))"))))))
+                 {:macros {'ext.license {'twice (fn [_ _ form] (list 'do form form))}}}))
+    (t/is (= "3" (:content (support/eval! env "(ext.license/twice (+ 1 2))"))))))
 
 (t/deftest source-values-are-read-on-every-call
   (let [current (atom 1)
@@ -264,10 +266,10 @@
     (register! env :counter
                (fn [_]
                  (swap! reads inc)
-                 {:ns {'counter {'value @current}}}))
-    (t/is (= "1" (:content (support/eval! env "counter/value"))))
+                 {:ns {'ext.counter {'value @current}}}))
+    (t/is (= "1" (:content (support/eval! env "ext.counter/value"))))
     (t/is (= 1 @reads) "the build's read is reused by the first call")
     (reset! current 2)
-    (t/is (= "2" (:content (support/eval! env "counter/value"))))
+    (t/is (= "2" (:content (support/eval! env "ext.counter/value"))))
     (t/is (= 2 @reads))))
 

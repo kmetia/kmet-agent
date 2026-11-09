@@ -145,7 +145,7 @@
           (is (= {:tools false :shell false :workspace false :ctx? true}
                  (turn! "codemode"
                         (json/generate-string
-                         {:code "(emit (deref (tools/call \"sandbox-probe\" {})))"})))
+                         {:code "(core/emit (deref (tools/call \"sandbox-probe\" {})))"})))
               "a script's inner call cannot read the host's services")
           (is (= children (count (srce/children ctx)))
               "and the realm is detached when the script returns"))))))
@@ -163,7 +163,7 @@
         (is (= {:tools true :shell true :workspace true :ctx? true}
                (turn! "codemode"
                       (json/generate-string
-                       {:code "(emit (deref (tools/call \"sandbox-probe\" {})))"})))
+                       {:code "(core/emit (deref (tools/call \"sandbox-probe\" {})))"})))
             "no boundary means the run's ctx, unreplaced")))))
 
 ;; ─── The value on an agent ────────────────────────────────────────────────

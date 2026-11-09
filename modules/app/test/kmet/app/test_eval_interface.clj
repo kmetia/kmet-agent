@@ -21,7 +21,7 @@
   (select-keys (record-for code name) [:doc :arglists]))
 
 (defn- describe-map [env form]
-  (edn/read-string (:content (support/eval! env (str "(emit " form ")")))))
+  (edn/read-string (:content (support/eval! env (str "(core/emit " form ")")))))
 
 (t/deftest test-docstring-attr-map-and-symbol-metadata
   (t/is (= {:doc nil :arglists '([x])}
@@ -94,9 +94,9 @@
     (t/is (str/includes? (:content (support/eval! env "(eval/describe 'report :doc)"))
                          "Render a report."))
     (t/is (= "([x])"
-             (:content (support/eval! env "(emit (eval/describe 'report :arglists))"))))
+             (:content (support/eval! env "(core/emit (eval/describe 'report :arglists))"))))
     (t/is (= ":defn"
-             (:content (support/eval! env "(emit (eval/describe 'report :kind))"))))
+             (:content (support/eval! env "(core/emit (eval/describe 'report :kind))"))))
     (t/is (str/includes? (:content (support/eval! env "(eval/describe 'report :source)"))
                          source))
     (let [unknown (support/eval! env "(eval/describe 'user/nope)")]
@@ -108,12 +108,12 @@
         path (str (fs/path (:agent-dir env) "eval" "user" "legacy.clj"))]
     (fs/create-dirs (fs/parent path))
     (spit path "(ns user)\n(defn legacy \"Legacy doc.\" [x] x)\n")
-    (support/eval! env "(emit :loaded)")
+    (support/eval! env "(core/emit :loaded)")
     (t/is (= "Legacy doc."
              (:content (support/eval! env "(eval/describe 'legacy :doc)"))))
     (t/is (= "([x])"
              (:content (support/eval! env
-                                      "(emit (eval/describe 'legacy :arglists))"))))))
+                                      "(core/emit (eval/describe 'legacy :arglists))"))))))
 
 (t/deftest test-describe-never-reads-a-changed-file
   (let [env (support/eval-ctx)
@@ -140,13 +140,13 @@
     (support/eval! env "(defmulti area :shape) (defmethod area :rect [m] :rect)")
     (t/is (= "([m])"
              (:content (support/eval! env
-                                      "(emit (eval/describe (symbol \"user/area :rect\") :arglists))"))))
+                                      "(core/emit (eval/describe (symbol \"user/area :rect\") :arglists))"))))
     (t/is (= "(defmethod area :rect [m] :rect)"
              (:content (support/eval! env
                                       "(eval/describe (symbol \"user/area :rect\") :source)"))))
     (support/eval! env "(declare early late)")
     (t/is (= ":declare"
-             (:content (support/eval! env "(emit (eval/describe 'early :kind))"))))
+             (:content (support/eval! env "(core/emit (eval/describe 'early :kind))"))))
     (t/is (= "(declare early late)"
              (:content (support/eval! env "(eval/describe 'late :source)"))))))
 
@@ -162,7 +162,7 @@
       (t/is (str/includes? help "user/undocumented defn ([x]) (cwd) — (no docstring)"))
       (t/is (= "true"
                (:content (support/eval! env
-                                        "(emit (nil? (eval/describe 'undocumented :doc)))")))))))
+                                        "(core/emit (nil? (eval/describe 'undocumented :doc)))")))))))
 
 (t/deftest test-help-omits-the-definition-file
   (let [env (support/eval-ctx)]
@@ -176,22 +176,22 @@
     (support/eval! env "(defn documented \"Doc.\" [x] x)")
     (let [index (:content (support/eval! env "(eval/help)"))
           library (:content (support/eval! env "(eval/help :library)"))
-          sandbox (:content (support/eval! env "(eval/help :sandbox)"))
+          core (:content (support/eval! env "(eval/help :core)"))
           persistence (:content (support/eval! env "(eval/help :persistence)"))
           one (:content (support/eval! env "(eval/help 'user/documented)"))]
       (t/is (str/includes? index "Eval help:"))
       (t/is (str/includes? index "Library: 1 saved, 0 session-only"))
       (t/is (str/includes? library "user/documented defn ([x]) (cwd) — Doc."))
-      (t/is (str/includes? sandbox "Sandbox:"))
+      (t/is (str/includes? core "Core:"))
       (t/is (str/includes? persistence "Persistence:"))
-      (t/is (str/includes? (:content (support/eval! env "(eval/help :sandbox)"))
+      (t/is (str/includes? (:content (support/eval! env "(eval/help :core)"))
                            "eval/forget"))
       (t/is (str/includes? one "user/documented defn ([x]) (cwd)"))
       (t/is (str/includes? one "doc: Doc."))
       (t/is (str/includes? one "source:"))
-      (t/is (str/includes? (:content (support/eval! env "(eval/help 'user/read)"))
-                           "user/read verb ([path] [path opts]) (built-in)"))
-      (t/is (str/includes? (:content (support/eval! env "(eval/describe 'user/read :doc)"))
+      (t/is (str/includes? (:content (support/eval! env "(eval/help 'core/read)"))
+                           "core/read verb ([path] [path opts]) (built-in)"))
+      (t/is (str/includes? (:content (support/eval! env "(eval/describe 'core/read :doc)"))
                            "read tool"))
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'clj/edit-form)"))
                            "clj/edit-form verb ([args]) (built-in)"))
@@ -207,7 +207,7 @@
     (t/is (:is-error failed))
     (t/is (= "true"
              (:content (support/eval! env
-                                      "(emit (nil? (eval/describe 'user/lost :file)))"))))
+                                      "(core/emit (nil? (eval/describe 'user/lost :file)))"))))
     (t/is (= "Lost doc."
              (:content (support/eval! env "(eval/describe 'user/lost :doc)"))))
     (t/is (str/includes?
@@ -233,7 +233,7 @@
              (:content (support/eval! env "(eval/describe 'stable :doc)"))))
     (t/is (= "true"
              (:content (support/eval! env
-                                      "(emit (nil? (eval/describe 'stable :file)))"))))
+                                      "(core/emit (nil? (eval/describe 'stable :file)))"))))
     (support/eval! env "(defn stable \"Kept.\" [] 3)")
     (t/is (= path
              (:content (support/eval! env "(eval/describe 'stable :file)"))))
@@ -247,7 +247,7 @@
     (t/is (:is-error result))
     (t/is (= "true"
              (:content (support/eval! env
-                                      "(emit (nil? (eval/describe 'user/boom :file)))"))))
+                                      "(core/emit (nil? (eval/describe 'user/boom :file)))"))))
     (t/is (= "Boom doc."
              (:content (support/eval! env "(eval/describe 'user/boom :doc)"))))
     (support/eval! env nil :drop ["user/boom"])
@@ -262,21 +262,21 @@
     (register! env :license
                (fn [_]
                  {:doc "License helpers"
-                  :ns {'license {'add! (with-meta
-                                         (fn [_] :added)
-                                         {:doc "Add a header."
-                                          :arglists '([path])
-                                          :source "(fn [path] ...)"})
-                                 'doc-only (with-meta
-                                             (fn [] :doc-only)
-                                             {:doc "Doc only."})
-                                 'bare (fn [] :bare)}}
-                  :macros {'license {'twice (with-meta
-                                              (fn [_ _ form] (list 'do form form))
-                                              {:doc "Twice."
-                                               :arglists '([form])})}}}))
-    (let [described (describe-map env "(eval/describe 'license/add!)")]
-      (t/is (= "license/add!" (:name described)))
+                  :ns {'ext.license {'add! (with-meta
+                                             (fn [_] :added)
+                                             {:doc "Add a header."
+                                              :arglists '([path])
+                                              :source "(fn [path] ...)"})
+                                     'doc-only (with-meta
+                                                 (fn [] :doc-only)
+                                                 {:doc "Doc only."})
+                                     'bare (fn [] :bare)}}
+                  :macros {'ext.license {'twice (with-meta
+                                                  (fn [_ _ form] (list 'do form form))
+                                                  {:doc "Twice."
+                                                   :arglists '([form])})}}}))
+    (let [described (describe-map env "(eval/describe 'ext.license/add!)")]
+      (t/is (= "ext.license/add!" (:name described)))
       (t/is (= :verb (:kind described)))
       (t/is (= '([path]) (:arglists described)))
       (t/is (= "(fn [path] ...)" (:source described)))
@@ -285,28 +285,28 @@
       (t/is (not (contains? described :scope)) "a nil scope is omitted")
       (t/is (= "Add a header."
                (:content (support/eval! env
-                                        "(eval/describe 'license/add! :doc)")))))
-    (let [described (describe-map env "(eval/describe 'license/doc-only)")]
+                                        "(eval/describe 'ext.license/add! :doc)")))))
+    (let [described (describe-map env "(eval/describe 'ext.license/doc-only)")]
       (t/is (= "Doc only." (:doc described))
             "doc is kept when there is no source to carry it")
       (t/is (not (contains? described :source))))
     (t/is (= "[\"Add a header.\" ([path])]"
              (:content (support/eval! env
-                                      "(emit [(-> (meta #'license/add!) :doc) (-> (meta #'license/add!) :arglists)])"))))
+                                      "(core/emit [(-> (meta #'ext.license/add!) :doc) (-> (meta #'ext.license/add!) :arglists)])"))))
     (t/is (= ":macro"
-             (:content (support/eval! env "(emit (eval/describe 'license/twice :kind))"))))
+             (:content (support/eval! env "(core/emit (eval/describe 'ext.license/twice :kind))"))))
     (t/is (= "true"
              (:content (support/eval! env
-                                      "(emit (nil? (eval/describe 'license/bare :source)))"))))
+                                      "(core/emit (nil? (eval/describe 'ext.license/bare :source)))"))))
     (let [help (:content (support/eval! env "(eval/help)"))]
-      (t/is (str/includes? help "license/add! ([path]) — Add a header."))
-      (t/is (str/includes? help "license/bare — (no docstring)")))
-    (let [help (:content (support/eval! env "(eval/help 'license/add!)"))]
-      (t/is (str/includes? help "license/add! verb ([path]) (source)"))
+      (t/is (str/includes? help "ext.license/add! ([path]) — Add a header."))
+      (t/is (str/includes? help "ext.license/bare — (no docstring)")))
+    (let [help (:content (support/eval! env "(eval/help 'ext.license/add!)"))]
+      (t/is (str/includes? help "ext.license/add! verb ([path]) (source)"))
       (t/is (str/includes? help "doc: Add a header.")))
     (let [sources (:content (support/eval! env "(eval/sources)"))]
       (t/is (str/includes? sources ":license"))
-      (t/is (str/includes? sources "license/add!"))
+      (t/is (str/includes? sources "ext.license/add!"))
       (t/is (str/includes? sources "(no docstring)")))))
 
 (t/deftest test-an-undocumented-definition-stays-live-only
@@ -325,7 +325,7 @@
       (t/is (str/includes? help "user/undocumented defn ([]) (cwd) — (no docstring)")))
     (t/is (= "true"
              (:content (support/eval! env
-                                      "(emit (nil? (eval/describe 'undocumented :file)))"))))
+                                      "(core/emit (nil? (eval/describe 'undocumented :file)))"))))
     (let [documented (support/eval! env "(defn documented \"Doc.\" [] 1)")]
       (t/is (not (str/includes? (:content documented) "live only")))
       (t/is (fs/exists? (support/library-file env :cwd "user" "documented.clj"))))))
@@ -346,7 +346,7 @@
     (t/is (not (str/includes? (slurp path) ":new")))
     (t/is (= "true"
              (:content (support/eval! env
-                                      "(emit (nil? (eval/describe 'kept :doc)))")))
+                                      "(core/emit (nil? (eval/describe 'kept :doc)))")))
           "describe shows the live undocumented record")
     (t/is (= "Old."
              (:doc (first (filter #(= "user/kept" (:name %))

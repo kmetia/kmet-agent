@@ -111,7 +111,7 @@
                       "  (ext/register-tool-source! api :owned-source (fn [] {})\n"
                       "    {:exposure :deferred :description \"Owned catalog\"})\n"
                       "  (ext/register-eval-source! api :owned-eval\n"
-                      "    (fn [_] {:ns {'owned-eval {'answer 42}}}))\n"
+                      "    (fn [_] {:ns {'ext.owned-eval {'answer 42}}}))\n"
                       "  (ext/register-skill! api \"---\\nname: owned-skill\\ndescription: d\\n---\\nbody\")\n"
                       "  (ext/register-prompt! api {:name \"owned-prompt\" :content \"body\"})\n"
                       "  (ext/register-flag! api \"owned-flag\")\n"
@@ -151,7 +151,7 @@
                                           {:agent-dir (test-tmp/temp-dir!
                                                        "test-ext-eval-agent-")})
               result ((:eval! service)
-                      {:code "owned-eval/answer" :session sess :cwd cwd})]
+                      {:code "ext.owned-eval/answer" :session sess :cwd cwd})]
           (t/is (not (:is-error result)) (:content result))
           (t/is (= "42" (:content result))
                 "an extension eval source contributes values to a real environment"))

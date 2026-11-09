@@ -15,7 +15,7 @@
 
    Scripting consequence: scripted MCP code now runs in the shared in-process
    SCI sandbox like every other script — report results
-   with `(emit value)`, deref tools/call explicitly
+   with `(core/emit value)`, deref tools/call explicitly
    (`@(tools/call \"server_tool\" args)`), and branch on the kmet result
    map (:is-error/:content), not on mcpScript's {:ok :data} envelope."
   (:require [kmet.extensions.mcp-adapter.tool-proxy :as proxy]
