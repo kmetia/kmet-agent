@@ -1328,6 +1328,9 @@
                             (let [eval-form (form-evaluator sci-ctx ns-atom)
                                   v (binding [*call-state* state
                                               tool-util/*cwd* (:cwd state)
+                                              ;; direct host tool executes from eval
+                                              ;; code (extension source verbs)
+                                              bash-tool/*cancel-signal* (:cancelled state)
                                               bash-tool/*shell* (get-in state [:bridge :shell])
                                               bash-tool/*session-env-fn* (get-in state [:bridge :session-env-fn])
                                               read-tool/*skill-resolver* (get-in state [:bridge :skill-resolver])]

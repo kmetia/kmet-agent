@@ -11,8 +11,9 @@
 
    The extension also contributes the `ext.powershell/run` eval verb:
    `(ext.powershell/run \"Get-ChildItem\" {:timeout 5})` returns the
-   command's output and throws on failure, like `core/bash`. The tool and
-   the verb run the same execute — one implementation, two entry points.
+   command's output and throws on failure, like `core/bash`; Escape and the
+   eval deadline stop the command's process tree. The tool and the verb run
+   the same execute — one implementation, two entry points.
 
    Pi parity: the tool is Windows-only. On a host without PowerShell the
    tool still registers and every call reports an unavailable-PowerShell

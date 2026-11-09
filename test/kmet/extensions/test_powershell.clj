@@ -6,6 +6,7 @@
   (:require [clojure.string :as str]
             [clojure.test :as t]
             [kmet.app.test-eval-support :as support]
+            [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.registry :as tools]
             [kmet.extension :as ext]))
 
@@ -101,6 +102,48 @@
         (t/is (= "boom" (ex-message thrown)))
         (t/is (= :powershell/command-failed (:type (ex-data thrown))))
         (t/is (= "boom" (get-in (ex-data thrown) [:result :content])))))))
+
+(t/deftest test-the-verb-observes-the-eval-cancel-signal
+  (with-shell "/fake/pwsh.exe"
+    (fn []
+      (let [started (promise)
+            release (promise)
+            seen (atom {})
+            fake-execute (fn [_args & _]
+                           (let [signal bash-tool/*cancel-signal*]
+                             (swap! seen assoc :bound? (some? signal))
+                             (deliver started true)
+                             @release
+                             (swap! seen assoc :fired? (boolean (and signal @signal)))
+                             {:content "cancelled" :is-error true}))
+            {:keys [source-fn]}
+            (init! {:create-bash-tool
+                    (fn [_]
+                      {:name "powershell"
+                       :execute fake-execute})})
+            env (support/eval-ctx)
+            signal (atom false)]
+        (support/eval! env ":warm")
+        (tools/register-eval-source! (:tools env) :powershell source-fn
+                                     {:owner [:test :powershell]})
+        (let [call (future
+                     (support/eval! env
+                                    "(ext.powershell/run \"Get-ChildItem\")"
+                                    {:signal signal}))]
+          (try
+            (t/is (deref started 1000 false)
+                  "the verb reached the tool execute")
+            (reset! signal true)
+            (deliver release true)
+            (t/is (not= ::timeout (deref call 3000 ::timeout))
+                  "the eval call settles on the signal")
+            (t/is (true? (:bound? @seen))
+                  "the eval thread binds bash-tool/*cancel-signal*")
+            (t/is (true? (:fired? @seen))
+                  "the verb's execute observes the call's signal")
+            (finally
+              (reset! signal true)
+              (deliver release true))))))))
 
 (t/deftest test-the-eval-verb-is-registered-and-runs-in-the-sandbox
   (with-shell "/fake/pwsh.exe"
