@@ -22,10 +22,11 @@
  {test {:doc "Run clojure extension tests (args: test namespace names)"
         :task (let [nss (or (some->> *command-line-args* (map symbol))
                             '[kmet.libs.test-clj-edit
+                              kmet.libs.test-clj-eval
                               kmet.extensions.clojure.edit-tool-test
                               kmet.extensions.clojure.sexp-tool-test
                               kmet.extensions.clojure.paren-repair-test
-                              kmet.extensions.clojure.nrepl-test
+                              kmet.libs.test-nrepl
                               kmet.extensions.clojure.eval-tool-test])]
                 (doseq [ns-sym nss]
                   (require ns-sym))

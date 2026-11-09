@@ -23,7 +23,8 @@
     "eval/move" "core/read" "core/write" "core/edit" "core/bash"
     "core/sh" "core/emit" "core/emit-image" "core/cwd" "core/env"
     "core/now" "core/sleep" "core/spawn"
-    "clj/edit-form" "clj/replace-sexp" "clj/paren-repair"})
+    "clj/edit-form" "clj/replace-sexp" "clj/paren-repair"
+    "clj/nrepl-eval"})
 
 (def ^:private reserved-command-names
   "The unqualified `/eval` verbs a source may not replace."

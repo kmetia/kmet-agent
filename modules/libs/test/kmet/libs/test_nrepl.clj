@@ -1,10 +1,10 @@
-(ns kmet.extensions.clojure.nrepl-test
-  "Tests for the nREPL client (kmet.extensions.clojure.nrepl): the bencode
+(ns kmet.libs.test-nrepl
+  "Tests for the nREPL client (kmet.libs.nrepl): the bencode
    codec, message accumulation, and a fake in-process nREPL server for the
    socket/session/eval path."
   (:require [babashka.fs :as fs]
             [clojure.test :as t :refer [deftest is testing]]
-            [kmet.extensions.clojure.nrepl :as nrepl]))
+            [kmet.libs.nrepl :as nrepl]))
 
 ;; ─── Codec helpers ─────────────────────────────────────────────────────────
 

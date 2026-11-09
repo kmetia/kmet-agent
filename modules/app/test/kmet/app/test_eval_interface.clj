@@ -206,7 +206,11 @@
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'clj/edit-form)"))
                            "clj/edit-form verb ([args]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/describe 'clj/edit-form :doc)"))
-                           "structured whole-form edit")))))
+                           "structured whole-form edit"))
+      (t/is (str/includes? (:content (support/eval! env "(eval/help 'clj/nrepl-eval)"))
+                           "clj/nrepl-eval verb ([args]) (built-in)"))
+      (t/is (str/includes? (:content (support/eval! env "(eval/describe 'clj/nrepl-eval :doc)"))
+                           "running nREPL server")))))
 
 (t/deftest test-an-unwritten-definition-is-described
   (let [env (support/eval-ctx)

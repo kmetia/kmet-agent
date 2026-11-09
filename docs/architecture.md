@@ -421,7 +421,10 @@ schema/render wrappers over the shared `kmet.libs.clj-edit` engine; the same
 engine backs the sandbox's direct `clj/edit-form`, `clj/replace-sexp` and
 `clj/paren-repair` verbs and is reachable through the `tools` bridge
 (`tools/clojure_edit`, `tools/clojure_edit_replace_sexp`,
-`tools/clojure_paren_repair`) when the extension is selected. The
+`tools/clojure_paren_repair`) when the extension is selected. Its
+`clojure_eval` tool is likewise a schema/render wrapper: the evaluation path
+is `kmet.libs.clj-eval` over `kmet.libs.nrepl`, which an eval call exposes
+directly as `clj/nrepl-eval`. The
 advertised set is a session fact. The selection mutation (`set-active-tools!`)
 records the live selection with `sync-tool-declarations!`;
 the loop reconciles the recorded loadout before every request with
@@ -673,8 +676,9 @@ eval source for them. The clojure extension's tools wrap the shared
 `kmet.libs.clj-edit` engine; an eval script can use the direct `clj/edit-form`,
 `clj/replace-sexp` and `clj/paren-repair` verbs without the extension, or
 reach the same engine through `tools/clojure_edit` when the extension is
-selected. The eval tool's
-description and `(eval/help)` name the shared script surface (aliases, the
+selected. The `clojure_eval` tool shares `kmet.libs.clj-eval` with the direct
+`clj/nrepl-eval` verb, so nREPL evaluation likewise needs no extension. The
+eval tool's description and `(eval/help)` name the shared script surface (aliases, the
 `tools` namespace, require-able namespaces and bundled libs) without depending
 on `codemode`, since either row can be selected alone; host-specific sandbox
 differences stay in this section, not in the model-facing text. `list` and

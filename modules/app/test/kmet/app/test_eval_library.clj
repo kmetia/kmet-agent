@@ -12,6 +12,7 @@
             [kmet.app.test-eval-support :as support]
             [kmet.app.tools.script :as script]
             [kmet.libs.concurrent :as concurrent]
+            [kmet.libs.nrepl :as nrepl]
             [kmet.test-tmp :as test-tmp]))
 
 (defn- library-file [env & parts]
@@ -707,3 +708,15 @@
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result) "[eval: forgot demo/x (cwd)]")))
     (t/is (not (fs/exists? path)))))
+
+(t/deftest the-nrepl-eval-verb-needs-no-tool-surface
+  ;; clj/nrepl-eval is an eval verb over kmet.libs.clj-eval, not a tool bridge:
+  ;; it works with every tool disabled.
+  (let [env (support/eval-ctx)]
+    (with-redefs [nrepl/eval-code
+                  (fn [_opts]
+                    {:ok? true :values ["3"] :out "" :err ""
+                     :events [[:value "3"]] :env :clj :session "s"})]
+      (binding [script/*enabled-tools-fn* (constantly #{})]
+        (let [result (support/eval! env "(:content (clj/nrepl-eval {:code \"(+ 1 2)\" :port 7888}))")]
+          (t/is (= "=> 3" (:content result))))))))

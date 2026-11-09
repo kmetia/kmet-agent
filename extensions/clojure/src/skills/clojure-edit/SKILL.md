@@ -21,7 +21,7 @@ better when the edit belongs in a script.
 | Small text changes, comments, several disjoint hunks | `edit` |
 | Edit as part of a script or batch | `eval` with `clj/edit-form`, `clj/replace-sexp` or `clj/paren-repair` (direct), or `tools/clojure_edit*` when the tool bridge is wanted |
 | Edit a definition already in the eval library | `eval` with `eval/edit-form` or `eval/patch` |
-| Verify a change in a running nREPL | `clojure_eval` |
+| Verify a change in a running nREPL | `clojure_eval`, or `eval` with `clj/nrepl-eval` (direct) |
 
 `clojure_edit_replace_sexp`, `clojure_paren_repair` and `clojure_eval` are
 deferred: load them with `tool_search` when they are not declared. The eval
@@ -66,11 +66,12 @@ bridge when the edit belongs in a script — do not apply the same edit twice.
 
 ## eval bridge
 
-- The eval sandbox ships direct verbs over `kmet.libs.clj-edit`:
+- The eval tool ships direct verbs over `kmet.libs.clj-edit`:
   `(clj/edit-form args)`, `(clj/replace-sexp args)` and
   `(clj/paren-repair args)`. They take the same argument maps and return the
   same result shape as the tool calls, resolve relative paths against the eval
-  call's cwd, and do not require this extension.
+  call's cwd, and do not require this extension. `(clj/nrepl-eval args)`
+  likewise shares `kmet.libs.clj-eval` with `clojure_eval`.
 - When this extension is selected, the same implementations are also reachable
   through the sandbox's `tools` namespace: `(tools/clojure_edit args)`,
   `(tools/clojure_edit_replace_sexp args)` and
@@ -79,8 +80,8 @@ bridge when the edit belongs in a script — do not apply the same edit twice.
 - `(eval/edit-form 'name new-source)` replaces a definition already in the eval
   library and re-evaluates it; `(eval/patch 'name old new)` replaces the first
   structurally equal subform. Both write only after a successful re-evaluation.
-- The tools and the eval verbs share `kmet.libs.clj-edit`; do not hand-edit
-  around either.
+- The tools and the eval verbs share `kmet.libs.clj-edit` and
+  `kmet.libs.clj-eval`; do not hand-edit around either.
 
 ## Edit hygiene
 
@@ -100,7 +101,8 @@ bridge when the edit belongs in a script — do not apply the same edit twice.
 
 ## Verify in nREPL
 
-After editing a namespace, verify it in a running nREPL with `clojure_eval`:
+After editing a namespace, verify it in a running nREPL with `clojure_eval`
+or `(clj/nrepl-eval args)` in an eval call:
 
 - Evaluate `(require '[my.ns :as ns] :reload)` and then call the changed function.
 - The session persists, so vars and namespaces loaded by one call are visible

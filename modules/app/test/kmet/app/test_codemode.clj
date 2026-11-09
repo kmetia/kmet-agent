@@ -959,3 +959,8 @@
       (t/is (not (:is-error r)) (:content r))
       (t/is (= "# memory body" (:content r))
             "the worker answered from the run's resolver"))))
+
+(t/deftest test-codemode-has-no-eval-only-verbs
+  ;; clj/nrepl-eval is an eval verb; codemode's fresh sandbox does not get it
+  (t/is (= "false"
+           (:content (run "(core/emit (contains? (ns-publics 'clj) 'nrepl-eval))")))))

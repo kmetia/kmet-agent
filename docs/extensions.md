@@ -637,8 +637,10 @@ calls, so it can expose current state instead of a snapshot:
   `kmet.libs.json`, `kmet.libs.markdown`, `kmet.libs.yaml`) are reserved.
   `core/read`, `core/write`, `core/edit`, `core/bash` and `core/sh` call the
   tool implementations directly; `clj/edit-form`, `clj/replace-sexp` and
-  `clj/paren-repair` call `kmet.libs.clj-edit` directly; `tools/*` is the
-  active tool bridge. Use `ext.license/add!`, not `add!` or `user/add!`.
+  `clj/paren-repair` call `kmet.libs.clj-edit` directly; `clj/nrepl-eval`
+  calls `kmet.libs.clj-eval`, the same implementation as the clojure
+  extension's `clojure_eval` tool; `tools/*` is the active tool bridge. Use
+  `ext.license/add!`, not `add!` or `user/add!`.
 - `:verbs` carries the call's `:read-file`, `:edit` and `:write-file`
   operations. They read that call's cwd and cancel signal; use them within
   the call, never keep them.

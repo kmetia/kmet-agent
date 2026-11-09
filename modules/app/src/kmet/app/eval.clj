@@ -43,6 +43,7 @@
             [kmet.app.tools.script :as script]
             [kmet.app.tools.util :as tool-util]
             [kmet.libs.clj-edit :as clj-edit]
+            [kmet.libs.clj-eval :as clj-eval]
             [kmet.libs.concurrent :as concurrent]
             [kmet.srce.core :as srce]
             [sci.core :as sci]))
@@ -634,6 +635,9 @@
    "clj/paren-repair" {:name "clj/paren-repair" :kind :verb
                        :doc "Repair unbalanced delimiters (same arguments as clojure_paren_repair)."
                        :arglists '([args])}
+   "clj/nrepl-eval" {:name "clj/nrepl-eval" :kind :verb
+                     :doc "Evaluate Clojure code in a running nREPL server (same arguments as the clojure_eval tool)."
+                     :arglists '([args])}
    "tools/call" {:name "tools/call" :kind :verb
                  :doc "Call a tool by name and return its derefable promise."
                  :arglists '([name] [name args])}
@@ -772,7 +776,7 @@
    (let [entry (describe-entry env name)]
      (if (nil? key) (describe-view entry) (get entry key)))))
 
-(defn- builtin-help-line [] "Built-in verbs: core/* runtime, clj/* structure, tools/* active tools, eval/* library. (eval/help) lists each with its summary; (eval/help 'name) shows its contract.")
+(defn- builtin-help-line [] "Built-in verbs: core/* runtime, clj/* Clojure helpers, tools/* active tools, eval/* library. (eval/help) lists each with its summary; (eval/help 'name) shows its contract.")
 
 (defn- verb-family
   [name]
@@ -1263,6 +1267,12 @@
         help-fn (fn [& [what]] (environment-help @env-ref what))
         sci-ctx (script/context
                   (assoc (script/base-namespaces)
+                         'clj {'nrepl-eval
+                               (fn [args]
+                                 (clj-eval/evaluate
+                                  (assoc args :cwd (or (:cwd script/*call-state*)
+                                                       cwd))
+                                  (:cancelled script/*call-state*)))}
                          'eval {'library library-fn
                                 'forget forget-fn
                                 'patch (fn [name old new]

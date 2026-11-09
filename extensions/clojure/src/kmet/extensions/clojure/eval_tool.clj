@@ -1,126 +1,27 @@
 ;; kmet.extensions.clojure.eval-tool — clojure_eval, nREPL evaluation for kmet.
 ;;
-;; Result shaping follows clojure-mcp-light's clj-nrepl-eval (EPL-2.0) and
-;; samizdat's eval tool: values print as `=> v` interleaved with the output
-;; that produced them, evaluation failures are an explicit "Eval error", and a
-;; delimiter repair is reported instead of silently correcting the model's
-;; code.
+;; The execution and result shape live in kmet.libs.clj-eval, shared with the
+;; eval sandbox's clj/nrepl-eval verb; this namespace is the tool record,
+;; schema and renderers.
 
 (ns kmet.extensions.clojure.eval-tool
   "clojure_eval — evaluate Clojure code in a running nREPL server."
   (:require [clojure.string :as str]
-            [kmet.ui.tui.tool-renderers :as renderers]
-            [kmet.libs.clj-edit :as util]
-            [kmet.extensions.clojure.nrepl :as nrepl]
+            [kmet.libs.clj-eval :as clj-eval]
+            [kmet.libs.nrepl :as nrepl]
             [kmet.libs.text :as text]
-            [kmet.libs.theme :as theme]))
-
-;; ─── Args ─────────────────────────────────────────────────────────────────
-
-(defn- parse-ms [v]
-  (cond
-    (number? v) (long v)
-    (string? v) (nrepl/parse-long* v)
-    :else nil))
-
-;; ─── Result rendering ─────────────────────────────────────────────────────
-
-(defn- render-events
-  "The events in arrival order: `=> value` for values, output text as sent
-   (trailing newlines trimmed so joins stay compact)."
-  [events]
-  (keep (fn [[kind v]]
-          (case kind
-            :value (str "=> " v)
-            :out (let [s (str/replace (str v) #"\n+$" "")] (when (seq s) s))
-            :err (let [s (str/replace (str v) #"\n+$" "")] (when (seq s) s))
-            nil))
-        events))
-
-(defn render-content
-  "The model-facing result text: optional notices, then the interleaved
-   output/value stream."
-  [{:keys [ok? events ex timeout? cancelled?]} repaired? timeout-ms]
-  (let [notices (cond-> []
-                  repaired? (conj "note: repaired unbalanced delimiters before evaluating")
-                  timeout? (conj (str "Evaluation timed out after " timeout-ms
-                                      " ms; sent an nREPL interrupt."))
-                  cancelled? (conj "Evaluation cancelled (abort requested).")
-                  (and (not ok?) (not timeout?) (not cancelled?))
-                  (conj (str "Eval error" (when ex (str " (" ex ")")))))]
-    (str/join "\n" (concat notices (render-events events)))))
-
-(defn- details
-  [result code repaired?]
-  {:code code
-   :values (vec (:values result))
-   :out (:out result)
-   :err (:err result)
-   :ns (:ns result)
-   :env (name (or (:env result) :unknown))
-   :session (:session result)
-   :repaired? repaired?
-   :timed-out? (boolean (:timeout? result))
-   :cancelled? (boolean (:cancelled? result))
-   :error? (not (:ok? result))})
-
-(defn- no-server-message
-  [host cwd]
-  (str "No nREPL server found for host " host ".\n"
-       "Looked for port files in " (or cwd "the process working directory") ": "
-       (str/join ", " nrepl/port-files) ",\n"
-       "then probed the common nREPL ports (" (str/join ", " nrepl/common-ports) ").\n"
-       "Start an nREPL (e.g. `bb nrepl`, `clj -M:nrepl`, or your project's REPL), "
-       "or pass `port` explicitly."))
+            [kmet.libs.theme :as theme]
+            [kmet.ui.tui.tool-renderers :as renderers]))
 
 ;; ─── Tool execute ─────────────────────────────────────────────────────────
 
-(defn- signal-cancelled?
-  "True when the run's abort SIGNAL is set. Accepts the contextual tool's
-   signal atom (deref) or a 0-arg predicate (the extension ctx's :signal)."
-  [signal]
-  (when signal
-    (try
-      (boolean (if (fn? signal) (signal) @signal))
-      (catch Exception _ false))))
-
 (defn execute
-  "Tool entry point: discover the target (unless `port` is given), repair any
-   delimiter imbalance, evaluate against the persistent session, and shape the
-   result. The contextual 4-arity receives the run's abort signal and the
-   extension context — its :cwd scopes port-file discovery."
-  ([args] (execute args nil nil nil))
+  "Tool entry point: delegate to kmet.libs.clj-eval/evaluate. The contextual
+   4-arity receives the run's abort signal and the extension context — its
+   :cwd scopes port-file discovery."
+  ([args] (clj-eval/evaluate args nil))
   ([args _on-update signal ctx]
-   (let [code (util/title-arg args :code)
-         host (or (util/title-arg args :host) "127.0.0.1")
-         port (util/title-arg args :port)
-         ns (util/title-arg args :ns)
-         cwd (:cwd ctx)
-         timeout-ms (or (parse-ms (util/title-arg args :timeout))
-                        nrepl/default-timeout-ms)
-         cancel (when signal (fn [] (signal-cancelled? signal)))]
-     (if (str/blank? code)
-       {:content "Missing required parameter: code" :is-error true}
-       (let [[fixed repaired?] (util/repair-delimiters (str code))]
-         (try
-           (if-let [target (if port
-                             {:host host :port port :source :parameter}
-                             (nrepl/discover-port host cwd))]
-             (let [result (nrepl/eval-code {:host (:host target)
-                                            :port (:port target)
-                                            :ns ns
-                                            :timeout-ms timeout-ms
-                                            :cancel cancel
-                                            :code fixed})]
-               {:content (render-content result repaired? timeout-ms)
-                :is-error (not (:ok? result))
-                :details (details result (str code) repaired?)})
-             {:content (no-server-message host cwd) :is-error true})
-           (catch Exception e
-             {:content (str "nREPL error: " (or (ex-message e) (str e)))
-              :is-error true
-              :details {:code (str code) :error? true
-                        :host host :port port}})))))))
+   (clj-eval/evaluate (assoc args :cwd (:cwd ctx)) signal)))
 
 ;; ─── Renderers ────────────────────────────────────────────────────────────
 

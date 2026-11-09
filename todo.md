@@ -404,7 +404,7 @@ Three tiers of what a script can call, and only the third is a source:
 |---|---|---|---|
 | primitives | `kmet.app.tools.script`, shared with `codemode` | `slurp`, `spit`, `sh`, `p/*`, `fs/*`, `json`, `emit`, `emit-image`, `tools/list`, `tools/describe`, `tools/call`, `(sandbox/cwd)`, `(sandbox/env k)`, `(sandbox/now)`, `(sandbox/sleep ms)`, `(sandbox/spawn f)` | no |
 | eval vocabulary | the `:eval` service (it needs library state) | `(eval/library)`, `(eval/sources)`, `(eval/help)`, `(eval/describe …)`, `(eval/forget …)`, `(eval/patch …)`, `(eval/edit-form …)` | no |
-| verbs | the `:core` eval source shipped by the eval tool (including the Clojure editing verbs after E17), and every mounted extension's own source | `edit`, `write-file`, `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair`; extension-specific verbs | yes (`{:core false}`) |
+| verbs | the `:core` eval source shipped by the eval tool (including the Clojure editing verbs after E17), and every mounted extension's own source | `edit`, `write-file`, `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair`, `clj/nrepl-eval`; extension-specific verbs | yes (`{:core false}`) |
 
 **The service.** `:eval` is provided per agent by the agents factory
 (`kmet.app.loop.driver`, beside `:shell`/`:sandbox`/`:permissions`), so a
@@ -611,8 +611,9 @@ and the cwd-scope task are done.
   `(eval/describe 'name)` resolves a source key as well as a library
   definition; `(eval/describe 'name :source)` returns the `:source` metadata
   when supplied. The `:core` source gains metadata for `user/edit`,
-  `user/write-file`, `clj/edit-form`, `clj/replace-sexp` and
-  `clj/paren-repair`; extension sources declare theirs in the same place. A
+  `user/write-file`, `clj/edit-form`, `clj/replace-sexp`,
+  `clj/paren-repair` and `clj/nrepl-eval`; extension sources declare theirs
+  in the same place. A
   source value without metadata is still valid and lists as
   `(no docstring)`. The prompt manifest stays library-only because sources
   are resolved per eval call and may have side effects; it points at
@@ -980,7 +981,9 @@ verbs.** `edit` and `write-file` are the two operations a bare profile (no
 extensions mounted) needs to loop over files; `clj/edit-form`,
 `clj/replace-sexp` and `clj/paren-repair` join them after E17 because `eval`
 is a Clojure environment and the engine is bundled. Other tool-specific verbs
-(search, nREPL, …) still come from the extension that owns the tool.
+(search, …) still come from the extension that owns the tool; nREPL is the
+exception — `clj/nrepl-eval` shares `kmet.libs.clj-eval` with the
+`clojure_eval` tool.
 `read`/`ls`/`glob`/`grep` are deliberately absent: `slurp` and the `fs` alias
 cover them, and a pure-Clojure grep would need gitignore and binary-file
 rules we would get wrong (`rg` via `sh` is the better answer).

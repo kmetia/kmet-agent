@@ -116,6 +116,10 @@ delimiters are broken.
 Evaluate Clojure code in a running nREPL server. The server must already be
 running: `bb nrepl`, `clj -M:nrepl`, `lein repl`, or the project's REPL.
 
+The evaluation path lives in `kmet.libs.clj-eval` over the nREPL client in
+`kmet.libs.nrepl`, shared with the eval tool's direct `clj/nrepl-eval`
+verb. The tool is therefore optional when the eval row is selected.
+
 ```
 clojure_eval:
   code: "(require '[my.app :as app] :reload)"
@@ -163,10 +167,10 @@ clojure_eval:
 **Why the client is in-tree:** the official `nrepl.core` needs `nrepl.tls`
 (`java.security.cert.Certificate`, unavailable in the extension context), and
 `nrepl/bencode` — even declared through a `deps.edn` — fails SCI source
-evaluation (`definline`, `clojure.lang` imports). The extension therefore
+evaluation (`definline`, `clojure.lang` imports). The shared library therefore
 carries a small pure-Clojure bencode codec and socket client in
-`kmet.extensions.clojure.nrepl`. No `deps.edn` means the shipped extension
-stays loadable in `jolt dist` builds.
+`kmet.libs.nrepl`. No `deps.edn` means the shipped extension stays loadable in
+`jolt dist` builds.
 
 ## Skill
 
@@ -189,12 +193,12 @@ Editing guidelines pulled on demand when working with Clojure files. Covers:
 | Fix unbalanced delimiters after an errant edit | `clojure_paren_repair` |
 | Small text changes or several disjoint hunks | `edit` |
 | Scripted or batch edits | `eval` with `clj/edit-form`, `clj/replace-sexp` or `clj/paren-repair` (direct), or `tools/clojure_edit*` when the tool bridge is wanted |
-| Verify a change in a running nREPL | `clojure_eval` |
+| Verify a change in a running nREPL | `clj/nrepl-eval` in an eval call (direct), or `clojure_eval` when the tool bridge is wanted |
 
 `clojure_edit_replace_sexp`, `clojure_paren_repair` and `clojure_eval` are
 deferred: when they are not declared, load them with `tool_search` first. The
-eval bridge shares `kmet.libs.clj-edit` with the tools and is reached
-through the `eval` tool's environment.
+eval bridge shares `kmet.libs.clj-edit` and `kmet.libs.clj-eval` with the
+tools and is reached through the `eval` tool's environment.
 
 ## Dependencies
 

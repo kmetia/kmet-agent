@@ -240,6 +240,7 @@
    trees in sync."
   '[kmet.libs.archive
     kmet.libs.clj-edit
+    kmet.libs.clj-eval
     kmet.libs.clipboard
     kmet.libs.concurrent
     kmet.libs.crypto
@@ -262,6 +263,7 @@
     kmet.libs.mcp.transport.http
     kmet.libs.mcp.transport.sse
     kmet.libs.mcp.transport.stdio
+    kmet.libs.nrepl
     kmet.libs.oauth
     kmet.libs.path
     kmet.libs.process

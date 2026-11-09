@@ -14,7 +14,7 @@
             [kmet.srce.core :as srce]
             [kmet.extensions.clojure.edit-tool :as edit-tool]
             [kmet.extensions.clojure.eval-tool :as eval-tool]
-            [kmet.extensions.clojure.nrepl :as nrepl]
+            [kmet.libs.nrepl :as nrepl]
             [kmet.extensions.clojure.paren-repair :as paren-repair]
             [kmet.extensions.clojure.sexp-tool :as sexp-tool]))
 

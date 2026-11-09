@@ -1,16 +1,17 @@
-;; kmet.extensions.clojure.nrepl — nREPL client for the clojure extension.
+;; kmet.libs.nrepl — nREPL client shared by the clojure extension tool and
+;; eval's clj/nrepl-eval verb.
 ;;
 ;; Ported from clojure-mcp-light's nrepl-client / nrepl-eval (EPL-2.0, the
-;; client behind clj-nrepl-eval), with two differences the kmet extension
-;; environment forces:
+;; client behind clj-nrepl-eval), with two differences kmet's portable
+;; surface forces:
 ;;
 ;;   * the bencode codec is pure Clojure over byte arrays. Babashka's bundled
-;;     bencode.core is not part of kmet's portable extension surface and jolt
+;;     bencode.core is not part of kmet's portable surface and jolt
 ;;     has no copy, so the wire format is spoken directly.
 ;;   * no session files — sessions persist in memory for the life of the kmet
 ;;     process, keyed by host:port.
 ;;
-;; Everything stays loadable on both loader backends: java.net.Socket and its
+;; Everything stays loadable on both hosts: java.net.Socket and its
 ;; streams exist on babashka and on jolt's jolt.socket library. The connect
 ;; budget and the read deadline use Socket.connect's timeout and
 ;; Socket.setSoTimeout, both honoured on Jolt (its Windows sockets are
@@ -19,7 +20,7 @@
 ;; watcher thread closes the socket, which unblocks a read even where the
 ;; read deadline cannot fire.
 
-(ns kmet.extensions.clojure.nrepl
+(ns kmet.libs.nrepl
   "nREPL client: bencode codec, port discovery, persistent in-memory sessions,
    and code evaluation with an interrupt-on-timeout deadline and an optional
    cancel predicate that closes the connection."
@@ -233,7 +234,8 @@
 ;; ═══════════════════════════════════════════════════════════════════════════════
 
 (def default-timeout-ms
-  "Default read/eval deadline in milliseconds (the clojure_eval default)."
+  "Default read/eval deadline in milliseconds (the clojure_eval and
+   clj/nrepl-eval default)."
   120000)
 
 (def ^:private max-int 2147483647)
@@ -453,7 +455,8 @@
 
 (defn close-sessions!
   "Best-effort: send the nREPL close op for every cached session and clear
-   the cache. Called on extension unload/reload."
+   the cache. The clojure extension calls it on unload/reload; sessions
+   created by eval's clj/nrepl-eval verb otherwise live for the process."
   []
   (doseq [[[host port] {:keys [session]}] @session-store]
     (when session
