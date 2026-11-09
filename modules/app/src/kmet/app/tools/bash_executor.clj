@@ -82,6 +82,12 @@
               ["ProgramFiles" "ProgramFiles(x86)"]))
       (if process/windows-os? "cmd.exe" "sh")))
 
+(defn- cmd-shell?
+  "True when SHELL is cmd.exe (bare or a path), the one shell that ignores a
+   second line in a /c argument."
+  [shell]
+  (boolean (re-find #"(?i)(?:^|[\\/])cmd(?:\.exe)?$" (str shell))))
+
 (defn- wait-for-child!
   "pi: waitForChildProcess — wait for the DIRECT child to exit and return its
    exit code.
@@ -141,7 +147,7 @@
   [shell shell-args command use-stdin?]
   (cond
     (some? shell-args) (with-setsid shell (conj (vec shell-args) command))
-    (str/includes? shell "cmd") [shell "/c" command]
+    (cmd-shell? shell) [shell "/c" command]
     use-stdin? [shell "-s"]
     :else (with-setsid shell ["-c" command])))
 
@@ -563,12 +569,6 @@
    :max-bytes max-bytes
    :max-lines max-lines
    :temp-file-prefix temp-file-prefix})
-
-(defn- cmd-shell?
-  "True when SHELL is cmd.exe (bare or a path), the one shell that ignores a
-   second line in a /c argument."
-  [shell]
-  (boolean (re-find #"(?i)(?:^|[\\/])cmd(?:\.exe)?$" (str shell))))
 
 (defn- command-separator
   "The separator between COMMAND-PREFIX and COMMAND. sh and PowerShell accept
