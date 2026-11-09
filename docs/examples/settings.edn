@@ -17,9 +17,9 @@
  :retry {:enabled true
          :max-retries 3
          :base-delay-ms 2000}
- :loop-guard {:enabled true
+ :loop-guard {:enabled false
               :threshold 3}
- :thinking-loop-guard-enabled true
+ :thinking-loop-guard-enabled false
  :steering-mode :all
  :follow-up-mode :one-at-a-time
  :http-idle-timeout-ms 120000   ; stream idle gap + response-start wait; 0 disables both

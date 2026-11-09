@@ -176,9 +176,9 @@
            http-idle-timeout-ms 120000
            http-total-timeout-ms 0
            block-images false
-           loop-guard-enabled true
+           loop-guard-enabled false
            loop-guard-threshold 3
-           thinking-loop-guard-enabled true
+           thinking-loop-guard-enabled false
            system-prompt-fn system-prompt/build-system-prompt
            system "You are kmet, a minimal coding agent. Help the user with their tasks.
 Use the available tools to read, write, edit files, and execute commands.

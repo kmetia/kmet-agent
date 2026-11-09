@@ -154,7 +154,7 @@
                                :loop-guard-enabled (:enabled loop-guard-settings)
                                :loop-guard-threshold (:threshold loop-guard-settings)
                                :thinking-loop-guard-enabled
-                               (get config :thinking-loop-guard-enabled true)
+                               (get config :thinking-loop-guard-enabled false)
                                :tool-hook extension-tool-hook
                                :on-event on-event}
                               timeout-opts

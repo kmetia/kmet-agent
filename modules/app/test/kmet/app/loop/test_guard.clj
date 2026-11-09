@@ -78,6 +78,7 @@
         executed (atom [])
         calls (atom 0)
         agent (support/make-agent-state
+               :loop-guard-enabled true
                :loop-guard-threshold 3
                :on-event (fn [e] (swap! events conj e)))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
@@ -125,6 +126,7 @@
         calls (atom 0)
         done-text (atom nil)
         agent (support/make-agent-state
+               :loop-guard-enabled true
                :on-event (fn [e] (swap! events conj e)))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message
@@ -188,7 +190,8 @@
                       (when-let [on-done (:on-done opts)]
                         (on-done :tool-calls))
                       :done))]
-      (let [agent (support/make-agent-state :ctx mine :on-event (fn [_]))]
+      (let [agent (support/make-agent-state :ctx mine :loop-guard-enabled true
+                                            :on-event (fn [_]))]
         @(loop/run-agent-turn agent {:message "run"
                                      :on-done (fn [_])
                                      :on-error (fn [_])})
@@ -261,7 +264,8 @@
                                      (on-done :tool-calls))
                                    :done))]
                    @(loop/run-agent-turn
-                     (support/make-agent-state :ctx run-ctx :on-event (fn [_]))
+                     (support/make-agent-state :ctx run-ctx :loop-guard-enabled true
+                                               :on-event (fn [_]))
                      {:message "run" :on-done (fn [_]) :on-error (fn [_])}))))]
     ;; The ctx's stages change while the first attempt is in flight.
     (run! (fn []
@@ -285,6 +289,7 @@
         done-text (atom nil)
         llm-signal (atom nil)
         agent (support/make-agent-state
+               :thinking-loop-guard-enabled true
                :on-event (fn [e] (swap! events conj e)))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message
@@ -324,6 +329,7 @@
   (let [events (atom [])
         calls (atom 0)
         agent (support/make-agent-state
+               :loop-guard-enabled true
                :loop-guard-threshold 3
                :on-event (fn [e] (swap! events conj e)))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
@@ -386,6 +392,7 @@
         calls (atom 0)
         done-text (atom nil)
         agent (support/make-agent-state
+               :loop-guard-enabled true
                :loop-guard-threshold 3
                :on-event (fn [e] (swap! events conj e)))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
@@ -428,6 +435,7 @@
         calls (atom 0)
         done-text (atom nil)
         agent (support/make-agent-state
+               :loop-guard-enabled true
                :loop-guard-threshold 3
                :on-event (fn [e] (swap! events conj e)))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
@@ -469,6 +477,7 @@
   (let [events (atom [])
         calls (atom 0)
         agent (support/make-agent-state
+               :loop-guard-enabled true
                :loop-guard-threshold 3
                :on-event (fn [e] (swap! events conj e)))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
@@ -503,6 +512,7 @@
         calls (atom 0)
         executed (atom 0)
         agent (support/make-agent-state
+               :loop-guard-enabled true
                :loop-guard-threshold 3
                :on-event (fn [e] (swap! events conj e)))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")

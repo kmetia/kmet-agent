@@ -38,8 +38,8 @@
    :retry {:enabled true :max-retries 3 :base-delay-ms 2000
            :max-agent-delay-ms 60000}
    ;; loop guard: repeat-loop circuit breaker (tool-call + thinking)
-   :loop-guard {:enabled true :threshold 3}
-   :thinking-loop-guard-enabled true
+   :loop-guard {:enabled false :threshold 3}
+   :thinking-loop-guard-enabled false
    :models []
    :http-idle-timeout-ms 120000
    ;; Whole-request deadline: nil follows the idle timeout; 0 disables the
@@ -746,7 +746,7 @@
    the second occurrence of any repeated call — too aggressive)."
   [config]
   (let [lg (:loop-guard config)]
-    {:enabled (if (contains? lg :enabled) (:enabled lg) true)
+    {:enabled (if (contains? lg :enabled) (:enabled lg) false)
      :threshold (max 2 (or (:threshold lg) 3))}))
 
 (defn get-loop-guard-settings-live

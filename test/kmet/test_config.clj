@@ -23,7 +23,9 @@
     (t/is (= :all (:steering-mode c)))
     (t/is (= :one-at-a-time (:follow-up-mode c)))
     (t/is (contains? c :session-dir))
-    (t/is (= "deepseek-v4.1-flash" (:model c)))))
+    (t/is (= "deepseek-v4.1-flash" (:model c)))
+    (t/is (= {:enabled false :threshold 3} (:loop-guard c)))
+    (t/is (false? (:thinking-loop-guard-enabled c)))))
 
 (t/deftest test-default-config-has-no-provider-map
   ;; Phase 0: the :providers map is replaced by the models registry — the
@@ -622,16 +624,19 @@
 
 (t/deftest test-get-loop-guard-settings
   (t/testing "defaults when :loop-guard is absent"
-    (t/is (= {:enabled true :threshold 3}
+    (t/is (= {:enabled false :threshold 3}
              (cfg/get-loop-guard-settings {}))))
   (t/testing "partial :loop-guard maps merge with defaults"
     (t/is (= {:enabled false :threshold 3}
              (cfg/get-loop-guard-settings {:loop-guard {:enabled false}})))
-    (t/is (= {:enabled true :threshold 5}
+    (t/is (= {:enabled true :threshold 3}
+             (cfg/get-loop-guard-settings {:loop-guard {:enabled true}}))
+          "an explicit enable stays")
+    (t/is (= {:enabled false :threshold 5}
              (cfg/get-loop-guard-settings {:loop-guard {:threshold 5}}))
           "threshold passes through"))
   (t/testing "threshold clamps to >= 2"
-    (t/is (= {:enabled true :threshold 2}
+    (t/is (= {:enabled false :threshold 2}
              (cfg/get-loop-guard-settings {:loop-guard {:threshold 1}}))
           "a 1-call threshold is too aggressive — clamped")))
 
@@ -647,12 +652,12 @@
                    (cfg/get-loop-guard-settings-live {:loop-guard {:threshold 3}}))))
         (t/testing "missing file falls back to the config value"
           (fs/delete-tree tmp)
-          (t/is (= {:enabled true :threshold 3}
+          (t/is (= {:enabled false :threshold 3}
                    (cfg/get-loop-guard-settings-live {:loop-guard {:threshold 3}}))))
         (t/testing "file without :loop-guard falls back to the config (project override)"
           (fs/create-dirs tmp)
           (spit settings-file "{:provider :opencode-go}\n")
-          (t/is (= {:enabled true :threshold 3}
+          (t/is (= {:enabled false :threshold 3}
                    (cfg/get-loop-guard-settings-live {:loop-guard {:threshold 3}})))))
       (finally (fs/delete-tree tmp)))))
 
