@@ -1660,7 +1660,7 @@
             drop (normalize-drop drop)
             {:keys [parsed error]} (try-parse-code code env)
             records (when parsed (scoped-records env scope parsed))
-            run-code (fn []
+            codemode (fn []
                        (let [handle (or (srce/get (:agent-ctx service) :tools)
                                         (throw (ex-info "the eval service needs the agent's :tools service"
                                                         {:type :eval/no-tools})))
@@ -1689,7 +1689,7 @@
                                       :select-tools registry/select-tools
                                       :execute-tool #(registry/execute-tool handle %1 %2 %3)})))]
         (if error
-          (error-result env (run-code) started)
+          (error-result env (codemode) started)
           (if (str/blank? code)
             (bad-request! "eval needs code or drop" {})
             (do
@@ -1697,7 +1697,7 @@
               (reset! (:change-lines env) [])
               (reset! (:call-scope env) scope)
               (try
-                (let [result (run-code)]
+                (let [result (codemode)]
                   (if (:is-error result)
                     (do
                       (when-not (contains? #{:timeout :aborted :incomplete}

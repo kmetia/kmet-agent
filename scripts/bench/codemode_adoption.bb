@@ -1,9 +1,9 @@
 #!/usr/bin/env bb
-;; Measures run_code adoption from kmet EDNL session logs.
+;; Measures codemode adoption from kmet EDNL session logs.
 ;;
-;;   bb scripts/bench/run_code_adoption.bb [sessions-dir]
+;;   bb scripts/bench/codemode_adoption.bb [sessions-dir]
 ;;
-;; Prints the tool-call mix, how run_code scripts are shaped (sandbox
+;; Prints the tool-call mix, how codemode scripts are shaped (sandbox
 ;; primitives vs the tools bridge), where the bridge is used, and the result
 ;; tokens each tool's results cost. The numbers quoted in
 ;; docs/architecture.md § Tools and the script sandbox come from this script.
@@ -18,7 +18,7 @@
 (def sessions-dir (or (first *command-line-args*) (str (fs/home) "/.kmet/sessions")))
 
 (def script-patterns
-  "What one run_code script uses. :bridge matches a dispatch; :batch matches
+  "What one codemode script uses. :bridge matches a dispatch; :batch matches
    the retired call-many/await-all helper (old logs still carry it);
    :discovery is the bridge-local listing."
   {:emit        #"\bemit\b"
@@ -34,17 +34,17 @@
 
 (def state
   (atom {:files 0 :entries 0 :bad 0 :calls {} :tokens {} :token-entries 0
-         :tool-results 0 :run-code 0 :script {} :bridge-sites []
-         :bridge-tools {} :bridge-sessions #{} :run-code-sessions #{}}))
+         :tool-results 0 :codemode 0 :script {} :bridge-sites []
+         :bridge-tools {} :bridge-sessions #{} :codemode-sessions #{}}))
 
 (defn note-entry! [file e]
   (swap! state update :entries inc)
   (doseq [{:keys [name arguments]} (:tool-calls e)]
     (swap! state update-in [:calls name] (fnil inc 0))
-    (when (= name "run_code")
+    (when (= name "codemode")
       (let [code (str (:code arguments))]
-        (swap! state update :run-code inc)
-        (swap! state update :run-code-sessions conj file)
+        (swap! state update :codemode inc)
+        (swap! state update :codemode-sessions conj file)
         (doseq [[k re] script-patterns]
           (when (re-find re code) (swap! state update-in [:script k] (fnil inc 0))))
         (when (re-find (:bridge script-patterns) code)
@@ -70,8 +70,8 @@
 
 (doseq [f (fs/glob sessions-dir "**.ednl")] (scan-file! f))
 
-(let [{:keys [files entries bad calls tokens run-code script bridge-sites
-              bridge-tools bridge-sessions run-code-sessions token-entries
+(let [{:keys [files entries bad calls tokens codemode script bridge-sites
+              bridge-tools bridge-sessions codemode-sessions token-entries
               tool-results]} @state
       total (reduce + 0 (vals calls))
       pct (fn [n d] (if (pos? d) (* 100.0 (/ n d)) 0.0))
@@ -81,11 +81,11 @@
   (doseq [[name n] (top calls 8)]
     (println (format "  %-12s %7d  %5.1f%%" name n (pct n total))))
   (println)
-  (println (format "run_code: %d calls in %d sessions (%.2f%% of tool calls)"
-                   run-code (count run-code-sessions) (pct run-code total)))
+  (println (format "codemode: %d calls in %d sessions (%.2f%% of tool calls)"
+                   codemode (count codemode-sessions) (pct codemode total)))
   (println (format "  bridge: %d call sites in %d sessions (%.1f%% of calls), batches: %d"
                    (count bridge-sites) (count bridge-sessions)
-                   (pct (count bridge-sites) run-code) (get script :batch 0)))
+                   (pct (count bridge-sites) codemode) (get script :batch 0)))
   (println "  bridge targets:" (if (seq bridge-tools)
                                  (into (sorted-map) (top bridge-tools 6))
                                  "none"))

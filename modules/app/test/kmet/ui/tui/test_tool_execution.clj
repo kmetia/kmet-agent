@@ -118,7 +118,7 @@
       (reset! (:content-atom c) "second")
       (is (some #(re-find #"second" %) (mapv strip-ansi (core/render c 40)))))))
 
-;; ─── Built-in renderers (read / write / edit / bash / run_code) ────────────
+;; ─── Built-in renderers (read / write / edit / bash / codemode) ────────────
 
 (defn- render-tool [& {:keys [name args content is-error expanded? truncation width]}]
   (let [c (te/make-tool-execution :name name :args args :content (or content "")
@@ -424,10 +424,10 @@
         (is (some #(re-find #"out1" %) plain))
         (is (some #(re-find #"Took" %) plain))))))
 
-(deftest test-run-code-render-call
-  (testing "run_code call shows the code, not the raw args map"
-    (let [plain (render-tool :name "run_code" :args {:code "(+ 1 2)"})]
-      (is (some #(re-find #"run \$ \(\+ 1 2\)" %) plain))
+(deftest test-codemode-render-call
+  (testing "codemode call shows the code, not the raw args map"
+    (let [plain (render-tool :name "codemode" :args {:code "(+ 1 2)"})]
+      (is (some #(re-find #"codemode \$ \(\+ 1 2\)" %) plain))
       (is (not-any? #(re-find #":code" %) plain)))))
 
 (deftest test-eval-render-call
@@ -437,9 +437,9 @@
       (is (some #(re-find #"5s" %) plain))
       (is (not-any? #(re-find #":code" %) plain)))))
 
-(deftest test-run-code-render-result
-  (testing "run_code result shows output, the inner-call summary and duration"
-    (let [c (te/make-tool-execution :name "run_code"
+(deftest test-codemode-render-result
+  (testing "codemode result shows output, the inner-call summary and duration"
+    (let [c (te/make-tool-execution :name "codemode"
                                     :args {:code "1"}
                                     :content "out1\nout2"
                                     :status true

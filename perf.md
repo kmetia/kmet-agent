@@ -2603,7 +2603,7 @@ The change is output-neutral on real content: dumping the fixture's whole
 transcript before/after (collapsed 2,261 lines, expanded 9,039) and diffing
 gives 0 differing lines. `bb test` 4,340 tests / 26,367 assertions (the only
 4 failures are `kmet.app.test-process-state`'s pre-existing ledger misses for
-`run_code.cljc`'s lane cells and `mutation.clj`'s `tails`, unrelated to this
+`codemode.cljc`'s lane cells and `mutation.clj`'s `tails`, unrelated to this
 pass), and `test-utils` + `test-tool-renderers` pass under jolt.
 
 The width work left one more walk in the path — long unbroken words — which

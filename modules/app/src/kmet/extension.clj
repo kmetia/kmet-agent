@@ -119,12 +119,12 @@
 (defn register-tool-source!
   "Register (or replace) a contributed tool source: ID → a 0-arg fn returning
    {name → tool map}. Its OPTS decide where the catalog lands: `:exposure
-   :sandbox` (the default) keeps it in the `run_code` sandbox's surface only —
+   :sandbox` (the default) keeps it in the `codemode` sandbox's surface only —
    the model never sees those tools (e.g. the mcp-adapter's MCP catalog);
    `:exposure :deferred` makes it model-facing but undeclared until
    `tool_search` loads a tool. `:description` is the one line the model reads
    about a deferred source. Re-registering under the same ID replaces the
-   source and invalidates cached run_code surfaces. Removed automatically when
+   source and invalidates cached codemode surfaces. Removed automatically when
    the extension unloads. Returns the deregister fn."
   ([api id tools-fn] (register-tool-source! api id tools-fn nil))
   ([api id tools-fn opts] ((:register-tool-source! api) id tools-fn opts)))

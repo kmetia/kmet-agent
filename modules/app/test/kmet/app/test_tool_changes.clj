@@ -235,7 +235,7 @@
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session
-                                        :enabled-tool-names (support/tool-names ["-bash" "-edit" "-write" "-run_code" "-eval"]))]
+                                        :enabled-tool-names (support/tool-names ["-bash" "-edit" "-write" "-codemode" "-eval"]))]
     (try
       (state/sync-tool-declarations! agent)
       ;; the persisted selection keeps the unrelated built-ins out; the
@@ -244,7 +244,7 @@
                                    (fn [] {"deferred-a" (tool-map "deferred-a")})
                                    {:exposure :deferred :description "A catalog"})
       (let [resumed (support/make-agent-state :session session
-                                              :enabled-tool-names (support/tool-names ["-bash" "-edit" "-write" "-run_code" "-eval"]))]
+                                              :enabled-tool-names (support/tool-names ["-bash" "-edit" "-write" "-codemode" "-eval"]))]
         (state/sync-resumed-declarations! resumed)
         (t/is (= #{"read" "tool_search"}
                  (names (state/active-tools resumed)))

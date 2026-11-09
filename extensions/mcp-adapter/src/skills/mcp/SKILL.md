@@ -47,9 +47,9 @@ disables the `read_<resource>` direct tools that are registered for the
 server's MCP resources by default. Server `searchKeywords`
 (`{"server_*" ["screenshot" "capture"]}`) boost proxy search ranking.
 
-## Scripted MCP calls — with the `run_code` tool
+## Scripted MCP calls — with the `codemode` tool
 
-MCP tools are contributed to kmet's builtin `run_code` sandbox, so several
+MCP tools are contributed to kmet's builtin `codemode` sandbox, so several
 MCP calls run in one request — loop, filter, chain, or fan out — and only
 the script's output enters the conversation. The sandbox is Clojure with
 the tools bridge — on babashka a full babashka surface, on other hosts the

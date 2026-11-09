@@ -44,7 +44,7 @@
    - `:default-enabled? false` marks a tool row that is mounted but off until
      a selection names it (`registry/default-tool-names` is the bundle without
      those rows). The row stays mounted, so `/config` and `/tools` can enable
-     it live; only the built-in default changes. `run_code` and `eval` opt out.
+     it live; only the built-in default changes. `codemode` and `eval` opt out.
 
    Config *values* deep-merge; composition does not — a bundle's rows are
    appended as they are, and later layers patch by id. A patch that names an

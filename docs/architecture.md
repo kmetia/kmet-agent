@@ -107,7 +107,7 @@ kmet/app/
 │                         tool_exec, the stages, and `driver.clj`/`stages.clj`
 ├── compaction/         — the compaction row and stage
 ├── tools/              — tool, util, invoke, registry, bash (+executor,
-│                         output), read, write, edit, run_code, eval, config, shell
+│                         output), read, write, edit, codemode, eval, config, shell
 ├── modes/              — the mode rows: print, rpc, server (+ server_unix), out
 ├── packages.clj, packages_cli.clj, git_packages.clj — package/resource
 │                         resolution and the install/remove/update/list/config CLI
@@ -353,7 +353,7 @@ configured default, and `:ui/request!` stays the generic dialog channel.
 The gate is the tool point's innermost `next` and runs **after** the extension
 hooks, so a hook's argument rewrite is judged by the policy instead of slipping
 past it — and a hook cannot rewrite what the policy already judged.
-`run_code`'s bridge runs the same point with the run's checks, so a script's
+`codemode`'s bridge runs the same point with the run's checks, so a script's
 inner `tools/call` is gated too, judged on the agent's ctx and not the sandbox
 realm's. A policy that throws, or answers something that is not a verdict, is a
 deny — the failure mode of an approval gate must never be allow. `:remember!` records an answer at `:once`, `:agent` or
@@ -466,7 +466,7 @@ descriptions shrink to share the room — every source stays listed, because bei
 listed is the point — and only the head lines outgrowing the room drops the last
 sources into one `… N more sources` line, as pi's section does. A source is
 announced only when at least one of its tools is selected, and the intro names
-only the discovery paths the selection actually has — run_code/eval
+only the discovery paths the selection actually has — codemode/eval
 (`tools/list`) and/or `tool_search`; with neither, nothing is appended.
 
 **One invocation pipeline.** `kmet.app.tools.invoke` is the only
@@ -483,25 +483,25 @@ chain → check → execute path:
 
 The loop emits a call's start event sequentially and runs its chain and body on
 its own worker, keeping the batch concurrent while every call's clock starts
-with its own body; the `run_code` bridge runs the same point inside one worker
+with its own body; the `codemode` bridge runs the same point inside one worker
 task and keeps its own promise and call trace. A scripted call therefore meets
 the run's chain exactly as a loop batch does — and the policy judges it too —
 while a hook still is not a sandbox (a script can shell out through
 `babashka.process`).
 
-**`run_code`** (`kmet.app.tools.run-code`, the `:tool/run_code` row) is
+**`codemode`** (`kmet.app.tools.codemode`, the `:tool/codemode` row) is
 model-written Clojure in a per-call sandbox with the agent's tools bridged in.
 *Why it exists*: a tool result is re-sent on every later turn, so its token
 cost is paid repeatedly. Measured over the session logs at the time of the
-change (689 `run_code` calls): 98% never touch the bridge — 628 `emit`, 342
+change (689 `codemode` calls): 98% never touch the bridge — 628 `emit`, 342
 `slurp`, 327 `sh`, 235 regular-expression, 0 `pmap`, 0 futures — and the 14
 that do are all in kmet's own sessions: 8 one web fetch (a tool with no local
 twin), 3 redundant `bash` calls, 3 bridge probes. The batch helper had one
 probe and no real use, and is gone;
-`scripts/bench/run_code_adoption.bb` reproduces the numbers.
+`scripts/bench/codemode_adoption.bb` reproduces the numbers.
 
 - **The boundary is the ctx.** The loop hands every call the run's ctx as
-  `:srce-ctx`; `run_code` replaces it with a `srce/isolate` **realm** of that
+  `:srce-ctx`; `codemode` replaces it with a `srce/isolate` **realm** of that
   ctx blocked for the names the agent's `:sandbox` value names (`:tools`,
   `:shell`, `:workspace` by default — `kmet.app.sandbox`). A tool a script
   calls cannot look the composition's services up from the ctx it was handed;
@@ -522,7 +522,7 @@ probe and no real use, and is gone;
   persistent-context counterpart below), and redefining an injected var stays
   call-local.
 - **Ordering.** The tool declares no execution mode, so its calls use the
-  default parallel batch. `run_code` code is not part of eval's definition
+  default parallel batch. `codemode` code is not part of eval's definition
   classifier: a script's top-level `def` is call-local, so the batch stays
   parallel. That classifier does not reach the bridge either: a script's own
   `tools/call` fan-out still runs concurrently and has no barrier.
@@ -547,7 +547,7 @@ probe and no real use, and is gone;
   one `describe` per candidate.
 - **The callable set** is the loop's `select-tools` result: all tools ∩ the
   agent's enabled set, plus extension-contributed sandbox sources, minus the
-  exclusions (`run_code` itself, so a bridge submission cannot nest) and minus
+  exclusions (`codemode` itself, so a bridge submission cannot nest) and minus
   the `:model-only` tools (declared to the model, never callable from a
   script — `tool_search` is one). A source is registered on the
   `:kmet/tool-source` tag and resolved per call. Its `:exposure` decides where
@@ -659,7 +659,7 @@ without those verbs. The clojure extension's tools wrap the same engine; the
 core Clojure verbs do not require the extension. The eval tool's description,
 guidelines and `(eval/help)` name the shared script surface (aliases, the
 `tools` namespace, require-able namespaces and bundled libs) without depending
-on `run_code`, since either row can be selected alone; host-specific sandbox
+on `codemode`, since either row can be selected alone; host-specific sandbox
 differences stay in this section, not in the model-facing text. `list` and
 `search` read the disk index across both roots (the built environment's pinned
 roots when the session has one, else the command cwd), so they show the

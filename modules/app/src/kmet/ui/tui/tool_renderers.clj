@@ -931,7 +931,7 @@
                               (let [footer (subs trimmed footer-start)]
                                 (or (and full-output-path
                                          (str/includes? footer full-output-path))
-                                    ;; the run_code tool's footer names the
+                                    ;; the codemode tool's footer names the
                                     ;; truncation instead of a spill file
                                     (str/includes? (str/lower-case footer) "truncat"))))
                        (str/trimr (subs trimmed 0 footer-start))
@@ -992,7 +992,7 @@
    while running, the default color once the result arrived, error (+ a
    (!) marker) on failure, with the elapsed/took duration as the text.
 
-   MEASURED-MS — the tool's own recorded duration (run_code's :details
+   MEASURED-MS — the tool's own recorded duration (codemode's :details
    :elapsed-ms) — wins over the component timestamp span when given. Nil
    when there is nothing to say: a replayed success has no started-at (pi
    renders replayed tools without a duration) and no error; a replayed
@@ -1047,7 +1047,7 @@
           cache)))))
 
 (defn render-code-call
-  "The shared call line for tools whose primary argument is code (run_code,
+  "The shared call line for tools whose primary argument is code (codemode,
    eval, clojure_eval): `<label> <code>`, rendered verbatim whatever the
    display mode (no head window, no expand hint — the bash call line's
    policy). LABEL stays bold tool-title; CODE is syntax-highlighted for LANG
@@ -1080,8 +1080,8 @@
 
 (def ^:private code-tool-labels
   "The call-line label for a code tool. An unknown tool falls back to the
-   run_code label, which is the original code-tool rendering."
-  {"run_code" "run $"
+   codemode label, which is the original code-tool rendering."
+  {"codemode" "codemode $"
    "eval" "eval $"})
 
 (defn- render-code-call-with-timeout
@@ -1094,13 +1094,13 @@
                  "")]
     (render-code-call label (:code args) suffix theme width context)))
 
-(defn render-run-code-call
-  "Call line for a code tool (run_code, eval): `<label> $ <code>` plus an
+(defn render-codemode-call
+  "Call line for a code tool (codemode, eval): `<label> $ <code>` plus an
    explicit timeout suffix, via the shared code-call renderer. The label comes
    from `code-tool-labels`; the quiet title mirrors the one-line head of the
    same call."
   [name args theme width context]
-  (render-code-call-with-timeout (get code-tool-labels name "run $")
+  (render-code-call-with-timeout (get code-tool-labels name "codemode $")
                                  args theme width context))
 
 (defn- summary-node
@@ -1151,8 +1151,8 @@
   [nodes]
   (h/compile-tree (into [:container {}] nodes)))
 
-(defn render-run-code-result
-  "Result body for run_code: the shell-style body (output preview, truncation
+(defn render-codemode-result
+  "Result body for codemode: the shell-style body (output preview, truncation
    warning) plus the inner-call summary and attached-image count lines. Eval
    composes the same `code-tool-result-nodes` with its defined/source summaries.
    The elapsed/took state line — the tool's own measured time when the result
@@ -1199,7 +1199,7 @@
 (defn render-eval-result
   "Result body for eval: the shared code-tool body plus the defined, forgotten,
    source and failure summary lines when the details carry them. The
-   elapsed/took state line is the tool component's tail line, as for run_code."
+   elapsed/took state line is the tool component's tail line, as for codemode."
   [content _is-error theme width expanded? _started-at ended-at truncation context]
   (result-tree
    (concat (code-tool-result-nodes content theme width expanded? ended-at truncation context)

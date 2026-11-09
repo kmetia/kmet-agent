@@ -451,12 +451,12 @@ a clear error unless it is part of the fixed bundled set below.
 ### The fixed bundled set
 
 kmet ships a fixed set of libraries in **both** artifacts and shares them by
-reference with every extension context and `run_code` script, so requiring a
+reference with every extension context and `codemode` script, so requiring a
 set member needs **no `deps.edn`** and no host-conditional code (the table
 and the portability guarantee are in the contract reference's
 § Bundled extension libraries).
 
-Script contexts (`run_code` and `eval`) also get the four portable `kmet.libs`
+Script contexts (`codemode` and `eval`) also get the four portable `kmet.libs`
 ports — `kmet.libs.json`, `kmet.libs.http`, `kmet.libs.yaml` and
 `kmet.libs.markdown`; no other kmet namespace is require-able from a script.
 
@@ -751,7 +751,7 @@ resource service (`kmet.app.resources`); the extension
 API deliberately exposes no settings writer. An extension that contributes a
 tool makes it available; whether it is selected is the user's choice.
 
-`run_code` and `eval` are mounted but opt-in (`:default-enabled? false`; see
+`codemode` and `eval` are mounted but opt-in (`:default-enabled? false`; see
 [Resource selection](configuration.md#resource-selection)). While no script
 tool is on, `:sandbox` tool sources stay registered — their tools are simply absent from the model's script
 surface until the persisted `:resources` selection or the `/tools` session

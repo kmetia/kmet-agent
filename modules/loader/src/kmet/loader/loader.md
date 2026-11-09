@@ -991,7 +991,7 @@ a top-level `eval` under `with-loader*` is **not** gated — a `require` of a
 namespace the loader cannot serve falls through to the runtime's global
 source roots. Only source *loaded through* a context carries the require
 rewrite, so code that must respect a context's policies has to enter as a
-namespace source. That is why the `run_code` sandbox evaluates on its own SCI
+namespace source. That is why the `codemode` sandbox evaluates on its own SCI
 context instead of a native loader context (`docs/architecture.md` § Tools and
 the script sandbox): a native evaluator would leave the require gate advisory.
 

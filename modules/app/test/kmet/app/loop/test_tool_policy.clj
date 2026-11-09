@@ -118,15 +118,15 @@
         "one process, one policy service, two verdicts")))
 
 (deftest a-scripted-inner-call-goes-through-the-gate
-  ;; the policy reaches calls a run_code script makes: the loop composes the
-  ;; gate into run-code's tool hooks, which the bridge hands to its workers
+  ;; the policy reaches calls a codemode script makes: the loop composes the
+  ;; gate into codemode's tool hooks, which the bridge hands to its workers
   (let [seen (atom [])
         calls (atom 0)
         agent (support/make-agent-state
-               ;; run_code is opt-in (S4.5); select it and the default-on set,
+               ;; codemode is opt-in (S4.5); select it and the default-on set,
                ;; so the script may call read
                :enabled-tool-names (support/tool-names
-                                    (conj (vec tools-registry/default-tool-names) "run_code"))
+                                    (conj (vec tools-registry/default-tool-names) "codemode"))
                :ctx (agent-ctx :agent/script (fn [_ request]
                                                (swap! seen conj (:tool-name request))
                                                :allow)))]
@@ -136,7 +136,7 @@
                     (future
                       (if (= 1 (swap! calls inc))
                         (do (when-let [on-tc (:on-tool-call opts)]
-                              (on-tc {:id "tc1" :name "run_code"
+                              (on-tc {:id "tc1" :name "codemode"
                                       :arguments (json/generate-string
                                                   {:code "(deref (tools/call \"read\" {:path \"deps.edn\"}))"})
                                       :index 0}))
@@ -148,7 +148,7 @@
                               (on-done :stop))))
                       :done))]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
-    (is (some #{"run_code"} @seen) "the outer call was judged")
+    (is (some #{"codemode"} @seen) "the outer call was judged")
     (is (some #{"read"} @seen) "and so was the call the script made")))
 
 (deftest a-hook-cannot-outrun-the-gate

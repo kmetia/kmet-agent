@@ -150,10 +150,10 @@ rationale — in the authoring guide
 ### Bundled extension libraries (fixed set)
 
 kmet ships a fixed set of libraries in **both** artifacts and shares them by
-reference with every extension context and `run_code` script: bb's bundled
+reference with every extension context and `codemode` script: bb's bundled
 ports serve the names on babashka, and `jolt dist` AOT-compiles kmet's pinned
 Maven deps into the Jolt binary. On both hosts the library is loaded once
-(extensions through `host-requires!`, scripts on the first `run_code` call),
+(extensions through `host-requires!`, scripts on the first `codemode` call),
 so sharing costs nothing per user and keeps `identical?`/protocol identity.
 Requiring a set member needs **no `deps.edn`** and no host-conditional code.
 The set is enumerated in `kmet.app.extensions.libs`:
@@ -185,7 +185,7 @@ SCI — Java-backed copies fail on classes the native image does not expose —
 and Jolt has no copies at all. Use `kmet.libs.json`, `kmet.libs.yaml`,
 `kmet.libs.markdown` and `kmet.libs.http` instead.
 
-Script contexts (`run_code` and `eval`) share those same four ports; no other
+Script contexts (`codemode` and `eval`) share those same four ports; no other
 kmet namespace is require-able from a script.
 
 ## Runtime lifecycle
@@ -317,14 +317,14 @@ the name over any other owner.
 A tool source contributes a whole catalog of tools at once, instead of one
 `register-tool!` per tool. Its `:exposure` says where the catalog lands:
 
-- **`:sandbox` (the default)** — the `run_code` tool's sandbox surface only:
+- **`:sandbox` (the default)** — the `codemode` tool's sandbox surface only:
 the model never sees these tools in its tool schema, `set-active-tools!` does
 not filter them, but `tool_search` can load one when it is active. Use it for
 tools that are meant to be looped over inside scripts but would bloat the
 model's context if advertised (the mcp-adapter contributes its cached MCP
 catalog this way — see `docs/architecture.md` § Tools and the script sandbox).
 - **`:deferred`** — the model-facing table, but **not declared**: the tools are
-callable from `run_code` and the resources selection (or a session override)
+callable from `codemode` and the resources selection (or a session override)
 picks over them like any registered tool, and one becomes declared to the model
 once `tool_search` loads it. Give the source a `:description` — one line — and the
 model is told the source exists through an appended conversation entry when the
@@ -339,10 +339,10 @@ promotion rides as a marker at its recorded position, so the array — the
 expensive front of the cached prefix — is not re-sent and the message list
 stays a growing prefix.
 
-`run_code` is a mounted but opt-in row (`:default-enabled? false`; see
+`codemode` is a mounted but opt-in row (`:default-enabled? false`; see
 [Resource selection](../../../../docs/configuration.md#resource-selection)):
 while it is off, `:sandbox` sources stay registered and their tools are absent from the model's script
-surface, not unregistered. Enabling `run_code` through the persisted
+surface, not unregistered. Enabling `codemode` through the persisted
 `:resources` selection or `/tools` makes them callable immediately, and
 unloading the extension is what
 removes them. The same holds for `:deferred` sources and a disabled `tool_search` —
@@ -374,7 +374,7 @@ the sources remain, but nothing can promote them (the run warns; see
   (arg normalization, `:prepare-arguments`, `:contextual?`/`:streams?`
   dispatch, error mapping). The registry shadows a colliding name, and the
   sandbox exclusion list still applies — a source can never contribute
-  `run_code` itself.
+  `codemode` itself.
 - The registration is removed automatically when the extension unloads.
 - **Defer a family, not its entry point.** The bundled clojure and tree-sitter
   extensions ship this way: the tool every use of the family starts with
@@ -510,7 +510,7 @@ edit-family tools (`clojure_edit`, `clojure_edit_replace_sexp`,
 a tool whose call and result renderers both produce nothing renders the
 tail line regardless of `:status` — it is the block's only presence, so a
 running/errored block cannot vanish. The runner
-tools opt in: `bash`, `run_code`, and the clojure extension's
+tools opt in: `bash`, `codemode`, and the clojure extension's
 `clojure_eval`, so they show Elapsed/Took and the error marker.
 Whichever shell a renderer uses, its output must be stable above that
 tail: once a line can scroll above the window it must never change again
@@ -528,7 +528,7 @@ plain-text output body: styled lines, a collapsed line window with an expand
 hint and truncation warnings — the opt-in grep/find/ls and powershell tools
 use it), `shell-call-renderer` (the shell call line for a supplied prompt —
 bash is `(shell-call-renderer "$")`; the powershell tool uses `"ps $"`)
-and `render-code-call` (the `run_code`/`eval`/`clojure_eval` call line: the
+and `render-code-call` (the `codemode`/`eval`/`clojure_eval` call line: the
 label in bold tool-title text, the code argument rendered verbatim and
 syntax-highlighted for its language — Clojure by default, or the 7-arg arity's
 language — whatever the display mode; quiet never runs renderers, so the
@@ -575,7 +575,7 @@ Other pi tool fields:
 #### Sandbox realms (the `:srce-ctx` a tool context carries)
 
 Every tool call the loop runs hands its tool the run's own context under
-`:srce-ctx` — the agent's ctx, or, inside a `run_code` script, that run's
+`:srce-ctx` — the agent's ctx, or, inside a `codemode` script, that run's
 **sandbox realm**: a child ctx where the agent's `:sandbox` value (`{:isolate
 #{…}}`, `kmet.app.sandbox`) says which service names do not resolve. A script
 therefore cannot read the composition's `:tools` table, `:shell` or
@@ -919,7 +919,7 @@ tool's own error.
 
 Parallel batches run each call's chain and body on its own worker thread, so
 a hook that asks a human is asked per call, and a slow hook holds only its
-own call. Scripted tool calls run through the same chain: a `run_code` call's
+own call. Scripted tool calls run through the same chain: a `codemode` call's
 inner `tools/call` fires the hooks with a synthetic `:tool-call-id` (and the
 batch's assistant message), and a settled call's `:terminate` hint rides
 through to the script's result (a script has no batch to stop). Inner calls
@@ -929,9 +929,9 @@ The chain sits **outside** the app's permission policy (`:permissions`, an
 app-level service no extension can mount): the check is the chain's innermost
 `next`, so a hook may rewrite a call but the policy judges the rewritten one —
 and a hook can never allow what the policy denies. A hook is an interception,
-not a sandbox: the run_code sandbox can also shell out through
+not a sandbox: the codemode sandbox can also shell out through
 `babashka.process` (`p/sh`/`p/shell`/`p/process`), which no per-tool hook
-covers, so blocking the `run_code` tool itself is what a hook can do.
+covers, so blocking the `codemode` tool itself is what a hook can do.
 
 ### Shortcuts and markdown transformers
 

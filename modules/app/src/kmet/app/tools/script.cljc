@@ -1,5 +1,5 @@
 (ns kmet.app.tools.script
-  "The script sandbox shared by `run_code` and `eval` (design:
+  "The script sandbox shared by `codemode` and `eval` (design:
    docs/architecture.md § Tools and the script sandbox).
 
    A call builds a per-call state (`prepare`), seeds the sandbox namespaces
@@ -85,7 +85,7 @@
 (def script-tool-names
   "The script tools themselves: neither can start the other, and neither is
    callable from inside a script."
-  #{"run_code" "eval"})
+  #{"codemode" "eval"})
 
 (def sandbox-summary
   "The model-facing summary of the shared script sandbox surface. Both script
@@ -165,8 +165,8 @@
   (or (:cwd *call-state*) (tool-util/cwd)))
 
 (defn- tool-error-type
-  "The tool's error keyword for SUFFIX — `:run-code/output-limit` for
-   run_code, `:eval/…` for eval. The tool name is the only part the type
+  "The tool's error keyword for SUFFIX — `:codemode/output-limit` for
+   codemode, `:eval/…` for eval. The tool name is the only part the type
    varies by; the suffix is the sandbox layer's."
   [tool suffix]
   (keyword (str (str/replace tool "_" "-") "/" suffix)))
@@ -847,7 +847,7 @@
   "Build the SCI context: NAMESPACES plus the sandbox's features, the host
    class table (a full babashka script resolves classes), load-fn and
    interrupt-fn. A caller that keeps the context (`eval`) builds it once;
-   `run_code` builds one per call."
+   `codemode` builds one per call."
   [namespaces interrupt-fn tool]
   (let [holder (atom nil)
         ctx (sci/init {:namespaces namespaces
@@ -861,12 +861,14 @@
 (defn base-namespaces
   "The host's babashka/clojure namespaces, copied by value — the part of the
    sandbox surface that does not change between calls, so a kept context
-   (`eval`) copies it once and `run_code` copies it per call."
+   (`eval`) copies it once and `codemode` copies it per call."
   []
   (require-host-namespaces!)
   (full-babashka-namespaces))
 
 (declare tools-namespace)
+
+(declare tool-content!)
 
 (defn call-namespaces
   "The per-call half of the sandbox namespaces: SCI core patches
@@ -888,7 +890,18 @@
                             'sandbox sandbox
                             'tools (tools-namespace (or surface {}))
                             'user {'emit emit-with-state
-                                   'emit-image emit-image-with-state}}
+                                   'emit-image emit-image-with-state
+                                   'read (fn [path & [opts]]
+                                           (tool-content! "read" (merge {:path path} opts)))
+                                   'write (fn [path content]
+                                            (tool-content! "write" {:path path :content content}))
+                                   'edit (fn [path old-text new-text]
+                                           (tool-content! "edit"
+                                                          {:path path
+                                                           :edits [{:oldText old-text
+                                                                    :newText new-text}]}))
+                                   'bash (fn [command & [opts]]
+                                           (tool-content! "bash" (merge {:command command} opts)))}}
                      ;; the cwd-defaulting sh is preloaded bare alongside the aliases
                      (contains? process 'sh) (assoc-in ['user 'sh] (get process 'sh)))]
     (reduce-kv (fn [acc ns-name ns-map]
@@ -1078,6 +1091,20 @@
                   :content "tools are not available outside a script call"})
       p)))
 
+(defn- tool-content!
+  "Settle a tool call and return its :content. Throws the tool's own message on
+   failure, so a bare (read ...)/(write ...)/(edit ...)/(bash ...) stops the
+   script instead of silently continuing."
+  [name args]
+  (let [result @(dispatch-current! name args)]
+    (if (:is-error result)
+      (throw (ex-info (str name ": " (:content result))
+                      {:type (tool-error-type (or (:tool *call-state*) "codemode")
+                                              "tool-call-failed")
+                       :tool name
+                       :result result}))
+      (:content result))))
+
 (defn- tools-namespace
   "The `tools` namespace a script sees: discovery, the dispatch fns and the
    result readers in one map, so what a script lists, calls and can name by
@@ -1202,7 +1229,7 @@
 (defn- form-evaluator
   "The one-form evaluator over SCI-CTX. With NS-ATOM, each form runs in the
    remembered namespace and the namespace it ended in is stored back; without
-   it, a form runs in the thread's current namespace (the run_code path)."
+   it, a form runs in the thread's current namespace (the codemode path)."
   [sci-ctx ns-atom]
   (if ns-atom
     (fn [form]

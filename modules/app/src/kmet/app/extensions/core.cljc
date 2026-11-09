@@ -1213,7 +1213,7 @@
                                                   tool-name
                                                   (extension-owner name)))
       ;; contributed tool sources: `:exposure :sandbox` (the default) adds the
-      ;; catalog to the run_code tool's surface only, `:deferred` adds it to the
+      ;; catalog to the codemode tool's surface only, `:deferred` adds it to the
       ;; model-facing table undeclared (mcp-adapter's MCP catalog as sandbox —
       ;; docs/architecture.md § Tools and the script sandbox)
       :register-tool-source! (fn [id tools-fn & [opts]]

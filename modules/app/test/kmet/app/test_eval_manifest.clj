@@ -236,7 +236,7 @@
 (t/deftest the-manifest-requires-eval-to-be-selected
   (let [env (support/eval-ctx)]
     (write-definition! env :cwd "user/a" "(defn a [] 1)")
-    (doseq [entries [[] ["run_code"]]]
+    (doseq [entries [[] ["codemode"]]]
       (let [agent (agent-for env entries)]
         (t/is (nil? (state/sync-eval-library-listing! agent))
               (str "entries " (pr-str entries)))

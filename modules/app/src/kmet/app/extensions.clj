@@ -22,9 +22,9 @@
    included) rather than overlaying it: it supplies every key the host reads, and
    kmet1's base binding remains only for the window before the root mounts.
 
-   **Every registration is routed, not held.** Tools and run_code-only tool
+   **Every registration is routed, not held.** Tools and codemode-only tool
    sources go to the composition's `:tools` service (the loop's tool table, the
-   `/tools` selector, run_code's surface), commands, prompts and skills to their
+   `/tools` selector, codemode's surface), commands, prompts and skills to their
    services, and every other host tag (hooks, renderers, flags, the UI port,
    themes) stays in the handle's remainder. The routing table is
    `kmet.app.registries/registry-tags`, one place for both the host and the

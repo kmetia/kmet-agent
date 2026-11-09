@@ -23,11 +23,11 @@
 ;; ─── S4.5: opt-in built-in tools ──────────────────────────────────────────
 
 (t/deftest test-opt-in-defaults
-  (t/is (= #{"run_code" "eval"}
+  (t/is (= #{"codemode" "eval"}
            (set (remove (set tools/default-tool-names)
                         tools/builtin-tool-names)))
         "the opt-ins are the only difference from the full built-in list")
-  (t/is (tools/default-off-tool? "run_code"))
+  (t/is (tools/default-off-tool? "codemode"))
   (t/is (tools/default-off-tool? "eval"))
   (t/is (not (tools/default-off-tool? "read")))
   (t/is (not (tools/default-off-tool? "extension_tool"))

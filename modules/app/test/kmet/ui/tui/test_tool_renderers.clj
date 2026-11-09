@@ -401,39 +401,39 @@
     (testing "pending bg while nothing rendered yet"
       (is (re-find #"\u001b\[48;" (or ansi "")) "box paints a background"))))
 
-(deftest test-run-code-call
+(deftest test-codemode-call
   (testing "short code renders as one line"
-    (let [lines (plain (r/render-run-code-call "run_code" {:code "(+ 1 2)"} th 60 {:expanded false}) 60)]
+    (let [lines (plain (r/render-codemode-call "codemode" {:code "(+ 1 2)"} th 60 {:expanded false}) 60)]
       (is (= 1 (count lines)))
-      (is (str/includes? (first lines) "run $ (+ 1 2)"))))
+      (is (str/includes? (first lines) "codemode $ (+ 1 2)"))))
   (testing "an explicit timeout renders as a suffix"
-    (let [lines (plain (r/render-run-code-call "run_code" {:code "1" :timeout 5} th 60 {}) 60)]
+    (let [lines (plain (r/render-codemode-call "codemode" {:code "1" :timeout 5} th 60 {}) 60)]
       (is (str/includes? (first lines) "(5s)"))))
   (testing "collapsed renders the whole multiline script, like expanded"
     (let [code (str/join "\n" (mapv #(str "(println " % ")") (range 20)))
-          lines (plain (r/render-run-code-call "run_code" {:code code} th 60 {:expanded false}) 60)]
+          lines (plain (r/render-codemode-call "codemode" {:code code} th 60 {:expanded false}) 60)]
       (is (= 20 (count lines)) "the whole script, no cap")
-      (is (str/starts-with? (first lines) "run $ (println 0)"))
+      (is (str/starts-with? (first lines) "codemode $ (println 0)"))
       (is (some #(str/includes? % "(println 19)") lines) "the tail renders")
       (is (not-any? #(str/includes? % "toggle") lines) "no expand hint")))
   (testing "expanded renders the script verbatim"
     (let [code (str/join "\n" (mapv #(str "line " %) (range 12)))
-          lines (plain (r/render-run-code-call "run_code" {:code code} th 60 {:expanded true}) 60)]
+          lines (plain (r/render-codemode-call "codemode" {:code code} th 60 {:expanded true}) 60)]
       (is (= 12 (count lines)))
       (is (str/includes? (peek lines) "line 11"))))
-  (testing "missing code keeps the `run $ ...` placeholder"
-    (let [lines (plain (r/render-run-code-call "run_code" {} th 60 {:expanded false}) 60)]
+  (testing "missing code keeps the `codemode $ ...` placeholder"
+    (let [lines (plain (r/render-codemode-call "codemode" {} th 60 {:expanded false}) 60)]
       (is (= 1 (count lines)))
-      (is (str/includes? (first lines) "run $ ...")))))
+      (is (str/includes? (first lines) "codemode $ ...")))))
 
 (deftest test-eval-call-uses-the-code-tool-renderer
   (testing "eval reuses the code-tool call renderer with its own label"
-    (let [lines (plain (r/render-run-code-call "eval" {:code "(+ 1 2)" :timeout 5} th 60 {}) 60)]
+    (let [lines (plain (r/render-codemode-call "eval" {:code "(+ 1 2)" :timeout 5} th 60 {}) 60)]
       (is (str/includes? (first lines) "eval $ (+ 1 2)"))
       (is (str/includes? (first lines) "(5s)")))))
 
 (deftest test-render-code-call
-  (testing "a custom label and suffix render like the run_code call"
+  (testing "a custom label and suffix render like the codemode call"
     (let [lines (plain (r/render-code-call "clj eval $" "(+ 1 2)"
                                            (theme/fg th :dim "  :7888") th 60 {}) 60)]
       (is (= 1 (count lines)))
@@ -462,14 +462,14 @@
 (deftest test-code-call-highlighting
   (testing "the code argument is syntax-highlighted beyond the bold label"
     (let [code "(defn f [x] x)"
-          run-code (raw-line (r/render-run-code-call "run_code" {:code code} th 120 {}) 120)
+          codemode (raw-line (r/render-codemode-call "codemode" {:code code} th 120 {}) 120)
           clj-eval (raw-line (r/render-code-call "clj eval $" code "" th 120 {}) 120)
           kw-esc (theme/get-fg-ansi th :syntax-keyword)]
-      (is (str/starts-with? run-code
-                            (theme/fg th :tool-title (theme/bold "run $ "))))
+      (is (str/starts-with? codemode
+                            (theme/fg th :tool-title (theme/bold "codemode $ "))))
       (is (str/starts-with? clj-eval
                             (theme/fg th :tool-title (theme/bold "clj eval $ "))))
-      (is (str/includes? run-code kw-esc) "run_code code is syntax-highlighted")
+      (is (str/includes? codemode kw-esc) "codemode code is syntax-highlighted")
       (is (str/includes? clj-eval kw-esc) "clj eval code is syntax-highlighted")))
   (testing "the language arity selects the grammar"
     (let [raw (raw-line (r/render-code-call "js $" "const x = 1;" "" "javascript"
@@ -479,23 +479,23 @@
   (testing "the highlight cache lives in renderer state and keeps other keys"
     (let [state (atom {:timer-id :ticker})
           ctx #(hash-map :state @state :set-state! (fn [s] (reset! state s)))]
-      (r/render-code-call "run $" "(defn f [x] x)" "" th 120 (ctx))
+      (r/render-code-call "codemode $" "(defn f [x] x)" "" th 120 (ctx))
       (is (= :ticker (:timer-id @state)) "the tool ticker's key survives")
       (let [cache (get-in @state [:code-highlight :cache])]
         (is (some? cache))
-        (r/render-code-call "run $" "(defn f [x] (inc x))" "" th 120 (ctx))
+        (r/render-code-call "codemode $" "(defn f [x] (inc x))" "" th 120 (ctx))
         (is (identical? cache (get-in @state [:code-highlight :cache]))
             "a second render reuses the cache atom"))))
   (testing "collapsed and expanded render the same call line"
     (let [code "(+ 1 2)"
-          render #(raw-line (r/render-run-code-call "run_code" {:code code} th 120
+          render #(raw-line (r/render-codemode-call "codemode" {:code code} th 120
                                                     {:expanded %}) 120)]
       (is (= (render false) (render true)))))
   (testing "a multi-line script keeps the prompt on its first line only"
     (let [code "(defn f [x]\n  x)"
-          lines (plain (r/render-run-code-call "run_code" {:code code} th 120 {}) 120)]
+          lines (plain (r/render-codemode-call "codemode" {:code code} th 120 {}) 120)]
       (is (= 2 (count lines)))
-      (is (str/starts-with? (first lines) "run $ (defn f [x]"))
+      (is (str/starts-with? (first lines) "codemode $ (defn f [x]"))
       (is (= "  x)" (str/trimr (second lines))))))
   (testing "a leading blank line is dropped instead of stranding the prompt"
     (let [code "\n  \n(+ 1 2)\n(+ 3 4)"
@@ -508,44 +508,44 @@
       (is (= 1 (count lines)))
       (is (str/includes? (first lines) "run ...")))))
 
-(deftest test-run-code-result
+(deftest test-codemode-result
   (testing "output preview and inner-call summary render"
     (let [context {:details {:calls [{:tool "read" :ok true}
                                      {:tool "bash" :ok true}
                                      {:tool "bash" :ok false}]}}
-          lines (plain (r/render-run-code-result "a\nb" false th 60 true 1000 2000 nil context) 60)]
+          lines (plain (r/render-codemode-result "a\nb" false th 60 true 1000 2000 nil context) 60)]
       (is (some #(= "a" (str/trim %)) lines))
       (is (= "3 tool calls: bash ×2, read, 1 failed"
              (some #(when (str/includes? % "tool call") (str/trim %)) lines)))
       (is (not-any? #(str/includes? % "Took") lines)
           "the state line belongs to the component (tail line)")))
   (testing "no inner calls → no summary line"
-    (let [lines (plain (r/render-run-code-result "x" false th 60 true 1000 2000 nil {}) 60)]
+    (let [lines (plain (r/render-codemode-result "x" false th 60 true 1000 2000 nil {}) 60)]
       (is (not-any? #(str/includes? % "tool call") lines))
       (is (not-any? #(str/includes? % "image") lines))
       (is (not-any? #(str/includes? % "Took") lines))))
   (testing "attached images get a count line"
-    (let [one (plain (r/render-run-code-result "x" false th 60 true 1000 2000 nil
+    (let [one (plain (r/render-codemode-result "x" false th 60 true 1000 2000 nil
                                                {:details {:images 1}}) 60)
-          two (plain (r/render-run-code-result "x" false th 60 true 1000 2000 nil
+          two (plain (r/render-codemode-result "x" false th 60 true 1000 2000 nil
                                                {:details {:images 2}}) 60)]
       (is (some #(str/includes? % "1 image attached") one))
       (is (some #(str/includes? % "2 images attached") two))))
   (testing "truncation warns like bash"
     (let [trunc {:truncated-by :lines :shown-lines 2 :total-lines 99}
-          lines (plain (r/render-run-code-result "a\nb" false th 80 true 1000 2000 trunc {}) 80)]
+          lines (plain (r/render-codemode-result "a\nb" false th 80 true 1000 2000 trunc {}) 80)]
       (is (some #(str/includes? % "Truncated: showing 2 of 99 lines") lines))))
   (testing "the script's own truncation notice is stripped from the body"
     (let [trunc {:truncated-by :lines :shown-lines 2 :total-lines 99}
-          content (str "a\nb\n\n[run_code output truncated: 99 lines / 1.0 KiB total, "
+          content (str "a\nb\n\n[codemode output truncated: 99 lines / 1.0 KiB total, "
                        "showing the last 2 lines. Print less or return distilled data instead.]")
-          lines (plain (r/render-run-code-result content false th 100 true 1000 2000 trunc {}) 100)]
+          lines (plain (r/render-codemode-result content false th 100 true 1000 2000 trunc {}) 100)]
       (is (not-any? #(str/includes? % "Print less") lines)
           "the model-facing notice does not render twice")
       (is (some #(str/includes? % "Truncated: showing 2 of 99 lines") lines))))
   (testing "timestamps/details no longer render a state line here"
     (let [context {:details {:elapsed-ms 3400}}
-          lines (plain (r/render-run-code-result "a" false th 60 true 1000 2000 nil context) 60)]
+          lines (plain (r/render-codemode-result "a" false th 60 true 1000 2000 nil context) 60)]
       (is (not-any? #(str/includes? % "Took") lines)
           "state-result-nodes owns the Took line (component tail line)"))))
 

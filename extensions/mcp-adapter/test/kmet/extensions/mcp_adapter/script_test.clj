@@ -1,7 +1,7 @@
 (ns kmet.extensions.mcp-adapter.script-test
-  "Scripted-MCP end-to-end (§12.6 Phase 2, run_code.md T2): the extension
-   contributes its cached catalog as a run_code tool source, and the real
-   `run_code` tool drives it — discovery, calls, error results, the
+  "Scripted-MCP end-to-end (§12.6 Phase 2, codemode.md T2): the extension
+   contributes its cached catalog as a codemode tool source, and the real
+   `codemode` tool drives it — discovery, calls, error results, the
    unknown-name gate, timeout, streaming progress and the call trace.
    Spawns the fake stdio server (^:slow)."
   (:require [clojure.string :as str]
@@ -14,9 +14,9 @@
             [kmet.test-utils :as test-utils]))
 
 (defn- script-exec
-  "Run CODE through the real run_code tool; returns the tool result map."
+  "Run CODE through the real codemode tool; returns the tool result map."
   [reg code & [{:keys [on-update timeout]}]]
-  (registry/execute-tool reg "run_code"
+  (registry/execute-tool reg "codemode"
                          (cond-> {:code code}
                            timeout (assoc :timeout timeout))
                          (cond-> {}
@@ -27,13 +27,13 @@
   {:settings (or settings {})
    :mcp-servers {"fake" {:command "bb" :args [fake-stdio]}}})
 
-(deftest ^:slow run-code-sandbox-bridge
+(deftest ^:slow codemode-sandbox-bridge
   (tu/with-agent-dir
     (fn [_]
       ;; the extension spawns the stdio fake itself from the config's :args
       (tu/write-edn! (config/global-config-path)
                      (fake-config (tu/fixture "fake-mcp-server.bb")))
-      ;; the built-in tool table, so `run_code` is the real tool
+      ;; the built-in tool table, so `codemode` is the real tool
       (let [reg (test-utils/tool-registry)
             {:keys [api state]} (ext/create-nullable-api)]
         (try

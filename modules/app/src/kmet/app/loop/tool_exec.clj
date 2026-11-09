@@ -110,7 +110,7 @@
    Rebuilt per call, so a tool sees the run it is part of rather than a
    captured one; the loop hands it over because only the loop knows which
    agent the call belongs to. A tool that reads a service reads it from here
-   (a process default is not a fallback), and `run_code` replaces the value
+   (a process default is not a fallback), and `codemode` replaces the value
    with its sandbox realm before a script's inner call goes out, so what a
    script can reach through a tool is the boundary and not the composition
    (`kmet.app.sandbox`, docs/architecture.md § Service catalog). Key absent —
@@ -314,7 +314,7 @@
    providers reject misordered results).
 
    The batch runs under script/*assistant-message* so a scripted inner
-   call carries the same assistant message in its op as the outer run_code
+   call carries the same assistant message in its op as the outer codemode
    call (futures convey the binding; the bridge captures it on the tool thread
    and hands it to its pool workers, which do not).
 

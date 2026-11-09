@@ -1,7 +1,7 @@
 (ns kmet.app.test-tool-exposure
   "Tool exposure: where a contributed tool source's catalog lands.
 
-   `:sandbox` (the default) adds a source's tools to the `run_code` sandbox's
+   `:sandbox` (the default) adds a source's tools to the `codemode` sandbox's
    surface only — the model never sees them; `:deferred` adds them to the
    model-facing table (undeclared, tagged `:exposure :deferred` by the source),
    where the selection settings and the declared/callable split resolve over
@@ -466,7 +466,7 @@
         (t/is (str/includes? content "1 deferred tool source"))
         (t/is (str/includes? content "- catalog: A catalog"))
         (t/is (str/includes? content "tool_search"))
-        (t/is (not (str/includes? content "run_code or eval"))
+        (t/is (not (str/includes? content "codemode or eval"))
               "only tool_search is selected")
         (t/is (not (str/includes? content "(tools/list)")))
         (t/is (false? (:display msg)) "the model reads it, not the chat"))
@@ -484,13 +484,13 @@
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session
-                                        :enabled-tool-names (support/tool-names ["run_code" "deferred-a"]))]
+                                        :enabled-tool-names (support/tool-names ["codemode" "deferred-a"]))]
     (try
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
       (let [msg (state/sync-tool-sources-listing! agent)
             content (:content msg)]
         (t/is (some? msg))
-        (t/is (str/includes? content "run_code"))
+        (t/is (str/includes? content "codemode"))
         (t/is (not (str/includes? content "eval")))
         (t/is (str/includes? content "(tools/list)"))
         (t/is (not (str/includes? content "tool_search"))))
@@ -509,7 +509,7 @@
             content (:content msg)]
         (t/is (some? msg))
         (t/is (str/includes? content "eval"))
-        (t/is (not (str/includes? content "run_code")))
+        (t/is (not (str/includes? content "codemode")))
         (t/is (str/includes? content "(tools/list)"))
         (t/is (not (str/includes? content "tool_search"))))
       (finally
@@ -521,13 +521,13 @@
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state
                :session session
-               :enabled-tool-names (support/tool-names ["run_code" "eval" "tool_search" "deferred-a"]))]
+               :enabled-tool-names (support/tool-names ["codemode" "eval" "tool_search" "deferred-a"]))]
     (try
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
       (let [msg (state/sync-tool-sources-listing! agent)
             content (:content msg)]
         (t/is (some? msg))
-        (t/is (str/includes? content "run_code or eval"))
+        (t/is (str/includes? content "codemode or eval"))
         (t/is (str/includes? content "(tools/list)"))
         (t/is (str/includes? content "tool_search")))
       (finally
@@ -551,7 +551,7 @@
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session
-                                        :enabled-tool-names (support/tool-names ["run_code"]))]
+                                        :enabled-tool-names (support/tool-names ["codemode"]))]
     (try
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
       (t/is (nil? (state/sync-tool-sources-listing! agent))
@@ -641,7 +641,7 @@
         long-ids (mapv (fn [i] {:id (keyword (str "a-very-long-source-identifier-" i))
                                 :description "a description"})
                        (range 400))]
-    (t/is (= (str "1 deferred tool source. Their tools are callable from a script (run_code or eval);"
+    (t/is (= (str "1 deferred tool source. Their tools are callable from a script (codemode or eval);"
                   " (tools/list) shows them, and tool_search loads one tool so you can call it directly.\n\n"
                   "- clojure: Clojure editing refinements")
              (listing small))
@@ -668,24 +668,24 @@
   (let [source {:id :symbols :description "Symbols"}
         listing (fn [opts] (session/deferred-sources-listing [source] opts))
         cases [[{} nil false]
-               [{:run-code? true} "run_code" false]
+               [{:codemode? true} "codemode" false]
                [{:eval? true} "eval" false]
                [{:tool-search? true} nil true]
-               [{:run-code? true :eval? true} "run_code or eval" false]
-               [{:run-code? true :tool-search? true} "run_code" true]
+               [{:codemode? true :eval? true} "codemode or eval" false]
+               [{:codemode? true :tool-search? true} "codemode" true]
                [{:eval? true :tool-search? true} "eval" true]
-               [{:run-code? true :eval? true :tool-search? true}
-                "run_code or eval" true]]]
+               [{:codemode? true :eval? true :tool-search? true}
+                "codemode or eval" true]]]
     (doseq [[opts label search?] cases]
       (let [text (listing opts)]
         (if label
           (do
             (t/is (str/includes? text (str "script (" label ")")))
             (t/is (= search? (str/includes? text "tool_search")))
-            (when (= label "run_code")
+            (when (= label "codemode")
               (t/is (not (str/includes? text "eval"))))
             (when (= label "eval")
-              (t/is (not (str/includes? text "run_code")))))
+              (t/is (not (str/includes? text "codemode")))))
           (if search?
             (t/is (str/includes? text "tool_search"))
             (t/is (nil? text))))))))

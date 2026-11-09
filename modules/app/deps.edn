@@ -91,7 +91,7 @@
         borkdude/edamame {:mvn/version "1.6.44"}
         org.clojure/spec.alpha {:mvn/version "0.5.238"}
         org.clojure/tools.reader {:mvn/version "1.6.0"}
-        ;; SCI: the tool layer's sandbox (tools/run-code) mints its own
+        ;; SCI: the tool layer's sandbox (tools/codemode) mints its own
         ;; contexts, and the loader's design puts the backend artifact on the
         ;; caller (loader.md §6.5). Same pin as agent's and jolt's.
         org.babashka/sci {:git/url "https://github.com/yogthos/sci.git"

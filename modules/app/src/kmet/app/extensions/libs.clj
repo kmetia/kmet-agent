@@ -1,19 +1,19 @@
 (ns kmet.app.extensions.libs
   "The fixed set of bundled libraries kmet provides on both hosts — to
-   extension contexts and to run_code scripts alike. See
+   extension contexts and to codemode scripts alike. See
    src/kmet/extension.md § Bundled extension libraries.
 
    The requires below are the set's enumeration of third-party roots:
    loading the namespace is the point. On Jolt it is statically required by
    kmet.app.extensions.core, so `jolt dist` pulls the whole set into the app's
    require closure (AOT), and the extension host view shares the loaded
-   namespaces by reference; on babashka/JVM host-requires! and run_code's
+   namespaces by reference; on babashka/JVM host-requires! and codemode's
    require-host-namespaces! require it on first use (the requires resolve to
    the bb-bundled ports there), so both SCI contexts inject the set
    identically.
 
    `bundled-library-namespace?` is the set's one piece of code: the
-   membership rule shared by the extension context filter and the run_code
+   membership rule shared by the extension context filter and the codemode
    sandbox's namespace copy, so the surface cannot drift from the set.
 
    clojure.* (core.async and rrb-vector included) and babashka.fs /

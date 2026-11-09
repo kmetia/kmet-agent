@@ -220,7 +220,7 @@ cached metadata so no server spawns at startup. Names are lowercased with
   spaces are escaped). Templates are listed by `/mcp list <server>`.
 - **Scripted MCP** (settings `:script-mode false` stops the
   contribution): the adapter contributes its cached MCP catalog to
-  kmet's builtin **`run_code`** tool as a tool source
+  kmet's builtin **`codemode`** tool as a tool source
   (`tool_source.clj`) — MCP tools are in the sandbox surface by their
   prefixed names, `(tools/list)`/`(tools/describe)` discover them, and
   `@(tools/call "server_tool" args)` runs one (a promise settling with
@@ -337,7 +337,7 @@ bb test-ext        # the suites that spawn the fake servers
 Marked `^:slow` (they spawn `bb` children or make loopback calls):
 `client-test` (stdio/streamable-HTTP/SSE transports, negotiation, the
 modern era and its subscriptions), `protocol-test` (raw wire shape),
-`oauth-test` (DCR/PKCE/device/machine grants), `script-test` (the run_code
+`oauth-test` (DCR/PKCE/device/machine grants), `script-test` (the codemode
 sandbox bridge), `e2e-test` (the proxy tool end to end), `panel-test`'s
 inactivity timer and `output-guard-test`'s env kill switch. The rest —
 naming, config, metadata cache, status/search/describe, prompts, the

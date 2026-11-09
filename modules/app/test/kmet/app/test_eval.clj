@@ -48,13 +48,13 @@
                 :limits (script/resolve-limits nil)})))
           "a new session builds its environment from the library roots")))
 
-(t/deftest test-a-definition-is-not-visible-to-run-code
+(t/deftest test-a-definition-is-not-visible-to-codemode
   (let [env (support/eval-ctx)]
     (support/eval! env "(def library-only \"Library only.\" 1)")
-    (let [r (support/call-tool env "run_code" {:code "(emit (some? (resolve 'library-only)))"})]
+    (let [r (support/call-tool env "codemode" {:code "(emit (some? (resolve 'library-only)))"})]
       (t/is (not (:is-error r)) (:content r))
       (t/is (= "false" (:content r))
-            "run_code keeps its fresh-context contract"))))
+            "codemode keeps its fresh-context contract"))))
 
 (t/deftest test-the-eval-prompt-puts-one-call-first
   (t/is (str/includes? (:description eval-tool/definition)
@@ -147,8 +147,8 @@
     (t/is (str/includes? text "(eval/help)"))
     (t/is (str/includes? text "serialize"))
     (t/is (str/includes? text "(sandbox/spawn f)"))
-    (t/is (not (str/includes? text "run_code"))
-          "eval's prompt must stand alone when run_code is not selected")
+    (t/is (not (str/includes? text "codemode"))
+          "eval's prompt must stand alone when codemode is not selected")
     (t/is (not (str/includes? text "Jolt")))
     (t/is (not (str/includes? text "JVM")))))
 
@@ -164,12 +164,13 @@
     (t/is (fs/exists? (support/library-file env :global "user" "g.clj")))
     (t/is (not (fs/exists? (support/library-file env :cwd "user" "g.clj"))))))
 
-(t/deftest test-the-script-descriptions-share-the-sandbox-summary
+(t/deftest test-codemode-and-eval-prompts-are-distinct
   (let [env (support/eval-ctx)
-        run-code (tools/get-tool (:tools env) "run_code")]
-    (t/is (str/includes? (:description run-code) script/sandbox-summary))
-    (t/is (str/includes? (:description eval-tool/definition)
-                         script/sandbox-summary))))
+        codemode (tools/get-tool (:tools env) "codemode")]
+    (t/is (not= (:prompt-snippet codemode) (:prompt-snippet eval-tool/definition)))
+    (t/is (not= (:description codemode) (:description eval-tool/definition)))
+    (t/is (not (str/includes? (:description codemode) script/sandbox-summary)))
+    (t/is (not (str/includes? (:description eval-tool/definition) script/sandbox-summary)))))
 
 (t/deftest test-the-tool-reports-a-missing-service
   (let [{:keys [tools]} (tu/tool-ctx)

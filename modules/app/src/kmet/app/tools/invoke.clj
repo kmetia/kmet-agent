@@ -1,6 +1,6 @@
 (ns kmet.app.tools.invoke
   "The shared tool-invocation pipeline — one implementation for the agent
-   loop's batches and the run_code sandbox's bridge:
+   loop's batches and the codemode sandbox's bridge:
 
      tool-point        — the one point: the run's around hooks outside, the
                          permission check at the innermost `next`, the body
@@ -15,14 +15,14 @@
    remains the per-tool dispatcher (argument normalization, :prepare-arguments,
    :contextual?/:streams? shapes); it is passed in rather than required so
    kmet.app.tools.script can use this namespace without a require cycle (the
-   registry builds the executor the run_code tool hands it)."
+   registry builds the executor the codemode tool hands it)."
   (:require [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.read :as read-tool]
             [kmet.app.tools.util :as tool-util]))
 
 (def execute-tool-contract
   "The injected per-tool dispatcher. `kmet.app.tools.registry/execute-tool`
-   satisfies it (the registry builds the run_code record's seam from it), and
+   satisfies it (the registry builds the codemode record's seam from it), and
    the loop's tool executor presents the same shape:
 
      (fn [tool-name args {:keys [signal ctx on-update tools]}]
@@ -66,7 +66,7 @@
 
 (defn tool-point
   "THE tool point: CHAIN over EXECUTE with CHECK innermost, one dispatch for the
-   loop's batches and the run_code sandbox.
+   loop's batches and the codemode sandbox.
 
    CHAIN is the run's around hooks, `(fn [op next] → result)`, nil meaning no
    hooks. CHECK — `(fn [op])` → nil when the call may proceed, else the block
@@ -89,7 +89,7 @@
 (defn execute-tool-call
   "Execute one call through EXECUTE-TOOL. BINDINGS, when given, are applied
    around execution ({:signal :session-env-fn :shell :skill-resolver :cwd}) — a raw worker thread
-   conveys no dynamic bindings, which is the run_code bridge's pool-worker
+   conveys no dynamic bindings, which is the codemode bridge's pool-worker
    case; the loop's futures already convey the run-wide ones. Returns the
    result map; never throws for a tool failure — a throwing tool becomes an
    error result (a missing EXECUTE-TOOL does throw: see

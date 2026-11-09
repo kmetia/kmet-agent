@@ -1,7 +1,7 @@
 (ns kmet.extensions.mcp-adapter.tool-proxy
   "The mcp proxy tool executor's invocation surface (§9.2, pi
    proxy-modes.ts — the execution half): param coercion and validation,
-   the live tool call (call-mcp-tool), resource reads, the run_code
+   the live tool call (call-mcp-tool), resource reads, the codemode
    sandbox records (script-tool-records), and the dispatch itself. The
    read-only modes live in search.clj (search) and status.clj
    (status/describe/list); the shared state view in catalog.clj.
@@ -181,7 +181,7 @@
             (catalog/return-error (str "MCP call failed: " (ex-message e)))))))))
 
 (defn script-tool-records
-  "The cached MCP catalog as run_code sandbox tool maps, keyed by the
+  "The cached MCP catalog as codemode sandbox tool maps, keyed by the
    prefixed name (architecture.md § Tools and the script sandbox — replaces
    the retired mcpScript tool):
    {name → {:name :label :description :parameters :streams? :execute}}.

@@ -1,6 +1,6 @@
 (ns kmet.app.tools.eval
   "The `eval` tool: model-written Clojure in the agent session's persistent
-   SCI environment (`kmet.app.eval`). Unlike `run_code`, the environment is
+   SCI environment (`kmet.app.eval`). Unlike `codemode`, the environment is
    kept across calls, so a definition from one call is visible to the next.
    The tool declares no execution mode: the loop examines each call's code
    before executing a batch, and a batch containing a verb definition runs in
@@ -9,7 +9,7 @@
    home's eval library — the session cwd's scope by default, the global scope
    when requested — and loaded by every session; a new session or a restart
    sees both layers. The
-   fresh-context, output-economy tool stays `run_code`.
+   fresh-context, output-economy tool stays `codemode`.
 
    The row also registers the `:core` eval source, which puts the shared
    `read-file`, `edit` and `write-file` operations under `user` and the
@@ -68,7 +68,7 @@
    :name "eval"
    :label "Eval"
    :description (str "Evaluate Clojure in this session's persistent SCI sandbox: "
-                     script/sandbox-summary
+                     "the babashka script surface (fs, sh, slurp, spit, require, tools)"
                      " The session is single-threaded: two eval calls never overlap — the second waits for the first. Put independent work in ONE call and fan out with (sandbox/spawn f), pmap, or tools/call promises; a call that defines a verb or changes eval state serializes its batch. "
                      "Eval creates verbs: a documented top-level definition persists in the eval library; without a docstring it is live-only. Local let/fn bindings are scratch. A successful call's namespace is re-entered; output is (emit value) or the final value, while stdout and stderr are discarded. "
                      "(eval/help) lists sources, the library, and the full verb surface; this is the sandbox, not the project's nREPL.")

@@ -78,7 +78,7 @@
   (t/testing "parallel tool-call batching guideline (kmet addition)"
     (let [result (skills/build-system-prompt :cwd "/tmp")]
       (t/is (str/includes? result "- When a turn needs several tool calls, batch the independent ones into one message"))
-      (t/is (str/includes? result "- Use run_code for Clojure — including one-liners —"))))
+      (t/is (str/includes? result "- One codemode call should complete a phase: read inputs, write files, run commands/tests, and emit a compact digest."))))
   (t/testing "skills are listed as available_skills XML"
     (let [name "test-prompt-skill"
           description "Prompt skill description."

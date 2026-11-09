@@ -1,5 +1,5 @@
 (ns kmet.app.tools.bash-output
-  "Pure output formatting and truncation shared by bash, read, run_code and
+  "Pure output formatting and truncation shared by bash, read, codemode and
    the TUI renderers (pi: bash-executor.ts formatSize / truncateHead /
    truncateTail).
 

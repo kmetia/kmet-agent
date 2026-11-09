@@ -36,7 +36,7 @@ These are load-bearing and not obvious from the code:
   per-agent world, `setup` shadows a service, `isolate` names a realm. A row
   flag nobody reads is exactly what the kernel refuses to ship for `:inject`.
 - **The code tools are opt-in.** pi's `defaultToolNames` ships every built-in
-  on. kmet marks `run_code` and `eval` `:default-enabled? false`: both stay
+  on. kmet marks `codemode` and `eval` `:default-enabled? false`: both stay
   mounted rows (`/config` and `/tools` enable them live), but an unset or
   modifier-only `:resources` list never turns them on — only a plain or
   `+name` entry does. The departure is deliberate: they are the two tools that
@@ -113,7 +113,7 @@ reason.
 
 ### 5. The script sandbox's evaluator, and process isolation
 
-`run_code` evaluates on SCI on every host (`docs/architecture.md` § Tools and
+`codemode` evaluates on SCI on every host (`docs/architecture.md` § Tools and
 the script sandbox). On Jolt, the native loader's `eval-in` (landed upstream)
 makes a native evaluator constructible — per-call context, require gate,
 bridge, capture and an engine-timer abort — but adopting it trades the
@@ -155,7 +155,7 @@ the process install — which is why a connection must not take the slot.
   moves and two seams, not a restructure.
 - A row flag or service key with no reader, and a second registry beside the
   services (`:registries`, `:modes`, a per-process tool table).
-- A `:bundle/ptc` / a second `:toolExecutor`: the bridge serves 2% of `run_code`
+- A `:bundle/ptc` / a second `:toolExecutor`: the bridge serves 2% of `codemode`
   calls and no batching, so a second presentation mode has no consumer
   (`docs/architecture.md` § Tools and the script sandbox).
 - A `reachesTools`-style declaration on the discovery tool. pi needs it because

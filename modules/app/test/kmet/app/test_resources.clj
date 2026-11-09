@@ -85,7 +85,7 @@
   (with-settings nil nil
     (fn [_ _]
       (let [s (service [["read" :tool/read]
-                        ["run_code" :tool/run_code]
+                        ["codemode" :tool/codemode]
                         ["eval" :tool/eval]
                         ["ext_tool" [:app :extensions "demo"]]]
                        [["a" :app] ["b" :app]]
@@ -95,10 +95,10 @@
             "opt-in built-ins are off, every other tool is on")
         (is (= #{"a" "b"} (enabled s :skill)))
         (is (= #{"p"} (enabled s :prompt)))
-        (is (available? s :tool "run_code"))
-        (is (not (selected? s :tool "run_code"))
+        (is (available? s :tool "codemode"))
+        (is (not (selected? s :tool "codemode"))
             "a default-off tool is not selected by default")
-        (is (not (enabled? s :tool "run_code")))
+        (is (not (enabled? s :tool "codemode")))
         (is (selected? s :tool "ext_tool")
             "an extension tool defaults on")
         (is (= {:kind :extension :id :ext/demo}
@@ -211,12 +211,12 @@
 
 (deftest unavailable-rows-follow-the-scope
   (let [s (service [["read" :tool/read]])]
-    (with-settings {:resources {:tools ["ghost" "-read" "run_code"]}}
+    (with-settings {:resources {:tools ["ghost" "-read" "codemode"]}}
       {:resources {:tools ["+project-ghost"]}}
       (fn [_ _]
         (let [global-rows ((:unavailable s) :tool :global)
               project-rows ((:unavailable s) :tool :project)]
-          (is (= ["ghost" "run_code"] (mapv :name global-rows))
+          (is (= ["codemode" "ghost"] (mapv :name global-rows))
               "stored global names no provider offers are reported")
           (is (= ["project-ghost"] (mapv :name project-rows))
               "project rows come from the project delta only")
@@ -261,10 +261,10 @@
             "enabling a default-on tool removes its entry")
         (is (= {} @global)
             "and the emptied :resources map is removed")
-        (is (nil? ((:set-global! s) :tool "run_code" false))
+        (is (nil? ((:set-global! s) :tool "codemode" false))
             "disabling a default-off tool removes nothing")
-        (is (= ["+run_code"] ((:set-global! s) :tool "run_code" true)))
-        (is (= {:resources {:tools ["+run_code"]}} @global)))))
+        (is (= ["+codemode"] ((:set-global! s) :tool "codemode" true)))
+        (is (= {:resources {:tools ["+codemode"]}} @global)))))
   (with-settings {:resources {:tools ["-ext"]}} nil
     (fn [_ _]
       (let [s (service [])]
@@ -272,12 +272,12 @@
             "enabling a default-on extension tool clears its -name")))))
 
 (deftest global-writer-rewrites-plain-selection
-  (with-settings {:resources {:tools ["read" "run_code"]}} nil
+  (with-settings {:resources {:tools ["read" "codemode"]}} nil
     (fn [global _]
       (let [s (service [])]
-        (is (= ["run_code"] ((:set-global! s) :tool "read" false)))
-        (is (= ["run_code"] (:tools (:resources @global))))
-        (is (= [] ((:set-global! s) :tool "run_code" false))
+        (is (= ["codemode"] ((:set-global! s) :tool "read" false)))
+        (is (= ["codemode"] (:tools (:resources @global))))
+        (is (= [] ((:set-global! s) :tool "codemode" false))
             "an emptied plain selection is stored as []")
         (is (= [] (:tools (:resources @global))))
         (is (= ["new"] ((:set-global! s) :tool "new" true)))

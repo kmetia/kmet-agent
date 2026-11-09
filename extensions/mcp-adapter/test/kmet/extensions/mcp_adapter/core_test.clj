@@ -40,7 +40,7 @@
             (is (true? (:streams? tool)))
             (is (contains? (get-in tool [:parameters :properties]) "search"))
             (is (fn? (:execute tool)))
-            (is (str/includes? (:description tool) "run_code"))
+            (is (str/includes? (:description tool) "codemode"))
             (is (str/includes? (:description tool) "eval"))))
         (testing "the retired mcpScript tool stays retired"
           (is (nil? (get-in s [:tools "mcpScript"]))))

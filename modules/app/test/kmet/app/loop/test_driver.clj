@@ -394,15 +394,15 @@
   ;; absolute allowlist, and neither writes the resources settings.
   (let [{:keys [root agents]} (mounted)
         reg (srce/get root :tools)]
-    (doseq [name ["alpha" "bash" "run_code"]]
+    (doseq [name ["alpha" "bash" "codemode"]]
       (tools/register-tool! reg {:name name :description name
                                  :execute (fn [_] {:content name})}))
     (let [handle (create! {:root root :agents agents}
                           {:config (assoc test-config
-                                          :tools ["-bash" "+run_code"])})]
-      (is (= #{"alpha" "run_code"}
+                                          :tools ["-bash" "+codemode"])})]
+      (is (= #{"alpha" "codemode"}
              (runtime/enabled-tool-names handle))
-          "the persisted selection minus bash plus the opt-in run_code"))
+          "the persisted selection minus bash plus the opt-in codemode"))
     (let [handle (create! {:root root :agents agents}
                           {:config (assoc test-config :tools ["alpha"])})]
       (is (= #{"alpha"} (runtime/enabled-tool-names handle))

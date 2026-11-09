@@ -71,7 +71,7 @@
                        tool-hook        ;; atom of the run's tool chain (fn [op next]) → result, or nil —
                                         ;; the around hooks (kmet.app.hooks/around); the permission check is
                                         ;; the tool point's innermost next, not part of this value. One value,
-                                        ;; so the loop's batches and the run_code sandbox run the same hooks
+                                        ;; so the loop's batches and the codemode sandbox run the same hooks
                        system-prompt-override ;; atom of string or nil (per-run override, pi: _systemPromptOverride)
                        transform-context      ;; atom of (fn [messages]) → messages (pi: transformContext)
                        prepare-next-turn      ;; atom of (fn [ctx]) → update map | nil (pi: prepareNextTurn)
@@ -464,14 +464,14 @@ Be precise and concise in your responses."}}]
    one-line descriptions changed since the branch's last listing. Appends one
    `:custom-message` (user-role, not displayed) and never rewrites the leading
    system prompt, which is a full prefix miss; a promotion appends nothing.
-   Selection-aware: a source is announced only when run_code/eval or
+   Selection-aware: a source is announced only when codemode/eval or
    tool_search can reach it, and a stale listing is corrected when none can.
    Returns the message, or nil when there was nothing new to say."
   [agent]
   (when-let [sess (:session agent)]
     (let [handle (srce/get (:ctx agent) :tools)
           selected (tools/select-tools (tool-table agent) (tool-selection agent))
-          opts {:run-code? (contains? selected "run_code")
+          opts {:codemode? (contains? selected "codemode")
                 :eval? (contains? selected "eval")
                 :tool-search? (contains? selected search/tool-search-name)}
           sources (tools/get-deferred-sources handle {:selected (set (keys selected))})
@@ -728,9 +728,9 @@ Be precise and concise in your responses."}}]
 
 (defn callable-tool-names
   "The names a script may call: the selection minus its `:model-only` tools —
-   the table half of the run_code surface
+   the table half of the codemode surface
    (`kmet.app.tools.registry/select-tools` adds the `:sandbox` sources'
-   catalog). The agent's `run_code` binding resolves this live, so a
+   catalog). The agent's `codemode` binding resolves this live, so a
    `:deferred` tool is callable whether or not it is declared."
   [agent]
   (into #{}

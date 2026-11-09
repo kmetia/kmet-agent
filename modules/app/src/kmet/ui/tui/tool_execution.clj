@@ -46,9 +46,9 @@
             :shell :self}
    "bash"  {:call renderers/render-bash-call
             :result renderers/render-bash-result}
-   "run_code" {:call renderers/render-run-code-call
-               :result renderers/render-run-code-result}
-   "eval" {:call renderers/render-run-code-call
+   "codemode" {:call renderers/render-codemode-call
+               :result renderers/render-codemode-result}
+   "eval" {:call renderers/render-codemode-call
            :result renderers/render-eval-result}})
 
 ;; ─── Render context helper ─────────────────────────────────────────────────

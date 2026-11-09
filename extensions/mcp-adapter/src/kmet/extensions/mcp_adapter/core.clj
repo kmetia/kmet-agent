@@ -694,7 +694,7 @@
            (str "Servers: " (str/join ", " summaries) ". ")
            "No servers with cached tools. ")
          "Servers connect lazily on first use. "
-         "For several MCP calls in one request, use an enabled script tool (`run_code` or `eval`) — MCP tools are in the script's surface by name. "
+         "For several MCP calls in one request, use an enabled script tool (`codemode` or `eval`) — MCP tools are in the script's surface by name. "
          "search: \"screenshot\" · tool: \"" (name prefix) "_tool\" args: {...}.")))
 
 (defn- register-proxy-tool!
@@ -1305,7 +1305,7 @@
     (auth/configure-storage! (:settings config))
     ;; 2. proxy tool (§10.4)
     (register-proxy-tool! state)
-    ;; 2b. the MCP catalog joins the run_code sandbox as a tool source —
+    ;; 2b. the MCP catalog joins the codemode sandbox as a tool source —
     ;; registered by sync-direct-tools! below (settings :script-mode
     ;; gates it; the shared engine retired the separate mcpScript tool)
     ;; 3. direct tools from cache (§10.5)

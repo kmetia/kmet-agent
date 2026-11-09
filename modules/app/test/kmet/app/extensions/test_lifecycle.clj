@@ -295,7 +295,7 @@
   ;; lists in namespaces that may not require that router. A tag in neither
   ;; list is never swept, and nothing fails loudly: :kmet/tool-source leaked
   ;; that way, and an unloaded extension's sandbox-only tools survived into the
-  ;; next namespace's run_code surface.
+  ;; next namespace's codemode surface.
   (t/is (= (set (keys registries/registry-tags))
            (into (set extensions/host-tags) registries/resource-tags))
         "host-tags + resource-tags must cover exactly the tags the router holds"))

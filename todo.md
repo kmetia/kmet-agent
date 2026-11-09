@@ -18,7 +18,7 @@ Status: todo. The sandbox's process-cancel tests (`sh`, `shell`, background
 `taskkill /T` branch of `kmet.libs.process/kill-process-tree!` and the
 watcher's cancel-kill are untested there. Add a Windows-safe child-process
 fixture (e.g. `cmd /c ...` with a delayed marker file) covering `sh`,
-`shell`, a background `process`, and a timed host-blocked `run_code`/`eval`
+`shell`, a background `process`, and a timed host-blocked `codemode`/`eval`
 call ending on Escape rather than at its timeout.
 
 ## Task: eval library interface discovery (10a, 2026-11-05)
@@ -265,7 +265,7 @@ follow across them. `KMET_CODING_AGENT_DIR` still isolates the whole home.
 - No `:keep` metadata, no project-root detection (git common dir, manifest),
   no `<cwd>/.kmet/eval`, no scratch root, no session-definition entries, no
   snapshots or branch fingerprints.
-- No change to `run_code`, the source registry, or extension-provided verbs
+- No change to `codemode`, the source registry, or extension-provided verbs
   beyond the reserved `move`/`eval/move` names.
 - No `--force` moves and no scope-qualified definition names.
 - No automatic session-dir rename or `/session migrate` in this task.
@@ -296,7 +296,7 @@ home, auto-written:
   loads the files, and an already-built environment never refreshes.
 - **Forget = delete.** Remove the file and unbind the live name; a flat
   `:drop` or `(eval/forget 'name)` is enough.
-- **`run_code` is the throwaway tool; `eval` is the library.**
+- **`codemode` is the throwaway tool; `eval` is the library.**
 - **Isolation is a home**, not a scope: `KMET_CODING_AGENT_DIR` (or a
   profile) gives a separate library.
 
@@ -324,7 +324,7 @@ are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9, 10a and 10b done; cwd-scope task done |
+| Persistent eval and eval sources | `codemode` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–9, 10a and 10b done; cwd-scope task done |
 | Eval library interface discovery (10a) | saved definitions and source-provided verbs expose an interface and implementation through `(eval/describe)`, not just names | **done** (2026-11-05) |
 | Cwd-scoped eval library | the one-home library makes every helper global; a model cleaning up "scratch" deletes user state | **done** (2026-11-05) — cwd default, explicit global, shadow/drop, move, pinned scope |
 | Clojure extension surface review | the extension's tools now overlap E17's core editing engine and its eval `clj/*` verbs; decide the remaining surface from usage | **measuring** — description and skill trimmed 2026-11-05; eval cwd-scope and 10b done, so the decision gate is open |
@@ -351,7 +351,7 @@ evaluates Lisp in the live image and keeps every definition
 
 ### Why
 
-`run_code` builds a fresh SCI context per call and discards it on return, on
+`codemode` builds a fresh SCI context per call and discards it on return, on
 purpose (`docs/architecture.md` § Tools and the script sandbox). Its economy
 is output: compute in code, send a digest, never re-send the data — measured
 at 689 calls, 98% of which never touch the bridge. It has no answer for the
@@ -386,13 +386,13 @@ the original does not need:
 
 | piece | today | this track |
 |---|---|---|
-| script sandbox | `kmet.app.tools.run-code`, one SCI ctx per call, ~1,000 lines of machinery | moves to `kmet.app.tools.script`; both tools use it |
+| script sandbox | `kmet.app.tools.codemode`, one SCI ctx per call, ~1,000 lines of machinery | moves to `kmet.app.tools.script`; both tools use it |
 | file ops | inline in `kmet.app.tools.edit` / `.write` `execute` | extracted as ops; tool and verb share them |
 | per-agent services | `:shell` (atom), `:sandbox` (data), `:permissions` (memory) — the agents factory provides each | `:eval` joins them, with one environment per session over the home library |
 | extension contribution | `register-tool!`, `register-tool-source!` (`:kmet/tool-source` on the `:tools` handle), commands, skills | `register-eval-source!` (`:kmet/eval-source`), same handle, same sweep |
-| model's code tool | `run_code` only | `run_code` + `eval` |
+| model's code tool | `codemode` only | `codemode` + `eval` |
 
-`run_code`'s per-call context costs roughly 3 ms of namespace copying plus
+`codemode`'s per-call context costs roughly 3 ms of namespace copying plus
 9 ms of `sci/init` (its own comment); a per-session context pays that once
 per session instead of once per call.
 
@@ -402,7 +402,7 @@ Three tiers of what a script can call, and only the third is a source:
 
 | tier | provided by | examples | removable |
 |---|---|---|---|
-| primitives | `kmet.app.tools.script`, shared with `run_code` | `slurp`, `spit`, `sh`, `p/*`, `fs/*`, `json`, `emit`, `emit-image`, `tools/list`, `tools/describe`, `tools/call`, `(sandbox/cwd)`, `(sandbox/env k)`, `(sandbox/now)`, `(sandbox/sleep ms)`, `(sandbox/spawn f)` | no |
+| primitives | `kmet.app.tools.script`, shared with `codemode` | `slurp`, `spit`, `sh`, `p/*`, `fs/*`, `json`, `emit`, `emit-image`, `tools/list`, `tools/describe`, `tools/call`, `(sandbox/cwd)`, `(sandbox/env k)`, `(sandbox/now)`, `(sandbox/sleep ms)`, `(sandbox/spawn f)` | no |
 | eval vocabulary | the `:eval` service (it needs library state) | `(eval/library)`, `(eval/sources)`, `(eval/help)`, `(eval/describe …)`, `(eval/forget …)`, `(eval/patch …)`, `(eval/edit-form …)` | no |
 | verbs | the `:core` eval source shipped by the eval tool (including the Clojure editing verbs after E17), and every mounted extension's own source | `edit`, `write-file`, `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair`; extension-specific verbs | yes (`{:core false}`) |
 
@@ -434,7 +434,7 @@ tracks the definitions the environment loaded; `:index` is the on-disk
 library, read without evaluating, and is what `/eval list` and `/eval search`
 use so they show the library rather than one session's cache.
 
-**The tool.** `:tool/eval` joins `:bundle/minimal` beside `:tool/run_code`,
+**The tool.** `:tool/eval` joins `:bundle/minimal` beside `:tool/codemode`,
 with `:default-enabled? false` (S4.5): off until selected or enabled by
 `/config`/`/tools`.
 
@@ -471,7 +471,7 @@ sandbox:
 (run {:sci-ctx :code :state :prelude :extra-details})   ; capture → eval thread → wait → result
 ```
 
-`run_code` becomes "build a fresh context, run, discard"; `eval` becomes
+`codemode` becomes "build a fresh context, run, discard"; `eval` becomes
 "rearm, seed, run" against the current session's environment. The context's
 `:load-fn` and `:interrupt-fn` are fixed at `sci/init`, which is why the
 interrupt and per-call namespaces are re-aimed through atoms rather than
@@ -645,17 +645,17 @@ every later step is additive. Estimated ~2,000 new lines, ~1,000 moved (step 1)
 plus ~150 moved (step 2).
 
 1. **`kmet.app.tools.script`.** Move the reusable sandbox out of
-   `run_code.cljc`: constants, the three dynamic vars (`*enabled-tools-fn*`,
+   `codemode.cljc`: constants, the three dynamic vars (`*enabled-tools-fn*`,
    `*tool-hooks*`, `*assistant-message*`), helpers, capture, capability
    namespaces, `host-class-map`, `sandbox-load-fn`, `context`,
    `call-namespaces`, `active-surface`, the bridge pool, `interrupt-fn`,
    `start-eval-thread!`, `assemble-result`, `realm`. New public seams as in
-   § Shape; message text parameterized by the tool name so `run_code`'s
-   strings stay byte-identical (`[run_code output truncated …]` is asserted).
-   `script-tool-names` = `#{"run_code" "eval"}` — neither tool nests the
+   § Shape; message text parameterized by the tool name so `codemode`'s
+   strings stay byte-identical (`[codemode output truncated …]` is asserted).
+   `script-tool-names` = `#{"codemode" "eval"}` — neither tool nests the
    other. Update the moved dynamic vars' bind sites: `kmet.app.loop.clj:1113`
    and `:1120`, `kmet.app.loop.tool_exec.clj:292`,
-   `test_run_code.clj` (three `binding`s).
+   `test_codemode.clj` (three `binding`s).
 2. **The file ops.** `kmet.app.tools.edit/edit-file` (mutation lock, BOM,
    line endings, `edit-diff/apply-edits-to-normalized-content`, write, diff)
    public, `execute` = op + rendering; `kmet.app.tools.write/write-file`
@@ -665,8 +665,8 @@ plus ~150 moved (step 2).
    lazy context, interrupt holder, sticky ns, lock, `:dispose!`; the driver
    provides the default like `:sandbox`; the handle's `:dispose!` calls the
    service's. `kmet.app.tools.eval` + the `:tool/eval` row in
-   `:bundle/minimal`, a sharp description against `run_code` (and one line
-   added to `run_code`'s pointing at `eval`).
+   `:bundle/minimal`, a sharp description against `codemode` (and one line
+   added to `codemode`'s pointing at `eval`).
 4. **Step 4R (done): the one home library.** Every successful top-level
    definition is written immediately under `<agent-dir>/eval/<ns>/<name>.clj`
    (one verbatim source slice, atomic publication under the root lock); a
@@ -737,7 +737,7 @@ plus ~150 moved (step 2).
 9. **Step 9 (done): docs and catalog.** `docs/architecture.md` § Service catalog (`:eval`)
    and § Tools and the script sandbox (the eval tool, the extraction, the
    library and the scoping of "a `def` in one call is invisible to the next"
-   to `run_code`); `bb generate-catalog`; `docs/pi-alignment.md` § codemode
+   to `codemode`); `bb generate-catalog`; `docs/pi-alignment.md` § codemode
    (the persistent `store`/`load` half and the extension analogue are no
    longer missing); `modules/app/src/kmet/design.md` § Open at HEAD 5 (one
    line: a persistent context makes Jolt's `eval-in` more attractive later;
@@ -773,7 +773,7 @@ plus ~150 moved (step 2).
 
 ### Test plan
 
-- **Step 1:** `test_run_code.clj` passes unmodified apart from the three
+- **Step 1:** `test_codemode.clj` passes unmodified apart from the three
   `binding`s — the strongest available proof that the extraction preserved
   behaviour. One test asserts the inner-call hook payload still carries the
   assistant message across the moved dynamic var.
@@ -863,8 +863,8 @@ plus ~150 moved (step 2).
   `~/.kmet/agent/eval` for review; no sandbox is claimed.
 - A host-blocked call still hits the existing interrupt-grace limitation
   (no process isolation — `modules/app/src/kmet/design.md` § Open at HEAD 5).
-- Nothing is kept from `run_code`; nothing from `eval` is visible to
-  `run_code`. Two homes never share; two agents or sessions in one home share
+- Nothing is kept from `codemode`; nothing from `eval` is visible to
+  `codemode`. Two homes never share; two agents or sessions in one home share
   the library files but each has its own live environment, so a definition is
   visible to another only when that environment is built again.
 - The library is unbounded (the model can define as much as it wants); a
@@ -888,7 +888,7 @@ plus ~150 moved (step 2).
 
 ### Decisions
 
-**E1 — a second tool, not a `run_code` flag.** `run_code`'s fresh context is
+**E1 — a second tool, not a `codemode` flag.** `codemode`'s fresh context is
 load-bearing for its output economy and for 98% of its calls; a stateful mode
 behind an argument would make every one of them stateful in the model's
 reading. Two rows, two names, two contracts.
@@ -949,7 +949,7 @@ full key.
 contribution crosses the isolation boundary the way every other capability
 does (functions and data), so no source can reach a host service it was not
 given. `script-tool-names` excludes both tools from any script's surface, so
-`run_code` cannot start an `eval` and an `eval` cannot start another.
+`codemode` cannot start an `eval` and an `eval` cannot start another.
 
 **E10 — sources cannot redefine builtins; the agent's overrides are never
 written.** Later-registration-wins is app-wide, so an extension that took
@@ -1022,7 +1022,7 @@ extensions are never loaded by default — every profile naming the row anyway.
 The service is provided unconditionally by the factory (lazy, zero cost until
 the first call), so removing `:tool/eval` leaves the `/eval` library command
 and its service in place — the command is a reader, unlike `:sandbox` without
-`:tool/run_code`.
+`:tool/codemode`.
 
 **E17 — the Clojure editing engine and the edit verbs are core; the tools stay
 an extension.** `eval` is a Clojure environment, and the engine's deps
@@ -1131,7 +1131,7 @@ compaction windows; the projection reconstruction matches the recorded
 | projection at a compaction trigger | 45.9M chars ≈ 11.5M tokens over 44 windows |
 | tool results / thinking / tool-call args | 45.3% / 37.3% / 14.8% |
 | tool-result bytes by tool | bash 66.4%, read 29.1%, everything else 4.5% |
-| unbounded tools at the trigger (`run_code`, extensions) | 1.9% of tool-result chars |
+| unbounded tools at the trigger (`codemode`, extensions) | 1.9% of tool-result chars |
 | ceiling every tool already observes | ~50 KiB (read/bash pi's cap, MCP adapter's output guard) |
 | R candidates (≥8 KiB, outside the newest turn) | 352 results = 26.8% of trigger tool chars; trimming saves ≈8% of the projection |
 | S budget 3,125 / 6,250 / 12,500 tok | 119 / 31 / 3 unbounded results clipped |

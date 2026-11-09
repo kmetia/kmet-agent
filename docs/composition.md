@@ -42,7 +42,7 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -82,7 +82,7 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -116,7 +116,7 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -150,7 +150,7 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -185,7 +185,7 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -219,7 +219,7 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -252,7 +252,7 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -326,23 +326,15 @@ Execute a bash command in the current working directory. Returns stdout and stde
 
 ---
 
-### `run_code`
+### `codemode`
 
-**Label:** Run code
+**Label:** Codemode
 
 **Parameters:** `code` (required), `timeout`, `max-output-bytes`
 
 **Description:**
 
-Run a Clojure script to work over the environment and report a digest. Use it when the intermediate output would flood the context — scan or transform many files, run a search→read→verify chain, compute counts, matches or a summary — instead of chaining bash cat/head/rg. Use bash for one small command and read for one file.
-
-Every run_code call starts from a fresh context; definitions do not persist.
-
-Inside the script the local primitives return values, not rendered text; prefer them over bash/read for local work. Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. A plain name is also a var — @(tools/read {:path "x"}) — while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe "name") returns one tool's declaration.
-
-Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image "shot.png") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.
-
-Sandbox: Clojure/SCI — aliases fs, str, set, edn, walk, json and p; bare sh; cwd-resolving slurp, spit and file-seq; sandbox helpers (sandbox/cwd), (sandbox/env k), (sandbox/now), (sandbox/sleep ms) and (sandbox/spawn f); bare (emit v) and (emit-image x); the tools and sandbox namespaces; clojure.*, babashka.*, the bundled libs (rewrite-clj, cljfmt, edamame, parinferish) and the kmet.libs ports (json, http, yaml, markdown) are require-able. Discover the surface with (all-ns) and a namespace's vars with (ns-publics 'clojure.string). :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB.
+Run one Clojure script in a fresh SCI sandbox with kmet's tools bridged in. Use it to complete a whole phase: inspect inputs, write files, run commands or tests, and emit only the compact result. Definitions do not persist between calls; stdout and stderr are discarded, and only the script's output reaches the conversation. Callable tools: read(path, offset?, limit?), write(path, content), edit(path, edits), bash(command, timeout?). Bare (read path), (write path text), (edit path old new), and (bash command) settle the matching tool; (slurp path), (spit path text), fs/*, and (sh ...) are local. (tools/list) lists every current declaration; @(tools/call "name" args) calls any other tool. Report with (emit value) or end on the value; :timeout is seconds; output is capped at 16 KiB/2000 lines, :max-output-bytes raises it to 50 KiB. Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) namespaces.
 
 ---
 
@@ -354,7 +346,7 @@ Sandbox: Clojure/SCI — aliases fs, str, set, edn, walk, json and p; bare sh; c
 
 **Description:**
 
-Evaluate Clojure in this session's persistent SCI sandbox: aliases fs, str, set, edn, walk, json and p; bare sh; cwd-resolving slurp, spit and file-seq; sandbox helpers (sandbox/cwd), (sandbox/env k), (sandbox/now), (sandbox/sleep ms) and (sandbox/spawn f); bare (emit v) and (emit-image x); the tools and sandbox namespaces; clojure.*, babashka.*, the bundled libs (rewrite-clj, cljfmt, edamame, parinferish) and the kmet.libs ports (json, http, yaml, markdown) are require-able. The session is single-threaded: two eval calls never overlap — the second waits for the first. Put independent work in ONE call and fan out with (sandbox/spawn f), pmap, or tools/call promises; a call that defines a verb or changes eval state serializes its batch. Eval creates verbs: a documented top-level definition persists in the eval library; without a docstring it is live-only. Local let/fn bindings are scratch. A successful call's namespace is re-entered; output is (emit value) or the final value, while stdout and stderr are discarded. (eval/help) lists sources, the library, and the full verb surface; this is the sandbox, not the project's nREPL.
+Evaluate Clojure in this session's persistent SCI sandbox: the babashka script surface (fs, sh, slurp, spit, require, tools) The session is single-threaded: two eval calls never overlap — the second waits for the first. Put independent work in ONE call and fan out with (sandbox/spawn f), pmap, or tools/call promises; a call that defines a verb or changes eval state serializes its batch. Eval creates verbs: a documented top-level definition persists in the eval library; without a docstring it is live-only. Local let/fn bindings are scratch. A successful call's namespace is re-entered; output is (emit value) or the final value, while stdout and stderr are discarded. (eval/help) lists sources, the library, and the full verb surface; this is the sandbox, not the project's nREPL.
 
 ---
 

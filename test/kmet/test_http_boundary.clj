@@ -22,7 +22,7 @@
    extensions, test), at any depth — a recursive walk, not `fs/glob` with
    `**/`: the glob does not match files directly in a base dir, so it was
    silently skipping the scripts/ top level and `extensions/*.clj`, and it
-   only looked at .clj, missing every .cljc (run_code, context, the win
+   only looked at .clj, missing every .cljc (codemode, context, the win
    clipboard shim). Build output and cache dirs are skipped
    (build-dir-names)."
   ([] (source-files ["src" "scripts" "extensions" "test"]))

@@ -186,8 +186,8 @@ defaults -> global selection -> project delta -> /tools session override
 The `/tools` override applies to tools only.
 
 Defaults: skills and prompt templates are on. A built-in tool is on unless
-its row carries `:default-enabled? false` (`run_code` and `eval`); extension
-tools are on. A modifier-only or unset selection never turns `run_code` or
+its row carries `:default-enabled? false` (`codemode` and `eval`); extension
+tools are on. A modifier-only or unset selection never turns `codemode` or
 `eval` on; a plain name or `+name` does.
 
 Availability is separate from selection. A resource is available when a
@@ -261,12 +261,12 @@ prompt never lists it.
 > shapes](#retired-selection-shapes) for migration reference.
 
 The built-in tools are `read`, `write`, `edit`, `bash`, `tool_search`,
-`run_code` and `eval`. All but the last two start enabled; `run_code` and
+`codemode` and `eval`. All but the last two start enabled; `codemode` and
 `eval` are mounted but opt-in (see below).
 Each is a composition row — `:tool/read`, `:tool/bash`, … in the built-in
 bundle — so a profile or a patch layer can take one out of the run entirely
 (`{:id :tool/bash :remove true}`: the tool is not in the model's schema and not
-in the `run_code` surface). The retired `:default-tools` key was the selection
+in the `codemode` surface). The retired `:default-tools` key was the selection
 on top of that; the runtime now applies the `:resources` selection instead.
 
 A tool row's `:config` changes what the model **reads**, never what the tool
@@ -300,7 +300,7 @@ removed one, applied in list order. A mixed list used its plain names as the
 selection and then applied the modifiers. An empty list disabled every
 default-on built-in tool (extension tools stayed available). An unset
 `:default-tools` selected `default-tool-names` — every built-in row without
-`:default-enabled? false` — so `run_code` and `eval` stayed off. Those two rows
+`:default-enabled? false` — so `codemode` and `eval` stayed off. Those two rows
 carry that marker: they are mounted, and the retired settings selection could
 enable them, while `/config` enables them persistently and `/tools` enables
 them for the current session only.
@@ -317,13 +317,13 @@ A plain list was absolute: a tool that mounted later was not added. A
 modifier-only list was re-resolved against the live table, so a tool that
 mounted later defaulted on (an extension or MCP catalog that connects after
 startup was not silently dropped). An empty list selected no model-facing tools
-(a `:sandbox` source's tools stay callable from `run_code`). Project settings
+(a `:sandbox` source's tools stay callable from `codemode`). Project settings
 layered over user settings for both keys: a `.kmet/settings.edn` list of only
 `+name`/`-name` entries modified the user's list, while a list containing a
 plain name replaced it.
 
 An extension tool source may be *deferred*: its tools are callable from
-`run_code` but not declared to the model until the built-in `tool_search`
+`codemode` but not declared to the model until the built-in `tool_search`
 loads one. `tool_search` itself is declared only while the selection can
 promote something — a deferred tool or a contributed sandbox tool — so a setup
 with no such source pays no schema for it. It is a selection row like any

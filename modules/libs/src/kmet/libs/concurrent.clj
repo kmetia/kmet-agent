@@ -3,7 +3,7 @@
 
    - `spawn` — the extension-SCI daemon-thread replacement for `future`
    - `or-signal` — a read-only OR-view over cancel signals (the provider
-     stream's guard trip, the run_code bridge's abort), used wherever a
+     stream's guard trip, the codemode bridge's abort), used wherever a
      consumer must poll two triggers as one
    - `queue`/`put!`/`take!`/`close!` — the hand-off between a blocking reader
      thread and the owner thread that consumes what it read

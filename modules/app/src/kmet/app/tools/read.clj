@@ -227,7 +227,7 @@
 (defn image-block
   "The wire image block `{:data <base64> :mime-type <str>}` for BUF when it is
    a supported image, nil otherwise (pi: detectSupportedImageMimeType plus
-   base64). The read tool and run_code's emit-image share it, so a script and
+   base64). The read tool and codemode's emit-image share it, so a script and
    a direct read accept exactly the same images."
   [^bytes buf]
   (when-let [mime-type (and buf (detect-supported-image-mime-type buf))]

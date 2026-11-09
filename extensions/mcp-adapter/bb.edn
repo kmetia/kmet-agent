@@ -10,7 +10,7 @@
         ;; malli at load time; pinned at the root deps.edn versions.
         org.clojure/data.json {:mvn/version "2.5.2"}
         metosin/malli {:mvn/version "0.20.3"}
-        ;; script_test drives run_code, whose sandbox shares the fixed bundled
+        ;; script_test drives codemode, whose sandbox shares the fixed bundled
         ;; extension set (kmet.app.extensions.libs). rewrite-clj, edamame and
         ;; spec.alpha are bb-bundled; cljfmt and parinferish are the two
         ;; Maven-only members, so the extension's own classpath has to declare

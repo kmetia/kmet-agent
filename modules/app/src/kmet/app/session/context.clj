@@ -47,8 +47,8 @@
 (defn- omitted-line
   "The closing line standing for DROPPED sources, naming the discovery paths
    OPTS makes available (pi: the `… N more servers` line)."
-  [dropped {:keys [run-code? eval? tool-search?]}]
-  (let [script? (or run-code? eval?)]
+  [dropped {:keys [codemode? eval? tool-search?]}]
+  (let [script? (or codemode? eval?)]
     (str "- … " dropped " more source" (when (not= 1 dropped) "s")
          (cond
            (and script? tool-search?)
@@ -105,11 +105,11 @@
 (defn- discovery-text
   "The sentence naming how OPTS lets the model reach a deferred source's tools;
    nil when no discovery path is selected. OPTS names the paths themselves, so
-   an eval-only or run_code-only selection never mentions the other tool."
-  [{:keys [run-code? eval? tool-search?]}]
+   an eval-only or codemode-only selection never mentions the other tool."
+  [{:keys [codemode? eval? tool-search?]}]
   (let [script (cond
-                 (and run-code? eval?) "run_code or eval"
-                 run-code? "run_code"
+                 (and codemode? eval?) "codemode or eval"
+                 codemode? "codemode"
                  eval? "eval")]
     (cond
       (and script tool-search?)
@@ -126,7 +126,7 @@
 (defn deferred-sources-listing
   "The text that tells the model which deferred tool sources exist: one line per
    source (its id and its one line), and what it can do about them. OPTS names
-   the available discovery paths (`:run-code?`, `:eval?`, `:tool-search?`); with
+   the available discovery paths (`:codemode?`, `:eval?`, `:tool-search?`); with
    none, returns nil — there is nothing the model can do with the list. Once
    something was listed, an empty set says so rather than leaving the stale
    message standing. The text is bounded (`max-listing-chars`) and
@@ -137,7 +137,7 @@
    one when it changes, so earlier messages stay cached; kmet has no
    mid-conversation system role, so this is appended as a custom message
    (`state/sync-tool-sources-listing!`) instead of rebuilding the leading one."
-  ([sources] (deferred-sources-listing sources {:run-code? true
+  ([sources] (deferred-sources-listing sources {:codemode? true
                                                 :eval? true
                                                 :tool-search? true}))
   ([sources opts]

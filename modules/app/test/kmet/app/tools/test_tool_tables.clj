@@ -169,8 +169,8 @@
                           (tool/configure (tool-record "bash") [:description "x"]))
         "a non-map config is refused"))
 
-(t/deftest the-run-code-record-dispatches-through-its-own-handle
-  ;; The `:tool/run_code` row builds its record for the handle it was mounted
+(t/deftest the-codemode-record-dispatches-through-its-own-handle
+  ;; The `:tool/codemode` row builds its record for the handle it was mounted
   ;; over, so the record's sandbox surface (`select-tools` over its own
   ;; registry) is that handle's: a tool registered in A is callable from A's
   ;; record and unknown to B's, and that surface is what the bridge gates on.
@@ -178,12 +178,12 @@
   ;; the shape assertions above cannot see.
   (let [a (:tools (tu/tool-ctx))
         b (:tools (tu/tool-ctx))
-        run (fn [h] (:execute (get (tools/get-all-tools h) "run_code")))
+        run (fn [h] (:execute (get (tools/get-all-tools h) "codemode")))
         code "(emit (:content @(tools/call \"probe\" {})))"]
     (tools/register-tool! a (probe "from-a"))
     (let [from-a (:content ((run a) {:code code} nil nil nil))
           from-b (:content ((run b) {:code code} nil nil nil))]
       (t/is (= "from-a" from-a)
             "A's record reaches the tool registered in A")
-      (t/is (str/includes? from-b "Tool not active in this run_code call: probe")
+      (t/is (str/includes? from-b "Tool not active in this codemode call: probe")
             "B's record does not — its surface came from its own handle"))))

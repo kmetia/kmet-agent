@@ -531,7 +531,7 @@
    membership rule lives beside its enumeration (kmet.app.extensions.libs,
    bundled-library-namespace?); the lazy resolve keeps the set's libraries
    off the extension machinery's load path — host-requires! loads them on
-   the first extension (run_code's require-host-namespaces! on the first
+   the first extension (codemode's require-host-namespaces! on the first
    script). The set's clojure.* members — spec.alpha, tools.reader,
    core.async, rrb-vector — are admitted by shared-namespace?'s host clauses
    and port sets instead."

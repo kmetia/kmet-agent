@@ -126,7 +126,7 @@
 (deftest extension-tools-reach-the-compositions-tool-table
   ;; The host's :registry is a tag router: :kmet/tool (and :kmet/tool-source)
   ;; go to the composition's :tools service, which is what the loop's table,
-  ;; the /tools selector and run_code read. Held in the row's own handle they
+  ;; the /tools selector and codemode read. Held in the row's own handle they
   ;; would register fine and be invisible — the Clojure extension's edit/eval
   ;; tools did exactly that.
   (with-restored-host

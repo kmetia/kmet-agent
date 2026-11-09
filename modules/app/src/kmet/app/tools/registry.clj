@@ -4,7 +4,7 @@
 
    **A tool is a registration, and a built-in tool is a row.** `:bundle/minimal`
    mounts five tool rows (`:tool/read`, `:tool/write`, `:tool/edit`,
-   `:tool/bash`, `:tool/run_code`), each injecting `:tools` and calling
+   `:tool/bash`, `:tool/codemode`), each injecting `:tools` and calling
    `mount-tool!`, so the table is exactly what the composition mounted: the rows
    a profile kept, minus the ones a patch removed, plus whatever an extension
    registered. There is no static table under it, and nothing sees a tool it did
@@ -361,7 +361,7 @@
    a colliding name keeps ALL's record), minus EXCLUDE names (the script
    surface hides its own tools). The result is a map with ALL's keys (its
    order is the map's — a table past array-map size does not keep insertion
-   order). The loop's schema and the run_code bridge's callable set both
+   order). The loop's schema and the codemode bridge's callable set both
    resolve through this, so what a caller lists and what it can dispatch
    cannot drift."
   [all {:keys [enabled contributed exclude]}]
@@ -422,9 +422,9 @@
    — extension context map for :contextual? tools (pi: execute(toolCallId,
    params, signal, onUpdate, ctx)), carrying the run's ctx under :srce-ctx
    when the call belongs to one (`kmet.app.loop.tool-exec`, and the sandbox
-   realm `run_code` substitutes for a script's inner calls — `kmet.app.sandbox`);
+   realm `codemode` substitutes for a script's inner calls — `kmet.app.sandbox`);
    :tools — a name → tool map override for
-   the run_code sandbox, which passes its own surface so the script's listing
+   the codemode sandbox, which passes its own surface so the script's listing
    is authoritative for dispatch (contributed sandbox tools are not in
    get-all-tools). A :contextual? tool's execute always receives 4 args
    (fn [args on-update signal ctx]) — pi passes the signal and ctx
@@ -505,7 +505,7 @@
 
 (def default-tool-names
   "The default built-in tool names: `:bundle/minimal`'s tool rows without
-   `:default-enabled? false` (run_code and eval opt out). Used by
+   `:default-enabled? false` (codemode and eval opt out). Used by
    `default-off-tool?` and the runtime's built-in default; the resources
    selection starts from this set."
   (bundle-default-tool-names minimal-bundle))

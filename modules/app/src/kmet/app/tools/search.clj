@@ -41,7 +41,7 @@
    `tool_search` reads `:declared` to skip what the model already has, narrows
    its candidates with `:selection` (so it never promises a tool the wire would
    not declare), and calls `:load!` with its matches. A tool body cannot reach
-   the agent, so this is the same seam `run_code` uses for the run state a tool
+   the agent, so this is the same seam `codemode` uses for the run state a tool
    needs. nil outside a run (a direct call, a test): a match that cannot be
    recorded is not loaded, so the call reports none (pi: `options.tools`
    absent); a missing `:selection` means no selection, as a direct call has

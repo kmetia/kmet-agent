@@ -164,3 +164,27 @@
     (t/is (= "hi\n"
              (:content (run-in s {}
                                "(emit (:out (sh \"sh\" \"-c\" \"read x; echo $x\" :in \"hi\\n\")))"))))))
+
+(defn- run-with-dispatch
+  "Run CODE with TOOLS dispatched through the bridge, so the bare tool wrappers
+   settle a real tool result."
+  [s tools code]
+  (script/run (assoc (run-opts tools code)
+                     :sci-ctx (:ctx s)
+                     :interrupt (:holder s)
+                     :execute-tool (fn [name args _]
+                                     (if-let [tool (get tools name)]
+                                       ((:execute tool) args)
+                                       {:content (str "Unknown tool: " name)
+                                        :is-error true})))))
+
+(t/deftest test-bare-tool-wrappers-settle-the-tool
+  (let [s (kept-context)
+        tools {"read" (tool-def "read")
+               "write" (tool-def "write")
+               "edit" (tool-def "edit")
+               "bash" (tool-def "bash")}]
+    (t/is (= "read" (:content (run-with-dispatch s tools "(emit (read \"x\"))"))))
+    (t/is (= "write" (:content (run-with-dispatch s tools "(emit (write \"x\" \"body\"))"))))
+    (t/is (= "edit" (:content (run-with-dispatch s tools "(emit (edit \"x\" \"old\" \"new\"))"))))
+    (t/is (= "bash" (:content (run-with-dispatch s tools "(emit (bash \"echo hi\"))"))))))

@@ -266,7 +266,7 @@
         agent (support/make-agent-state
                :on-event (fn [e] (swap! events conj e))
                ;; bash is left out of the selection
-               :enabled-tool-names (support/tool-names ["read" "write" "edit" "run_code"]))]
+               :enabled-tool-names (support/tool-names ["read" "write" "edit" "codemode"]))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (support/stub-llm-tool-then-text (atom 0))
                   state/execute-tool-for (fn [_ name _ _] (swap! executed conj name)
@@ -476,7 +476,7 @@
         agent (support/make-agent-state
                :enabled-tool-names (support/tool-names
                                     (conj (vec tools-registry/default-tool-names)
-                                          "run_code")))]
+                                          "codemode")))]
     (reset! (:tool-hook agent)
             (support/tool-hook (fn [op next] (swap! hook-calls conj op) (next op))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
@@ -485,7 +485,7 @@
                     (future
                       (if (= 1 (swap! calls inc))
                         (do (when-let [on-tc (:on-tool-call opts)]
-                              (on-tc {:id "tc1" :name "run_code"
+                              (on-tc {:id "tc1" :name "codemode"
                                       :arguments (json/generate-string
                                                   {:code "(deref (tools/call \"read\" {:path \"deps.edn\"}))"})
                                       :index 0}))
@@ -499,11 +499,11 @@
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
     (t/is (some #(= "read" (:tool-name %)) @hook-calls)
           "the scripted read call ran through the run's tool hook")
-    (t/is (some #(str/starts-with? (str (:tool-call-id %)) "run_code-") @hook-calls)
+    (t/is (some #(str/starts-with? (str (:tool-call-id %)) "codemode-") @hook-calls)
           "the inner call carries a synthetic script-N tool-call-id")
     (t/is (some #(= "tc1" (:tool-call-id %)) @hook-calls)
-          "the outer run_code call went through the same hook")
-    (t/is (= (:assistant-message (first (filter #(= "run_code" (:tool-name %)) @hook-calls)))
+          "the outer codemode call went through the same hook")
+    (t/is (= (:assistant-message (first (filter #(= "codemode" (:tool-name %)) @hook-calls)))
              (:assistant-message (first (filter #(= "read" (:tool-name %)) @hook-calls))))
           "the inner call carries the same assistant message as the outer call")))
 
@@ -937,9 +937,9 @@
               all (tools-registry/get-all-tools (support/tool-table))]
           (t/is (= (disj (set tools-registry/default-tool-names) "tool_search")
                    (all-names fal)))
-          (t/is (contains? (set (keys all)) "run_code"))
+          (t/is (contains? (set (keys all)) "codemode"))
           (t/is (contains? (set (keys all)) "eval"))
-          (t/is (not (contains? (all-names fal) "run_code"))
+          (t/is (not (contains? (all-names fal) "codemode"))
                 "the opt-ins are mounted but absent from the active set")
           (t/is (not (contains? (all-names fal) "eval"))))))))
 
@@ -968,7 +968,7 @@
   (let [ag (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
                                      :enabled-tool-names (support/tool-names ["-bash"]))
         names (set (map :name (state/active-tools ag)))]
-    (t/is (contains? names "run_code"))
+    (t/is (contains? names "codemode"))
     (t/is (contains? names "eval"))
     (t/is (not (contains? names "bash")))))
 

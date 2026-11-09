@@ -29,9 +29,9 @@ settings — see
 [`docs/extensions.md`](../docs/extensions.md)).
 
 A directory extension's manifest may carry `:meta` for opaque host
-metadata; nothing reads it at HEAD. And because `run_code`
+metadata; nothing reads it at HEAD. And because `codemode`
 is opt-in, an extension's `:sandbox` tool sources stay registered but
-unreachable from the model until `run_code` is enabled through the persisted
+unreachable from the model until `codemode` is enabled through the persisted
 `:resources` selection or the `/tools` session selector.
 
 ```bash

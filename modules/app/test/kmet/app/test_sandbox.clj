@@ -1,5 +1,5 @@
 (ns kmet.app.test-sandbox
-  "Landing 9c's gate: `run_code`'s tool bridge executes in an isolated realm.
+  "Landing 9c's gate: `codemode`'s tool bridge executes in an isolated realm.
 
    The realm is the agent's `:sandbox` value applied to the run's ctx, and it
    exists for the inner-call path only: the loop hands every tool call its own
@@ -107,9 +107,9 @@
    captured tool context's report."
   [tool args]
   (let [seen (atom nil)
-        ;; run_code is opt-in (S4.5); the script tests select it
+        ;; codemode is opt-in (S4.5); the script tests select it
         agent (support/make-agent-state
-               :enabled-tool-names (support/tool-names ["+run_code"]))]
+               :enabled-tool-names (support/tool-names ["+codemode"]))]
     (tools/register-tool! (support/tool-table) (probe seen))
     (try
       (with-redefs [cfg/get-api-key (fn [_] "test-key")
@@ -133,7 +133,7 @@
           "a tool the loop calls resolves the agent's own services"))))
 
 (deftest a-scripts-inner-call-runs-in-the-realm
-  ;; The 9c gate: the same probe, called from inside a run_code script, sees a
+  ;; The 9c gate: the same probe, called from inside a codemode script, sees a
   ;; realm — the host's table and seams do not resolve through the ctx the
   ;; bridge hands it, even though the run's tool context did.
   (support/with-registry
@@ -143,7 +143,7 @@
         (srce/provide! ctx :workspace :the-runs-workspace)
         (let [children (count (srce/children ctx))]
           (is (= {:tools false :shell false :workspace false :ctx? true}
-                 (turn! "run_code"
+                 (turn! "codemode"
                         (json/generate-string
                          {:code "(emit (deref (tools/call \"sandbox-probe\" {})))"})))
               "a script's inner call cannot read the host's services")
@@ -161,7 +161,7 @@
         (srce/provide! ctx :shell (atom {}))
         (srce/provide! ctx :workspace :the-runs-workspace)
         (is (= {:tools true :shell true :workspace true :ctx? true}
-               (turn! "run_code"
+               (turn! "codemode"
                       (json/generate-string
                        {:code "(emit (deref (tools/call \"sandbox-probe\" {})))"})))
             "no boundary means the run's ctx, unreplaced")))))
