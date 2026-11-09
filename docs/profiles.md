@@ -80,9 +80,14 @@ A missing file is not a layer; an existing one is read and validated like a
 being ignored. A row or insert patch naming an `:ext/<id>` that no installed
 extension answers to is removed when the run resolves the layer, with a
 warning, and the file is saved without it — as is a remove or config patch
-that only targeted the row. The two ambient layers are kmet's to maintain
-(`kmet plugins` writes them); an explicit `--patch` file stays strict and
-fails the composition instead.
+that only targeted the row. A patch naming, or anchoring on, a row this
+composition does not have is dropped the same way, with a warning, but the
+file is left alone: the id may be a typo or a row from another kmet version,
+and only you can decide which. `kmet plugins` is where you decide: the next
+save it makes drops the remove and config patches whose target no built-in row
+and no row in either ambient layer names. The two ambient layers are kmet's to
+maintain (`kmet plugins` writes them); an explicit `--patch` file stays strict
+and fails the composition instead.
 
 The application order is **built-in table, global, project, then each
 `--patch` flag in the order given**, so a project layer overrides a global one
@@ -151,15 +156,17 @@ not.
 
 A patch that targets an id an earlier layer *removed* is a no-op (a project
 layer disabling a row the global layer already disabled does not fail); an id
-that was never present is still an error. A `:remove` patch therefore needs a
-row to target somewhere earlier in the composition: `kmet plugins` keeps a
-disabled extension's row (with its config) and only adds the remove patch, so
-if you delete that row by hand, delete its remove patch too.
+that was never present is an error, except in the two ambient layers, where
+the patch is dropped with a warning (see *Your own layers*). A `:remove` patch
+therefore needs a row to target somewhere earlier in the composition: `kmet
+plugins` keeps a disabled extension's row (with its config) and only adds the
+remove patch, so if you delete that row by hand, delete its remove patch too.
 
-Every mistake is refused by name before anything boots: an unknown row id, a
-duplicate id, a patch that changes nothing, a `:remove` that also sets config,
-an unknown patch key, or a file that is not `{:rows … :patch …}` — each names
-the offending entry (`:kmet.app/unknown-row`, `:kmet.app/bad-patch`,
+Every mistake is refused by name before anything boots: an unknown row id (the
+two ambient layers drop such a patch with a warning instead), a duplicate id,
+a patch that changes nothing, a `:remove` that also sets config, an unknown
+patch key, or a file that is not `{:rows … :patch …}` — each names the
+offending entry (`:kmet.app/unknown-row`, `:kmet.app/bad-patch`,
 `:kmet.app/bad-patch-file`, …).
 
 ## Checking a layer before you run it

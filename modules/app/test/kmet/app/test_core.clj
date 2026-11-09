@@ -519,6 +519,33 @@
               "the layer is saved without the row")))
       (finally (io/delete-file path true)))))
 
+(deftest dump-config-drops-an-ambient-stale-row-patch
+  ;; The motivating case: a project or global patch.edn still carries a patch
+  ;; for a row this composition does not have (a retired id, a typo). Startup
+  ;; drops it with a warning instead of failing the boot, and the file is left
+  ;; alone — the editor, not the run, decides to rewrite it.
+  (let [content "{:rows [] :patch [{:id :tool/run_code :remove true}]}\n"
+        path (scratch-patch! content)]
+    (try
+      (with-redefs [cfg/patch-paths (fn [] [path])]
+        (let [{:keys [code out err]} (support/run-main ["--dump-config"])]
+          (is (zero? code) "the stale patch no longer fails the composition")
+          (is (str/starts-with? out "profile :tui rows=30 patches=2"))
+          (is (str/includes? err "Warning: dropped {:id :tool/run_code, :remove true}")
+              "the drop is announced on stderr")
+          (is (str/includes? err path))
+          (is (str/includes? err "the composition has no row :tool/run_code"))
+          (is (= content (slurp path)) "the layer is left alone")))
+      (finally (io/delete-file path true)))))
+
+(deftest an-explicit-stale-row-patch-is-not-dropped
+  (let [path (scratch-patch! "{:rows [] :patch [{:id :tool/run_code :remove true}]}\n")]
+    (try
+      (let [{:keys [code err]} (support/run-main ["--dump-config" "--patch" path])]
+        (is (= 1 code) "an explicit --patch file keeps failing")
+        (is (str/includes? err "unknown row: :tool/run_code")))
+      (finally (io/delete-file path true)))))
+
 (deftest an-explicit-patch-file-is-not-healed
   (let [path (scratch-patch! (str "{:rows [{:id :ext/tools :plugin :ext/tools}]\n"
                                   " :patch []}\n"))]

@@ -29,7 +29,10 @@
 
    A write re-renders the layer's EDN and keeps the file's leading comments;
    it runs under the EDN store's file lock, so two editors cannot lose each
-   other's toggle."
+   other's toggle. A write also drops the remove and config patches whose
+   target no built-in row and no row in either ambient layer names — a retired
+   row id or a typo the run drops in memory and warns about — so the editor's
+   save heals the file a run only reports."
   (:require [clojure.edn :as edn]
             [clojure.pprint :as pprint]
             [clojure.string :as str]
@@ -211,24 +214,71 @@
   (let [header (when (fs/exists? path) (comment-header (slurp path)))]
     (spit path (str header (with-out-str (pprint/pprint data))))))
 
+(defn- builtin-row-ids
+  "Every row id the built-in table declares — each bundle's rows and each
+   profile's layers — across all profiles. Ambient layers apply to every
+   profile, so a row any of them composes is a patch target a save keeps; an
+   id none of them declares (a retired row, a typo) can never apply. Data
+   only."
+  []
+  (let [table (profile/builtin)]
+    (into #{}
+          (comp (mapcat :rows) (keep :id))
+          (concat (vals (:bundles table))
+                  (mapcat #(profile/layers table %) (keys (:profiles table)))))))
+
+(defn- target-ids
+  "The row ids a remove or config patch in the two ambient LAYER-DATAS may
+   keep naming: the built-in rows, plus the id of every row and insert the
+   readable layers themselves carry. An id outside this set names no row
+   anywhere, so a save drops the patch instead of writing it back."
+  [layer-datas]
+  (into (builtin-row-ids)
+        (comp (mapcat (fn [{:keys [rows patch]}] (concat rows patch)))
+              (filter :plugin)
+              (map row-id))
+        layer-datas))
+
+(defn- stale-patch?
+  "True when PATCH is a remove or config patch whose :id is not in IDS."
+  [ids patch]
+  (and (map? patch)
+       (contains? patch :id)
+       (not (:plugin patch))
+       (not (contains? ids (:id patch)))))
+
+(defn- without-stale-patches
+  "DATA with the remove and config patches whose target IDS does not name
+   removed; every other key and entry is untouched."
+  [data ids]
+  (let [patch (:patch data)
+        kept (into [] (remove #(stale-patch? ids %)) patch)]
+    (if (= (vec patch) kept)
+      data
+      (assoc data :patch kept))))
+
 (defn- update-layer!
-  "Read PATH, apply F to its `[rows patch]` and write the result back when
-   either changed, keeping the layer's other keys and its leading comments.
-   The read-modify-write runs under the EDN store's file lock. Returns true
-   when the file changed."
+  "Read PATH, drop the remove and config patches whose target no row in the
+   two ambient layers or in the built-in table names (a save must not write a
+   retired row id or a typo back), apply F to the remaining `[rows patch]` and
+   write the result back when anything changed, keeping the layer's other keys
+   and its leading comments. The read-modify-write runs under the EDN store's
+   file lock. Returns true when the file changed."
   [path f]
   (when-let [dir (fs/parent path)]
     (fs/create-dirs dir))
   (eds/with-file-lock (str path ".lock")
     (fn []
-      (let [data (read-data! path)
+      (let [original (read-data! path)
+            data (without-stale-patches original
+                                        (target-ids (map :data (vals (layers)))))
             rows (vec (or (:rows data) []))
             patch (vec (or (:patch data) []))
             [next-rows next-patch] (f rows patch)
             next (if (and (= rows next-rows) (= patch next-patch))
                    data
                    (assoc data :rows next-rows :patch next-patch))]
-        (if (= data next)
+        (if (= original next)
           false
           (do (write-layer! path next)
               true))))))

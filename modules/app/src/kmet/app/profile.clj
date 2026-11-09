@@ -48,7 +48,12 @@
 
    Config *values* deep-merge; composition does not — a bundle's rows are
    appended as they are, and later layers patch by id. A patch that names an
-   unknown id without a `:plugin` is an error, not a silent no-op.
+   unknown id without a `:plugin` is an error, not a silent no-op — unless
+   the layer is flagged `:lenient? true` (how `kmet.app.core` reads the two
+   ambient user layers), in which case the patch is dropped and reported in
+   `:dropped` for the entry to warn about: a patch.edn written for an older
+   composition heals instead of failing the boot. The built-in layers and an
+   explicit `--patch` file stay strict.
 
    This namespace is data only: it never loads a plugin and never reads a
    process value. `kmet.app.catalog` turns rows into cards, `kmet.app.core`
@@ -186,25 +191,36 @@
       (update row :config #(deep-merge (or % {}) cfg))
       row)))
 
-(defn- insert-row
-  "Insert PATCH (a row with an explicit or defaulted :id) among ROWS,
-   positioned by :after/:before or appended."
+(defn- insert-at
+  "The index PATCH inserts at among ROWS, or nil when its :after/:before
+   anchor is absent. An anchor-less insert appends."
   [rows patch]
-  (let [new-row (dissoc patch :after :before)
-        anchor (or (:after patch) (:before patch))
-        at (if anchor
-             (if-let [i (row-index rows anchor)]
-               (if (:before patch) i (inc i))
-               (unknown-row anchor patch))
-             (count rows))]
-    (vec (concat (subvec rows 0 at) [new-row] (subvec rows at)))))
+  (if-let [anchor (or (:after patch) (:before patch))]
+    (when-let [i (row-index rows anchor)]
+      (if (:before patch) i (inc i)))
+    (count rows)))
+
+(defn- insert-row
+  "Insert PATCH (a row with an explicit or defaulted :id) among ROWS at AT."
+  [rows at patch]
+  (vec (concat (subvec rows 0 at) [(dissoc patch :after :before)] (subvec rows at))))
+
+(defn- unknown-or-dropped
+  "Strict composition: raise :kmet.app/unknown-row naming MISSING. A LAYER
+   flagged `:lenient?` instead records the patch in STATE's `:dropped` —
+   `{:missing missing :patch patch :path (:path layer)}` — and continues."
+  [state layer missing patch]
+  (if (:lenient? layer)
+    (update state :dropped conj {:missing missing :patch patch :path (:path layer)})
+    (unknown-row missing patch)))
 
 (defn- apply-patch
-  "Apply PATCH to STATE (`{:rows [...] :removed #{ids}}`) and return the new
-   state. Removing an id that an earlier patch removed is a no-op, so a
-   project layer's disable of a row a global layer already disabled does not
-   dangle; removing an id that was never there is still an error."
-  [state patch]
+  "Apply PATCH of LAYER to STATE (`{:rows [...] :removed #{ids} :dropped
+   [...]}`) and return the new state. Removing an id that an earlier patch
+   removed is a no-op, so a project layer's disable of a row a global layer
+   already disabled does not dangle; removing an id that was never there is an
+   error unless LAYER is lenient."
+  [state layer patch]
   (let [rows (:rows state)
         removed (:removed state)
         patch (check-patch! patch)
@@ -213,37 +229,53 @@
     (cond
       (:remove patch)
       (cond
-        idx {:rows (vec (concat (subvec rows 0 idx) (subvec rows (inc idx))))
-             :removed (conj removed id)}
+        idx (-> state
+                (assoc :rows (vec (concat (subvec rows 0 idx) (subvec rows (inc idx)))))
+                (update :removed conj id))
         (contains? removed id) state
-        :else (unknown-row id patch))
+        :else (unknown-or-dropped state layer id patch))
 
       idx (do (when (or (:after patch) (:before patch))
                 (bad-patch patch "a patch on an existing row takes no :after/:before"))
-              {:rows (assoc rows idx (patched-row (nth rows idx) patch))
-               :removed (disj removed id)})
+              (-> state
+                  (assoc :rows (assoc rows idx (patched-row (nth rows idx) patch)))
+                  (update :removed disj id)))
 
-      (contains? patch :plugin) {:rows (insert-row rows patch)
-                                 :removed (disj removed id)}
+      (contains? patch :plugin)
+      (if-let [at (insert-at rows patch)]
+        (-> state
+            (assoc :rows (insert-row rows at patch))
+            (update :removed disj id))
+        (unknown-or-dropped state layer (or (:after patch) (:before patch)) patch))
+
       ;; a config overlay on a row an earlier patch removed has nothing to
-      ;; apply; a never-present id is still a typo
+      ;; apply; a never-present id is a typo (dropped when the layer is
+      ;; lenient)
       (contains? removed id) state
-      :else (unknown-row id patch))))
+      :else (unknown-or-dropped state layer id patch))))
 
 (defn compose
   "Apply LAYERS in order to an empty composition → `{:rows [row …] :patches
-   n}`. Every row must carry an `:id` (a card's, resolved by the catalog);
-   duplicate ids across stacked bundles are an error. A patch targeting an
-   id an earlier patch removed is a no-op (remove or config), so a project
-   layer's disable of a globally disabled row does not dangle; an id that was
-   never there is still an error."
+   n :dropped [entry …]}`. Every row must carry an `:id` (a card's, resolved
+   by the catalog); duplicate ids across stacked bundles are an error. A patch
+   targeting an id an earlier patch removed is a no-op (remove or config), so
+   a project layer's disable of a globally disabled row does not dangle; an id
+   that was never there is an error.
+
+   A layer flagged `:lenient? true` — the two ambient user layers as
+   `kmet.app.core` reads them — drops a patch that names, or anchors on, a row
+   that was never present instead of raising, and records it in `:dropped` as
+   `{:missing missing :patch patch :path p}` (MISSING the absent row id, PATH
+   the layer's own `:path`) so the entry can warn. The built-in layers and an
+   explicit `--patch` file stay strict."
   [layers]
   (let [composed (reduce (fn [state layer]
-                           (reduce apply-patch
+                           (reduce (fn [state patch] (apply-patch state layer patch))
                                    {:rows (into (:rows state) (:rows layer))
-                                    :removed (:removed state)}
+                                    :removed (:removed state)
+                                    :dropped (:dropped state)}
                                    (:patch layer)))
-                         {:rows [] :removed #{}}
+                         {:rows [] :removed #{} :dropped []}
                          layers)
         rows (:rows composed)
         patches (transduce (map #(count (:patch %))) + layers)
@@ -255,7 +287,7 @@
     (when (seq dupes)
       (throw (ex-info (str "duplicate row ids: " (pr-str (vec dupes)))
                       {:type :kmet.app/duplicate-row :ids (vec dupes)})))
-    {:rows rows :patches patches}))
+    {:rows rows :patches patches :dropped (:dropped composed)}))
 
 (defn- pad [s width] (format (str "%-" width "s") s))
 

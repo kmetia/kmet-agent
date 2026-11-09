@@ -405,3 +405,19 @@
                     (render-lines project 240)))
         (t/is (not-any? #(str/includes? % "settings.edn")
                         (render-lines global 240)))))))
+
+(t/deftest a-toggle-drops-a-stale-row-patch
+  (with-plugins
+    (fn [{:keys [global-patch]}]
+      (spit global-patch
+            (pr-str {:rows []
+                     :patch [{:id :tool/run_code :remove true}
+                             {:id :tool/bash :remove true}]}))
+      (let [screen (plugins/make-plugins-screen :rows 40)]
+        (plugins/screen-set-query! screen "bash")
+        (t/is (false? (:enabled (first-item screen)))
+              "the stale layer's remove patch disables bash")
+        (protocols/handle-input screen " ")
+        (t/is (true? (:enabled (first-item screen))))
+        (t/is (= {:rows [] :patch []} (layer-of global-patch))
+              "the save dropped the retired row's patch along with the toggle")))))

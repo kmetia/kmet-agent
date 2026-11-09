@@ -271,7 +271,7 @@
         (is (true? (layers/apply-project-state! :ext/x :inherit)))
         (is (= [] (:patch (read-layer project))))
         (let [parsed (layers/layers)]
-          (is (= {:rows [] :patches 0}
+          (is (= {:rows [] :patches 0 :dropped []}
                  (profile/compose [(:data (:global parsed))
                                    (:data (:project parsed))])))))
       (testing "a config patch on an id the global layer still composes stays"
@@ -302,7 +302,7 @@
       (is (= {:rows [] :patch []} (read-layer project))
           "the row and the config patch that only targeted it are gone")
       (let [parsed (layers/layers)]
-        (is (= {:rows [] :patches 0}
+        (is (= {:rows [] :patches 0 :dropped []}
                (profile/compose [(:data (:global parsed))
                                  (:data (:project parsed))])))))))
 
@@ -463,3 +463,26 @@
                  (read-layer project))
               (str "a project remove patch dies with the global row it"
                    " targeted; a patch on a row that still composes stays")))))))
+
+(deftest a-save-drops-patches-no-row-can-target
+  (with-layers
+    (fn [{:keys [global project]}]
+      (write-layer! global {:rows [{:id :app/custom :plugin 'kmet.app.test/plugin}]
+                            :patch [{:id :tool/run_code :remove true}
+                                    {:id :tool/nope :config {:a 1}}
+                                    {:id :app/custom :config {:a 1}}
+                                    {:id :mode-tui :remove true}]})
+      (is (true? (layers/apply-global-builtin-state! :tool/bash false)))
+      (is (= {:rows [{:id :app/custom :plugin 'kmet.app.test/plugin}]
+              :patch [{:id :app/custom :config {:a 1}}
+                      {:id :mode-tui :remove true}
+                      {:id :tool/bash :remove true}]}
+             (read-layer global))
+          (str "the patches no built-in row and no layer row names are gone;"
+               " a layer row's target and a built-in row's target stay"))
+      (testing "a project save heals the project layer the same way"
+        (write-layer! project {:rows [] :patch [{:id :tool/run_code :config {}}]})
+        (is (true? (layers/apply-project-state! :ext/a :load)))
+        (is (= {:rows [] :patch [{:id :ext/a :plugin :ext/a}]}
+               (read-layer project))
+            "the stale project patch is dropped, the toggle's insert written")))))

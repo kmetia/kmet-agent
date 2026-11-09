@@ -10,7 +10,11 @@
    table without them. A row in one of them naming an extension that is not
    installed is removed when the run resolves the layers, with a warning and
    the file saved: a retired extension's row heals instead of failing the
-   boot, while an explicit `--patch` file stays strict. `--dump-state` is the other half of an inspection: it
+   boot. A patch in one of them naming, or anchoring on, a row the composition
+   does not have is dropped for that composition, with a warning, and the file
+   is left alone (the id may be a typo or a row from another version): a stale
+   patch.edn likewise heals instead of failing the boot, while a built-in
+   layer or an explicit `--patch` file stays strict. `--dump-state` is the other half of an inspection: it
    boots the same rows and prints the ctx tree the boot produced
    (`kmet.app.inspect`), which is the one question a composition listing cannot
    answer — what is `:pending` and on what, what failed and with which error.
@@ -409,19 +413,37 @@
       (throw (ex-info (str "a patch file holds {:rows […] :patch […]}: " path)
                       {:type :kmet.app/bad-patch-file :path path :content layer})))))
 
+(defn- warn-dropped-patches!
+  "Warn once per patch an ambient layer carried that names, or anchors on, a
+   row the composition does not have, naming the file so the patch can be
+   fixed. The layer itself is left alone."
+  [dropped]
+  (when (seq dropped)
+    (binding [*out* *err*]
+      (doseq [{:keys [missing patch path]} dropped]
+        (println (str "Warning: dropped " (pr-str patch) " from " path
+                      " — the composition has no row " (pr-str missing))))
+      (flush))))
+
 (defn compose-config
   "Compose OPTS' profile plus its layers, describing every row through the
    catalog on the way: the built-in table, then the ambient user layers
-   (`:user-layer-paths`, resolved by `main`), then the `--patch` files. Returns
-   `{:profile kw :rows … :patches n}`; composition errors are `:kmet.app/*`
-   ex-infos."
+   (`:user-layer-paths`, resolved by `main`), then the `--patch` files. The
+   ambient layers compose leniently (`:lenient?`): a patch one of them carries
+   that names a row the composition does not have is dropped and warned about
+   on stderr instead of failing the boot, so a patch.edn written for an older
+   composition cannot strand a run. The built-in layers and the `--patch`
+   files stay strict. Returns `{:profile kw :rows … :patches n :dropped […]}`;
+   composition errors are `:kmet.app/*` ex-infos."
   [opts]
   (let [chosen (:profile opts)
         table (profile/builtin)
+        ambient (fn [path] (assoc (read-layer path) :lenient? true :path path))
         layers (concat (profile/layers table chosen)
-                       (map read-layer (:user-layer-paths opts))
+                       (map ambient (:user-layer-paths opts))
                        (map read-layer (:patch opts)))
         composed (profile/compose (map catalog/describe-layer layers))]
+    (warn-dropped-patches! (:dropped composed))
     (assoc composed :profile chosen)))
 
 (defn- heal-user-layers!

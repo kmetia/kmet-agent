@@ -196,8 +196,9 @@ pass).
   config, `{:id … :remove true}` drops it, and an unknown `:id` that carries a
   `:plugin` inserts a row (positioned by `:after`/`:before`, else appended). A
   patch that names an unknown row without a plugin is an error, and so is a
-  duplicate id across stacked layers. Configuration *values* deep-merge;
-  composition does not.
+  duplicate id across stacked layers — except in the two ambient layers, which
+  compose leniently and drop such a patch with a warning. Configuration
+  *values* deep-merge; composition does not.
 - Layers apply in order: the built-in table < `~/.kmet/agent/patch.edn` <
   `.kmet/patch.edn` < `--patch FILE` (repeatable). `--dump-default-config`
   prints the built-in table alone, and `kmet plugins` edits the two ambient
@@ -206,8 +207,12 @@ pass).
   insert naming an `:ext/<id>` no installed extension answers to, and the
   remove or config patches that only targeted those rows — with a warning,
   saving the file — so a retired extension's row heals instead of failing the
-  boot; a `--patch` file keeps failing, since it is not kmet's to edit. A
-  profile still comes only from the built-in table: there is no named home
+  boot. A patch naming, or anchoring on, a row the composition does not have is
+  dropped for that run with a warning and the file is left alone — the id may
+  be a typo or a row from another version — but a `kmet plugins` save drops the
+  remove and config patches among them, and a `--patch` file keeps failing,
+  since it is not kmet's to edit. A profile still comes only from the
+  built-in table: there is no named home
   profile and no project-shipped profile table. (dsh applies its home-level patch *after* the profile's own
   rows and has no project layer; kmet puts both ambient layers before the
   profile's own rows and the `--patch` files, the usual project-over-user

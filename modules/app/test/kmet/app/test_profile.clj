@@ -106,6 +106,33 @@
   (is (not (profile/layer? {:rows 42})))
   (is (not (profile/layer? [{:id :tool/read :plugin 'kmet.app.test/read}]))))
 
+(deftest lenient-layers-drop-unknown-row-patches
+  (testing "a stale remove/config patch is dropped and reported, not raised"
+    (let [composed (profile/compose
+                    [{:rows [read-row]}
+                     {:lenient? true :path "project/patch.edn"
+                      :patch [{:id :tool/run_code :remove true}
+                              {:id :tool/nope :config {:a 1}}]}])]
+      (is (= [:tool/read] (ids composed)))
+      (is (= [{:missing :tool/run_code
+               :patch {:id :tool/run_code :remove true} :path "project/patch.edn"}
+              {:missing :tool/nope
+               :patch {:id :tool/nope :config {:a 1}} :path "project/patch.edn"}]
+             (:dropped composed)))))
+  (testing "an unknown insert anchor is dropped too"
+    (let [composed (profile/compose
+                    [{:lenient? true :path "project/patch.edn"
+                      :patch [{:id :tool/ls :plugin 'kmet.app.test/ls :after :tool/nope}]}])]
+      (is (empty? (:rows composed)))
+      (is (= [{:missing :tool/nope
+               :patch {:id :tool/ls :plugin 'kmet.app.test/ls :after :tool/nope}
+               :path "project/patch.edn"}]
+             (:dropped composed)))))
+  (testing "a strict layer keeps raising"
+    (is (= :kmet.app/unknown-row
+           (error-type #(profile/compose
+                         [{:patch [{:id :tool/nope :remove true}]}]))))))
+
 (deftest bad-patches-throw
   (testing "an unknown row targeted by a config-only patch"
     (is (= :kmet.app/unknown-row
