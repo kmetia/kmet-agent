@@ -411,10 +411,12 @@ many recent tokens to keep.
 VCC is deterministic and makes no model call: it emits fixed
 `[Early Session Requests]`, `[Files And Changes]`, `[Commits]`,
 `[User Messages]`, `[Branch Summary]`, and brief-transcript sections,
-merged with the previous summary and bounded by fixed caps. Failed tool calls
-are marked in the brief and never counted as file changes or commits. Both
-compactors use the same cut and the same previous-summary boundary.
-`/settings` switches the compactor live.
+merged with the previous summary and bounded by fixed caps. User messages are
+one line and capped at 300 characters, skill blocks collapse to a
+`[skill: name]` tag, and the brief transcript is selected by signal under a
+size-relative budget. Failed tool calls are marked in the brief and never
+counted as file changes or commits. Both compactors use the same cut and the
+same previous-summary boundary. `/settings` switches the compactor live.
 
 `/compact keep:N` overrides the cut for that compaction: the last N user turns
 (and everything after the Nth-from-last user message) are kept verbatim and

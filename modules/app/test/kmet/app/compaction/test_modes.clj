@@ -68,7 +68,7 @@
         (t/is (true? (compact/compact-context! agent nil :manual))))
       (let [entry (compaction-entry sess)]
         (t/is (= :compaction (:role entry)))
-        (t/is (str/includes? (:summary entry) "[User Messages]"))
+        (t/is (str/includes? (:summary entry) "[Early Session Requests]"))
         (t/is (= :vcc (get-in entry [:details :compactor])))
         (t/is (pos? (:tokens-before entry)))))))
 
@@ -109,14 +109,15 @@
   (with-session
     {:compactor :vcc :keep-recent-tokens 1}
     (fn [sess agent]
-      (user! sess "one")
+      (user! sess "first request")
       (assistant! sess "a")
-      (user! sess "two")
+      (user! sess "second request")
       (assistant! sess "b")
       (t/is (true? (compact/compact-context! agent nil :manual
                                              {:keep-user-turns 1})))
       (t/is (= :compaction (:role (compaction-entry sess))))
-      (t/is (str/includes? (:summary (compaction-entry sess)) "[User Messages]")))))
+      (t/is (str/includes? (:summary (compaction-entry sess))
+                           "[Early Session Requests]")))))
 
 (t/deftest keep-n-cut-is-shared-by-both-compactors
   (doseq [compactor [:llm :vcc]]
