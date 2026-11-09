@@ -114,17 +114,7 @@
 
 (defn- handle-compact
   [{:keys [ui] engine :runtime} args]
-  (let [{:keys [custom-instructions keep-user-turns error]} (parse-compact-args args)
-        callbacks {:on-complete (fn [result]
-                                  (when-not (= :aborted result)
-                                    ;; pi: handleCompactCommand ignores the
-                                    ;; thrown compaction error — compaction_end
-                                    ;; surfaces it (showError for manual); the
-                                    ;; completion reply is only for success and
-                                    ;; nothing-to-compact.
-                                    (out ui :info "Compact" (if result
-                                                              "Session compacted."
-                                                              "Nothing to compact (session too small)."))))}]
+  (let [{:keys [custom-instructions keep-user-turns error]} (parse-compact-args args)]
     (if error
       (out ui :warning (str "Compact: " error))
       ;; A front end always hands its commands a handle; the handle owns the
@@ -132,7 +122,18 @@
       (if-let [request (:request-compaction! engine)]
         (try
           (case (request custom-instructions
-                         (assoc callbacks :keep-user-turns keep-user-turns))
+                         {:keep-user-turns keep-user-turns
+                          :on-complete
+                          (fn [result]
+                            (when-not (= :aborted result)
+                              ;; pi: handleCompactCommand ignores the thrown
+                              ;; compaction error — compaction_end surfaces it
+                              ;; (showError for manual); the completion reply
+                              ;; is only for success and nothing-to-compact.
+                              (out ui :info "Compact"
+                                   (if result
+                                     "Session compacted."
+                                     "Nothing to compact (session too small)."))))})
             ;; A run in flight defers the compaction (kmet's cancel is cooperative,
             ;; so compacting under a live run would race it — pi instead aborts the
             ;; run first).
