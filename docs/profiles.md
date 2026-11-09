@@ -189,7 +189,7 @@ passing more than one is a usage error rather than a silent pick.
 | profile | what it does |
 |---|---|
 | `tui` | the interactive terminal UI (the default) |
-| `print` | runs one prompt and exits; `--mode text` streams the answer, `--mode edn` prints the session header and events as EDN |
+| `print` | runs one prompt and exits; `-c`/`--session` resume a stored session; `--mode text` streams the answer, `--mode edn` prints the session header and events as EDN |
 | `rpc` | the long-lived EDN protocol on stdin/stdout — see [`rpc.md`](rpc.md) |
 | `server` | the same protocol on a socket, one agent per connection; `--port` (0 asks the OS) or `--socket`, a bearer token, `--max-sessions` — see [`serve.md`](serve.md) |
 

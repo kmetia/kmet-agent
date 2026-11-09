@@ -520,9 +520,9 @@
   (println "  --max-sessions <n> --profile server's connection cap (default 8, 0 = no cap)")
   (println "  --queue-depth <n>  --profile server's records buffered per connection (default 256)")
   (println "  --idle-timeout <s> --profile server releases a connection silent this long (default 1800, 0 = never)")
-  (println "  -c, --continue     Continue this directory's last session (the TUI)")
-  (println "  -r, --resume       Pick a session to resume (the TUI)")
-  (println "  --session <id>     Open a session by id, prefix or path (the TUI)")
+  (println "  -c, --continue     Continue this directory's last session (TUI and print)")
+  (println "  -r, --resume       Pick a session to resume (TUI only)")
+  (println "  --session <id>     Open a session by id, prefix or path (TUI and print)")
   (println "  --session-dir <dir> Session storage directory")
   (println "  --dump-config      Print the composed plugin rows and exit")
   (println "  --dump-default-config")
@@ -708,15 +708,28 @@
 
 (defn- no-session-lifecycle
   "The usage error of a mode that does not open its own session, given the flag
-   that asked: named after composition, before anything boots. Print, rpc and
-   the server create their agent through `:agents`, whose factory takes no
-   session option yet, so accepting the flag there
-   would silently start the fresh session the flag exists to prevent."
+   that asked: named after composition, before anything boots. RPC and the
+   server create their agent through `:agents` and have no front-end session
+   lifecycle; accepting the flag there would silently start the fresh session
+   the flag exists to prevent."
   [profile flag]
   (binding [*out* *err*]
     (println (str flag " needs a mode that opens a session; profile "
                   (name profile) " creates its own, so it has none to continue"))
-    (println "  kmet -c   continues this directory's last session in the TUI")
+    (println "  kmet -c   continues this directory's last session (TUI and print)")
+    (flush))
+  1)
+
+(defn- resume-is-tui-only
+  "The usage error for `--resume` outside the TUI: the flag opens an
+   interactive picker, which only the TUI has. Print names `--session`
+   instead; rpc and the server refuse every session-lifecycle flag before
+   this check."
+  [profile]
+  (binding [*out* *err*]
+    (println (str "--resume picks a session interactively and is TUI-only; profile "
+                  (name profile) " has no session picker"))
+    (println "  use --session <id|path> to resume a specific session")
     (flush))
   1)
 
@@ -745,6 +758,9 @@
         (cond
           (and flag (not (:session-lifecycle mode)))
           (no-session-lifecycle (:profile opts) flag)
+
+          (and (= flag "--resume") (not= :tui (:profile opts)))
+          (resume-is-tui-only (:profile opts))
 
           (and (:prompt mode) (str/blank? prompt))
           (no-prompt (:profile opts))

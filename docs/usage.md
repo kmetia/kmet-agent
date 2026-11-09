@@ -48,7 +48,7 @@ bb start @tasks.md "summarize the tasks"
   --idle-timeout <s>    --profile server releases a connection silent this long (default 1800, 0 = never)
   -c, --continue        Continue this directory's last session (the TUI)
   -r, --resume          Pick a session to resume (the TUI)
-  --session <id>        Open a session by id, prefix or path (the TUI)
+  --session <id>        Open a session by id, prefix or path (TUI and print)
   --session-dir <dir>   Session storage directory
   --dump-config         Print the composed plugin rows and exit
   --dump-default-config
@@ -73,8 +73,9 @@ recent session for the current directory (falling back to a fresh one when
 none exists) and `--session <id|path>` resumes a specific session, by id,
 id prefix, or file path. A resumed session continues with its history and
 its recorded working directory. `-r/--resume` browses sessions interactively
-and is TUI-only. A mode that opens its own session (print, rpc, server)
-refuses these flags by name instead of silently starting a fresh one.
+and is TUI-only; print refuses it by name. RPC and the server open a fresh
+session per run and refuse all three flags instead of silently starting the
+fresh session they exist to prevent.
 
 `--mode edn` (implies `--print`) writes the machine-readable variant to
 stdout: the session header line, then every public event as one EDN map

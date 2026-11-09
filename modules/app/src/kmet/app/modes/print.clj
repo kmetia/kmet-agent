@@ -25,12 +25,18 @@
    a run that patched in a provider answers through it rather than through a
    hardcoded default.
 
+   A run can resume a stored session: `--session <id|path>` opens it by id,
+   prefix or file path, and `--continue` opens the most recent session for the
+   process cwd. `--resume` stays the TUI's interactive picker.
+
    Two formats, kmet1's two: `:text` (the default) streams the answer and
    reports a failure on stderr; `:edn` prints the session header and every event
    as EDN for a machine to read, so the event stream carries the failure and the
    exit code is the only thing left to say it happened. The mode prints; the
    entry point owns the process and prints its own errors."
-  (:require [clojure.string :as str]
+  (:require [babashka.fs :as fs]
+            [clojure.string :as str]
+            [kmet.app.config :as cfg]
             [kmet.app.wire :as wire]
             [kmet.app.packages :as packages]
             [kmet.app.session.runtime :as runtime]
@@ -93,6 +99,19 @@
       (events/on! scope :error (fn [event] (reset! error (:message event))))
       (events/on! scope :agent-settled (fn [event] (deliver settled event)))])))
 
+(defn- session-target
+  "The stored session CONFIG asks this run to resume, or nil for a fresh one.
+   `--session` names an id or path; the agent factory resolves it over the
+   effective session dir. `--continue` takes the most recent session for the
+   process cwd, and falls through to a fresh one when none exists. `--session`
+   wins when both are present, as at the entry point."
+  [config]
+  (or (:session config)
+      (when (:continue config)
+        (let [run-config (cfg/apply-cli-overrides (or (:config config) {}) config)]
+          (runtime/find-recent-session (cfg/get-session-dir run-config)
+                                       (str (fs/cwd)))))))
+
 (defn- run-prompt!
   "One prompt: create, listen on its ctx, send, wait for the settle, report.
    Returns the exit code. The mode owns the agent it made, so the handle is
@@ -101,13 +120,20 @@
    subscription: the teardown can dispose it before the run ends, and this
    function never subscribes twice.
 
-   CREATE-OPTS are the agent's own options — the invocation's run overrides
+   A stored session TARGET (`--session`, or `--continue`'s most recent) is
+   opened through the registry's `:resume!`, so the agent is created on the
+   stored session rather than starting fresh and then switching. CREATE-OPTS
+   are the agent's own options — the invocation's run overrides
    (`invocation/create-opts`); the driver applies them to the settings it loads.
    In edn mode the session header goes out first, before the run produces any
    event: a consumer reads the header to learn the id the events belong to."
   [scope agents {:keys [prompt format] :as config} settled error listener]
   (try
-    (let [handle ((:create! agents) scope (invocation/create-opts config))]
+    (let [target (session-target config)
+          opts (invocation/create-opts config)
+          handle (if target
+                   ((:resume! agents) scope target opts)
+                   ((:create! agents) scope opts))]
       (try
         ;; the agent exists, so its ctx is the scope that hears only its events
         (reset! listener (subscriptions (:ctx handle) format settled error))

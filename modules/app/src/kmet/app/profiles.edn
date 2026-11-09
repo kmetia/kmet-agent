@@ -175,10 +175,12 @@
   ;; print is the first profile with a mode row: one prompt, one run, its text
   ;; on stdout, the exit code in `kmet.app.core`. `:mode true` marks the row the
   ;; entry point hands the invocation's input to (the prompt, where to report).
+  ;; :session-lifecycle lets -c/--session open a stored session before the run;
+  ;; -r stays the TUI's picker (`kmet.app.core` refuses it for print).
   :print
   {:bundles [[:bundle/minimal {}] [:bundle/headless {}]]
    :rows [{:id :mode-print :plugin kmet.app.modes.print/plugin
-           :mode true :prompt true}]
+           :mode true :prompt true :session-lifecycle true}]
    :patch []}
 
   ;; rpc is the same rows with a mode that serves a protocol instead of a

@@ -387,12 +387,10 @@
       (is (str/includes? err "Model \"nope\" not found")))))
 
 (deftest session-flags-need-a-mode-that-opens-a-session
-  ;; Print, rpc and the server create their agent through `:agents`, whose
-  ;; factory takes no session option yet. Accepting the flag
-  ;; there would start the fresh session it exists to prevent, so it is refused
-  ;; by name, before anything boots.
-  (doseq [[args flag profile] [[["-p" "hi" "-c"] "--continue" "print"]
-                               [["--profile" "rpc" "--resume"] "--resume" "rpc"]
+  ;; RPC and the server create their agent through `:agents` and have no
+  ;; front-end session lifecycle. Accepting the flag there would start the
+  ;; fresh session it exists to prevent, so it is refused by name.
+  (doseq [[args flag profile] [[["--profile" "rpc" "--resume"] "--resume" "rpc"]
                                [["--profile" "rpc" "--session" "abc"]
                                 "--session" "rpc"]]]
     (let [{:keys [code err]} (support/run-main args)]
@@ -403,6 +401,16 @@
           "and so is the profile whose mode cannot honor it")
       (is (str/includes? err "kmet -c")
           "and the invocation that can"))))
+
+(deftest print-honors-session-lifecycle-but-not-resume
+  (let [mode (last (:rows (core/compose-config (core/parse-args ["-p" "hi"]))))]
+    (is (= :mode-print (:id mode)))
+    (is (true? (:session-lifecycle mode))
+        "print opens the session, so -c/--session reach it"))
+  (let [{:keys [code err]} (support/run-main ["-p" "--resume" "hi"])]
+    (is (= 1 code))
+    (is (str/includes? err "--resume"))
+    (is (str/includes? err "TUI-only"))))
 
 (deftest version-prints-the-shared-string
   (with-redefs [version/kmet-version (constantly "v9.9.9")]

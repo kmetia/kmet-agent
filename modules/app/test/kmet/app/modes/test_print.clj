@@ -307,3 +307,73 @@
     (extensions/unbind-extensions!)
     (is (nil? (extensions/ui-capability :set-theme))
         "a process with no front end of its own is back to inert")))
+
+(defn- user-texts [messages]
+  (->> messages
+       (filter #(= :user (:role %)))
+       (mapcat :content)
+       (keep :text)
+       vec))
+
+(defn- recording-send [seen]
+  (fn [opts]
+    (swap! seen conj (user-texts (:messages opts)))
+    (future
+      (when-let [f (:on-text opts)] (f "ok"))
+      (when-let [f (:on-done opts)] (f :stop))
+      :done)))
+
+(deftest print-mode-resumes-a-session
+  ;; `--session <id|path>` creates the agent on the stored session, not a fresh
+  ;; one: the first user message is already in the model context, and the new
+  ;; prompt is appended after it.
+  (let [seen (atom [])]
+    (with-mode-run
+      (recording-send seen)
+      (fn []
+        (let [first-run (support/run-main ["-p" "first"])
+              file (some-> (fs/glob (support/sessions-dir) "**/*.ednl") first str)]
+          (is (= 0 (:code first-run)) (:err first-run))
+          (is (some? file) "the first run left a stored session")
+          (when file
+            (let [second-run (support/run-main ["-p" "--session" file "second"])]
+              (is (= 0 (:code second-run)) (:err second-run))
+              (is (= [["first"] ["first" "second"]] @seen)
+                  "the resumed run reads the stored user message and appends the new one"))))))))
+
+(deftest print-mode-continues-the-most-recent-session
+  ;; `-c/--continue` names the most recent stored session for the process cwd;
+  ;; with none it falls back to a fresh session (the first run here).
+  (let [seen (atom [])]
+    (with-mode-run
+      (recording-send seen)
+      (fn []
+        (let [first-run (support/run-main ["-p" "first"])
+              second-run (support/run-main ["-p" "-c" "second"])]
+          (is (= 0 (:code first-run)) (:err first-run))
+          (is (= 0 (:code second-run)) (:err second-run))
+          (is (= [["first"] ["first" "second"]] @seen)
+              "-c resumed the first run's session and appended the second prompt"))))))
+
+(deftest print-mode-names-an-unknown-session
+  ;; An id or path nothing answers to is a named failure before the run, never
+  ;; a fresh conversation wearing the requested session.
+  (with-mode-run
+    (answering "unused")
+    (fn []
+      (let [{:keys [code out err]} (support/run-main ["-p" "--session" "no-such-session" "hello"])]
+        (is (= 1 code))
+        (is (empty? out))
+        (is (str/includes? err "no stored session"))))))
+
+(deftest print-mode-lets-session-win-over-resume
+  ;; The explicit session is the more specific answer, as at the entry point:
+  ;; print does not refuse the run because --resume was also present.
+  (with-mode-run
+    (answering "unused")
+    (fn []
+      (let [{:keys [code out err]} (support/run-main ["-p" "--session" "no-such-session" "--resume" "hello"])]
+        (is (= 1 code))
+        (is (empty? out))
+        (is (not (str/includes? err "TUI-only")))
+        (is (str/includes? err "no stored session"))))))
