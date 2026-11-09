@@ -7,6 +7,9 @@
             [babashka.fs :as fs]
             [kmet.ai.llm :as llm]
             [kmet.app.compaction :as compact]
+            [kmet.app.compaction.stage :as stage]
+            [kmet.app.compaction.vcc :as vcc]
+            [kmet.app.loop.state :as loop-state]
             [kmet.app.loop.test-support :as support]
             [kmet.app.session.core :as session]
             [kmet.app.session.context :as context]
@@ -40,6 +43,14 @@
   (session/append-entry sess {:role :assistant
                               :content [{:type :text :text text}]}))
 
+(defn- error-message [f]
+  (try (f) nil (catch Exception e (ex-message e))))
+
+(defn- keep-error [agent keep-user-turns]
+  (error-message
+   #(compact/compact-context! agent nil :manual
+                              {:keep-user-turns keep-user-turns})))
+
 (defn- compaction-entry [sess]
   (last (filter #(= :compaction (:role %)) (session/get-branch sess))))
 
@@ -60,6 +71,20 @@
         (t/is (str/includes? (:summary entry) "[User Messages]"))
         (t/is (= :vcc (get-in entry [:details :compactor])))
         (t/is (pos? (:tokens-before entry)))))))
+
+(t/deftest vcc-preserves-a-branch-summary
+  (with-session
+    {:compactor :vcc :keep-recent-tokens 1}
+    (fn [sess agent]
+      (user! sess "one")
+      (assistant! sess "a")
+      (session/append-entry sess {:role :branch-summary
+                                  :summary "BRANCH CONTEXT"})
+      (user! sess "two")
+      (t/is (true? (compact/compact-context! agent nil :manual)))
+      (t/is (str/includes? (:summary (compaction-entry sess))
+                           "BRANCH CONTEXT")
+            "a branch summary is not dropped by VCC"))))
 
 (t/deftest vcc-rejects-free-form-instructions
   (let [events (atom [])]
@@ -202,3 +227,42 @@
                         :done))]
         (t/is (true? (compact/compact-context! agent "focus on tests" :manual)))
         (t/is (str/includes? (:summary (compaction-entry sess)) "llm summary"))))))
+
+(t/deftest a-replaced-vcc-strategy-may-accept-instructions
+  (with-session
+    {:compactor :vcc :keep-recent-tokens 1}
+    (fn [sess agent]
+      (user! sess "one")
+      (assistant! sess "a")
+      (user! sess "two")
+      (let [strategies {:llm stage/llm-strategy
+                        :vcc (assoc vcc/strategy
+                                    :supports-custom-instructions? true)}]
+        (t/is (true? ((var stage/compact-context*)
+                      strategies agent "focus on tests" :manual nil)))
+        (t/is (= :compaction (:role (compaction-entry sess))))
+        (t/is (str/includes? (:summary (compaction-entry sess))
+                             "[Compaction Instructions]"))))))
+
+(t/deftest keep-user-turns-is-validated-at-the-contract
+  (with-session
+    {:compactor :vcc :keep-recent-tokens 1}
+    (fn [sess agent]
+      (user! sess "one")
+      (t/is (re-find #"non-negative integer" (keep-error agent "1")))
+      (t/is (re-find #"non-negative integer" (keep-error agent -1))))))
+
+(t/deftest live-compactor-setter-selects-vcc
+  (with-session
+    {:compactor :llm :keep-recent-tokens 1}
+    (fn [sess agent]
+      (user! sess "one")
+      (assistant! sess "a")
+      (user! sess "two")
+      (loop-state/set-compactor! agent :vcc)
+      (t/is (= :vcc (:compactor @(:cfg agent))))
+      (with-redefs [llm/send-message
+                    (fn [& _]
+                      (throw (ex-info "VCC must not call the LLM" {})))]
+        (t/is (true? (compact/compact-context! agent nil :manual))))
+      (t/is (= :vcc (get-in (compaction-entry sess) [:details :compactor]))))))

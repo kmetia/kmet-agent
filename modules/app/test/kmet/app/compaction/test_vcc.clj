@@ -117,3 +117,94 @@
     (t/is (not (str/includes? summary "deferred sources listing")))
     (t/is (not (str/includes? summary "eval library listing")))
     (t/is (str/includes? summary "[extension:ext/state] extension note"))))
+
+(t/deftest summary-preserves-branch-summaries
+  (let [summary (:summary (summarize [(user "hello")
+                                      {:role :branch-summary
+                                       :summary "BRANCH CONTEXT"}]))]
+    (t/is (str/includes? summary "[Branch Summary]"))
+    (t/is (str/includes? summary "BRANCH CONTEXT"))))
+
+(t/deftest summary-merges-a-previous-branch-summary
+  (let [previous (str "[Branch Summary]\nold branch context\n\n"
+                      "[User Messages]\n- old user")
+        summary (:summary (summarize [(user "new")] {:previous-summary previous}))]
+    (t/is (str/includes? summary "old branch context"))
+    (t/is (str/includes? summary "new"))))
+
+(t/deftest failed-tool-results-are-marked-and-not-files
+  (let [messages [(assistant "editing"
+                             [{:id "e1" :name "edit"
+                               :arguments {:path "/src/x.clj"}}])
+                  {:role :tool
+                   :tool-name "edit"
+                   :is-error true
+                   :content [{:type :tool_result
+                              :tool_use_id "e1"
+                              :content "String not found"}]}
+                  (user "try again")]
+        summary (:summary (summarize messages))]
+    (t/is (not (str/includes? summary "- Modified: /src/x.clj"))
+          "a failed edit is not a file change")
+    (t/is (str/includes? summary "[failed: String not found]")
+          "the tool error is visible in the brief")))
+
+(t/deftest failed-commits-are-not-listed
+  (let [messages [(assistant "committing"
+                             [{:id "c1" :name "bash"
+                               :arguments {:command "git commit -m \"fix\""}}])
+                  {:role :tool
+                   :tool-name "bash"
+                   :is-error true
+                   :content [{:type :tool_result
+                              :tool_use_id "c1"
+                              :content "nothing to commit"}]}]
+        summary (:summary (summarize messages))]
+    (t/is (not (str/includes? summary "[Commits]"))
+          "a failed commit is not a commit")))
+
+(t/deftest commit-parsing-handles-message-forms-and-skips-noise
+  (t/testing "--message in the space form is parsed"
+    (let [summary (:summary (summarize
+                             [(assistant "c"
+                                         [{:id "c1" :name "bash"
+                                           :arguments {:command "git commit --message \"space form\""}}])
+                              {:role :tool :tool-name "bash" :is-error false
+                               :content [{:type :tool_result :tool_use_id "c1"
+                                          :content "[master abc1234] space form"}]}]))]
+      (t/is (str/includes? summary "abc1234: space form"))))
+  (t/testing "a commit without a parsed message is skipped"
+    (let [summary (:summary (summarize
+                             [(assistant "c"
+                                         [{:id "c1" :name "bash"
+                                           :arguments {:command "git commit -F msg.txt"}}])
+                              {:role :tool :tool-name "bash" :is-error false
+                               :content [{:type :tool_result :tool_use_id "c1"
+                                          :content "[master def5678] from file"}]}]))]
+      (t/is (not (str/includes? summary "[Commits]")))))
+  (t/testing "--amend --no-edit is named"
+    (let [summary (:summary (summarize
+                             [(assistant "c"
+                                         [{:id "c1" :name "bash"
+                                           :arguments {:command "git commit --amend --no-edit"}}])
+                              {:role :tool :tool-name "bash" :is-error false
+                               :content [{:type :tool_result :tool_use_id "c1"
+                                          :content "[master abc9999] amended"}]}]))]
+      (t/is (str/includes? summary "abc9999: amend"))))
+  (t/testing "git commit-tree is not a commit"
+    (let [summary (:summary (summarize
+                             [(assistant "c"
+                                         [{:id "c1" :name "bash"
+                                           :arguments {:command "git commit-tree -m tree"}}])
+                              {:role :tool :tool-name "bash" :is-error false
+                               :content [{:type :tool_result :tool_use_id "c1"
+                                          :content "[master 1234567] tree"}]}]))]
+      (t/is (not (str/includes? summary "[Commits]"))))))
+
+(t/deftest llm-summary-with-a-separator-is-preserved
+  (let [previous "## Goal\nkeep the API stable\n\n---\n\nmore context"
+        summary (:summary (summarize [(user "new")] {:previous-summary previous}))]
+    (t/is (str/includes? summary "[Previous Summary]"))
+    (t/is (str/includes? summary "## Goal"))
+    (t/is (str/includes? summary "keep the API stable"))
+    (t/is (str/includes? summary "more context"))))

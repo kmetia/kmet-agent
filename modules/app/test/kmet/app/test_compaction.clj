@@ -459,3 +459,13 @@
       (t/is (= 0 (core/find-user-turn-cut-index
                   [(u "1") empty-entry (u "2")] 2))))))
 
+(t/deftest test-prepare-with-settings-does-not-use-an-uncompactable-oversized-tail
+  (let [entries [{:id "u1" :role :user :content "first"}
+                 {:id "u2" :role :user :content (apply str (repeat 1000 "a"))}
+                 {:id "u3" :role :user :content (apply str (repeat 1000 "b"))}]]
+    (t/is (nil? (core/prepare-with-settings
+                 entries
+                 {:keep-user-turns 1
+                  :keep-recent-tokens 100000
+                  :keep-tail-budget 10}))
+          "an oversized keep:N tail with no token-cut fallback compacts nothing")))

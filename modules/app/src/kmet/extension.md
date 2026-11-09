@@ -1383,10 +1383,11 @@ Compaction is available on the context as `(:compact ctx)`:
 ((:compact ctx) {:custom-instructions "focus on auth"}) ; LLM only
 ```
 
-`:custom-instructions` are rejected when `:compactor :vcc` is selected (VCC is
-deterministic and cannot apply prose); use `:keep-user-turns` or switch the
-compactor in `/settings`. `:keep-user-turns` is a non-negative integer: 0
-compacts everything, N keeps the last N user turns.
+`:custom-instructions` are rejected when the selected compactor does not
+support them (the builtin VCC compactor cannot apply prose); use
+`:keep-user-turns` or switch the compactor in `/settings`. `:keep-user-turns`
+is a non-negative integer: 0 compacts everything, N keeps the last N user
+turns.
 
 ### Shell
 

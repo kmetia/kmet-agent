@@ -281,7 +281,7 @@
         ((var builtins/register-builtin-commands!) cfg/default-config)
         (reset! (:turn-running? (:engine cs)) true)
         (with-redefs [agent-compact/compact-context!
-                      (fn [_ag instructions reason]
+                      (fn [_ag instructions reason & _]
                         (deliver ran [instructions reason])
                         true)]
           ((:handler (commands/find-command "compact")) (support/command-ctx cs) "focus")

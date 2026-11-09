@@ -256,7 +256,8 @@
 (def llm-strategy
   "The builtin LLM compactor: the shared cut plus the summarization call."
   {:prepare core/prepare-with-settings
-   :summarize summarize!})
+   :summarize summarize!
+   :supports-custom-instructions? true})
 
 (def default-strategies
   "The two builtin compactors by setting keyword."
@@ -422,14 +423,15 @@
   "Gather the compaction plan for REASON (pi: prepareCompaction): the branch
    entries, the settings, and the prepared cut. Returns nil when there is
    nothing to compact, {:problem msg} for pi's manual already-compacted case,
-   and {:entries es :prep p :strategy s} when there is something to summarize.
-   The 4-arity takes the strategies and the already-resolved settings."
+   and {:entries es :prep p} when there is something to summarize.
+   The 4-arity takes the already-selected strategy and resolved settings."
   ([agent reason]
-   (prepare-compaction default-strategies agent reason (compaction-settings agent)))
-  ([strategies agent reason settings]
+   (let [settings (compaction-settings agent)]
+     (prepare-compaction (selected-strategy default-strategies settings)
+                         agent reason settings)))
+  ([strategy agent reason settings]
    (let [sess (:session agent)
          entries (session/get-branch sess)
-         strategy (selected-strategy strategies settings)
          window (:context-window @(:cfg agent))
          reserve (:reserve-tokens settings)
          strategy-settings (cond-> settings
@@ -445,7 +447,7 @@
        (when (and (= :manual reason)
                   (= :compaction (:role (last entries))))
          {:problem "Already compacted"})
-       {:entries entries :prep prep :strategy strategy}))))
+       {:entries entries :prep prep}))))
 
 (defn- ask-before-compact!
   "Fire the :session-before-compact boundary (pi: session_before_compact):
@@ -531,17 +533,18 @@
   [strategies agent sess reason custom-instructions opts failure from-extension]
   (if (compaction-aborted? agent)
     :aborted
-    (let [settings (compaction-settings-for agent (:keep-user-turns opts))]
-      (when (and (= :vcc (:compactor settings))
+    (let [settings (compaction-settings-for agent (:keep-user-turns opts))
+          strategy (selected-strategy strategies settings)]
+      (when (and (not (:supports-custom-instructions? strategy true))
                  (not (str/blank? custom-instructions)))
         (throw (ex-info
-                (str "The VCC compactor is deterministic and cannot apply "
-                     "custom compaction instructions. Remove the instructions, "
-                     "use keep:N, or switch the compactor in /settings.")
+                (str "The selected compactor cannot apply custom compaction "
+                     "instructions. Remove the instructions, use keep:N, or "
+                     "switch the compactor in /settings.")
                 {:type :kmet/compactor-rejects-instructions
-                 :compactor :vcc})))
-      (let [{:keys [entries prep problem strategy] :as plan}
-            (prepare-compaction strategies agent reason settings)]
+                 :compactor (:compactor settings)})))
+      (let [{:keys [entries prep problem] :as plan}
+            (prepare-compaction strategy agent reason settings)]
         (cond
           problem
           (do (vreset! failure problem) :failed)
@@ -611,6 +614,13 @@
    blocks this prompt's automatic checks (see maybe-compact!); the next
    prompt starts fresh."
   [strategies agent custom-instructions reason opts]
+  (let [keep-user-turns (:keep-user-turns opts)]
+    (when (and (some? keep-user-turns)
+               (or (not (integer? keep-user-turns))
+                   (neg? keep-user-turns)))
+      (throw (ex-info ":keep-user-turns must be a non-negative integer"
+                      {:type :kmet.app/bad-keep-user-turns
+                       :keep-user-turns keep-user-turns}))))
   ;; The claim is the CAS, not a test followed by a reset: a manual
   ;; compaction and the automatic check on settle can otherwise both pass
   ;; the test, and the loser's `reset!` of the compaction signal below would
@@ -767,6 +777,13 @@
   "The `:compaction` service over STRATEGIES — a map with :llm and :vcc
    compactor maps. The row builds it from the injected strategy services."
   [strategies]
+  (when-not (and (map? (:llm strategies)) (map? (:vcc strategies)))
+    (throw (ex-info (str "the :compaction service requires :compactor/llm "
+                         "and :compactor/vcc")
+                    {:type :kmet.app/missing-compactor
+                     :missing (vec (for [k [:llm :vcc]
+                                         :when (not (map? (get strategies k)))]
+                                     k))})))
   {:maybe-compact! (fn [agent] (maybe-compact* strategies agent))
    :compact-for-overflow! (fn [agent] (compact-for-overflow* strategies agent))
    :compact-context! (fn [agent & args] (run-compact-context strategies agent args))

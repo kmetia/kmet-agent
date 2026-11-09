@@ -257,7 +257,7 @@ schema-validated at load).
 | `:agents` | live handles, the factory seam, the send/control surface | `kmet.app.agents/plugin` |
 | `:agentLoop` | the driver; registers the `:agents` factory | `kmet.app.loop.driver/plugin` |
 | `:retry-policy` `:loop-guard` | the loop's stages | `kmet.app.loop.stages/{retry-policy-row,loop-guard-row}` |
-| `:compactor/llm` `:compactor/vcc` | the two builtin compaction strategies (`{:prepare :summarize}`); the LLM one summarizes with the model, the VCC one deterministically | `kmet.app.compaction.{llm,vcc}/plugin` |
+| `:compactor/llm` `:compactor/vcc` | the two builtin compaction strategies (`{:prepare :summarize :supports-custom-instructions?}`); the LLM one summarizes with the model, the VCC one deterministically | `kmet.app.compaction.{llm,vcc}/plugin` |
 | `:compaction` | the compaction stage's operations over the injected compactors, dispatching on the `:compactor` setting | `kmet.app.compaction/plugin` |
 | `:permissions` | `{:policy :remember!}` — the tool-call decision | `kmet.app.permissions/permissions`, per agent |
 | `:approvals` | `{:ask!}` — the one `:ask` delivery seam | `kmet.app.permissions/approvals` at the root; the TUI and server rows supply their own |

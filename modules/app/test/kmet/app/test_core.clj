@@ -456,7 +456,7 @@
 (deftest dump-config-prints-the-built-in-composition
   (let [{:keys [code out]} (support/run-main ["--dump-config"])]
     (is (zero? code))
-    (is (str/starts-with? out "profile :tui rows=28 patches=1")
+    (is (str/starts-with? out "profile :tui rows=30 patches=1")
         (str "the bundle: the logger, the process world, the extension host, the bus, the"
              " four registries, the resource selector, the prompt builder, the session log and its"
              " storage, the projections, the agent registry, the loop's two"
@@ -482,7 +482,7 @@
     (try
       (let [{:keys [code out]} (support/run-main ["--dump-config" "--patch" path])]
         (is (zero? code))
-        (is (str/starts-with? out "profile :tui rows=29 patches=2"))
+        (is (str/starts-with? out "profile :tui rows=31 patches=2"))
         (is (str/includes? out ":app/sample"))
         (is (str/includes? out "inject={:tools nil}"))
         (is (str/includes? out "config={:a 1, :b {:c 2}}")
@@ -499,7 +499,7 @@
       (with-redefs [cfg/patch-paths (fn [] [path])]
         (let [{:keys [code out err]} (support/run-main ["--dump-config"])]
           (is (zero? code) "the stale row no longer fails the composition")
-          (is (str/starts-with? out "profile :tui rows=28 patches=1"))
+          (is (str/starts-with? out "profile :tui rows=30 patches=1"))
           (is (str/includes? err "Warning: removed :ext/tools")
               "the removal is announced on stderr")
           (is (= {:rows [] :patch []} (edn/read-string (slurp path)))
@@ -542,7 +542,7 @@
       (with-redefs [cfg/patch-paths (fn [] [global local])]
         (let [{:keys [code out]} (support/run-main ["--dump-config"])]
           (is (zero? code))
-          (is (str/starts-with? out "profile :tui rows=29 patches=2")
+          (is (str/starts-with? out "profile :tui rows=31 patches=2")
               "the global layer inserts the row; the project layer patches it")
           (is (str/includes? out "config={:a 2}")
               "the project layer applies over the global one"))
@@ -569,7 +569,7 @@
         (let [{:keys [code out]} (support/run-main ["--dump-default-config"
                                                     "--patch" path])]
           (is (zero? code) "neither the ambient layer nor --patch is read")
-          (is (str/starts-with? out "profile :tui rows=28 patches=1"))))
+          (is (str/starts-with? out "profile :tui rows=30 patches=1"))))
       (finally (io/delete-file path true)))))
 
 (deftest dump-state-prints-the-booted-tree
@@ -580,8 +580,8 @@
       (is (zero? code))
       (is (str/starts-with? out "[:app]")
           "the root frame, at the origin of every unit path")
-      (is (str/includes? out "children=27")
-          (str "the twenty-six bundle rows the world is deferred out of, then the"
+      (is (str/includes? out "children=29")
+          (str "the twenty-eight bundle rows the world is deferred out of, then the"
                " TUI's mode row — mounted, not run"))
       (is (str/includes? out ":active"))
       (is (str/includes? out "provides=[commands]"))
@@ -643,9 +643,9 @@
       (let [{:keys [code err]} (support/run-main ["--patch" path "hello"])]
         (is (= 1 code))
         (is (str/includes? err
-                           (str "booted 26 plugin rows (26 fibers, 1 deferred: :world, services:"
-                                " agents approvals commands compaction events llm"
-                                " logger loop-guard projections prompts resources retry-policy"
+                           (str "booted 28 plugin rows (28 fibers, 1 deferred: :world, services:"
+                                " agents approvals commands compaction compactor/llm compactor/vcc"
+                                " events llm logger loop-guard projections prompts resources retry-policy"
                                 " sessionPersistence sessions skills system-prompt"
                                 " tools ui)"))
             "the boot is the point: a run with no mode still proves the rows mount,

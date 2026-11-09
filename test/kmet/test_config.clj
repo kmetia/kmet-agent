@@ -501,43 +501,49 @@
     (finally (http/set-transport! :platform))))
 
 (t/deftest test-get-compaction-settings
+  (t/testing "the compactor selector defaults to :llm and rejects unknown values"
+    (t/is (= :llm (:compactor (cfg/get-compaction-settings {} :opencode-go "m"))))
+    (t/is (= :vcc (:compactor (cfg/get-compaction-settings
+                               {:compactor :vcc} :opencode-go "m"))))
+    (t/is (= :llm (:compactor (cfg/get-compaction-settings
+                               {:compactor :bogus} :opencode-go "m")))))
   (t/testing "built-in defaults when both ordinary settings are absent"
-    (t/is (= {:enabled true :reserve-tokens 16384 :keep-recent-tokens 20000}
+    (t/is (= {:enabled true :reserve-tokens 16384 :keep-recent-tokens 20000 :compactor :llm}
              (cfg/get-compaction-settings {} :opencode-go "m"))))
   (t/testing ":enabled mirrors :auto-compact (pi: getCompactionEnabled)"
     (t/is (false? (:enabled (cfg/get-compaction-settings
                              {:auto-compact false} :opencode-go "m")))))
   (t/testing "ordinary settings"
-    (t/is (= {:enabled true :reserve-tokens 8192 :keep-recent-tokens 5000}
+    (t/is (= {:enabled true :reserve-tokens 8192 :keep-recent-tokens 5000 :compactor :llm}
              (cfg/get-compaction-settings {:compact-reserve-tokens 8192
                                            :keep-recent-tokens 5000}
                                           :opencode-go "m"))))
   (t/testing "the matching entry wins field by field (pi: compaction.modelOverrides)"
-    (t/is (= {:enabled true :reserve-tokens 400000 :keep-recent-tokens 5000}
+    (t/is (= {:enabled true :reserve-tokens 400000 :keep-recent-tokens 5000 :compactor :llm}
              (cfg/get-compaction-settings
               {:compact-reserve-tokens 8192
                :keep-recent-tokens 5000
                :compact-model-overrides {"opencode-go/m" {:reserve-tokens 400000}}}
               :opencode-go "m")))
-    (t/is (= {:enabled true :reserve-tokens 16384 :keep-recent-tokens 4000}
+    (t/is (= {:enabled true :reserve-tokens 16384 :keep-recent-tokens 4000 :compactor :llm}
              (cfg/get-compaction-settings
               {:compact-model-overrides {"opencode-go/m" {:keep-recent-tokens 4000}}}
               :opencode-go "m"))
           "an entry field alone overrides; the other falls back independently"))
   (t/testing "zero is a valid token value (pi: reserveTokens 0)"
-    (t/is (= {:enabled true :reserve-tokens 0 :keep-recent-tokens 0}
+    (t/is (= {:enabled true :reserve-tokens 0 :keep-recent-tokens 0 :compactor :llm}
              (cfg/get-compaction-settings
               {:compact-model-overrides {"opencode-go/m" {:reserve-tokens 0
                                                           :keep-recent-tokens 0}}}
               :opencode-go "m"))))
   (t/testing "keys are exact \"provider/modelId\" strings, slashes included"
-    (t/is (= {:enabled true :reserve-tokens 8192 :keep-recent-tokens 20000}
+    (t/is (= {:enabled true :reserve-tokens 8192 :keep-recent-tokens 20000 :compactor :llm}
              (cfg/get-compaction-settings
               {:compact-reserve-tokens 8192
                :compact-model-overrides {"opencode-go/m" {:reserve-tokens 400000}}}
               :other "m"))
           "a provider mismatch leaves the ordinary setting")
-    (t/is (= {:enabled true :reserve-tokens 400000 :keep-recent-tokens 20000}
+    (t/is (= {:enabled true :reserve-tokens 400000 :keep-recent-tokens 20000 :compactor :llm}
              (cfg/get-compaction-settings
               {:compact-model-overrides {"commandcode/deepseek/v4.1-flash"
                                          {:reserve-tokens 400000}}}

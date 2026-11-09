@@ -410,19 +410,22 @@ many recent tokens to keep.
 `:compactor` selects the builtin summarizer: `:llm` (the default) or `:vcc`.
 VCC is deterministic and makes no model call: it emits fixed
 `[Early Session Requests]`, `[Files And Changes]`, `[Commits]`,
-`[User Messages]`, and brief-transcript sections, merged with the previous
-summary and bounded by fixed caps. Both compactors use the same cut and the
-same previous-summary boundary. `/settings` switches the compactor live.
+`[User Messages]`, `[Branch Summary]`, and brief-transcript sections,
+merged with the previous summary and bounded by fixed caps. Failed tool calls
+are marked in the brief and never counted as file changes or commits. Both
+compactors use the same cut and the same previous-summary boundary.
+`/settings` switches the compactor live.
 
 `/compact keep:N` overrides the cut for that compaction: the last N user turns
 (and everything after the Nth-from-last user message) are kept verbatim and
 everything before is summarized. `keep:0` compacts everything and keeps only
 the summary. Without `keep:N`, `:keep-recent-tokens` (and its per-model
 overrides) chooses the cut. An explicit `keep:N` that would keep a tail larger
-than the model's context window falls back to the token cut and reports the
-reason. VCC rejects free-form compaction instructions (the LLM compactor
-applies them); use `keep:N` or switch the compactor. Branch summaries remain
-LLM summaries regardless of `:compactor`. The summary's own output is capped at
+than the model's context window falls back to the token cut and records
+`:keep-fallback :tail-too-large` in the compaction entry details. VCC rejects
+free-form compaction instructions (the LLM compactor applies them); use
+`keep:N` or switch the compactor. Branch summaries remain LLM summaries
+regardless of `:compactor`. The summary's own output is capped at
 `0.8 ×` the effective reserve, plus the session level's thinking budget
 when the model reasons, bounded by the model's maximum output tokens (pi:
 `adjustMaxTokensForThinking`). The token budgets can be tuned per model

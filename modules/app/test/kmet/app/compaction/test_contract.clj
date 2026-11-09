@@ -51,3 +51,12 @@
       (is (thrown-with-msg? Exception #"takes no :config"
                             ((:apply compaction/plugin)
                              (srce/extend world {}) {:reserve-tokens 1}))))))
+
+(deftest the-row-refuses-a-missing-compactor-service
+  (let [world (srce/root)
+        message (try
+                  ((:apply compaction/plugin) (srce/extend world {}) nil)
+                  nil
+                  (catch Exception e (ex-message e)))]
+    (is (re-find #"requires :compactor/llm" message)
+        "a composition that omits a strategy fails at mount, not at use")))

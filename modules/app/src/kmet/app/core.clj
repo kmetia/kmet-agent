@@ -564,7 +564,12 @@
    held back (a `:defer` row is composed, but only its owner mounts it), and the
    service names they provide."
   [{:keys [fibers rows deferred]}]
-  (let [services (->> fibers (mapcat (comp :provides deref)) distinct sort (map name))
+  (let [service-name (fn [k]
+                       (if-let [ns (namespace k)]
+                         (str ns "/" (name k))
+                         (name k)))
+        services (->> fibers (mapcat (comp :provides deref)) distinct
+                      (map service-name) sort)
         held (when (seq deferred)
                (str (count deferred) " deferred: "
                     (str/join " " (map #(pr-str (:id %)) deferred)) ", "))]

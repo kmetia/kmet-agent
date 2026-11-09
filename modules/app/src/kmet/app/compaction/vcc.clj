@@ -4,8 +4,8 @@
    The compactor consumes the projection-aware preparation produced by
    kmet.app.compaction.core (the same cut both builtin compactors use) and
    emits fixed sections — compaction instructions, early requests, files and
-   changes, commits, user messages, an optional preserved previous summary,
-   and a brief transcript. It never calls the model and never re-reads the
+   changes, commits, user messages, branch summaries, an optional preserved
+   previous summary, and a brief transcript. It never calls the model and never re-reads the
    session. Caps keep the output bounded; merging keeps a previous VCC summary
    alive across compactions. A previous summary in another format (for example
    the LLM compactor's Goal/Progress checkpoint) is preserved verbatim in
@@ -25,6 +25,8 @@
 (def ^:private max-tool-lines 8)
 (def ^:private max-instructions-chars 1000)
 (def ^:private max-previous-chars 4000)
+(def ^:private max-branch-chars 4000)
+(def ^:private max-branch-entry-chars 2000)
 (def ^:private skip-custom-types
   #{context/tool-sources-custom-type context/eval-library-custom-type})
 
@@ -87,7 +89,7 @@
   (let [s (sanitize s)]
     (if (<= (count s) max)
       s
-      (str (subs s 0 (- max 30)) "\n...[previous summary truncated]"))))
+      (str (subs s 0 (- max 30)) "\n...[text truncated]"))))
 
 ;; ─── Tool calls ──────────────────────────────────────────────────────────
 
@@ -111,11 +113,17 @@
       (arg tc :pattern)
       (arg tc :query)))
 
-(defn- tool-call-line [tc]
-  (let [v (tool-value tc)]
-    (str "* " (or (:name tc) "tool")
-         (when (seq (str v))
-           (str " \"" (clip (str v) 160) "\"")))))
+(defn- tool-call-line
+  "One tool-call line, marked when its result failed."
+  [tc result]
+  (let [v (tool-value tc)
+        line (str "* " (or (:name tc) "tool")
+                  (when (seq (str v))
+                    (str " \"" (clip (str v) 160) "\"")))]
+    (if (:is-error result)
+      (let [error (clip (:text result) 120)]
+        (str line " [failed" (when (seq error) (str ": " error)) "]"))
+      line)))
 
 ;; ─── Normalization ───────────────────────────────────────────────────────
 
@@ -131,12 +139,14 @@
         (keep (fn [m]
                 (when (= :tool (:role m))
                   (when-let [id (tool-result-id m)]
-                    [id (tool-result-text m)]))))
+                    [id {:text (tool-result-text m)
+                         :is-error (boolean (:is-error m))}]))))
         messages))
 
 (defn- normalize-blocks
   "Session projection messages to the block model the summary sections read.
-   Tool results are collected separately for commit hash extraction."
+   Tool results are collected separately for commit hashes, failed-file
+   filtering, and brief failure markers."
   [messages]
   (reduce (fn [acc m]
             (case (:role m)
@@ -161,7 +171,14 @@
                              :command (:command m)
                              :text (or edited (:command m))
                              :output (:output m)
-                             :exit-code (:exit-code m)})))
+                             :exit-code (:exit-code m)
+                             :cancelled (:cancelled m)})))
+
+              :branch-summary
+              (let [t (sanitize (:summary m))]
+                (if (seq t)
+                  (conj acc {:role :branch-summary :text t})
+                  acc))
 
               :custom
               (if (contains? skip-custom-types (:custom-type m))
@@ -182,13 +199,15 @@
 (defn- user-texts [blocks]
   (vec (keep #(when (= :user (:role %)) (:text %)) blocks)))
 
-(defn- file-lists [blocks]
+(defn- file-lists [blocks results]
   (reduce (fn [acc b]
             (if (= :assistant (:role b))
               (reduce (fn [acc tc]
                         (let [name (tool-name tc)
-                              path (some-> (arg tc :path) str)]
+                              path (some-> (arg tc :path) str)
+                              failed? (:is-error (get results (:id tc)))]
                           (if (and (seq path)
+                                   (not failed?)
                                    (contains? #{"read" "edit" "write"} name))
                             (update acc (if (= "read" name) :read :modified)
                                     conj path)
@@ -200,13 +219,18 @@
           blocks))
 
 (defn- git-commit? [cmd]
-  (boolean (re-find #"\bgit\s+commit\b" (or cmd ""))))
+  (boolean (re-find #"\bgit\s+commit(?=\s|$)" (or cmd ""))))
 
 (defn- commit-subject [cmd]
   (or (second (re-find #"-[a-zA-Z]*m\s+\"([^\"]*)\"" cmd))
       (second (re-find #"-[a-zA-Z]*m\s+'([^']*)'" cmd))
       (second (re-find #"-[a-zA-Z]*m\s+(\S+)" cmd))
-      (second (re-find #"--message=(\S+)" cmd))))
+      (second (re-find #"--message=\s*\"([^\"]*)\"" cmd))
+      (second (re-find #"--message=\s*'([^']*)'" cmd))
+      (second (re-find #"--message=\s*(\S+)" cmd))
+      (second (re-find #"--message\s+\"([^\"]*)\"" cmd))
+      (second (re-find #"--message\s+'([^']*)'" cmd))
+      (second (re-find #"--message\s+(\S+)" cmd))))
 
 (defn- commit-hash [text]
   (or (second (re-find #"\[[^\]]*?\b([0-9a-f]{7,40})\b[^\]]*\]" (or text "")))
@@ -216,10 +240,13 @@
 (defn- commit-line [cmd result-text]
   (when (git-commit? cmd)
     (let [subject (some-> (commit-subject cmd) (str/split #"\n") first str/trim)
-          hash (commit-hash result-text)]
-      (str "- "
-           (when (seq hash) (str hash ": "))
-           (if (seq subject) subject "commit")))))
+          amend? (boolean (re-find #"--amend\b" cmd))
+          hash (commit-hash result-text)
+          subject (or subject (when amend? "amend"))]
+      (when subject
+        (str "- "
+             (when (seq hash) (str hash ": "))
+             subject)))))
 
 (defn- commit-lines [blocks results]
   (reduce (fn [acc b]
@@ -228,13 +255,18 @@
               (into acc
                     (keep (fn [tc]
                             (when (= "bash" (tool-name tc))
-                              (let [cmd (or (arg tc :command) "")]
-                                (when (git-commit? cmd)
-                                  (commit-line cmd (get results (:id tc)))))))
-                          (:tool-calls b)))
+                              (let [cmd (or (arg tc :command) "")
+                                    result (get results (:id tc))]
+                                (when (and (git-commit? cmd)
+                                           (not (:is-error result)))
+                                  (commit-line cmd (:text result)))))))
+                    (:tool-calls b))
 
               :bash
-              (if (git-commit? (:command b))
+              (if (and (not (:cancelled b))
+                       (or (nil? (:exit-code b))
+                           (zero? (:exit-code b)))
+                       (git-commit? (:command b)))
                 (if-let [line (commit-line (:command b) (:output b))]
                   (conj acc line)
                   acc)
@@ -251,6 +283,7 @@
         (seq (get-in merged [:files :read]))) (conj :files)
     (seq (:commits merged)) (conj :commits)
     (seq (:users merged)) (conj :users)
+    (seq (:branch merged)) (conj :branch)
     (seq (:previous merged)) (conj :previous)
     (seq brief) (conj :brief)))
 
@@ -262,11 +295,14 @@
    "[Commits]" :commits
    "[User Messages]" :users
    "[Compaction Instructions]" :instructions
+   "[Branch Summary]" :branch
    "[Previous Summary]" :previous})
 
 (defn- parse-previous
   "Parse a previous VCC summary. A summary in another format is preserved
-   verbatim under :previous rather than silently dropped."
+   verbatim under :previous rather than silently dropped. `---` is the VCC
+   brief separator only after a VCC header; an LLM summary containing one is
+   still unparsed."
   [summary]
   (let [s (sanitize summary)]
     (when (seq s)
@@ -277,8 +313,8 @@
                           (contains? section-headers line)
                           (assoc acc :current (section-headers line) :recognized? true)
 
-                          (= line "---")
-                          (assoc acc :current :brief :recognized? true)
+                          (and (= line "---") (:recognized? acc))
+                          (assoc acc :current :brief)
 
                           (empty? line) acc
 
@@ -299,26 +335,34 @@
                               :commits (update acc :commits conj line)
                               :users (update acc :users conj value)
                               :instructions (update acc :instructions conj value)
+                              :branch (update acc :branch conj line)
                               :previous (update acc :previous conj line)
                               :brief (update acc :brief conj line)
-                              acc)))))
+                              (update acc :prelude conj line))))))
                     {:current nil
                      :recognized? false
+                     :prelude []
                      :early []
                      :files {:modified [] :read []}
                      :commits []
                      :users []
                      :instructions []
+                     :branch []
                      :previous []
                      :brief []}
                     (str/split-lines s))]
         (if (:recognized? parsed)
-          (-> parsed
-              (update :previous (fn [ls]
-                                  (when (seq ls)
-                                    (clip-block (str/join "\n" ls)
-                                                max-previous-chars))))
-              (dissoc :current :recognized?))
+          (let [previous-lines (concat (:prelude parsed) (:previous parsed))
+                previous (when (seq previous-lines)
+                           (clip-block (str/join "\n" previous-lines)
+                                       max-previous-chars))
+                branch (when (seq (:branch parsed))
+                         (clip-block (str/join "\n" (:branch parsed))
+                                     max-branch-chars))]
+            (-> parsed
+                (assoc :previous previous
+                       :branch (when branch [branch]))
+                (dissoc :current :recognized? :prelude)))
           {:previous (clip-block s max-previous-chars)})))))
 
 (defn- merge-newest
@@ -349,11 +393,16 @@
                                  identity max-files)}
      :commits (merge-newest (:commits prev) (:commits fresh) commit-key max-commits)
      :users (merge-newest (:users prev) (:users fresh) identity max-users)
-     :previous (:previous prev)}))
+     :branch (let [old (vec (:branch prev))
+                   new (vec (:branch fresh))]
+               (when (seq (concat old new))
+                 [(clip-block (str/join "\n\n" (concat old new))
+                              max-branch-chars)]))
+     :previous (or (:previous prev) (:previous fresh))}))
 
 ;; ─── Brief transcript and formatting ─────────────────────────────────────
 
-(defn- brief-lines [blocks]
+(defn- brief-lines [blocks results]
   (mapcat (fn [b]
             (case (:role b)
               :user [(str "[user] " (clip (:text b) 400))]
@@ -369,7 +418,7 @@
                   (seq text) (conj (str "[assistant] " (clip text 400)))
                   (pos? omitted) (conj (str "* (" omitted
                                             " earlier tool-call entries omitted)"))
-                  (seq kept) (into (map tool-call-line kept))))
+                  (seq kept) (into (map #(tool-call-line % (get results (:id %))) kept))))
 
               :bash
               [(str "$ " (clip (or (:text b) (:command b) "") 300)
@@ -433,44 +482,34 @@
   (when (seq lines)
     (str title "\n" (str/join "\n" lines))))
 
-(defn- format-summary [merged brief]
+(defn- render-sections [merged]
   (let [file-lines (concat (map #(str "- Modified: " %)
                                 (get-in merged [:files :modified]))
                            (map #(str "- Read: " %)
-                                (get-in merged [:files :read])))
-        sections (keep identity
-                       [(section "[Compaction Instructions]"
-                                 (map #(str "- " %) (:instructions merged)))
-                        (section "[Early Session Requests]"
-                                 (map #(str "- " %) (:early merged)))
-                        (section "[Files And Changes]" file-lines)
-                        (section "[Commits]" (:commits merged))
-                        (section "[User Messages]"
-                                 (map #(str "- " %) (:users merged)))
-                        (section "[Previous Summary]"
-                                 (when (:previous merged) [(:previous merged)]))])
-        body (str/join "\n\n" sections)]
+                                (get-in merged [:files :read])))]
+    (str/join "\n\n"
+              (keep identity
+                    [(section "[Compaction Instructions]"
+                              (map #(str "- " %) (:instructions merged)))
+                     (section "[Early Session Requests]"
+                              (map #(str "- " %) (:early merged)))
+                     (section "[Files And Changes]" file-lines)
+                     (section "[Commits]" (:commits merged))
+                     (section "[User Messages]"
+                              (map #(str "- " %) (:users merged)))
+                     (section "[Branch Summary]"
+                              (when (:branch merged) [(:branch merged)]))
+                     (section "[Previous Summary]"
+                              (when (:previous merged) [(:previous merged)]))]))))
+
+(defn- format-summary [merged brief]
+  (let [body (render-sections merged)]
     (str body
          (when (seq brief)
            (str (when (seq body) "\n\n") "---\n\n" (str/join "\n" brief))))))
 
 (defn- build-summary [merged brief]
-  (let [sections (str/join "\n\n"
-                           (keep identity
-                                 [(section "[Compaction Instructions]"
-                                           (map #(str "- " %) (:instructions merged)))
-                                  (section "[Early Session Requests]"
-                                           (map #(str "- " %) (:early merged)))
-                                  (section "[Files And Changes]"
-                                           (concat (map #(str "- Modified: " %)
-                                                        (get-in merged [:files :modified]))
-                                                   (map #(str "- Read: " %)
-                                                        (get-in merged [:files :read]))))
-                                  (section "[Commits]" (:commits merged))
-                                  (section "[User Messages]"
-                                           (map #(str "- " %) (:users merged)))
-                                  (section "[Previous Summary]"
-                                           (when (:previous merged) [(:previous merged)]))]))
+  (let [sections (render-sections merged)
         budget (- max-summary-chars (count sections)
                   (if (seq sections) 7 0))
         brief (if (seq brief) (fit-brief brief budget) [])
@@ -497,10 +536,14 @@
         users (user-texts blocks)
         fresh {:early (vec (take max-early users))
                :users (vec (take-last max-users users))
-               :files (file-lists blocks)
-               :commits (commit-lines blocks results)}
+               :files (file-lists blocks results)
+               :commits (commit-lines blocks results)
+               :branch (vec (keep #(when (= :branch-summary (:role %))
+                                     (clip-block (:text %)
+                                                 max-branch-entry-chars))
+                                  blocks))}
         merged (merge-summary previous fresh custom-instructions)
-        fresh-brief (cap-lines (collapse-runs (brief-lines blocks))
+        fresh-brief (cap-lines (collapse-runs (brief-lines blocks results))
                                max-brief-lines)
         brief (cap-lines (concat (:brief previous) fresh-brief)
                          max-brief-lines)
@@ -516,9 +559,12 @@
                :empty? empty?}}))
 
 (def strategy
-  "The builtin VCC compactor: the shared cut plus the deterministic summary."
+  "The builtin VCC compactor: the shared cut plus the deterministic summary.
+   It cannot apply free-form instructions; the orchestrator rejects them via
+   :supports-custom-instructions?."
   {:prepare core/prepare-with-settings
-   :summarize summarize})
+   :summarize summarize
+   :supports-custom-instructions? false})
 
 (defn apply-row
   "Provide the VCC compactor as the `:compactor/vcc` service. No :config:
