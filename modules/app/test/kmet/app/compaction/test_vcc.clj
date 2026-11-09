@@ -252,3 +252,15 @@
                                            :arguments {:command "cd repo && git commit -m \"real\""}}])
                               (tool-result "c1" "[master abc1234] real")]))]
       (t/is (str/includes? summary "abc1234: real")))))
+
+(t/deftest heredoc-commit-messages-are-skipped
+  (let [command (str "git commit -m \"$(cat <<'EOF'\n"
+                     "subject\n"
+                     "EOF\n"
+                     ")\"")
+        summary (:summary (summarize
+                           [(assistant "c"
+                                       [{:id "c1" :name "bash"
+                                         :arguments {:command command}}])
+                            (tool-result "c1" "[master abc1234] subject")]))]
+    (t/is (not (str/includes? summary "[Commits]")))))

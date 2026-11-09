@@ -236,7 +236,11 @@
    #"--message\s+(\S+)"])
 
 (defn- commit-subject [cmd]
-  (some #(second (re-find % cmd)) commit-subject-patterns))
+  (when-let [subject (some #(second (re-find % cmd)) commit-subject-patterns)]
+    (let [subject (str/trim subject)]
+      (when-not (or (str/starts-with? subject "$(")
+                    (str/includes? subject "<<"))
+        subject))))
 
 (def ^:private commit-hash-patterns
   [#"\[[^\]]*?\b([0-9a-f]{7,40})\b[^\]]*\]"
@@ -310,7 +314,8 @@
    "[Previous Summary]" :previous
    "[Transcript]" :brief})
 
-(def ^:private transcript-separator "\n\n[Transcript]\n\n")
+(def ^:private transcript-header "[Transcript]\n\n")
+(def ^:private transcript-separator (str "\n\n" transcript-header))
 
 (defn- tagged
   [tag text]
@@ -543,7 +548,7 @@
   (let [body (render-sections merged)]
     (str body
          (when (seq brief)
-           (str (when (seq body) "\n\n") "[Transcript]\n\n"
+           (str (when (seq body) "\n\n") transcript-header
                 (str/join "\n" brief))))))
 
 (defn- build-summary [merged brief]
