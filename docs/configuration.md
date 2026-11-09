@@ -130,6 +130,7 @@ The system prompt (pi-compatible) is built from: the default (or `:system-prompt
 base, the active tools with one-line snippets, guidelines, `:append-system-prompt`,
 the project context (`AGENTS.md`/`CLAUDE.md` from `~/.kmet/agent` and the cwd's
 ancestors), the `<available_skills>` block, and the current working directory.
+Pass `-nc`/`--no-context-files` to skip project-context discovery for one run.
 
 Like pi, prompt files are discovered when the config keys are unset:
 

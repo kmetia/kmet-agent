@@ -87,7 +87,10 @@
   (is (true? (:dump-config? (core/parse-args ["--dump-config"]))))
   (is (true? (:dump-state? (core/parse-args ["--dump-state"]))))
   (is (true? (:version? (core/parse-args ["--version"]))))
-  (is (true? (:help? (core/parse-args ["-h"])))))
+  (is (true? (:help? (core/parse-args ["-h"]))))
+  (is (true? (:no-context-files (core/parse-args ["--no-context-files"]))))
+  (is (true? (:no-context-files (core/parse-args ["-nc"])))
+      "pi's short spelling"))
 
 (deftest parse-args-takes-kmet1s-one-shot-spellings
   (is (= :print (:profile (core/parse-args ["-p" "hi"])))
@@ -357,10 +360,12 @@
                                "--append-system-prompt" "MORE"
                                "--session-dir" "target/sessions"
                                "--models" "a,b"
-                               "--tools" "-bash,+eval"])]
+                               "--tools" "-bash,+eval"
+                               "--no-context-files"])]
     (is (= {:format :text :thinking :high :system-prompt "SYS"
             :append-system-prompt ["MORE"] :session-dir "target/sessions"
-            :models ["a" "b"] :tools ["-bash" "+eval"] :prompt "hi"
+            :models ["a" "b"] :tools ["-bash" "+eval"]
+            :no-context-files true :prompt "hi"
             :on-result :result :config {:model "x"}}
            (mode-input opts {:model "x"} "hi" :result))))
   (is (= {:format :text :on-result :result :config {}}

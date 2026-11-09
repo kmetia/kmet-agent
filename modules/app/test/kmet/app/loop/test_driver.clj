@@ -21,6 +21,7 @@
             [kmet.app.extensions :as host]
             [kmet.app.loop :as loop]
             [kmet.app.loop.driver :as driver]
+            [kmet.app.project-context :as context]
             [kmet.app.session.lifecycle :as lifecycle]
             [kmet.app.permissions :as permissions]
             [kmet.app.projections :as projections]
@@ -928,3 +929,22 @@
             (is (pos? (fs/size path)))
             (finally
               ((:dispose! agents) handle))))))))
+
+(deftest a-run-can-skip-project-context-files
+  ;; :no-context-files is the CLI's -nc/--no-context-files: the driver must not
+  ;; read AGENTS.md/CLAUDE.md for the run's system prompt.
+  (let [{:keys [root agents]} (mounted)]
+    (with-stubbed-llm
+      (fn [_]
+        (with-redefs [context/load-project-context-files
+                      (fn [& _]
+                        (throw (ex-info "context files must not be read" {})))]
+          (let [handle ((:create! agents)
+                        root
+                        {:config (assoc test-config :no-context-files true)})]
+            (try
+              ((:send! agents) handle "hello" {:target :next-turn})
+              ((:when-idle agents) handle)
+              (is (= :completed @(:last-outcome (:agent handle))))
+              (finally
+                ((:dispose! agents) handle)))))))))

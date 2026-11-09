@@ -824,8 +824,9 @@
   "Apply CLI opts onto a config map (pi: CLI flags override settings).
    Handles :model, :provider, :thinking, :models (scoped list), :tools (the
    session tool selection: a plain allowlist or +name/-name entries over the
-   effective persisted selection), :system-prompt (last wins), :session-dir,
-   and :append-system-prompt (repeatable; each piece is resolved and they are
+   effective persisted selection), :no-context-files (skip AGENTS.md/CLAUDE.md
+   discovery for one run), :system-prompt (last wins), :session-dir, and
+   :append-system-prompt (repeatable; each piece is resolved and they are
    joined with blank lines by `get-append-system-prompt`, like pi)."
   [config opts]
   (cond-> config
@@ -835,6 +836,7 @@
     (:models opts) (assoc :models (:models opts))
     (:session-dir opts) (assoc :session-dir (:session-dir opts))
     (:tools opts) (assoc :tools (:tools opts))
+    (:no-context-files opts) (assoc :no-context-files true)
     (:system-prompt opts) (assoc :system-prompt (:system-prompt opts))
     ;; repeatable: the pieces stay separate until
     ;; `get-append-system-prompt` resolves each one and joins, so a piece that

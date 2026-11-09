@@ -257,7 +257,7 @@ arg parsing. Still missing:
 
 **Flags** — kmet covers `--mode text|edn|rpc`, `-p/--print`, `-c/--continue`,
 `-r/--resume`, `--session <id|path>`, `--session-dir`, `--model`, `--provider`,
-`--models`, `--tools`, `--list-models`, `--system-prompt`,
+`--models`, `--tools`, `-nc/--no-context-files`, `--list-models`, `--system-prompt`,
 `--append-system-prompt`, `-t/--thinking` (pi 1.3 moved `-t` to `--tools`, so
 kmet spells the tool flag `--tools` only — see below), `-d/--debug`,
 `-h/--help`, `-v/--version`, `--generate-models`, `@files`, and positional
@@ -277,7 +277,6 @@ Missing, by pi's cli.md groups:
 | `--skill`, `-ns/--no-skills` | load skills / disable discovered ones for one run |
 | `--prompt-template`, `-np/--no-prompt-templates` | load prompt templates / disable discovered ones for one run |
 | `--theme`, `--use-theme`, `--no-themes` | load / select / disable themes for one run |
-| `-nc/--no-context-files` | disable `AGENTS.md`/`CLAUDE.md` discovery |
 | `--mode json` | JSONL event stream (kmet print mode has `--mode text|edn`) |
 | `--export` | export a session file to HTML from the CLI |
 | `--tui-mode` | `regular` vs `fullscreen` TUI (pi 1.3 defaults to fullscreen) — **postponed indefinitely** (the inline-scrollback model is deliberate; `tui.md` §15.1) |

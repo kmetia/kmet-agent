@@ -67,76 +67,36 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description (str "Evaluate Clojure in this session's persistent SCI script sandbox: "
+   :description (str "Evaluate Clojure in this session's persistent SCI sandbox: "
                      script/sandbox-summary
-                     " The session is single-threaded: two eval calls never overlap — the second waits for the first. Put independent work in ONE call and fan out inside it with (sandbox/spawn f), pmap, or several (tools/call …) promises; a call that defines a verb or changes eval state serializes its whole batch."
-                     " Eval creates verbs: a top-level definition with a non-blank docstring is "
-                     "written to the agent's eval library, so it persists across "
-                     "calls and new sessions and a restart load it. A new definition "
-                     "without a docstring stays live for this session only and is not "
-                     "saved; add a docstring and re-evaluate to keep it. A defmethod is "
-                     "saved with its loaded multimethod. A saved "
-                     "definition redefined without a docstring is not written; the saved "
-                     "file is unchanged. Local "
-                     "let/fn bindings are scratch; only a documented top-level "
-                     "definition is a library write. An already-running session is "
-                     "a cache and does not pick up another session's new files. New "
-                     "definitions are saved in the cwd scope unless scope is global; "
-                     "a redefinition stays in the active definition's scope and keeps "
-                     "its file. Drop deletes the definition's actual file, unbinds "
-                     "this session's live name, and resolves unqualified names in "
-                     "the namespace the call ends in; a file that also defines "
-                     "other names must be dropped with all of them. "
-                     "(eval/move 'name :global|:cwd) moves a definition between "
-                     "scopes. A call that ends in a "
-                     "normal error writes nothing; its definitions stay live and "
-                     "can be forgotten. A successful call's namespace is "
-                     "re-entered by the next. Output is the emitted text (or the "
-                     "final value of a silent success); stdout and stderr are "
-                     "discarded. One call runs a whole script: forms run in order, "
-                     "independent work can overlap — start (sandbox/spawn f) or "
-                     "(tools/call …) and deref them to join. Prefer one call with "
-                     "fan-out; separate eval calls do not overlap. This is the "
-                     "sandbox, not the project's nREPL.")
-   :prompt-snippet "One eval call at a time: fan out with sandbox/spawn or tools/call promises; separate eval calls serialize."
+                     " The session is single-threaded: two eval calls never overlap — the second waits for the first. Put independent work in ONE call and fan out with (sandbox/spawn f), pmap, or tools/call promises; a call that defines a verb or changes eval state serializes its batch. "
+                     "Eval creates verbs: a documented top-level definition persists in the eval library; without a docstring it is live-only. Local let/fn bindings are scratch. A successful call's namespace is re-entered; output is (emit value) or the final value, while stdout and stderr are discarded. "
+                     "(eval/help) lists sources, the library, and the full verb surface; this is the sandbox, not the project's nREPL.")
+   :prompt-snippet "One eval call at a time: fan out with sandbox/spawn or tools/call promises; separate eval calls serialize. (eval/help) lists the surface."
    :prompt-guidelines
-   ["Do not issue two eval calls for independent work. Make one call instead: (let [a (sandbox/spawn #(job-a)) b (sandbox/spawn #(job-b))] [(deref a) (deref b)]). Separate eval calls run one after the other, so wall time is the sum, not the max. A call that defines a verb or changes eval state serializes its whole batch. eval is the full script sandbox, not a bare REPL: fs, sh, slurp, tools and require work as in a babashka script; (eval/help) lists sources, loaded definitions and the surface."
-    "Read files with (user/read-file path) or (user/read-file path offset limit); it shares the read tool's 1-indexed offset/limit and truncation. For images use (emit-image path)."
-    "Call the run's tools through the `tools` namespace: (tools/list) lists them, (tools/describe \"name\") shows one declaration, and (tools/call \"name\" args) returns a promise to deref — or use (tools/call! \"name\" args) to settle and throw on failure; a plain name is a var too, @(tools/name args)."
-    "Define what should survive the call: a documented top-level definition is written to the agent's eval library as a verb, while an undocumented one stays live for this session only. Use local bindings for throwaway code."
-    "Eval creates verbs: give a top-level defn/defmacro/def/etc. a non-blank docstring to save it to the library, where later calls and sessions can use it; a new definition without one is live-only and not saved. Add a docstring and re-evaluate to keep it; a defmethod is saved with its loaded multimethod. A saved definition redefined without a docstring is not written; the saved documented file is unchanged. The docstring is the interface later calls see, with its arglists; (eval/describe 'name :doc) reads it; a patch or edit-form result cannot remove it."
-    "New sessions and a restart load the library; an already-running session is a cache and does not see another session's new files. The prompt previews the saved or loaded definitions; the first eval reports any loaded definitions and files that failed. A call that ends in a normal error writes nothing; its definitions stay live and can be forgotten."
-    "A redefinition keeps its file; drop or (eval/forget 'name) deletes the definition's actual file and unbinds this session's live name, resolving unqualified names in the namespace the call ends in. A file that also defines other names must be dropped with all of them. A code-less call may carry only drop (plus scope)."
-    "New definitions default to the cwd scope; pass scope global to save a new name globally. An existing active name keeps its scope, and the scope option may only name its active layer. Move a definition with (eval/move 'name :global|:cwd) or /eval move; a move does not re-evaluate. Use (eval/patch 'name old new) to replace one subform in a named definition; it re-evaluates before writing, and the definition name and docstring must stay (a defmethod is covered by its multimethod). Use (eval/edit-form 'name new-source) to replace the whole definition; edit files structurally with clj/edit-form, clj/replace-sexp and clj/paren-repair."
-    "Use (eval/describe 'name) for one definition's kind, arglists, file, scope and source — an entry with a source omits :doc; (eval/describe 'name key) returns one field, including :doc. (eval/sources) stays the registered-source listing, including each contributed verb's interface."
-    "Report with (emit value) or end on the value you want reported; stdout and stderr are discarded."]
+   ["Do not issue two eval calls for independent work. Make one call and fan out with (sandbox/spawn f), pmap, or tools/call promises; separate eval calls run one after the other, so wall time is the sum, not the max."
+    "The sandbox is the babashka script surface, not a bare REPL: fs, sh, slurp, spit, require, tools, and user/read-file work. (eval/help) lists sources, verbs, and the library."
+    "Eval creates verbs: a top-level defn/defmacro/def/etc. with a docstring is written to the eval library and persists; an undocumented definition is live-only. Local let/fn bindings are scratch. Use (eval/describe 'name) for one definition and (eval/sources) for the source listing."
+    "Report with (emit value) or end on the value you want reported; stdout and stderr are discarded. Prefer one call with fan-out; keep definitions and order-sensitive edits in source order."]
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"
-                         :description "Clojure forms. A top-level definition with a non-blank docstring is written to the agent's eval library; an undocumented one stays live for this session only. Omit when only drop acts."}
+                         :description "Clojure forms. Omit when only dropping definitions."}
                  "timeout" {:type "number"
-                            :description (str "Timeout in seconds — like bash's :timeout: omit or 0 "
-                                              "= no deadline; fractional ok, capped at a day")}
+                            :description "Seconds; omit or 0 = no deadline."}
                  "drop" {:type "array"
                          :items {:type "string"}
-                         :description "Definition names to remove: deletes the library file and unbinds the live name. May be used without code."}
+                         :description "Definition names to remove. May be used without code."}
                  "scope" {:type "string"
                           :enum ["cwd" "global"]
-                          :description "Library layer for a new definition or a drop: cwd (default for new names) or global. A redefinition keeps its active layer."}
+                          :description "cwd (default) or global."}
                  "max-output-bytes" {:type "number"
-                                     :description "Maximum result bytes (default 16 KiB; capped at 50 KiB)"}}
+                                     :description "Max result bytes (default 16 KiB, max 50 KiB)."}}
                 :required []}
    :execute execute
    :streams? true
    :contextual? true
-   ;; the script tool: the transcript keeps the Elapsed/Took tail line
-   ;; (tool-execution :status) for its whole life
    :status true
-   ;; No :execution-mode: the loop's batch classifier examines the call's code
-   ;; and serializes a batch only when it contains a verb definition.
-   ;; Calls to one session serialize on the service's session lock anyway; the
-   ;; group queues them in source order, so a waiting call is not "prepared" —
-   ;; and shows no Elapsed — until it actually runs.
    :serial-group :eval
    :title title))
 

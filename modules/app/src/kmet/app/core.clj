@@ -73,7 +73,10 @@
    ;; kmet1's maintenance switches: neither runs a mode.
    "-d" :debug
    "--debug" :debug
-   "--generate-models" :generate-models})
+   "--generate-models" :generate-models
+   ;; pi's -nc: skip AGENTS.md/CLAUDE.md discovery for this run.
+   "-nc" :no-context-files
+   "--no-context-files" :no-context-files})
 
 (def ^:private value-flags
   {"--profile" :profile
@@ -350,7 +353,7 @@
   "Parse kmet2's argv → `{:profile kw :patch [path …] :args [rest …] :version?
    :help? :dump-config? :dump-default-config? :dump-state? :format kw :model str
    :provider kw :thinking kw :models [pattern …] :tools [entry …]
-   :system-prompt str :append-system-prompt [str …] :session-dir path
+   :no-context-files bool :system-prompt str :append-system-prompt [str …] :session-dir path
    :continue? :resume?
    :session str :debug :generate-models :list-models str-or-true
    :token str :socket path :max-sessions long :queue-depth long
@@ -487,6 +490,7 @@
   (println "  --models <a,b>     Models the session's scope offers (comma separated)")
   (println "  --tools <list>     Session-only tool selection (comma separated; plain names")
   (println "                     or only +name/-name modifiers)")
+  (println "  -nc, --no-context-files  Disable AGENTS.md/CLAUDE.md discovery")
   (println "  -t, --thinking <level>  Thinking level (off, minimal, low, medium, high, xhigh, max)")
   (println "  --system-prompt <text>  Replace the system prompt (text, or a path to a file)")
   (println "  --append-system-prompt <text>  Append to the system prompt (repeatable)")
@@ -558,7 +562,8 @@
   "What the command line asks a mode for: the prompt and where to report, plus
    what the mode hands its run — the output `:format`, the agent's
    `:model`/`:provider`/`:thinking` overrides, the scope it offers
-   (`:models`), its session tool selection (`:tools`), its prompt and
+   (`:models`), its session tool selection (`:tools`), whether it skips
+   project context files (`:no-context-files`), its prompt and
    session-dir overrides (`:system-prompt`, `:append-system-prompt`,
    `:session-dir`), the socket `:port`, the server's
    transport and limits (`:socket`, `:token`, `:max-sessions`, `:queue-depth`,
@@ -570,7 +575,7 @@
    map of every option it could have been told."
   [opts config prompt on-result]
   (cond-> (assoc (select-keys opts [:format :model :provider :thinking :models
-                                    :tools :system-prompt :append-system-prompt
+                                    :tools :no-context-files :system-prompt :append-system-prompt
                                     :session-dir :port :socket :token
                                     :max-sessions :queue-depth :idle-timeout
                                     :session])

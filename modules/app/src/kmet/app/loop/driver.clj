@@ -54,15 +54,16 @@
 
 (defn- prompt-options
   "The options the run's prompt is built from: what the config says, the run's
-   cwd, the project context files, and the DECLARED tools the state will
+   cwd, the project context files (unless the config sets :no-context-files), and the DECLARED tools the state will
    resolve through its ctx — the same derivation the wire uses, so the prompt's
    Available-tools list cannot offer what no request declares."
   [config ctx {:keys [cwd enabled-tool-names session]}]
   {:custom-prompt (cfg/get-custom-prompt config)
    :append-prompt (cfg/get-append-system-prompt config)
    :cwd cwd
-   :context-files (context/load-project-context-files
-                   (cfg/get-agent-dir) (str (fs/cwd)))
+   :context-files (when-not (:no-context-files config)
+                    (context/load-project-context-files
+                     (cfg/get-agent-dir) (str (fs/cwd))))
    :tools (loop-state/declared-tools-for-session
            ctx session
            {:enabled-tool-names enabled-tool-names

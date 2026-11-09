@@ -76,10 +76,12 @@
 (deftest create-opts-is-the-run-overrides-and-nothing-of-the-modes-own
   (is (= {:model "deepseek-v4-flash" :provider :opencode-go :thinking :high
           :models ["deepseek-v4-flash"] :session-dir "target/sessions"
+          :no-context-files true
           :system-prompt "SYS" :append-system-prompt ["MORE"]}
          (invocation/create-opts
           {:model "deepseek-v4-flash" :provider :opencode-go :thinking :high
            :models ["deepseek-v4-flash"] :session-dir "target/sessions"
+           :no-context-files true
            :system-prompt "SYS" :append-system-prompt ["MORE"]
            ;; the mode's own, which `create!` must not see
            :prompt "hi" :format :text :port 0 :on-result :result

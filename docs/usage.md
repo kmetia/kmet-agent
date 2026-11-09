@@ -36,6 +36,7 @@ bb start @tasks.md "summarize the tasks"
   --models <a,b>        Models the session's scope offers (comma separated)
   --tools <list>        Session-only tool selection (comma separated; plain names
                         or only +name/-name modifiers)
+  -nc, --no-context-files  Disable AGENTS.md/CLAUDE.md discovery
   -t, --thinking <level> Thinking level (off, minimal, low, medium, high, xhigh, max)
   --system-prompt <txt> Replace the system prompt (text, or a path to a file)
   --append-system-prompt <txt> Append to the system prompt (repeatable)

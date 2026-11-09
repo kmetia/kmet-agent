@@ -25,8 +25,10 @@
    itself, per creation, so an agent's model is an option of the agent; the
    entry has already resolved it for a mode that runs kmet1's front end.
    `--tools` rides here as a session override: the driver applies it to the
-   created agent exactly as `/tools` does, never to the persisted selection."
-  [:model :provider :thinking :models :tools :session-dir :system-prompt
+   created agent exactly as `/tools` does, never to the persisted selection.
+   `--no-context-files` rides here too: the driver skips project-context
+   discovery for the agent's system prompt."
+  [:model :provider :thinking :models :tools :no-context-files :session-dir :system-prompt
    :append-system-prompt])
 
 (defn create-opts
