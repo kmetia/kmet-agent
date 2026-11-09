@@ -64,7 +64,8 @@
     (let [r (output/truncate-tail "xxxxxxxxxx" :max-bytes 4)]
       (t/is (= "xxxx" (:content r)))
       (t/is (= :bytes (:truncated-by r)))
-      (t/is (true? (:last-line-partial r))))))
+      (t/is (true? (:last-line-partial r)))
+      (t/is (= 10 (:last-line-bytes r)) "the full last line's size"))))
 
 (t/deftest test-truncate-head
   (t/testing "a result inside both budgets passes through untouched"

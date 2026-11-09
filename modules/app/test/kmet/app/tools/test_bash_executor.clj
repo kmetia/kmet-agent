@@ -47,6 +47,12 @@
 ;; seq, $VAR redirection), so the namespace registers none of them on Windows.
 ;; The executor's Windows paths (NUL stdin, cmd /c, the pipe-close drain) are
 ;; not reachable from these and need their own cases.
+(t/deftest abort-wins-over-a-simultaneous-timeout
+  (t/testing "pi checks the signal before the timeout after the wait"
+    (let [e (try (#'exec/finish-spawn 0 1 (atom true) (atom true) nil)
+                 (catch Exception e e))]
+      (t/is (= "aborted" (ex-message e))))))
+
 (when-not process/windows-os?
   (t/deftest ^:slow command-output-and-exit-code
     (t/testing "a successful command returns its output and a zero exit code"
@@ -100,9 +106,38 @@
     (t/testing "a cwd that does not exist is an error, not a spawn"
       (let [r (execute! {:command "echo hi"
                          :cwd "/definitely/not/a/directory/kmet-test"})]
-        (t/is (str/includes? (str (:output r)) "Working directory does not exist"))
+        (t/is (= (str "Working directory does not exist: "
+                      "/definitely/not/a/directory/kmet-test"
+                      "\nCannot execute bash commands.")
+                 (:output r)))
         (t/is (true? (:failed r)) "flagged, so the tool reports :is-error")
         (t/is (nil? (:exit-code r))))))
+
+  (t/deftest timeout-validation-matches-pi
+    (t/testing "a non-positive or non-finite timeout is rejected before spawn"
+      (doseq [timeout [0 -1 Double/NaN]]
+        (let [r (execute! {:command "echo hi" :timeout timeout})]
+          (t/is (= "Invalid timeout: must be a finite number of seconds"
+                   (:output r)))
+          (t/is (true? (:failed r))))))
+    (t/testing "a timeout past setTimeout's limit is rejected"
+      (let [r (execute! {:command "echo hi" :timeout 2147483.648})]
+        (t/is (= "Invalid timeout: maximum is 2147483.647 seconds"
+                 (:output r)))
+        (t/is (true? (:failed r))))))
+
+  (t/deftest an-already-aborted-signal-does-not-spawn
+    (t/testing "pi checks the signal before spawn and reports aborted"
+      (let [marker (str (fs/create-temp-file {:prefix "kmet-abort-"
+                                              :suffix ".marker"
+                                              :dir (doto "target" fs/create-dirs)}))
+            _ (fs/delete marker)
+            r (execute! {:command (str "touch " marker)
+                         :signal (atom true)})]
+        (t/is (true? (:cancelled r)))
+        (t/is (not (:timed-out r)))
+        (t/is (not (:failed r)))
+        (t/is (not (fs/exists? marker)) "the command never ran"))))
 
   (t/deftest ^:slow spawn-hook-and-env-merge-reach-the-command
     (t/testing "the spawn hook can rewrite the command; env is merged in"

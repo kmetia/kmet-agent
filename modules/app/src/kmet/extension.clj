@@ -190,7 +190,7 @@
                             :timeout :env} → {:exit-code :cleanup} (pi:
                             BashOperations — delegate to a remote host)
      :name :label :description — tool-facing overrides (defaults: 'bash',
-                            'Execute command', pi's bash description)"
+                            'bash', pi's bash description)"
   [api opts]
   ((:create-bash-tool api) opts))
 
@@ -455,7 +455,7 @@
               :create-bash-tool (fn [opts]
                                   (swap! state update :bash-tool-opts conj opts)
                                   {:name (or (:name opts) "bash")
-                                   :label "Execute command"
+                                   :label "bash"
                                    :description "bash (nullable)"
                                    :parameters {:type "object"
                                                 :properties {"command" {:type "string"

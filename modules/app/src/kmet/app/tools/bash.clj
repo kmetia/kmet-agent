@@ -5,8 +5,7 @@
    `:tool/bash` row mounts (create-tool) itself, and extension-built bash tools
    are the same record.
    Streams live output via an optional on-update callback (pi: onUpdate)."
-  (:require [clojure.string :as str]
-            [kmet.app.tools.bash-executor :as bash-exec]
+  (:require [kmet.app.tools.bash-executor :as bash-exec]
             [kmet.app.tools.bash-output :as bash-out]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.tool :as tool]
@@ -84,6 +83,80 @@
   ;; Pi: bashToolSystemPromptContribution.guidelines (PI_* → KMET_*)
   "You can inspect KMET_* environment variables for current model and session details.")
 
+(defn- truncation-footer
+  "Pi's formatOutput footer: the model sees which slice of the output it got
+   and where the full text lives. A byte cut through a single over-long line
+   names the last-line size; a line cut names the line range; a byte cut on
+   whole lines names the byte limit."
+  [truncation full-output-path]
+  (when (and truncation full-output-path)
+    (let [total-lines (:total-lines truncation)
+          output-lines (:output-lines truncation)
+          start-line (+ (- total-lines output-lines) 1)
+          end-line total-lines]
+      (cond
+        (:last-line-partial truncation)
+        (str "\n\n[Showing last " (bash-out/format-size (:output-bytes truncation))
+             " of line " end-line
+             " (line is " (bash-out/format-size (:last-line-bytes truncation))
+             "). Full output: " full-output-path "]")
+
+        (= :lines (:truncated-by truncation))
+        (str "\n\n[Showing lines " start-line "-" end-line " of " total-lines
+             ". Full output: " full-output-path "]")
+
+        :else
+        (str "\n\n[Showing lines " start-line "-" end-line " of " total-lines
+             " (" (bash-out/format-size bash-out/DEFAULT-MAX-BYTES) " limit)"
+             ". Full output: " full-output-path "]")))))
+
+(defn- result-map
+  "The model-facing result of an executor RESULT (pi: formatOutput +
+   appendStatus): empty command output shows \"(no output)\", a throw keeps its
+   status (and partial output for abort/timeout), and truncation details
+   survive when the tool returns rather than throws."
+  [result timeout]
+  (let [{:keys [output exit-code cancelled truncated truncation full-output-path
+                timed-out failed timeout-seconds]} result
+        footer (truncation-footer truncation full-output-path)]
+    (if cancelled
+      ;; Pi: appendStatus — only adds \n\n separator when there is output
+      {:content (str (when (seq (str output footer)) (str output footer "\n\n"))
+                     "Command aborted")
+       :is-error true}
+      (let [is-error (boolean (or timed-out failed (not= exit-code 0)))
+            base (if (and (not (or timed-out failed)) (empty? output))
+                   "(no output)"
+                   output)
+            status (cond
+                     timed-out (str "Command timed out after "
+                                    (or timeout-seconds timeout "?") " seconds")
+                     ;; the failure text already carries the error
+                     failed nil
+                     (nil? exit-code) "Command terminated without an exit code"
+                     (not= 0 exit-code) (str "Command exited with code " exit-code)
+                     :else nil)
+            content (if status
+                      (str (when (seq (str base footer))
+                             (str base footer "\n\n"))
+                           status)
+                      (str base footer))]
+        (if truncated
+          (cond-> {:content content
+                   :is-error is-error}
+            (not (or timed-out failed))
+            (assoc :truncation {:total-lines (:total-lines truncation)
+                                :total-bytes (:total-bytes truncation)
+                                :shown-lines (:output-lines truncation)
+                                :output-bytes (:output-bytes truncation)
+                                :truncated-by (:truncated-by truncation)
+                                :last-line-partial (:last-line-partial truncation)
+                                :max-bytes (:max-bytes truncation)
+                                :max-lines (:max-lines truncation)
+                                :full-output-path full-output-path}))
+          {:content content
+           :is-error is-error})))))
+
 (defn run-bash
   "Execute through the shared executor with the tool's spawn options (pi: the
    BashToolOptions an execute closure closes over)."
@@ -132,67 +205,10 @@
                                  (trim-live!)
                                  (send-update))
                      :max-lines bash-out/DEFAULT-MAX-LINES
-                     :max-bytes bash-out/DEFAULT-MAX-BYTES})
-            {:keys [output exit-code cancelled truncated truncation full-output-path
-                    timed-out failed]} result
-            ;; Pi: [Showing lines X-Y of Z. Full output: path] footer for the LLM
-            ;; (stripped from the TUI display by the bash render-result, which
-            ;; shows the truncation warning instead)
-            footer (when (and truncation full-output-path)
-                     (let [total-lines (:total-lines truncation)
-                           output-lines (:output-lines truncation)
-                           start-line (+ (- total-lines output-lines) 1)
-                           end-line total-lines
-                           limit-str (when (= (:truncated-by truncation) :bytes)
-                                       (str " (" (bash-out/format-size
-                                                  (or (:max-bytes truncation)
-                                                      bash-out/DEFAULT-MAX-BYTES))
-                                            " limit)"))]
-                       (str "\n\n[Showing lines " start-line "-" end-line " of " total-lines
-                            limit-str ". Full output: " full-output-path "]")))]
-        (if cancelled
-          ;; Pi: appendStatus — only adds \n\n separator when there is output
-          {:content (str (when (seq (str output footer)) (str output footer "\n\n")) "Command aborted")
-           :is-error true}
-          (let [;; pi: no exit code is an error, never a success — :failed is
-                ;; the executor's throw, and nil is an exit that could not be
-                ;; observed
-                is-error (boolean (or timed-out failed (not= exit-code 0)))
-                ;; Pi: formatOutput — empty successful output shows "(no output)"
-                base (if (and (not is-error) (empty? output)) "(no output)" output)
-                ;; Pi: appendStatus(outputText, status) — status follows the output
-                status (cond
-                         timed-out (str "Command timed out after " (or timeout "?") " seconds")
-                         ;; the failure text already carries the error
-                         failed nil
-                         (nil? exit-code) "Command terminated without an exit code"
-                         (not= 0 exit-code) (str "Command exited with code " exit-code)
-                         :else nil)
-                content (if status
-                          (str (when (seq (str base footer))
-                                 (str base footer "\n\n"))
-                               status)
-                          (str base footer))]
-            (if truncated
-              ;; Pi: details are lost when the tool throws, so errors carry no
-              ;; truncation metadata (the footer stays in the content instead)
-              (cond-> {:content content
-                       :is-error is-error}
-                (not is-error)
-                (assoc :truncation {:total-lines (:total-lines truncation)
-                                    :total-bytes (:total-bytes truncation)
-                                    :shown-lines (:output-lines truncation)
-                                    :truncated-by (:truncated-by truncation)
-                                    :max-bytes (:max-bytes truncation)
-                                    :max-lines (:max-lines truncation)
-                                    :full-output-path full-output-path}))
-              {:content content
-               :is-error is-error}))))
+                     :max-bytes bash-out/DEFAULT-MAX-BYTES})]
+        (result-map result timeout))
       (catch Exception e
-        (let [msg (ex-message e)]
-          (if (str/includes? msg "timeout")
-            {:content (str "Command timed out after " (or timeout "?") " seconds") :is-error true}
-            {:content (str "Error: " msg) :is-error true}))))))
+        {:content (str (ex-message e)) :is-error true}))))
 
 (defn create-tool
   "Build a bash Tool record (pi: createBashTool/createShellToolDefinition —
@@ -201,7 +217,7 @@
    BashToolOptions plus the tool-facing fields:
      :name                — tool name (default \"bash\"; registering that name
                             replaces the built-in tool)
-     :label               — display label (default \"Execute command\")
+     :label               — display label (default \"bash\")
      :description         — provider-facing description (default: pi's)
      :command-prefix      — command prepended to every command (pi: commandPrefix;
                             default: the run's :shell service)
@@ -229,7 +245,7 @@
    (let [expose-session-env? (if (some? expose-session-env?) expose-session-env? true)]
      (tool/make-tool
       :name (or name "bash")
-      :label (or label "Execute command")
+      :label (or label "bash")
       :description (or description default-description)
       :prompt-snippet "Execute bash commands (ls, grep, find, etc.)"
       ;; pi: promptGuidelines are the contribution's, gated on
@@ -237,6 +253,7 @@
       :prompt-guidelines (when expose-session-env? [session-env-guideline])
       :params {:command {:type :string :description "Shell command to execute"}
                :timeout {:type :number :description "Timeout in seconds (optional, no default timeout)" :optional? true}}
+      :constrained-sampling {:type :json-schema :strict :prefer}
       :execute (fn [args & [on-update]]
                  (run-bash args on-update
                            {:command-prefix command-prefix

@@ -258,10 +258,24 @@
    exit code — the kill itself returns normally with a SIGKILL code (pi)."
   [exit-code timeout signal timed-out cleanup]
   (cond
-    @timed-out (throw (ex-info (str "timeout:" timeout) {}))
     (and signal @signal) (throw (ex-info "aborted" {}))
+    @timed-out (throw (ex-info (str "timeout:" timeout) {}))
     :else {:exit-code exit-code
            :cleanup cleanup}))
+
+(def ^:private max-timeout-ms 2147483647)
+
+(defn- validate-timeout!
+  "Pi: resolveTimeoutMs — nil means no timeout; anything else must be a finite
+   number of seconds, positive and within setTimeout's limit."
+  [timeout]
+  (when (some? timeout)
+    (when-not (and (host/finite? timeout) (pos? timeout))
+      (throw (ex-info "Invalid timeout: must be a finite number of seconds"
+                      {:type :invalid-timeout})))
+    (when (> (* timeout 1000) max-timeout-ms)
+      (throw (ex-info "Invalid timeout: maximum is 2147483.647 seconds"
+                      {:type :invalid-timeout})))))
 
 (defn create-default-ops
   "Pi: createLocalShellOperations/getShellConfig — the local spawn for one
@@ -275,8 +289,13 @@
                     {:shell-path shell-path})))
   (let [shell (or shell-path (resolve-shell))]
     (fn spawn [{:keys [command cwd on-data signal timeout env]}]
+      (validate-timeout! timeout)
+      (when (and signal @signal)
+        (throw (ex-info "aborted" {})))
       (when-not (fs/exists? cwd)
-        (throw (ex-info (str "Working directory does not exist: " cwd) {:cwd cwd})))
+        (throw (ex-info (str "Working directory does not exist: " cwd
+                             "\nCannot execute bash commands.")
+                        {:cwd cwd})))
       (let [;; Pi: getShellConfig resolves shell + args per platform
             use-stdin? (stdin-transport? shell shell-args)
             argv (shell-argv shell shell-args command use-stdin?)
@@ -382,12 +401,18 @@
               (when (.isOverflow res) (recur)))))]
     {:chunk
      (fn [raw-bytes offset len]
-       (when (pos? len)
-         (.put decode-in raw-bytes offset len))
-       (.flip decode-in)
+       ;; A custom BashOperations may hand over any chunk size, not just the
+       ;; executor's 8 KiB reads: fill, decode and compact until it is spent,
+       ;; keeping a split UTF-8 sequence in the carry buffer.
        (let [sb (StringBuilder.)]
-         (decode-into! sb false)
-         (.compact decode-in)
+         (loop [off offset remaining len]
+           (when (pos? remaining)
+             (let [n (min remaining (- (.capacity decode-in) (.position decode-in)))]
+               (.put decode-in raw-bytes off n)
+               (.flip decode-in)
+               (decode-into! sb false)
+               (.compact decode-in)
+               (recur (+ off n) (- remaining n)))))
          (decoded-string sb)))
      :finish
      (fn []
@@ -531,13 +556,13 @@
                 (recur last-bytes deadline))))))))
 
 (defn- failure-result
-  "The call's result when the run threw: the same clean/truncate/persist tail,
-   classified as cancelled, timed out, or :failed — an error appended to the
-   output and the flag the tool turns into :is-error, since a call that never
-   produced an exit code did not succeed."
-  [ctx signal e]
+  "The call's result when the run threw. An abort or timeout keeps the output
+   so far (pi appends its status to it); any other throw is the error message
+   alone — pi discards the partial output there."
+  [ctx e]
   (let [{:keys [content truncated truncation full-output-path]}
         (truncate-and-persist! ctx (clean-tail ctx))
+        msg (str (ex-message e))
         result {:output content
                 :exit-code nil
                 :cancelled false
@@ -545,12 +570,16 @@
                 :truncation truncation
                 :full-output-path full-output-path}]
     (cond
-      (and signal @signal) (assoc result :cancelled true)
-      (str/includes? (str (ex-message e)) "timeout") (assoc result :timed-out true)
+      (= "aborted" msg) (assoc result :cancelled true)
+      (str/starts-with? msg "timeout:")
+      (assoc result :timed-out true
+             :timeout-seconds (subs msg (count "timeout:")))
       :else (assoc result
                    :failed true
-                   :output (str (when (seq content) (str content "\n\n"))
-                                "Error: " (ex-message e))))))
+                   :output msg
+                   :truncated false
+                   :truncation nil
+                   :full-output-path nil))))
 
 (defn- new-run-state
   "One call's streaming state: the raw chunk log and the rolling tail (whose
@@ -627,4 +656,4 @@
 
       (catch Exception e
         (debug/log "bash execute error: " e)
-        (failure-result ctx signal e)))))
+        (failure-result ctx e)))))

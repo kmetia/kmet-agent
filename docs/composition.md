@@ -330,7 +330,7 @@ Edit a single file using exact text replacement. Every edits[].oldText must matc
 
 ### `bash`
 
-**Label:** Execute command
+**Label:** bash
 
 **Parameters:** `command` (required), `timeout`
 

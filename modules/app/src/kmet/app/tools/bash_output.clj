@@ -129,7 +129,8 @@
       {:content content :truncated false :truncated-by nil
        :total-lines total-lines :total-bytes total-bytes
        :output-lines total-lines :output-bytes total-bytes
-       :last-line-partial false :first-line-exceeds-limit false
+       :last-line-partial false
+       :first-line-exceeds-limit false
        :max-lines max-lines :max-bytes max-bytes}
       (let [[out-lines out-bytes last-partial truncated-by]
             (loop [i (dec (count lines)) acc [] b 0 lp false tb :lines]
@@ -152,5 +153,7 @@
         {:content out-content :truncated true :truncated-by truncated-by
          :total-lines total-lines :total-bytes total-bytes
          :output-lines (count out-lines) :output-bytes out-bytes
-         :last-line-partial last-partial :first-line-exceeds-limit false
+         :last-line-partial last-partial
+         :last-line-bytes (if (seq lines) (byte-length (peek lines)) 0)
+         :first-line-exceeds-limit false
          :max-lines max-lines :max-bytes max-bytes}))))
