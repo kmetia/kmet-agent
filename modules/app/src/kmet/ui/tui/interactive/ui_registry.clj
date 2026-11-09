@@ -558,10 +558,12 @@
                                                                                   (pos? window))
                                                                          (int (* 100.0 (/ tokens window))))})))
                                     :compact (fn [& [{:keys [custom-instructions
+                                                             keep-user-turns
                                                              on-complete on-error]}]]
                                                (case ((:request-compaction! engine)
                                                       custom-instructions
-                                                      {:on-complete (fn [result]
+                                                      {:keep-user-turns keep-user-turns
+                                                       :on-complete (fn [result]
                                                                       (when on-complete
                                                                         (on-complete {:result result})))
                                                        :on-error (fn [e]

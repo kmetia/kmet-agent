@@ -325,3 +325,25 @@
             (is (every? (set (keys handlers))
                         [:theme :show-hardware-cursor :clear-on-shrink
                          :show-images :image-width-cells]))))))))
+
+(deftest compactor-row-selects-the-builtin-strategy
+  (testing "the panel exposes :compactor and the change applies live + persists"
+    (let [cs (settings-cs)
+          focused (atom nil)
+          applied (atom nil)
+          saved (atom nil)]
+      (with-redefs [core/tui-set-focus (fn [_ c] (reset! focused c))
+                    core/tui-request-render (fn [_] nil)
+                    runtime/set-compactor! (fn [_ c] (reset! applied c))
+                    cfg/save-setting! (fn [path value] (reset! saved [path value]))]
+        (ss/show-settings cs)
+        (let [sl @focused
+              row (settings-list/settings-list-get-item sl :compactor)
+              handlers ((var ss/row-handlers) {:cs cs
+                                               :engine (:engine cs)})]
+          (is (some? row) "the compactor row is present")
+          (is (= "llm" (:value row)))
+          (is (= ["llm" "vcc"] (:values row)))
+          ((get handlers :compactor) "vcc")
+          (is (= :vcc @applied))
+          (is (= [[:compactor] :vcc] @saved)))))))

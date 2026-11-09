@@ -621,15 +621,19 @@
 (defn compact-with-summary!
   "Append a compaction entry summarizing everything before first-kept-id (pi:
    appendCompaction). Append-only: the summarized entries stay in the file;
-   build-context returns [compaction, ...from first-kept-id], so old content
+   build-context returns [compaction, ...from first-kept-id] (or just the
+   compaction when first-kept-id is nil), so old content
    stays reachable (tree, fork) while being excluded from the LLM context.
    opts may carry :tokens-before, :usage, :details, :from-hook (true when an
    extension supplied the summary — pi: CompactionEntry.fromHook).
    Returns the compaction entry, or nil when first-kept-id is not found.
+   A nil first-kept-id is the compact-all sentinel: context-entries then keeps
+   no tail (only the summary).
    The compaction policy that calls this lives in kmet.app.compaction.stage;
    the entry shape belongs here, next to make-bash-entry."
   [session summary first-kept-id & [opts]]
-  (when (some #(= (:id %) first-kept-id) @(:entries session))
+  (when (or (nil? first-kept-id)
+            (some #(= (:id %) first-kept-id) @(:entries session)))
     (append-entry session
                   (merge {:role :compaction
                           :summary summary

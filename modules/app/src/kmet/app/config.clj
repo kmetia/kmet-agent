@@ -23,6 +23,8 @@
    :compact-token-threshold nil
    ;; pi: autoCompact — gates proactive compaction (overflow recovery stays on)
    :auto-compact true
+   ;; the builtin compactor selected for context compaction: :llm | :vcc
+   :compactor :llm
    ;; pi: reserveTokens — tokens reserved for prompt + response
    :compact-reserve-tokens 16384
    :keep-recent-tokens 20000
@@ -699,14 +701,16 @@
    \"provider/modelId\" :compact-model-overrides entry, then the ordinary
    :compact-reserve-tokens / :keep-recent-tokens, then the built-in
    default. Returns {:enabled bool :reserve-tokens n :keep-recent-tokens
-   n}."
+   n}, plus :compactor (:llm | :vcc)."
   [config provider model-id]
   (let [model-key (str (name provider) "/" model-id)]
     {:enabled (boolean (get config :auto-compact true))
      :reserve-tokens (compaction-token-setting config model-key
                                                :compact-reserve-tokens :reserve-tokens)
      :keep-recent-tokens (compaction-token-setting config model-key
-                                                   :keep-recent-tokens :keep-recent-tokens)}))
+                                                   :keep-recent-tokens :keep-recent-tokens)
+     :compactor (let [c (get config :compactor :llm)]
+                  (if (contains? #{:llm :vcc} c) c :llm))}))
 
 (defn get-branch-summary-settings
   "Branch-summary settings (pi: settings-manager branchSummary block —

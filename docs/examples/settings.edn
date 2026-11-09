@@ -6,6 +6,7 @@
                                  ; block's tail while the model thinks, the label alone after), :hidden
  :session-dir "~/.kmet/sessions"
  :auto-compact true
+ :compactor :llm
  :compact-token-threshold nil
  :compact-reserve-tokens 16384
  :keep-recent-tokens 20000

@@ -307,6 +307,88 @@
          ;; replacement)
          :tokens-before (projected-context-tokens projected entries)}))))
 
+(defn- user-message?
+  "True when a projected message is a user turn (the unit keep:N counts)."
+  [m]
+  (= :user (:role m)))
+
+(defn find-user-turn-cut-index
+  "The projected entry index to start keeping after KEEP-USER-TURNS user turns,
+   or nil when the projection has fewer user turns. 0 means compact all (the
+   projection length). Counts projected user messages from the end; an omitted
+   user message projects none and is not a turn."
+  [projected keep-user-turns]
+  (if (zero? keep-user-turns)
+    (count projected)
+    (loop [i (dec (count projected)) seen 0]
+      (if (neg? i)
+        nil
+        (if (some user-message? (:messages (nth projected i)))
+          (if (= (inc seen) keep-user-turns)
+            i
+            (recur (dec i) (inc seen)))
+          (recur (dec i) seen))))))
+
+(defn prepare-keep-n
+  "Prepare a compaction whose kept tail starts after KEEP-USER-TURNS user
+   turns (0 compacts everything, leaving no first-kept-id). Uses the same
+   projection boundary and previous-summary rules as prepare."
+  [entries keep-user-turns]
+  (when (and (seq entries)
+             (not= :compaction (:role (last entries)))
+             (some? keep-user-turns)
+             (not (neg? keep-user-turns)))
+    (let [projected (session/project-entries (session/context-entries entries))
+          prev-idx (first (keep-indexed (fn [i pe]
+                                          (when (and (= :compaction (:role (:source pe)))
+                                                     (seq (:messages pe)))
+                                            i))
+                                        projected))
+          previous-summary (when prev-idx (:summary (:source (nth projected prev-idx))))
+          boundary-start (if prev-idx (inc prev-idx) 0)
+          relative-cut (find-user-turn-cut-index (subvec projected boundary-start)
+                                                 keep-user-turns)
+          cut-idx (when relative-cut (+ boundary-start relative-cut))
+          first-kept-id (when (and (some? cut-idx) (pos? keep-user-turns))
+                          (:id (:source (nth projected cut-idx))))
+          tail-tokens (when (some? cut-idx)
+                        (estimated-tokens
+                         (vec (mapcat :messages (subvec projected cut-idx)))))
+          msgs (when (some? cut-idx)
+                 (vec (mapcat (fn [pe]
+                                (if (= :compaction (:role (:source pe)))
+                                  []
+                                  (remove #(= :system (:role %)) (:messages pe))))
+                              (subvec projected boundary-start cut-idx))))]
+      (when (and (some? cut-idx)
+                 (or (zero? keep-user-turns) (some? first-kept-id))
+                 (seq msgs))
+        {:first-kept-id first-kept-id
+         :messages msgs
+         :previous-summary previous-summary
+         :tokens-before (projected-context-tokens projected entries)
+         :tail-tokens tail-tokens
+         :keep-user-turns keep-user-turns}))))
+
+(defn prepare-with-settings
+  "The cut a compactor uses: an explicit keep:N overrides the token budget;
+   otherwise the ordinary :keep-recent-tokens cut applies. When SETTINGS
+   carries :keep-tail-budget and the explicit tail is too large, fall back to
+   the token cut and record :keep-fallback :tail-too-large on the
+   preparation."
+  [entries settings]
+  (if (some? (:keep-user-turns settings))
+    (let [prep (prepare-keep-n entries (:keep-user-turns settings))
+          budget (:keep-tail-budget settings)
+          too-large? (and prep budget
+                          (> (or (:tail-tokens prep 0) 0) budget))
+          fallback (when too-large?
+                     (prepare entries (:keep-recent-tokens settings)))]
+      (if fallback
+        (assoc fallback :keep-fallback :tail-too-large)
+        prep))
+    (prepare entries (:keep-recent-tokens settings))))
+
 ;; ─── Conversation serialization (pi: serializeConversation) ────────────────
 
 (defn- truncate-for-summary

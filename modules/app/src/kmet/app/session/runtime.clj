@@ -265,7 +265,8 @@
 
 (defn pending-compaction
   "Manual compaction requests waiting to run, in order
-   ({:custom-instructions s-or-nil :on-complete f :on-error f} — see
+   ({:custom-instructions s-or-nil :keep-user-turns n-or-nil
+     :on-complete f :on-error f} — see
    request-compaction!): a request that arrived while a prompt was running
    waits for the settle, an idle one only for the drain to start."
   [engine]
@@ -287,6 +288,11 @@
   (loop-state/cycle-thinking-level! (agent-state engine)))
 
 (defn set-auto-compact! [engine enabled?] (loop-state/set-auto-compact! (agent-state engine) enabled?))
+
+(defn set-compactor!
+  "Select the context compactor live (:llm or :vcc)."
+  [engine compactor]
+  (loop-state/set-compactor! (agent-state engine) compactor))
 
 (defn set-steering-mode! [engine mode] (loop-state/set-steering-mode! (agent-state engine) mode))
 

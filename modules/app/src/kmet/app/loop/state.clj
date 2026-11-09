@@ -159,12 +159,13 @@
          has no tool table; an agent's run passes its own child ctx, which
          carries its own :loop-guard and :retry-policy stages, and a process
          run passes the app root)"
-  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms branch-summary-reserve-tokens tool-hook system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts system-prompt-fn compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens compact-model-overrides http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images enabled-tool-names ctx]
+  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms branch-summary-reserve-tokens tool-hook system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts system-prompt-fn compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens compact-model-overrides http-idle-timeout-ms http-total-timeout-ms auto-compact compactor loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images enabled-tool-names ctx]
       :or {provider :opencode-go
            thinking :off
            steering-mode :all
            follow-up-mode :one-at-a-time
            auto-compact true
+           compactor :llm
            max-retries 3
            base-delay-ms 2000
            max-agent-delay-ms retry/default-max-agent-delay-ms
@@ -208,6 +209,7 @@ Be precise and concise in your responses."}}]
                                 :steering-mode steering-mode
                                 :follow-up-mode follow-up-mode
                                 :auto-compact (boolean auto-compact)
+                                :compactor (keyword (or compactor :llm))
                                 :block-images (boolean block-images)
                                 :context-window context-window
                                 :loop-guard-enabled (boolean loop-guard-enabled)
@@ -1321,6 +1323,15 @@ Be precise and concise in your responses."}}]
    is unaffected."
   [agent enabled?]
   (swap! (:cfg agent) assoc :auto-compact (boolean enabled?)))
+
+(defn set-compactor!
+  "Select the context compactor live (:llm or :vcc); the next compaction
+   reads it."
+  [agent compactor]
+  (when-not (contains? #{:llm :vcc} compactor)
+    (throw (ex-info (str "Unknown compactor: " (pr-str compactor))
+                    {:type :invalid-compactor :compactor compactor})))
+  (swap! (:cfg agent) assoc :compactor compactor))
 
 (defn set-http-idle-timeout-ms!
   "Set the SSE idle timeout live (pi: setHttpIdleTimeoutMs); 0 disables."

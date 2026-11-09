@@ -5,6 +5,8 @@
    do not read."
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.app.compaction :as compaction]
+            [kmet.app.compaction.stage :as stage]
+            [kmet.app.compaction.vcc :as vcc]
             [kmet.srce.core :as srce]))
 
 (deftest the-builtin-is-the-stage-implementation
@@ -40,6 +42,8 @@
 
 (deftest the-row-provides-the-builtin-and-takes-no-config
   (let [world (srce/root)]
+    (srce/provide! world :compactor/llm stage/llm-strategy)
+    (srce/provide! world :compactor/vcc vcc/strategy)
     (srce/plugin! world #'compaction/plugin nil)
     (is (= compaction/builtin (srce/get world :compaction))
         "the row's value is the builtin; a profile replaces it by id")

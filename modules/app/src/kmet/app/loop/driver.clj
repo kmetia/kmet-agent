@@ -136,6 +136,7 @@
                                    16384)
                                :compact-token-threshold (:compact-token-threshold config)
                                :auto-compact (get config :auto-compact true)
+                               :compactor (or (:compactor config) :llm)
                                :steering-mode (or (:steering-mode config) :all)
                                :follow-up-mode (or (:follow-up-mode config) :one-at-a-time)
                                :keep-recent-tokens (or (:keep-recent-tokens config) 20000)
@@ -444,8 +445,13 @@
                                       (not (runtime/compacting? engine))))
                       :has-pending-messages (fn [] (boolean (seq (runtime/queues engine))))
                       :abort (fn [] (lifecycle/cancel-run! engine))
-                      :compact (fn [& [instructions]]
-                                 (manual/request-compaction! engine instructions nil))}))
+                      :compact (fn [& [opts]]
+                                 (let [opts (if (string? opts)
+                                              {:custom-instructions opts}
+                                              opts)]
+                                   (manual/request-compaction!
+                                    engine (:custom-instructions opts)
+                                    {:keep-user-turns (:keep-user-turns opts)})))}))
             ;; true when this call claimed the run: the CAS is what decides, so
             ;; a message arriving as another thread starts a run is queued by
             ;; the caller rather than dropped. A start that throws before it

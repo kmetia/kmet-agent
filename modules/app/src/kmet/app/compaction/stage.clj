@@ -1,7 +1,9 @@
 (ns kmet.app.compaction.stage
-  "Proactive and reactive conversation compaction — the builtin implementation
+  "Proactive and reactive conversation compaction — the builtin orchestrator
    behind the `:compaction` contract (`kmet.app.compaction`), which is what the
-   loop and the session handle call.
+   loop and the session handle call. It owns the events, threshold/overflow
+   checks, abort state and append; the cut and the summary come from the
+   selected builtin compactor (`:llm` or `:vcc`).
 
    The compaction stage of the agent loop (owner: kmet.app.compaction.core
    is what compaction is — algorithms, cut point, prompts; this namespace is
@@ -9,8 +11,8 @@
    compact-with-summary! entry). The session is compacted proactively
    (measured usage vs. the model's context window) and reactively after a
    context-overflow error (compact once, then retry). Compaction summarizes
-   the pre-cut conversation via the LLM (pi: core/compaction) and replaces it
-   with a summary entry. The summarization call is retried with the configured
+   the pre-cut conversation (pi: core/compaction) and replaces it
+   with a summary entry; the `:compactor` setting picks the summarizer. The summarization call is retried with the configured
    retry policy (pi: completeSummarization → retryAssistantCall), reports
    :summarization-retry-* events while it backs off, and reasons at the
    session's thinking level; a failure surfaces its cause behind pi's reason
@@ -18,6 +20,7 @@
   (:require [clojure.string :as str]
             [kmet.app.llm :as llm]
             [kmet.app.compaction.core :as core]
+            [kmet.app.compaction.vcc :as vcc]
             [kmet.app.debug :as debug]
             [kmet.app.retry :as retry]
             [kmet.libs.concurrent :as concurrent]
@@ -178,7 +181,8 @@
   (cfg/get-compaction-settings
    (assoc (select-keys agent [:compact-reserve-tokens :keep-recent-tokens
                               :compact-model-overrides])
-          :auto-compact (boolean (:auto-compact @(:cfg agent))))
+          :auto-compact (boolean (:auto-compact @(:cfg agent)))
+          :compactor (get @(:cfg agent) :compactor :llm))
    @(:provider agent)
    @(:model agent)))
 
@@ -246,7 +250,18 @@
           ;; included; log it so an empty summary stays diagnosable
           (when (str/blank? (:text result))
             (debug/log "Warning: summarization returned an empty summary"))
-          {:summary (:text result) :usage (:usage result)})))))
+          {:summary (:text result) :usage (:usage result)
+           :details {:compactor :llm}})))))
+
+(def llm-strategy
+  "The builtin LLM compactor: the shared cut plus the summarization call."
+  {:prepare core/prepare-with-settings
+   :summarize summarize!})
+
+(def default-strategies
+  "The two builtin compactors by setting keyword."
+  {:llm llm-strategy
+   :vcc vcc/strategy})
 
 (defn generate-branch-summary
   "LLM summary of abandoned branch entries for tree navigation (pi:
@@ -393,24 +408,44 @@
     succeeded? true
     :else result))
 
+(defn- selected-strategy
+  "The compactor selected by SETTINGS' :compactor (:llm by default)."
+  [strategies settings]
+  (case (:compactor settings)
+    :vcc (:vcc strategies)
+    :llm (:llm strategies)
+    (do (debug/log (str "Unknown compactor " (pr-str (:compactor settings))
+                        "; using :llm"))
+        (:llm strategies))))
+
 (defn- prepare-compaction
   "Gather the compaction plan for REASON (pi: prepareCompaction): the branch
    entries, the settings, and the prepared cut. Returns nil when there is
    nothing to compact, {:problem msg} for pi's manual already-compacted case,
-   and {:entries es :prep p} when there is something to summarize."
-  [agent reason]
-  (let [sess (:session agent)
-        entries (session/get-branch sess)
-        settings (compaction-settings agent)
-        prep (some-> (core/prepare entries (:keep-recent-tokens settings))
-                     (assoc :settings settings))]
-    (if (or (nil? prep) (empty? (:messages prep)))
-      ;; pi: compact() separates an already-compacted session from one with
-      ;; nothing to summarize
-      (when (and (= :manual reason)
-                 (= :compaction (:role (last entries))))
-        {:problem "Already compacted"})
-      {:entries entries :prep prep})))
+   and {:entries es :prep p :strategy s} when there is something to summarize.
+   The 4-arity takes the strategies and the already-resolved settings."
+  ([agent reason]
+   (prepare-compaction default-strategies agent reason (compaction-settings agent)))
+  ([strategies agent reason settings]
+   (let [sess (:session agent)
+         entries (session/get-branch sess)
+         strategy (selected-strategy strategies settings)
+         window (:context-window @(:cfg agent))
+         reserve (:reserve-tokens settings)
+         strategy-settings (cond-> settings
+                             (and window (pos? (long window))
+                                  reserve (pos? (long reserve)))
+                             (assoc :keep-tail-budget (- (long window)
+                                                         (long reserve))))
+         prep (some-> ((:prepare strategy) entries strategy-settings)
+                      (assoc :settings settings))]
+     (if (or (nil? prep) (empty? (:messages prep)))
+       ;; pi: compact() separates an already-compacted session from one with
+       ;; nothing to summarize
+       (when (and (= :manual reason)
+                  (= :compaction (:role (last entries))))
+         {:problem "Already compacted"})
+       {:entries entries :prep prep :strategy strategy}))))
 
 (defn- ask-before-compact!
   "Fire the :session-before-compact boundary (pi: session_before_compact):
@@ -458,22 +493,33 @@
         :failed)
 
     :else
-    (if-let [compacted
-             (record-compaction!
-              agent sess summary-result
-              (or (:first-kept-id summary-result)
-                  (:first-kept-id prep))
-              (or (:tokens-before summary-result)
-                  (:tokens-before prep))
-              @from-extension)]
-      compacted
-      ;; the first-kept entry vanished from the branch — nothing was
-      ;; appended, so this is a failure, not a silent no-op
-      (do (debug/log
-           "Warning: compaction target entry not found; compaction skipped")
-          (vreset! failure
-                   "the first kept entry is no longer in the session")
-          :failed))))
+    (let [summary-result (cond-> summary-result
+                           (:keep-fallback prep)
+                           (update :details assoc :keep-fallback
+                                   (:keep-fallback prep)))]
+      (if-let [compacted
+               (record-compaction!
+                agent sess summary-result
+                (or (:first-kept-id summary-result)
+                    (:first-kept-id prep))
+                (or (:tokens-before summary-result)
+                    (:tokens-before prep))
+                @from-extension)]
+        compacted
+        ;; the first-kept entry vanished from the branch — nothing was
+        ;; appended, so this is a failure, not a silent no-op
+        (do (debug/log
+             "Warning: compaction target entry not found; compaction skipped")
+            (vreset! failure
+                     "the first kept entry is no longer in the session")
+            :failed)))))
+
+(defn- compaction-settings-for
+  "The effective settings for one compaction, with an explicit keep:N cut
+   when the caller supplied one."
+  [agent keep-user-turns]
+  (cond-> (compaction-settings agent)
+    (some? keep-user-turns) (assoc :keep-user-turns keep-user-turns)))
 
 (defn- compact-with-session!
   "The compaction body (pi: prepareCompaction → session_before_compact →
@@ -482,30 +528,40 @@
    when a handler cancelled. FAILURE and FROM-EXTENSION are the caller's
    reporting volatiles — they outlive this body, since the caller's catch
    reports into FAILURE too."
-  [agent sess reason custom-instructions failure from-extension]
+  [strategies agent sess reason custom-instructions opts failure from-extension]
   (if (compaction-aborted? agent)
     :aborted
-    (let [{:keys [entries prep problem] :as plan} (prepare-compaction agent reason)]
-      (cond
-        problem
-        (do (vreset! failure problem) :failed)
+    (let [settings (compaction-settings-for agent (:keep-user-turns opts))]
+      (when (and (= :vcc (:compactor settings))
+                 (not (str/blank? custom-instructions)))
+        (throw (ex-info
+                (str "The VCC compactor is deterministic and cannot apply "
+                     "custom compaction instructions. Remove the instructions, "
+                     "use keep:N, or switch the compactor in /settings.")
+                {:type :kmet/compactor-rejects-instructions
+                 :compactor :vcc})))
+      (let [{:keys [entries prep problem strategy] :as plan}
+            (prepare-compaction strategies agent reason settings)]
+        (cond
+          problem
+          (do (vreset! failure problem) :failed)
 
-        (nil? plan)
-        false
+          (nil? plan)
+          false
 
-        :else
-        (let [{:keys [cancelled supplied]}
-              (ask-before-compact! agent reason custom-instructions entries prep)]
-          (if cancelled
-            ::cancelled
-            (let [supplied-summary (extension-summary supplied)
-                  summary-result
-                  (if supplied-summary
-                    (do (vreset! from-extension true)
-                        supplied-summary)
-                    (summarize! agent prep custom-instructions reason))]
-              (apply-summary! agent sess prep summary-result failure
-                              from-extension))))))))
+          :else
+          (let [{:keys [cancelled supplied]}
+                (ask-before-compact! agent reason custom-instructions entries prep)]
+            (if cancelled
+              ::cancelled
+              (let [supplied-summary (extension-summary supplied)
+                    summary-result
+                    (if supplied-summary
+                      (do (vreset! from-extension true)
+                          supplied-summary)
+                      ((:summarize strategy) agent prep custom-instructions reason))]
+                (apply-summary! agent sess prep summary-result failure
+                                from-extension)))))))))
 
 (defn- compaction-outcome
   "The reporting view of RESULT for finish-compaction!: what status to report
@@ -518,7 +574,7 @@
      :error-message (when failed?
                       (core/compaction-failure-message reason failure))}))
 
-(defn compact-context!
+(defn- compact-context*
   "LLM-based compaction (pi: prepareCompaction → compact): summarize the
    pre-cut entries, append a compaction entry (append-only — summarized
    entries stay in the file, build-context excludes them), and rebuild the
@@ -554,7 +610,7 @@
    that did not complete — :failed, :aborted, or an extension cancel —
    blocks this prompt's automatic checks (see maybe-compact!); the next
    prompt starts fresh."
-  [agent & [custom-instructions reason]]
+  [strategies agent custom-instructions reason opts]
   ;; The claim is the CAS, not a test followed by a reset: a manual
   ;; compaction and the automatic check on settle can otherwise both pass
   ;; the test, and the loser's `reset!` of the compaction signal below would
@@ -593,15 +649,21 @@
               result
               (try
                 (if-let [sess (:session agent)]
-                  (compact-with-session! agent sess reason custom-instructions
+                  (compact-with-session! strategies agent sess reason
+                                         custom-instructions opts
                                          failure from-extension)
                   false)
                 (catch Exception e
-                  (debug/log-error "compaction failed unexpectedly: " e)
-                  (let [aborted? (compaction-aborted? agent)]
-                    (when-not aborted?
-                      (vreset! failure (or (ex-message e) (str e))))
-                    (if aborted? :aborted :failed))))
+                  (if (= :kmet/compactor-rejects-instructions
+                         (:type (ex-data e)))
+                    (do (vreset! failure (or (ex-message e) (str e)))
+                        :failed)
+                    (do
+                      (debug/log-error "compaction failed unexpectedly: " e)
+                      (let [aborted? (compaction-aborted? agent)]
+                        (when-not aborted?
+                          (vreset! failure (or (ex-message e) (str e))))
+                        (if aborted? :aborted :failed))))))
               {:keys [succeeded? aborted? failed? error-message]}
               (compaction-outcome reason result @failure)]
           (finish-compaction! agent reason result @from-extension
@@ -609,7 +671,19 @@
         (finally
           (reset! (:compacting? agent) false))))))
 
-(defn maybe-compact!
+(defn compact-context!
+  "Compact the context with the compactor selected by :compactor (:llm or
+   :vcc). OPTS may carry :keep-user-turns (0 compacts everything). Returns
+   true when a compaction happened, false when there was nothing to compact
+   (or one is in progress), and :aborted when cancelled."
+  ([agent]
+   (compact-context* default-strategies agent nil nil nil))
+  ([agent custom-instructions reason]
+   (compact-context* default-strategies agent custom-instructions reason nil))
+  ([agent custom-instructions reason opts]
+   (compact-context* default-strategies agent custom-instructions reason opts)))
+
+(defn- maybe-compact*
   "Proactively compact before a run (pi: _checkCompaction — threshold case).
    Triggers when the measured context usage comes within reserve tokens of
    the model's context window (pi: contextTokens > contextWindow -
@@ -619,7 +693,7 @@
    always available. A compaction that aborted or failed earlier in this
    prompt stands down too (:compaction-blocked — pi: skipAbortedCheck,
    extended). Returns true when compaction happened."
-  [agent]
+  [strategies agent]
   ;; nil session, auto-compact off, or a blocked compaction this prompt →
   ;; no proactive compaction
   (if-let [sess (and (not @(:compaction-blocked agent))
@@ -652,16 +726,56 @@
               ;; estimate with lastUsageIndex null → no compaction)
               (and window-reserve (pos? window-reserve)
                    has-usage? measured (>= measured window-reserve)))
-        (let [result (compact-context! agent nil :threshold)]
+        (let [result (compact-context* strategies agent nil :threshold nil)]
           (and (not= :aborted result) result))
         false))
     false))
 
-(defn compact-for-overflow!
+(defn- compact-for-overflow*
   "Force-compact after a context-overflow error so the retried call fits
    (pi: _checkCompaction — overflow case). Returns true when compaction
    happened."
-  [agent]
+  [strategies agent]
   (when-let [sess (:session agent)]
     (when (pos? (count @(:entries sess)))
-      (compact-context! agent nil :overflow))))
+      (compact-context* strategies agent nil :overflow nil))))
+
+(defn maybe-compact!
+  "Proactively compact before a run with the selected compactor."
+  [agent]
+  (maybe-compact* default-strategies agent))
+
+(defn compact-for-overflow!
+  "Force-compact after a context-overflow error with the selected compactor."
+  [agent]
+  (compact-for-overflow* default-strategies agent))
+
+(defn- run-compact-context
+  "The service-shaped compact-context!: ARGS may carry custom-instructions,
+   reason, and opts (in that order)."
+  [strategies agent args]
+  (case (count args)
+    0 (compact-context* strategies agent nil nil nil)
+    1 (compact-context* strategies agent (nth args 0) nil nil)
+    2 (compact-context* strategies agent (nth args 0) (nth args 1) nil)
+    3 (compact-context* strategies agent (nth args 0) (nth args 1) (nth args 2))
+    (throw (ex-info "compact-context! takes at most 3 arguments"
+                    {:type :kmet.app/bad-compaction-args
+                     :count (count args)}))))
+
+(defn make-implementation
+  "The `:compaction` service over STRATEGIES — a map with :llm and :vcc
+   compactor maps. The row builds it from the injected strategy services."
+  [strategies]
+  {:maybe-compact! (fn [agent] (maybe-compact* strategies agent))
+   :compact-for-overflow! (fn [agent] (compact-for-overflow* strategies agent))
+   :compact-context! (fn [agent & args] (run-compact-context strategies agent args))
+   :omit-recovery-attempt! omit-recovery-attempt!
+   :abort-compaction! abort-compaction!
+   :reset-compaction-blocked! reset-compaction-blocked!
+   :stage-retry-policy stage-retry-policy
+   :generate-branch-summary generate-branch-summary})
+
+(def builtin
+  "The builtin implementation for a state outside a composition."
+  (make-implementation default-strategies))

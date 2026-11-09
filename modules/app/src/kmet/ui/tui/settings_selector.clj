@@ -2,6 +2,7 @@
   "Settings selector panel (pi: showSettingsSelector +
    settings-selector.ts) — pi's rows backed by kmet machinery: thinking
    level (the current model's available levels), thinking display, auto-compact,
+   the context compactor (:llm | :vcc),
    inline images (show-images / image-width, terminal-gated, plus the
    ungated block-images), steering/follow-up queue modes, HTTP idle/total timeouts, cache-miss notices,
    tree filter mode, editor/output padding, autocomplete max items, hardware
@@ -201,6 +202,12 @@
        (when-let [f (:footer-comp cs)]
          (footer/footer-set-auto-compact! f on?))))
 
+   :compactor
+   (fn [value]
+     (let [compactor (keyword value)]
+       (runtime/set-compactor! engine compactor)
+       (cfg/save-setting! [:compactor] compactor)))
+
    :steering-mode
    (fn [value]
      (let [mode (keyword value)]
@@ -363,7 +370,12 @@
                                         "Clear empty rows when content shrinks (may cause flicker)"))
         base-items (into []
                          (concat [(bool-row :auto-compact "Auto-compact" (:auto-compact (runtime/run-options engine))
-                                            "Automatically compact context when it gets too large")]
+                                            "Automatically compact context when it gets too large")
+                                  {:id :compactor
+                                   :label "Compactor"
+                                   :description "Context compaction strategy: LLM summary or deterministic VCC"
+                                   :value (name (or (:compactor (runtime/run-options engine)) :llm))
+                                   :values ["llm" "vcc"]}]
                                  img-rows
                                  [(bool-row :block-images "Block images" (:block-images (runtime/run-options engine))
                                             "Prevent images from being sent to LLM providers")

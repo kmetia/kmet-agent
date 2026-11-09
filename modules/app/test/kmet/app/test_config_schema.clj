@@ -14,3 +14,9 @@
 (deftest closed-under-debug-still-open-at-boundary
   (testing "unknown keys survive (forward compatible)"
     (is (cs/validate-config? {:provider :opencode-go :future-key 1}))))
+
+(deftest compactor-is-one-of-the-builtins
+  (testing "the compactor selector accepts only the builtin strategies"
+    (is (cs/validate-config? {:compactor :llm}))
+    (is (cs/validate-config? {:compactor :vcc}))
+    (is (not (cs/validate-config? {:compactor :other})))))

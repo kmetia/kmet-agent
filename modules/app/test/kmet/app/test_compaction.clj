@@ -436,3 +436,26 @@
         (t/is (= 5 (core/projected-context-tokens proj branch))
               "1 + 1 + 3, estimated — the usage predates the compaction")))))
 
+(t/deftest test-find-user-turn-cut-index
+  (let [u (fn [t] {:messages [{:role :user :content t}]})
+        a (fn [t] {:messages [{:role :assistant :content t}]})
+        empty-entry {:messages []}]
+    (t/testing "keep:N counts projected user turns from the newest"
+      (t/is (= 4 (core/find-user-turn-cut-index
+                  [(u "1") (a "x") (u "2") (a "y") (u "3")] 1)))
+      (t/is (= 2 (core/find-user-turn-cut-index
+                  [(u "1") (a "x") (u "2") (a "y") (u "3")] 2)))
+      (t/is (= 0 (core/find-user-turn-cut-index
+                  [(u "1") (a "x") (u "2") (a "y") (u "3")] 3))))
+    (t/testing "keep:0 compacts everything"
+      (t/is (= 5 (core/find-user-turn-cut-index
+                  [(u "1") (a "x") (u "2") (a "y") (u "3")] 0))))
+    (t/testing "more turns than exist has no cut"
+      (t/is (nil? (core/find-user-turn-cut-index
+                   [(u "1") (a "x") (u "2")] 3))))
+    (t/testing "an omitted user turn projects no message and is not counted"
+      (t/is (= 2 (core/find-user-turn-cut-index
+                  [(u "1") empty-entry (u "2")] 1)))
+      (t/is (= 0 (core/find-user-turn-cut-index
+                  [(u "1") empty-entry (u "2")] 2))))))
+

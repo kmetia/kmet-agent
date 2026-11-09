@@ -1,0 +1,119 @@
+(ns kmet.app.compaction.test-vcc
+  (:require [clojure.string :as str]
+            [clojure.test :as t]
+            [kmet.app.compaction.vcc :as vcc]))
+
+(defn- user [text]
+  {:role :user :content [{:type :text :text text}]})
+
+(defn- assistant [text & [tool-calls]]
+  (cond-> {:role :assistant :content [{:type :text :text text}]}
+    (seq tool-calls) (assoc :tool-calls (vec tool-calls))))
+
+(defn- tool-result [id content]
+  {:role :tool
+   :tool-name "read"
+   :is-error false
+   :content [{:type :tool_result :tool_use_id id :content content}]})
+
+(defn- bash [command output & [exit-code]]
+  {:role :bash :command command :output output :exit-code exit-code})
+
+(defn- summarize [messages & [opts]]
+  (vcc/summarize nil
+                 (merge {:messages messages
+                         :previous-summary nil
+                         :tokens-before 100}
+                        opts)
+                 nil :manual))
+
+(t/deftest summary-has-the-vcc-sections-and-is-deterministic
+  (let [messages [(user "first request")
+                  (assistant "reading the file"
+                             [{:id "r1" :name "read" :arguments {:path "/src/a.clj"}}])
+                  (tool-result "r1" "file data")
+                  (assistant "editing the file"
+                             [{:id "e1" :name "edit" :arguments {:path "/src/b.clj"}}])
+                  (bash "git commit -m \"fix: thing\"" "[master abc1234] fix: thing" 0)
+                  (user "last request")]
+        result (summarize messages)
+        summary (:summary result)]
+    (t/is (str/includes? summary "[Early Session Requests]"))
+    (t/is (str/includes? summary "- first request"))
+    (t/is (str/includes? summary "[Files And Changes]"))
+    (t/is (str/includes? summary "- Modified: /src/b.clj"))
+    (t/is (str/includes? summary "- Read: /src/a.clj"))
+    (t/is (str/includes? summary "[Commits]"))
+    (t/is (str/includes? summary "- abc1234: fix: thing"))
+    (t/is (str/includes? summary "[User Messages]"))
+    (t/is (str/includes? summary "[user] last request"))
+    (t/is (str/includes? summary "* read \"/src/a.clj\""))
+    (t/is (= :vcc (get-in result [:details :compactor])))
+    (t/is (= 6 (get-in result [:details :source-message-count])))
+    (t/is (= result (summarize messages))
+          "the same preparation produces the same summary")))
+
+(t/deftest summary-merges-a-previous-vcc-summary
+  (let [previous (str "[Early Session Requests]\n- original request\n\n"
+                      "[Files And Changes]\n- Modified: /old.clj\n\n"
+                      "[User Messages]\n- original request\n\n"
+                      "---\n\n[user] old line")
+        messages [(user "new request")
+                  (assistant "writing" [{:id "w1" :name "write" :arguments {:path "/new.clj"}}])
+                  (user "newest request")]
+        summary (:summary (summarize messages {:previous-summary previous}))]
+    (t/is (str/includes? summary "- original request")
+          "a previous early request is preserved")
+    (t/is (str/includes? summary "- Modified: /old.clj"))
+    (t/is (str/includes? summary "- Modified: /new.clj"))
+    (t/is (str/includes? summary "[user] old line")
+          "the previous brief is merged with the fresh one")
+    (t/is (str/includes? summary "- newest request"))))
+
+(t/deftest summary-preserves-an-llm-format-previous-summary
+  (let [previous "## Goal\nKeep the API stable\n\n## Next Steps\n1. Ship it"
+        summary (:summary (summarize [(user "new request")] {:previous-summary previous}))]
+    (t/is (str/includes? summary "[Previous Summary]"))
+    (t/is (str/includes? summary "## Goal"))
+    (t/is (str/includes? summary "Keep the API stable"))))
+
+(t/deftest summary-dedupes-files-newest-and-caps-user-messages
+  (let [messages (into [(user "first")]
+                       (mapcat (fn [i]
+                                 [(assistant (str "step " i)
+                                             [{:id (str "t" i) :name "read"
+                                               :arguments {:path "/src/a.clj"}}])
+                                  (user (str "request " i))])
+                               (range 20)))
+        summary (:summary (summarize messages))]
+    (t/is (= 1 (count (re-seq #"- Read: /src/a.clj" summary)))
+          "a repeated path appears once")
+    (t/is (str/includes? summary "- request 19"))
+    (t/is (not (str/includes? summary "[User Messages]\n- request 0\n"))
+          "only the newest 15 user messages are listed")))
+
+(t/deftest summary-keeps-the-brief-bounded
+  (let [messages (mapv #(user (str "message " % " " (apply str (repeat 200 "x"))))
+                       (range 300))
+        summary (:summary (summarize messages))
+        brief (second (str/split summary #"---\n\n"))]
+    (t/is (<= (count (str/split-lines brief)) 120)
+          "the brief stays within its line cap")
+    (t/is (<= (count summary) 12000) "the whole summary stays within its char cap")))
+
+(t/deftest summary-never-empty
+  (let [result (summarize [(tool-result "r1" "only a tool result")])]
+    (t/is (str/includes? (:summary result) "(no renderable user messages)"))
+    (t/is (true? (get-in result [:details :empty?])))))
+
+(t/deftest skipped-custom-types-never-reach-the-summary
+  (let [messages [{:role :custom :custom-type :tool-sources
+                   :content [{:type :text :text "deferred sources listing"}]}
+                  {:role :custom :custom-type :eval-library
+                   :content [{:type :text :text "eval library listing"}]}
+                  {:role :custom :custom-type :ext/state
+                   :content [{:type :text :text "extension note"}]}]
+        summary (:summary (summarize messages))]
+    (t/is (not (str/includes? summary "deferred sources listing")))
+    (t/is (not (str/includes? summary "eval library listing")))
+    (t/is (str/includes? summary "[extension:ext/state] extension note"))))

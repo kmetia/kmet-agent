@@ -739,3 +739,16 @@
         (t/is (= "hello" (:content (nth (s/get-branch loaded) 1)))
               "entry content persisted verbatim"))
       (finally (fs/delete-tree dir)))))
+
+(t/deftest test-compact-all-with-nil-first-kept-id
+  (let [dir (test-tmp/temp-dir! "test-sess-compact-all-")
+        sess (s/create-session dir)]
+    (try
+      (doseq [i (range 3)]
+        (s/append-entry sess {:role :user :content [{:type :text :text (str "msg " i)}]}))
+      (let [entry (s/compact-with-summary! sess "ALL" nil)]
+        (t/is (some? entry))
+        (t/is (nil? (:first-kept-id entry)))
+        (t/is (= [entry] (s/build-context sess))
+              "compact-all keeps only the summary in context"))
+      (finally (fs/delete-tree dir)))))

@@ -89,9 +89,32 @@
           (out ui :info "Export" (str "Failed to export session: "
                                       (or (ex-message e) (str e)))))))))
 
+(defn- parse-compact-args
+  "Parse /compact's arguments: a leading keep:N is a structured cut option;
+   the rest is custom instructions. keep:N alone is valid; a malformed
+   keep: prefix is reported instead of being passed as prose."
+  [args]
+  (let [arg (str/trim (or args ""))]
+    (cond
+      (empty? arg)
+      {:custom-instructions nil :keep-user-turns nil}
+
+      (not (str/starts-with? (str/lower-case arg) "keep:"))
+      {:custom-instructions arg :keep-user-turns nil}
+
+      :else
+      (if-let [[_ n rest] (re-matches #"(?i)keep:(\d+)(?:\s+(?s)(.*))?" arg)]
+        (let [keep (parse-long n)
+              instructions (let [r (str/trim (or rest ""))]
+                             (when (seq r) r))]
+          (if (some? keep)
+            {:custom-instructions instructions :keep-user-turns keep}
+            {:error "Usage: /compact [keep:N] [instructions]"}))
+        {:error "Usage: /compact [keep:N] [instructions]"}))))
+
 (defn- handle-compact
   [{:keys [ui] engine :runtime} args]
-  (let [instructions (when (seq args) args)
+  (let [{:keys [custom-instructions keep-user-turns error]} (parse-compact-args args)
         callbacks {:on-complete (fn [result]
                                   (when-not (= :aborted result)
                                     ;; pi: handleCompactCommand ignores the
@@ -101,24 +124,30 @@
                                     ;; nothing-to-compact.
                                     (out ui :info "Compact" (if result
                                                               "Session compacted."
-                                                              "Nothing to compact (session too small)."))))}]
-    ;; A front end always hands its commands a handle; the handle owns the
-    ;; deferred-compaction queue a running prompt fills.
-    (if-let [request (:request-compaction! engine)]
-      (case (request instructions callbacks)
-        ;; A run in flight defers the compaction (kmet's cancel is cooperative,
-        ;; so compacting under a live run would race it — pi instead aborts the
-        ;; run first).
-        :scheduled
-        (out ui :info "Compact"
-             "Compaction scheduled — it will run when the current response finishes.")
+                                                              "Nothing to compact (session too small)."))))
+                   :on-error (fn [e]
+                               (out ui :warning "Compact"
+                                    (or (ex-message e) (str e))))}]
+    (if error
+      (out ui :warning "Compact" error)
+      ;; A front end always hands its commands a handle; the handle owns the
+      ;; deferred-compaction queue a running prompt fills.
+      (if-let [request (:request-compaction! engine)]
+        (case (request custom-instructions
+                       (assoc callbacks :keep-user-turns keep-user-turns))
+          ;; A run in flight defers the compaction (kmet's cancel is cooperative,
+          ;; so compacting under a live run would race it — pi instead aborts the
+          ;; run first).
+          :scheduled
+          (out ui :info "Compact"
+               "Compaction scheduled — it will run when the current response finishes.")
 
-        :compacting
-        (out ui :info "Compact" "Compaction already in progress.")
+          :compacting
+          (out ui :info "Compact" "Compaction already in progress.")
 
-        ;; :started — the completion reply arrives through :on-complete
-        nil)
-      (out ui :warning "This front end cannot compact the session."))))
+          ;; :started — the completion reply arrives through :on-complete
+          nil)
+        (out ui :warning "This front end cannot compact the session.")))))
 
 (defn- handle-units
   "Show the process's unit tree: one flat line per ctx and per mounted fiber,
@@ -167,6 +196,6 @@
 
    {:name "compact"
     :description "Manually compact the session context"
-    :argument-hint "<instructions>"
+    :argument-hint "[keep:N] [instructions]"
     :handler handle-compact})
   (commands/register-builtin! eval-command/command))

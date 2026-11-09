@@ -402,10 +402,27 @@ the measured context usage (latest response's reported usage + a chars/4
 estimate of newer entries) comes within `:compact-reserve-tokens` (default
 16384) of the model's context window. An explicit `:compact-token-threshold`
 (estimated tokens) can override it. Context-overflow errors compact once then
-retry. The pre-cut conversation is summarized via the LLM (structured
+retry. The pre-cut conversation is summarized (structured
 Goal/Progress/Next-Steps checkpoint, updated on subsequent compactions) and
 replaced with a summary entry; `:keep-recent-tokens` (default 20000) sets how
-many recent tokens to keep. The summary's own output is capped at
+many recent tokens to keep.
+
+`:compactor` selects the builtin summarizer: `:llm` (the default) or `:vcc`.
+VCC is deterministic and makes no model call: it emits fixed
+`[Early Session Requests]`, `[Files And Changes]`, `[Commits]`,
+`[User Messages]`, and brief-transcript sections, merged with the previous
+summary and bounded by fixed caps. Both compactors use the same cut and the
+same previous-summary boundary. `/settings` switches the compactor live.
+
+`/compact keep:N` overrides the cut for that compaction: the last N user turns
+(and everything after the Nth-from-last user message) are kept verbatim and
+everything before is summarized. `keep:0` compacts everything and keeps only
+the summary. Without `keep:N`, `:keep-recent-tokens` (and its per-model
+overrides) chooses the cut. An explicit `keep:N` that would keep a tail larger
+than the model's context window falls back to the token cut and reports the
+reason. VCC rejects free-form compaction instructions (the LLM compactor
+applies them); use `keep:N` or switch the compactor. Branch summaries remain
+LLM summaries regardless of `:compactor`. The summary's own output is capped at
 `0.8 ×` the effective reserve, plus the session level's thinking budget
 when the model reasons, bounded by the model's maximum output tokens (pi:
 `adjustMaxTokensForThinking`). The token budgets can be tuned per model
@@ -422,7 +439,7 @@ model:
  {"commandcode/deepseek/deepseek-v4.1-flash" {:reserve-tokens 400000}}}
 ```
 
-`/compact [instructions]` triggers it manually. A `/compact` that arrives
+`/compact [keep:N] [instructions]` triggers it manually. A `/compact` that arrives
 while a turn is running is deferred and starts when the turn settles
 (the RPC `compact` command answers `:scheduled true` for it).
 Escape aborts an in-progress compaction without cancelling the running turn

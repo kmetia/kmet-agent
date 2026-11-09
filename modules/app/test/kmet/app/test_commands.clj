@@ -211,3 +211,29 @@
    {:name "b" :description "b" :handler (fn [_ _] nil)})
   (commands/clear-commands!)
   (t/is (empty? (commands/get-commands))))
+
+(t/deftest compact-args-parse-the-structured-cut
+  (let [parse #'builtins/parse-compact-args]
+    (t/is (= {:custom-instructions nil :keep-user-turns nil}
+             (parse "")))
+    (t/is (= {:custom-instructions "focus on tests" :keep-user-turns nil}
+             (parse "focus on tests")))
+    (t/is (= {:custom-instructions nil :keep-user-turns 2}
+             (parse "keep:2")))
+    (t/is (= {:custom-instructions "focus on tests" :keep-user-turns 0}
+             (parse "keep:0 focus on tests")))
+    (t/is (= {:custom-instructions "do it" :keep-user-turns 3}
+             (parse "KEEP:3 do it")))
+    (t/is (contains? (parse "keep:x") :error)
+          "a malformed keep: prefix is not passed as prose")
+    (t/is (contains? (parse "keep:") :error))))
+
+(t/deftest compact-rejects-a-malformed-keep-prefix
+  (let [warnings (atom [])]
+    ((var builtins/handle-compact)
+     {:ui {:warning (fn [title message] (swap! warnings conj [title message]))}
+      :runtime {:request-compaction! (fn [& _]
+                                       (throw (ex-info "must not request" {})))}}
+     "keep:x")
+    (t/is (= 1 (count @warnings)))
+    (t/is (str/includes? (second (first @warnings)) "Usage: /compact"))))

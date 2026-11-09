@@ -86,18 +86,25 @@
           ;; the same id, and the row's :config is the stage's config.
           {:id :retry-policy :plugin kmet.app.loop.stages/retry-policy-row}
           {:id :loop-guard :plugin kmet.app.loop.stages/loop-guard-row}
-          ;; Compaction as a service (kmet.app.compaction): the loop and the
-          ;; session handle call the contract, the builtin stage implementation
-          ;; is what this row provides, and a profile replaces the strategy by
-          ;; naming another plugin under the same id. The budgets stay settings
-          ;; keys, so the row takes no :config.
-          {:id :compaction :plugin kmet.app.compaction/plugin}
           ;; Model access as a service (kmet.app.llm): the loop's completion and
           ;; the compaction summarizer call the contract, this row provides the
           ;; builtin (kmet.ai.llm), and a profile replaces model access by
           ;; naming another plugin under the same id. Per-call state (provider,
           ;; model, thinking) rides the request, so the row takes no :config.
           {:id :llm :plugin kmet.app.llm/plugin}
+          ;; The two builtin compactors. The :compaction row injects both and
+          ;; dispatches on the :compactor setting (:llm or :vcc); /settings
+          ;; writes that key. Each has its own service key because the kernel
+          ;; allows one provider per key. No :config — the cut budgets are
+          ;; top-level settings, not composition.
+          {:id :compactor/llm :plugin kmet.app.compaction.llm/plugin}
+          {:id :compactor/vcc :plugin kmet.app.compaction.vcc/plugin}
+          ;; Compaction as a service (kmet.app.compaction): the loop and the
+          ;; session handle call the contract, the row provides the orchestrator
+          ;; over the injected compactors, and a profile replaces it by naming
+          ;; another plugin under the same id. The compactor choice and budgets
+          ;; stay settings keys, so the row takes no :config.
+          {:id :compaction :plugin kmet.app.compaction/plugin}
           ;; The loop as the driver (7a): it registers the :agents factory, so
           ;; create! publishes a runnable agent — a state over the agent's ctx,
           ;; its own session, and the :systemPrompt row's builder.

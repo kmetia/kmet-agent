@@ -22,6 +22,7 @@
    [:images {:optional true}
     [:map {:closed false}
      [:block-images {:optional true} :boolean]]]
+   [:compactor {:optional true} [:enum :llm :vcc]]
    [:http-idle-timeout-ms {:optional true} [:or :nil :int]]
    [:http-total-timeout-ms {:optional true} [:or :nil :int]]
    [:resources {:optional true} Resources]])

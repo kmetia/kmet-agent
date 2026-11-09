@@ -844,7 +844,8 @@ Three events fire **before** session mutations; handlers may return
                        ; a rewritten one carries its replacement),
                        ; :tokens-before counts the projection, and :settings
                        ; is the resolved CompactionSettings
-                       ; ({:enabled :reserve-tokens :keep-recent-tokens})
+                       ; ({:enabled :reserve-tokens :keep-recent-tokens
+                       ;   :compactor :keep-user-turns?})
 
 ;; after a successful compaction — the appended rollup entry
 (ext/on-event api :session-compact
@@ -1369,6 +1370,19 @@ the process binding is still the answer (pi: `createContext()`; the ctx
 settings entry appended before a tree navigation is not on the new branch);
 use `get-all-entries` for extension settings that must outlive branch jumps
 (the review extension's custom instructions do).
+
+Compaction is available on the context as `(:compact ctx)`:
+
+```clojure
+((:compact ctx))                              ; selected compactor (:llm | :vcc)
+((:compact ctx) {:keep-user-turns 2})         ; explicit cut, same compactor
+((:compact ctx) {:custom-instructions "focus on auth"}) ; LLM only
+```
+
+`:custom-instructions` are rejected when `:compactor :vcc` is selected (VCC is
+deterministic and cannot apply prose); use `:keep-user-turns` or switch the
+compactor in `/settings`. `:keep-user-turns` is a non-negative integer: 0
+compacts everything, N keeps the last N user turns.
 
 ### Shell
 

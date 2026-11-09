@@ -56,8 +56,10 @@ its layers; this page is what the build ships.
 | `:agents` | `kmet.app.agents/plugin` | `projections` | `agents` |  |  |
 | `:retry-policy` | `kmet.app.loop.stages/retry-policy-row` |  | `retry-policy` |  |  |
 | `:loop-guard` | `kmet.app.loop.stages/loop-guard-row` |  | `loop-guard` |  |  |
-| `:compaction` | `kmet.app.compaction/plugin` |  | `compaction` |  |  |
 | `:llm` | `kmet.app.llm/plugin` |  | `llm` |  |  |
+| `:compactor/llm` | `kmet.app.compaction.llm/plugin` | `llm` | `llm` |  |  |
+| `:compactor/vcc` | `kmet.app.compaction.vcc/plugin` |  | `vcc` |  |  |
+| `:compaction` | `kmet.app.compaction/plugin` | `llm`, `vcc` | `compaction` |  |  |
 | `:agent-loop` | `kmet.app.loop.driver/plugin` | `agents`, `projections`, `sessions`, `system-prompt` |  |  |  |
 | `:approvals` | `kmet.app.permissions/approvals` |  | `approvals` |  |  |
 
@@ -96,8 +98,10 @@ its layers; this page is what the build ships.
 | `:agents` | `kmet.app.agents/plugin` | `projections` | `agents` |  |  |
 | `:retry-policy` | `kmet.app.loop.stages/retry-policy-row` |  | `retry-policy` |  |  |
 | `:loop-guard` | `kmet.app.loop.stages/loop-guard-row` |  | `loop-guard` |  |  |
-| `:compaction` | `kmet.app.compaction/plugin` |  | `compaction` |  |  |
 | `:llm` | `kmet.app.llm/plugin` |  | `llm` |  |  |
+| `:compactor/llm` | `kmet.app.compaction.llm/plugin` | `llm` | `llm` |  |  |
+| `:compactor/vcc` | `kmet.app.compaction.vcc/plugin` |  | `vcc` |  |  |
+| `:compaction` | `kmet.app.compaction/plugin` | `llm`, `vcc` | `compaction` |  |  |
 | `:agent-loop` | `kmet.app.loop.driver/plugin` | `agents`, `projections`, `sessions`, `system-prompt` |  |  |  |
 | `:approvals` | `kmet.app.permissions/approvals` |  | `approvals` |  |  |
 | `:ui` | `kmet.ui.headless/plugin` |  | `ui` |  |  |
@@ -130,8 +134,10 @@ its layers; this page is what the build ships.
 | `:agents` | `kmet.app.agents/plugin` | `projections` | `agents` |  |  |
 | `:retry-policy` | `kmet.app.loop.stages/retry-policy-row` |  | `retry-policy` |  |  |
 | `:loop-guard` | `kmet.app.loop.stages/loop-guard-row` |  | `loop-guard` |  |  |
-| `:compaction` | `kmet.app.compaction/plugin` |  | `compaction` |  |  |
 | `:llm` | `kmet.app.llm/plugin` |  | `llm` |  |  |
+| `:compactor/llm` | `kmet.app.compaction.llm/plugin` | `llm` | `llm` |  |  |
+| `:compactor/vcc` | `kmet.app.compaction.vcc/plugin` |  | `vcc` |  |  |
+| `:compaction` | `kmet.app.compaction/plugin` | `llm`, `vcc` | `compaction` |  |  |
 | `:agent-loop` | `kmet.app.loop.driver/plugin` | `agents`, `projections`, `sessions`, `system-prompt` |  |  |  |
 | `:approvals` | `kmet.app.permissions/approvals` |  | `approvals` |  |  |
 | `:ui` | `kmet.ui.headless/plugin` |  | `ui` |  |  |
@@ -164,8 +170,10 @@ its layers; this page is what the build ships.
 | `:agents` | `kmet.app.agents/plugin` | `projections` | `agents` |  |  |
 | `:retry-policy` | `kmet.app.loop.stages/retry-policy-row` |  | `retry-policy` |  |  |
 | `:loop-guard` | `kmet.app.loop.stages/loop-guard-row` |  | `loop-guard` |  |  |
-| `:compaction` | `kmet.app.compaction/plugin` |  | `compaction` |  |  |
 | `:llm` | `kmet.app.llm/plugin` |  | `llm` |  |  |
+| `:compactor/llm` | `kmet.app.compaction.llm/plugin` | `llm` | `llm` |  |  |
+| `:compactor/vcc` | `kmet.app.compaction.vcc/plugin` |  | `vcc` |  |  |
+| `:compaction` | `kmet.app.compaction/plugin` | `llm`, `vcc` | `compaction` |  |  |
 | `:agent-loop` | `kmet.app.loop.driver/plugin` | `agents`, `projections`, `sessions`, `system-prompt` |  |  |  |
 | `:approvals` | `kmet.app.permissions/approvals` |  | `approvals` |  |  |
 | `:ui` | `kmet.ui.headless/plugin` |  | `ui` |  |  |
@@ -199,8 +207,10 @@ its layers; this page is what the build ships.
 | `:agents` | `kmet.app.agents/plugin` | `projections` | `agents` |  |  |
 | `:retry-policy` | `kmet.app.loop.stages/retry-policy-row` |  | `retry-policy` |  |  |
 | `:loop-guard` | `kmet.app.loop.stages/loop-guard-row` |  | `loop-guard` |  |  |
-| `:compaction` | `kmet.app.compaction/plugin` |  | `compaction` |  |  |
 | `:llm` | `kmet.app.llm/plugin` |  | `llm` |  |  |
+| `:compactor/llm` | `kmet.app.compaction.llm/plugin` | `llm` | `llm` |  |  |
+| `:compactor/vcc` | `kmet.app.compaction.vcc/plugin` |  | `vcc` |  |  |
+| `:compaction` | `kmet.app.compaction/plugin` | `llm`, `vcc` | `compaction` |  |  |
 | `:agent-loop` | `kmet.app.loop.driver/plugin` | `agents`, `projections`, `sessions`, `system-prompt` |  |  |  |
 | `:approvals` | `kmet.app.modes.server/approvals` |  | `approvals` |  |  |
 | `:ui` | `kmet.ui.headless/plugin` |  | `ui` |  |  |
@@ -233,8 +243,10 @@ its layers; this page is what the build ships.
 | `:agents` | `kmet.app.agents/plugin` | `projections` | `agents` |  |  |
 | `:retry-policy` | `kmet.app.loop.stages/retry-policy-row` |  | `retry-policy` |  |  |
 | `:loop-guard` | `kmet.app.loop.stages/loop-guard-row` |  | `loop-guard` |  |  |
-| `:compaction` | `kmet.app.compaction/plugin` |  | `compaction` |  |  |
 | `:llm` | `kmet.app.llm/plugin` |  | `llm` |  |  |
+| `:compactor/llm` | `kmet.app.compaction.llm/plugin` | `llm` | `llm` |  |  |
+| `:compactor/vcc` | `kmet.app.compaction.vcc/plugin` |  | `vcc` |  |  |
+| `:compaction` | `kmet.app.compaction/plugin` | `llm`, `vcc` | `compaction` |  |  |
 | `:agent-loop` | `kmet.app.loop.driver/plugin` | `agents`, `projections`, `sessions`, `system-prompt` |  |  |  |
 | `:ui` | `kmet.ui.tui/provider-plugin` |  | `approvals`, `ui` |  |  |
 | `:mode-tui` | `kmet.ui.tui/plugin` | `system-prompt`, `tools` |  |  | mode session-lifecycle |
@@ -266,8 +278,10 @@ its layers; this page is what the build ships.
 | `:agents` | `kmet.app.agents/plugin` | `projections` | `agents` |  |  |
 | `:retry-policy` | `kmet.app.loop.stages/retry-policy-row` |  | `retry-policy` |  |  |
 | `:loop-guard` | `kmet.app.loop.stages/loop-guard-row` |  | `loop-guard` |  |  |
-| `:compaction` | `kmet.app.compaction/plugin` |  | `compaction` |  |  |
 | `:llm` | `kmet.app.llm/plugin` |  | `llm` |  |  |
+| `:compactor/llm` | `kmet.app.compaction.llm/plugin` | `llm` | `llm` |  |  |
+| `:compactor/vcc` | `kmet.app.compaction.vcc/plugin` |  | `vcc` |  |  |
+| `:compaction` | `kmet.app.compaction/plugin` | `llm`, `vcc` | `compaction` |  |  |
 | `:agent-loop` | `kmet.app.loop.driver/plugin` | `agents`, `projections`, `sessions`, `system-prompt` |  |  |  |
 | `:ui` | `kmet.ui.tui/provider-plugin` |  | `approvals`, `ui` |  |  |
 | `:mode-tui` | `kmet.ui.tui/plugin` | `system-prompt`, `tools` |  | {:presets [:bundle/gated]} | mode session-lifecycle |

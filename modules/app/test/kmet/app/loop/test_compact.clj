@@ -830,7 +830,8 @@
                             :done))]
             (binding [*err* (java.io.StringWriter.)]
               (t/is (true? (compact/compact-context! agent nil :manual)))))
-          (t/is (= {:enabled true :reserve-tokens 8000 :keep-recent-tokens 40}
+          (t/is (= {:enabled true :reserve-tokens 8000 :keep-recent-tokens 40
+                    :compactor :llm}
                    (get-in (support/event-of events :session-before-compact)
                            [:preparation :settings]))
                 "preparation.settings carries the resolved entry (pi)")

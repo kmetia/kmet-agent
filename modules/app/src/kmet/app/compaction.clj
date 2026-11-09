@@ -3,8 +3,10 @@
    call, resolved through the agent's composition.
 
    The builtin implementation is `kmet.app.compaction.stage`, and the
-   `:compaction` row provides it as a service; a profile replaces the strategy
-   by naming another plugin under the same id, and every caller here reaches
+   `:compaction` row provides it as a service over the injected
+   `:compactor/llm` and `:compactor/vcc` strategies; the `:compactor` setting
+   selects one per compaction. A profile replaces the whole orchestrator by
+   naming another plugin under the same id, and every caller here reaches
    whatever is mounted without knowing which. A state outside a composition (a
    hand-built run, a test) falls back to the builtin, as the loop's stage map
    does for its two rows."
@@ -13,16 +15,9 @@
 
 (def builtin
   "The builtin compaction implementation: one fn per operation the callers use.
-   This is what the `:compaction` row provides, and what a state with no
-   composition resolves."
-  {:maybe-compact! stage/maybe-compact!
-   :compact-for-overflow! stage/compact-for-overflow!
-   :compact-context! stage/compact-context!
-   :omit-recovery-attempt! stage/omit-recovery-attempt!
-   :abort-compaction! stage/abort-compaction!
-   :reset-compaction-blocked! stage/reset-compaction-blocked!
-   :stage-retry-policy stage/stage-retry-policy
-   :generate-branch-summary stage/generate-branch-summary})
+   This is what a state with no composition resolves; the `:compaction` row
+   builds the same operations over the injected compactor strategies."
+  stage/builtin)
 
 (defn- impl
   "AGENT's compaction implementation: the `:compaction` service its ctx can
@@ -80,21 +75,29 @@
 ;; ─── The row ─────────────────────────────────────────────────────────────
 
 (defn apply-row
-  "Provide the builtin implementation as the `:compaction` service, into the
-   mount site's scope so the loop and every agent ctx below it resolve it.
-   No `:config`: the budgets are settings keys (`:compact-reserve-tokens`,
-   `:keep-recent-tokens`, `:compact-token-threshold`, … and the per-model
-   overrides), and a row that silently ignored one would read like an applied
-   override."
+  "Provide the compaction orchestrator as the `:compaction` service, over the
+   injected :compactor/llm and :compactor/vcc strategies, into the mount
+   site's scope so the loop and every agent ctx below it resolve it.
+   No `:config`: the compactor selection and budgets are settings keys
+   (`:compactor`, `:compact-reserve-tokens`, `:keep-recent-tokens`,
+   `:compact-token-threshold`, … and the per-model overrides), and a row that
+   silently ignored one would read like an applied override."
   [ctx config]
   (when (some? config)
-    (throw (ex-info (str "the :compaction row takes no :config — the budgets are"
-                         " settings keys under :compact-*, not composition")
+    (throw (ex-info (str "the :compaction row takes no :config — the compactor and"
+                         " budgets are settings keys, not composition")
                     {:type :kmet.app/bad-compaction-config
                      :config config})))
-  (srce/provide! ctx :compaction builtin {:in (:parent ctx)}))
+  (let [strategies {:llm (srce/get ctx :compactor/llm)
+                    :vcc (srce/get ctx :compactor/vcc)}]
+    (srce/provide! ctx :compaction
+                   (if (= strategies stage/default-strategies)
+                     stage/builtin
+                     (stage/make-implementation strategies))
+                   {:in (:parent ctx)})))
 
 (srce/defplugin plugin
   {:name :compaction
+   :inject {:compactor/llm nil :compactor/vcc nil}
    :provide #{:compaction}
    :apply apply-row})

@@ -357,7 +357,7 @@
             seen (atom [])]
         (reset! (:turn-running? handle) true)
         (with-redefs [agent-compact/compact-context!
-                      (fn [_ag instructions reason]
+                      (fn [_ag instructions reason & _]
                         (swap! seen conj [instructions reason])
                         true)]
           (is (= :scheduled

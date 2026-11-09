@@ -26,10 +26,11 @@
    the :compaction-end event carries the rest to the UI. An exception
    escaping the compaction reports through :on-error too (logged either
    way); one escaping a callback is contained so it cannot kill the drain."
-  [engine {:keys [custom-instructions on-complete on-error]}]
+  [engine {:keys [custom-instructions keep-user-turns on-complete on-error]}]
   (let [outcome (try
                   {:result (agent-compact/compact-context!
-                            (runtime/agent-state engine) custom-instructions :manual)}
+                            (runtime/agent-state engine) custom-instructions :manual
+                            {:keep-user-turns keep-user-turns})}
                   (catch Exception e
                     ;; a future that swallows the exception hides real bugs,
                     ;; so log it (pi: handleCompactCommand catches and ignores
@@ -85,6 +86,8 @@
      :on-error    — (fn [error]): an exception escaping the compaction, or a
                     :failed compaction with its `Compaction failed: …`
                     message.
+     :keep-user-turns — optional explicit cut: keep the last N user turns
+                    (0 compacts everything).
    Returns :started (the compaction launched), :scheduled (deferred until
    the running prompt settles), or :compacting (one is already in flight —
    nothing is queued)."

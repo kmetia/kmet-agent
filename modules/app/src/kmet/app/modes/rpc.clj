@@ -339,13 +339,20 @@
    the outcome arrives as :compaction-end / :session-compact(-failed) events.
    The work runs on a future so the reader stays live."
   [{:keys [agents handle]} command]
-  (let [instructions (:custom-instructions command)]
+  (let [instructions (:custom-instructions command)
+        keep-user-turns (:keep-user-turns command)]
     (cond
       (and (some? instructions) (not (string? instructions)))
       (failed :compact ":custom-instructions must be a string")
 
+      (and (some? keep-user-turns)
+           (or (not (integer? keep-user-turns))
+               (neg? keep-user-turns)))
+      (failed :compact ":keep-user-turns must be a non-negative integer")
+
       :else
-      (case ((:request-compaction! agents) handle instructions nil)
+      (case ((:request-compaction! agents) handle instructions
+                                           {:keep-user-turns keep-user-turns})
         :compacting (failed :compact "Compaction already in progress")
         :scheduled (ok :compact {:accepted true :scheduled true})
         (ok :compact {:accepted true})))))
