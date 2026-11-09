@@ -30,7 +30,7 @@
 
 (def ^:private reserved-command-names
   "The unqualified `/eval` verbs a source may not replace."
-  #{"list" "search" "describe" "drop" "move" "sources" "help"
+  #{"list" "search" "describe" "drop" "move" "reload" "sources" "help"
     "--help" "-h"})
 
 (defn- described

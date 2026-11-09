@@ -3,7 +3,8 @@
    the session's live-only definitions.
 
    Verbs: `list [pattern]`, `search <text>`, `describe <name>`,
-   `drop <name>…`, `move <name> global|cwd`, `sources` and `help`; entries
+   `drop <name>…`, `move <name> global|cwd`, `reload`, `sources` and `help`.
+   `reload` rebuilds the session's sandbox from both library roots. Entries
    show their cwd/global scope (or `live`) and whether an entry is shadowed.
    `/eval <name>` is a `describe` shorthand when the name is defined and is
    not a known verb. An eval source may contribute a verb through the
@@ -224,6 +225,7 @@
                "/eval drop <name>…      Delete actual files and unbind the live names"
                "/eval drop names sharing a file together; a partial file is refused"
                "/eval move <name> global|cwd  Move a definition to the other scope"
+               "/eval reload            Rebuild the sandbox from the library files"
                "/eval sources           List eval sources and loaded definitions"
                "/eval help              This help"]
         contributed (map (fn [[verb {:keys [description]}]]
@@ -292,6 +294,16 @@
             (out ui :warning (or (ex-message e) (str e)))))
         (out ui :warning "Usage: /eval move <name> global|cwd"))
 
+      (= verb "reload")
+      (if-let [reload (:reload! svc)]
+        (let [{:keys [is-error content]}
+              (try
+                (reload {:session sess :cwd cwd})
+                (catch Exception e
+                  {:is-error true :content (or (ex-message e) (str e))}))]
+          (out ui (if is-error :warning :info) "Eval" content))
+        (out ui :warning "This eval service cannot reload."))
+
       (= verb "sources")
       (out ui :info "Eval" (sources-text svc cwd sess))
 
@@ -318,6 +330,6 @@
 (def command
   "The `/eval` command record, registered with the engine-portable builtins."
   {:name "eval"
-   :description "List, search, describe, move or drop eval definitions"
-   :argument-hint "<list|search|describe|move|drop|sources|help> [args], or <name>"
+   :description "List, search, describe, move, drop or reload eval definitions"
+   :argument-hint "<list|search|describe|move|drop|reload|sources|help> [args], or <name>"
    :handler handle})

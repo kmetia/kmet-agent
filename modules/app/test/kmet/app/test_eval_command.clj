@@ -307,6 +307,20 @@
     (t/is (not (fs/exists? cwd-file)))
     (t/is (fs/exists? global))))
 
+(t/deftest reload-builds-and-refreshes-the-session-environment
+  (let [env (eval-env)
+        _ (write-def! env {:name "user/saved"
+                           :source "(defn saved \"Saved.\" [] :saved)"})]
+    (let [[[level label content]] (run env "reload")]
+      (t/is (= :info level))
+      (t/is (= "Eval" label))
+      (t/is (str/includes? content "[eval: loaded 1 library definition")))
+    (write-def! env {:name "user/added"
+                     :source "(defn added \"Added.\" [] :added)"})
+    (let [[[level _ content]] (run env "reload")]
+      (t/is (= :info level))
+      (t/is (str/includes? content "[eval: reloaded 2 library definitions")))))
+
 (t/deftest sources-and-help
   (let [env (eval-env)]
     (let [[[level _ content]] (run env "sources")]
@@ -322,6 +336,7 @@
       (t/is (str/includes? help "/eval search <text>"))
       (t/is (str/includes? help "/eval drop <name>"))
       (t/is (str/includes? help "/eval move <name> global|cwd"))
+      (t/is (str/includes? help "/eval reload"))
       (t/is (str/includes? help "/eval describe <name>"))
       (t/is (str/includes? help "/eval <name>"))
       (t/is (str/includes? help "/eval sources"))

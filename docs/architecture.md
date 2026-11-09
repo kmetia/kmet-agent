@@ -632,11 +632,14 @@ redefining an active name keeps its layer and its file. `:scope :global` or `:cw
 a new name's layer and is accepted for an existing name only when it names
 the active layer. A session's first eval scans and evaluates both layers; a
 new session or a restarted process loads them, while an already-built
-environment is a runtime cache and never refreshes. Sessions share the files
-but not the environment. `:drop` and `(eval/forget 'name)` target the active
-record by default; a scoped drop targets either layer. Drop/forget resolve an
-unqualified name in the namespace the call ends in. Dropping a record deletes
-its actual `:file`, unbinds the live name, and re-evaluates the next record
+environment is a runtime cache that refreshes only on an explicit
+`/eval reload`. The reload builds a fresh sandbox, replays the session-only
+definitions, and keeps the old environment when a file fails to load. Sessions
+share the files but not the environment. `:drop` and `(eval/forget 'name)`
+target the active record by default; a scoped drop targets either layer.
+Drop/forget resolve an unqualified name in the namespace the call ends in.
+Dropping a record deletes its actual `:file`, unbinds the live name, and
+re-evaluates the next record
 (restoring a shadowed global); dropping a non-active record deletes only its
 file and leaves the live definition. All targets resolve before anything is
 deleted, and a file that also defines other addresses must be requested with
@@ -651,9 +654,9 @@ re-evaluating; they refuse collisions, same-scope moves, and source-provided
 or unwritten targets, take both root locks in the fixed global-then-cwd order,
 and roll back the target if the source delete fails. The engine-portable
 builtins register `/eval` (`list`, `search`, `describe`, `drop`, `move`,
-`sources`, `help`, plus verbs an eval source contributes), independent of the
-`:tool/eval` row,
-so removing the row leaves the command and its service. An unknown leading
+`reload`, `sources`, `help`, plus verbs an eval source contributes),
+independent of the `:tool/eval` row, so removing the row leaves the command
+and its service. An unknown leading
 name that resolves to a definition or source verb is a `describe` shorthand;
 an unresolvable one keeps the unknown-verb hint. The row also
 registers the `:core` eval source (the shared
@@ -774,9 +777,14 @@ or aborted call is not tracked, because its interpreter
 may still be running. A failed write is
 reported and the live definition remains until the process ends, with the old
 file authoritative for the next build. A failed delete or unbind is reported;
-a failed unbind leaves the live definition until a restart. A session environment and its lock are
-retained until the agent is disposed; deleting a session does not release them,
-and two sessions in one home share the files but not the live environment.
+a failed unbind leaves the live definition until a restart. An `/eval reload`
+builds a fresh sandbox: file side effects run again, ad-hoc namespace state
+(extra requires, aliases, `in-ns`) is lost, and only files plus session-only
+definitions carry over (replayed in name order; source-key shadows are not
+replayed). A build failure keeps the old sandbox. A session environment and
+its lock are retained until the agent is disposed; deleting a session does not
+release them, and two sessions in one home share the files but not the live
+environment.
 A cwd scope is one layer per normalized cwd, shared by sessions with that
 cwd; worktrees and subdirectories are separate scopes by design, and
 symlinks are separate because the key uses the normalized path, not

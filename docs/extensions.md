@@ -650,7 +650,7 @@ calls, so it can expose current state instead of a snapshot:
   `(eval/describe 'license/add! :source)` return one field each. A value
   without metadata is still valid and lists as `(no docstring)`.
 - `:commands` adds verbs to `/eval`; its built-in verbs (`list`, `search`,
-  `describe`, `drop`, `move`, `sources`, `help`) are reserved.
+  `describe`, `drop`, `move`, `reload`, `sources`, `help`) are reserved.
 - A source key is never written to the eval library. A model redefinition
   shadows it live, and dropping the name restores the source value while the
   source is mounted (the result line says `restored`, not `forgot`). The key

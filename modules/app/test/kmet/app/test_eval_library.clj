@@ -1,8 +1,8 @@
 (ns kmet.app.test-eval-library
   "The eval library: definitions write the cwd scope by default (or the active
-   scope on redefinition), sessions load both roots as a runtime cache, drops
-   and `(eval/forget)` delete and unbind, and legacy project files or session
-   entries are ignored."
+   scope on redefinition), sessions load both roots as a runtime cache that
+   only `/eval reload` refreshes, drops and `(eval/forget)` delete and unbind,
+   and legacy project files or session entries are ignored."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
@@ -98,6 +98,64 @@
                 (support/eval-in! restarted other cwd
                                   "(emit (some? (resolve 'later)))")))
             "a new process builds a new environment from the library"))))
+
+(t/deftest test-an-explicit-reload-refreshes-the-library
+  (let [env (support/eval-ctx)
+        service (:service env)
+        _ (support/eval! env "(emit 1)")
+        _ (eval-files/write-definition!
+           (support/cwd-root env)
+           {:name "user/later" :ns "user" :kind :def
+            :source "(def later \"Later.\" 7)"})
+        _ (eval-files/write-definition!
+           (support/global-root env)
+           {:name "user/globally" :ns "user" :kind :def
+            :source "(def globally \"Global.\" :g)"})]
+    (t/is (= "false"
+             (:content (support/eval! env "(emit (some? (resolve 'later)))")))
+          "automatic refresh is still off")
+    (let [result ((:reload! service) {:session (:session env) :cwd (:cwd env)})]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result)
+                           "[eval: reloaded 2 library definitions")))
+    (t/is (= "7" (:content (support/eval! env "later"))))
+    (t/is (= ":g" (:content (support/eval! env "globally"))))
+    (eval-files/write-definition!
+     (support/cwd-root env)
+     {:name "user/later" :ns "user" :kind :def
+      :source "(def later \"Later.\" 8)"})
+    (let [result ((:reload! service) {:session (:session env) :cwd (:cwd env)})]
+      (t/is (not (:is-error result)) (:content result)))
+    (t/is (= "8" (:content (support/eval! env "later")))
+          "a changed file is rebuilt from disk")))
+
+(t/deftest test-a-reload-replays-live-only-definitions
+  (let [env (support/eval-ctx)
+        service (:service env)
+        _ (support/eval! env "(def live 41)")]
+    (t/is (not (fs/exists? (library-file env "user" "live.clj")))
+          "an undocumented definition is not written")
+    (let [result ((:reload! service) {:session (:session env) :cwd (:cwd env)})]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result)
+                           "replayed 1 live-only definition")))
+    (t/is (= "41" (:content (support/eval! env "live"))))
+    (t/is (not (fs/exists? (library-file env "user" "live.clj")))
+          "the reload keeps it memory-only")))
+
+(t/deftest test-a-failed-reload-keeps-the-current-environment
+  (let [env (support/eval-ctx)
+        service (:service env)
+        _ (support/eval! env "(defn kept \"Kept.\" [] :kept)")]
+    (fs/create-dirs (fs/parent (library-file env "user" "broken.clj")))
+    (spit (library-file env "user" "broken.clj")
+          "(ns user)\n(throw (ex-info \"boom\" {}))\n")
+    (let [result ((:reload! service) {:session (:session env) :cwd (:cwd env)})]
+      (t/is (:is-error result))
+      (t/is (str/includes? (:content result)
+                           "the current environment is unchanged")))
+    (t/is (= ":kept" (:content (support/eval! env "(kept)")))
+          "the old environment still runs")))
 
 (t/deftest test-a-restart-loads-the-library
   (let [env (support/eval-ctx)

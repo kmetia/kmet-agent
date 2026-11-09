@@ -11,9 +11,11 @@
    definitions. A name whose sanitized spelling would collide gets a short
    address digest, so distinct addresses never share a file. A new session or
    a restarted process loads both layers; an already-built environment is a
-   runtime cache and never refreshes. `:drop` and `(eval/forget 'name)` resolve
-   in the namespace the call ends in and delete the record's actual file,
-   unbinding the live name and restoring a shadowed record when one exists. A
+   runtime cache that refreshes only on `/eval reload`, which rebuilds it from
+   both roots and replays the session-only definitions. `:drop` and
+   `(eval/forget 'name)` resolve in the namespace the call ends in and delete
+   the record's actual file, unbinding the live name and restoring a shadowed
+   record when one exists. A
    file that also defines other addresses must be dropped with all of them. A
    mounted source's value is restored (reported as `restored`, not `forgot`)
    when its shadow is dropped. `(eval/move)` moves one record between layers.
@@ -544,9 +546,10 @@
 
 (defn- failure-line
   "One load failure's result line."
-  [{:keys [file error scope]}]
+  [{:keys [file error scope] :as failure}]
   (str "[eval: load failed " (if scope (name scope) "library") " "
-       (or file "<library>") ": " (truncate-report-error error) "]"))
+       (or file (:name failure) "<library>") ": "
+       (truncate-report-error error) "]"))
 
 (defn- build-report-lines
   "The first eval after an environment build reports the loaded set and load
@@ -1141,8 +1144,8 @@
 
 (defn- ensure-environment!
   "The current environment for SESSION, built from the library on first use.
-   An existing environment is reused: a session is a runtime cache, not a
-   branch-scoped definition log."
+   An existing environment is reused until an explicit `/eval reload`: a session
+   is a runtime cache, not a branch-scoped definition log."
   [service session cwd]
   (let [id (:id session)]
     (or (get @(:envs service) id)
@@ -1153,6 +1156,43 @@
           (get (swap! (:envs service)
                       #(if (contains? % id) % (assoc % id env)))
                id)))))
+
+(defn- replay-live!
+  "Evaluate OLD's session-only records into ENV, keeping them live-only. A
+   failure leaves that name out of ENV and is returned; the caller keeps the
+   old environment rather than swapping in a partial one."
+  [env old]
+  (reduce (fn [failures [name record]]
+            (let [{:keys [error]} (eval-definition! env record)]
+              (if error
+                (conj failures {:name name :error error
+                                :scope (or (:scope record) :cwd)})
+                (do
+                  (swap! (:unwritten env) conj name)
+                  (swap! (:unwritten-records env) assoc name record)
+                  failures))))
+          []
+          (sort-by key @(:unwritten-records old))))
+
+(defn- reload-environment!
+  "Build a fresh environment for OLD's pinned cwd and replay OLD's
+   session-only records. Returns `{:env fresh :replayed n}` on success; a build
+   or replay failure returns `{:env old :kept? true :failures [...]}`, so a
+   broken file cannot empty a working session. The fresh environment's
+   first-eval build report is cleared: the reload itself reports the outcome."
+  [service old]
+  (let [fresh (build-environment service (:cwd old))
+        build-failures (vec @(:failures fresh))]
+    (if (seq build-failures)
+      {:env old :kept? true :failures build-failures}
+      (let [replay-failures (replay-live! fresh old)]
+        (if (seq replay-failures)
+          {:env old :kept? true :failures replay-failures}
+          (do
+            (when-let [sticky (some-> @(:sticky-ns old) sci/ns-name)]
+              (reset! (:sticky-ns fresh) (sci/find-ns (:sci-ctx fresh) sticky)))
+            (reset! (:build-report fresh) nil)
+            {:env fresh :replayed (count @(:unwritten-records old))}))))))
 
 ;; ─── Request normalization ────────────────────────────────────────────────
 
@@ -1734,6 +1774,64 @@
       (let [lock (Object.)]
         (get (swap! locks #(if (contains? % id) % (assoc % id lock))) id))))
 
+(defn- counted
+  "N and SINGULAR, pluralized when N is not one."
+  [n singular]
+  (str n " " singular (when (not= 1 n) "s")))
+
+(defn- reload-result
+  "The command result for a completed reload: the count line, any failures,
+   and the machine-readable details."
+  [verb n live-count failures]
+  {:content (str/join
+             "\n"
+             (cons (str "[eval: " verb " " (counted n "library definition")
+                        (when (pos? live-count)
+                          (str "; replayed "
+                               (counted live-count "live-only definition")))
+                        "]")
+                   (map failure-line failures)))
+   :details (cond-> {:reloaded true :loaded n}
+              (pos? live-count) (assoc :replayed live-count)
+              (seq failures) (assoc :failures failures))
+   :is-error (boolean (seq failures))})
+
+(defn- reload-request!
+  "The `/eval reload` service: rebuild SESSION's environment from both library
+   roots in a fresh sandbox, replaying its session-only definitions. A build or
+   replay failure keeps the current environment and reports the failures, so a
+   broken file cannot empty a working session. Without a built environment this
+   is the first build. Returns the command result map."
+  [service {:keys [session cwd]}]
+  (when @(:disposed? service)
+    (throw (ex-info "the agent's eval service is disposed"
+                    {:type :eval/disposed})))
+  (let [session (resolve-session session)
+        _ (when-not session
+            (throw (ex-info "eval needs a session"
+                            {:type :eval/no-session})))
+        lock (session-lock (:session-locks service) (:id session))]
+    (locking lock
+      (if-let [old (get @(:envs service) (:id session))]
+        (let [{:keys [env kept? failures replayed]}
+              (reload-environment! service old)]
+          (if kept?
+            {:content (str/join
+                       "\n"
+                       (cons "[eval: reload failed; the current environment is unchanged]"
+                             (map failure-line failures)))
+             :details {:reloaded false :failures failures}
+             :is-error true}
+            (let [n (count (library-entries env))]
+              (swap! (:envs service) assoc (:id session) env)
+              (reload-result "reloaded" n (or replayed 0) nil))))
+        (let [env (ensure-environment! service session (or cwd (tool-util/cwd)))
+              n (count (library-entries env))
+              failures (take-failures! env)]
+          ;; the command reports this build; do not repeat it as the first eval
+          (reset! (:build-report env) nil)
+          (reload-result "loaded" n 0 failures))))))
+
 (defn- drop-request!
   "Drop NAMES for SESSION without building an environment: delete the files
    and, when an environment exists, refresh its source layer and unbind the
@@ -2002,6 +2100,7 @@
       :drop! (fn [{:keys [session drop cwd scope]}]
                (drop-request! service session drop cwd scope))
       :move! #(move-request! service %)
+      :reload! #(reload-request! service %)
       :library #(service-library service)
       :live (fn
               ([] (service-live service))
