@@ -3,7 +3,8 @@
    formatResumeCommand: a persisted session file, attached stdout, and the
    --session-dir argument only for a non-default layout) and the shared
    bash-cancel helper."
-  (:require [clojure.test :as t :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :as t :refer [deftest is testing]]
             [babashka.fs :as fs]
             [kmet.app.config :as cfg]
             [kmet.app.session.core :as session]
@@ -33,7 +34,9 @@
 (deftest format-resume-command-conditions
   (let [root (str (fs/create-temp-dir {:dir "target" :prefix "resume-hint-"}))
         dir (str (fs/path root "sessions"))
-        custom (str (fs/path root "custom"))
+        ;; a forward-slash path stays a safe shell token on every host; a
+        ;; Windows path's backslashes are quoted by pi's quoteIfNeeded
+        custom (str/replace (str (fs/path root "custom")) "\\" "/")
         cwd "/some/project"]
     (try
       (testing "persisted session, attached stdout, default layout: bare command"

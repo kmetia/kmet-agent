@@ -197,25 +197,40 @@
 (t/deftest test-session-load-nonexistent
   (t/is (thrown? Exception (s/load-session "nonexistent.ednl"))))
 
+(defn- posix-encode
+  "encode-cwd with POSIX path normalization pinned, for the shared pi-spelling
+   assertions. On Windows a POSIX-looking path is absolutized onto the current
+   drive and its ':' is not a legal path character."
+  [cwd]
+  (with-redefs [fs/expand-home identity
+                fs/absolutize identity
+                fs/normalize identity]
+    (s/encode-cwd cwd)))
+
+(defn- posix-decode
+  [encoded]
+  (with-redefs [fs/windows? (constantly false)]
+    (s/decode-cwd encoded)))
+
 (t/deftest test-encode-cwd
   ;; 2026-11-05: the shared cwd key is injective — ~, -, : and / are
   ;; escaped before the -- wrapper, unlike the legacy pi layout
-  (t/is (= "--home-user-proj--" (s/encode-cwd "/home/user/proj")))
-  (t/is (= "--home-user-proj-a--" (s/encode-cwd "/home/user/proj/a")))
-  (t/is (= "--home-user-proj~-a--" (s/encode-cwd "/home/user/proj-a"))
+  (t/is (= "--home-user-proj--" (posix-encode "/home/user/proj")))
+  (t/is (= "--home-user-proj-a--" (posix-encode "/home/user/proj/a")))
+  (t/is (= "--home-user-proj~-a--" (posix-encode "/home/user/proj-a"))
         "a hyphen is escaped, so it cannot collide with a slash")
-  (t/is (= "--home-user-~~x--" (s/encode-cwd "/home/user/~x")))
-  (t/is (= "--home-user-a~cb--" (s/encode-cwd "/home/user/a:b")))
-  (t/is (not (str/includes? (s/encode-cwd "/home/user/a:b") ":"))
+  (t/is (= "--home-user-~~x--" (posix-encode "/home/user/~x")))
+  (t/is (= "--home-user-a~cb--" (posix-encode "/home/user/a:b")))
+  (t/is (not (str/includes? (posix-encode "/home/user/a:b") ":"))
         "the key carries no colon: a Windows drive path must stay a legal name")
-  (t/is (= "----" (s/encode-cwd "/")))
+  (t/is (= "----" (posix-encode "/")))
   (t/is (= (s/encode-cwd (str (fs/absolutize "a/b"))) (s/encode-cwd "a/b"))
         "a relative cwd is absolutized before encoding")
   (t/is (= (s/encode-cwd (str (fs/expand-home "~/proj")))
            (s/encode-cwd "~/proj"))
         "~ is expanded before encoding")
-  (t/is (not= (s/encode-cwd "/home/user/proj-a")
-              (s/encode-cwd "/home/user/proj/a"))
+  (t/is (not= (posix-encode "/home/user/proj-a")
+              (posix-encode "/home/user/proj/a"))
         "the collision the legacy encoder had is gone"))
 
 (t/deftest test-encode-cwd-windows-drive
@@ -234,13 +249,22 @@
                 "/home/user/~x"
                 "/home/user/a:b"
                 "/"]]
-    (t/is (= path (s/decode-cwd (s/encode-cwd path)))
+    (t/is (= path (posix-decode (posix-encode path)))
           (str path " round-trips")))
   (t/testing "a Windows drive key decodes to its drive path"
     (with-redefs [fs/windows? (constantly true)]
       (t/is (= "C:/src/my/kmet" (s/decode-cwd "--C~c-src-my-kmet--")))))
   (t/is (thrown? Exception (s/decode-cwd "home-user-proj"))
         "a string without the -- wrapper is refused"))
+
+(t/deftest test-encode-cwd-native-round-trip
+  ;; The real normalizer on the running host: a Windows cwd's drive colon is
+  ;; escaped into the key, and decode restores the forward-slash path.
+  (let [cwd (str (fs/absolutize "target"))
+        encoded (s/encode-cwd cwd)]
+    (t/is (not (str/includes? encoded ":")))
+    (t/is (= (str/replace cwd "\\" "/")
+             (s/decode-cwd encoded)))))
 
 (t/deftest test-legacy-encode-cwd
   (t/is (= "--home-user-proj--" (s/legacy-encode-cwd "/home/user/proj")))
@@ -252,10 +276,11 @@
 (t/deftest test-session-dir-for-cwd-needs-a-base
   ;; a blank base makes the encoded name a relative path, so the directory would
   ;; be created under the process cwd instead of a sessions dir
-  (t/is (= "/base/--home-proj--" (s/session-dir-for-cwd "/base" "/home/proj")))
-  (t/is (= "/base/--home-proj~-x--"
+  (t/is (= (str (fs/path "/base" (s/encode-cwd "/home/proj")))
+           (s/session-dir-for-cwd "/base" "/home/proj")))
+  (t/is (= (str (fs/path "/base" (s/encode-cwd "/home/proj-x")))
            (s/session-dir-for-cwd "/base" "/home/proj-x")))
-  (t/is (= "/base/--home-proj-x--"
+  (t/is (= (str (fs/path "/base" (s/legacy-encode-cwd "/home/proj-x")))
            (s/legacy-session-dir-for-cwd "/base" "/home/proj-x"))
         "the legacy dir keeps its non-injective spelling")
   (doseq [base [nil ""]]

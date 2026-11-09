@@ -79,10 +79,14 @@
           (opts-map opts))))
 
 (defn call-tool
-  [env tool-name args]
-  (binding [extensions/*agent-context* {:session (constantly (:session env))}]
-    (tools/execute-tool (:tools env) tool-name args
-                        {:ctx {:srce-ctx (:ctx env) :cwd (:cwd env)}})))
+  "Execute TOOL-NAME through the env's tool handle. OPTS merges into the
+   execute-tool options, so a cancellation test can pass :signal."
+  ([env tool-name args] (call-tool env tool-name args {}))
+  ([env tool-name args opts]
+   (binding [extensions/*agent-context* {:session (constantly (:session env))}]
+     (tools/execute-tool (:tools env) tool-name args
+                         (merge {:ctx {:srce-ctx (:ctx env) :cwd (:cwd env)}}
+                                opts)))))
 
 (defn library-for
   "The service's `(eval/library)` value for an explicit SESSION."

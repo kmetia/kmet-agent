@@ -321,6 +321,16 @@
       (t/is (= :info level))
       (t/is (str/includes? content "[eval: reloaded 2 library definitions")))))
 
+(t/deftest reload-failure-reports-through-the-warning-channel
+  (let [env (eval-env)
+        bad (str (fs/path (:cwd-root env) "user" "broken.clj"))]
+    (fs/create-dirs (fs/parent bad))
+    (spit bad "(defn broken [")
+    (let [[[level content]] (run env "reload")]
+      (t/is (= :warning level)
+            "a failed reload uses the one-argument warning capability")
+      (t/is (str/includes? content "load failed")))))
+
 (t/deftest sources-and-help
   (let [env (eval-env)]
     (let [[[level _ content]] (run env "sources")]

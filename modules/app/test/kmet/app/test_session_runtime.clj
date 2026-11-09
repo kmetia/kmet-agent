@@ -276,21 +276,25 @@
         (is (= opts @(:system-prompt-opts ag)))))))
 
 (deftest test-active-tools-follow-the-resources-selection
-  (with-handle
-    (fn [handle _]
-      (let [ag (rt/agent-state handle)
-            configured (set (map :name (rt/active-tools handle)))]
-        (is (contains? configured "read")
-            "the bootstrap resources selection is active")
-        (is (nil? @(:active-tools ag))
-            "no session override at startup")
-        (loop-state/set-active-tools! ag ["read" "bash"])
-        (is (= #{"read" "bash"}
-               (set (map :name (rt/active-tools handle))))
-            "the session override restricts the active set")
-        (loop-state/set-active-tools! ag nil)
-        (is (= configured (set (map :name (rt/active-tools handle))))
-            "nil restores the resources selection")))))
+  ;; pin the settings scopes: the composition reads the developer's files at
+  ;; mount, so a non-default project selection would change the default set
+  (with-redefs [cfg/read-global-settings-map (constantly {})
+                cfg/read-project-settings-map (constantly {})]
+    (with-handle
+      (fn [handle _]
+        (let [ag (rt/agent-state handle)
+              configured (set (map :name (rt/active-tools handle)))]
+          (is (contains? configured "read")
+              "the bootstrap resources selection is active")
+          (is (nil? @(:active-tools ag))
+              "no session override at startup")
+          (loop-state/set-active-tools! ag ["read" "bash"])
+          (is (= #{"read" "bash"}
+                 (set (map :name (rt/active-tools handle))))
+              "the session override restricts the active set")
+          (loop-state/set-active-tools! ag nil)
+          (is (= configured (set (map :name (rt/active-tools handle))))
+              "nil restores the resources selection"))))))
 
 (deftest test-refresh-resources-clears-only-the-tool-override
   (with-handle

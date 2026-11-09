@@ -287,7 +287,9 @@
                 (reload {:session sess :cwd cwd})
                 (catch Exception e
                   {:is-error true :content (or (ex-message e) (str e))}))]
-          (out ui (if is-error :warning :info) "Eval" content))
+          (if is-error
+            (out ui :warning content)
+            (out ui :info "Eval" content)))
         (out ui :warning "This eval service cannot reload."))
 
       (= verb "sources")

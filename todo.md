@@ -13,13 +13,16 @@ manifest state the rule; `docs/architecture.md` is authoritative.
 
 ## Task: Windows process-cancel tests (2026-11-06)
 
-Status: todo. The sandbox's process-cancel tests (`sh`, `shell`, background
-`process`) skip Windows via `when-not kprocess/windows-os?`, so the
-`taskkill /T` branch of `kmet.libs.process/kill-process-tree!` and the
-watcher's cancel-kill are untested there. Add a Windows-safe child-process
-fixture (e.g. `cmd /c ...` with a delayed marker file) covering `sh`,
-`shell`, a background `process`, and a timed host-blocked `codemode`/`eval`
-call ending on Escape rather than at its timeout.
+Status: done (2026-11-09). The sandbox's process-cancel tests (`sh`, `shell`,
+background `process`) no longer skip Windows: `kmet.app.tools.test-script`'s
+fixture now writes a parent/child script per host (`cmd.exe /c` with
+`start /b` and a `ping` delay on Windows, `sh` with a background subshell on
+Unix), so the marker proves the descendant tree died, not just the direct
+child. The `taskkill /T` branch of `kmet.libs.process/kill-process-tree!` and
+the watcher's cancel-kill are exercised on Windows by all three, and
+`kmet.app.test-eval` gained the eval counterpart of codemode's timed
+host-blocked Escape test. Verified on Windows with `bb test-ext` and
+`jolt test-ext` for the script, eval, codemode and process namespaces.
 
 ## Task: eval library interface discovery (10a, 2026-11-05)
 
@@ -104,7 +107,9 @@ the same metadata.
 Status: done (2026-11-05). Step 0 (the shared cwd key), the eval scopes in
 steps 1–9, and step 10a (interface discovery) are landed. Supersedes the
 one-global-library decision below; that decision stays as the step-4R
-history.
+history. Windows verification (2026-11-09): the shared-spelling assertions
+pin POSIX normalization and a native round-trip covers the real normalizer,
+so `test-store` passes on every host; the encoder itself needed no change.
 
 The eval environment keeps one durable visibility layer per session cwd, with
 the home library as an explicit global layer. One definition per address is

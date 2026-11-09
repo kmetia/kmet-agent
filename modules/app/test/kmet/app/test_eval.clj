@@ -12,6 +12,7 @@
             [kmet.app.tools.eval :as eval-tool]
             [kmet.app.tools.registry :as tools]
             [kmet.app.tools.script :as script]
+            [kmet.libs.concurrent :as concurrent]
             [kmet.test-tmp :as test-tmp]
             [kmet.test-utils :as tu]))
 
@@ -216,6 +217,24 @@
     (t/is (:is-error r))
     (t/is (= :timeout (get-in r [:details :error])))
     (t/is (= 0.1 (get-in r [:details :timeout])))))
+
+(t/deftest ^:slow test-cancel-ends-a-host-blocked-call-with-a-deadline
+  ;; The eval tool shares the script layer's cancellation wait: Escape during
+  ;; host-blocked code ends the call after the grace, not at the model's
+  ;; timeout. The codemode test covers the same plumbing on the other tool.
+  (let [env (support/eval-ctx)
+        signal (atom false)
+        started (concurrent/monotonic-ms)
+        f (future (support/call-tool env "eval"
+                                     {:code "(core/sleep 5000)" :timeout 10}
+                                     {:signal signal}))]
+    (Thread/sleep 100)
+    (reset! signal true)
+    (let [r (deref f 7000 ::timeout)]
+      (t/is (not= ::timeout r) "the call returns on Escape, not at the deadline")
+      (t/is (< (- (concurrent/monotonic-ms) started) 4000)
+            "abandoned after the grace, well before the 10s deadline")
+      (t/is (= :aborted (get-in r [:details :error]))))))
 
 (t/deftest ^:slow test-a-parallel-call-waits-and-starts-its-clock-after-the-lock
   (let [env (support/eval-ctx)

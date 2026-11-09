@@ -1213,7 +1213,7 @@
                      :source-namespaces source-namespaces
                      :get-all-tools (if handle
                                       #(registry/get-all-tools handle)
-                                      (constantly []))
+                                      (constantly {}))
                      :get-contributed-tools (if handle
                                               #(registry/get-contributed-tools handle)
                                               (constantly {}))
