@@ -6,6 +6,8 @@
    `drop <name>…`, `move <name> global|cwd`, `reload`, `sources` and `help`.
    `reload` rebuilds the session's sandbox from both library roots. Entries
    show their cwd/global scope (or `live`) and whether an entry is shadowed.
+   Output is Markdown — headings, bullets and fenced code — rendered by the
+   TUI's custom-message component.
    `/eval <name>` is a `describe` shorthand when the name is defined and is
    not a known verb. An eval source may contribute a verb through the
    service's `:source-commands` map; built-in names are reserved. The command
@@ -54,23 +56,53 @@
   (str "(" (name (or scope :global))
        (when (false? active) ", shadowed") ")"))
 
+(defn- inline-code
+  "S as a Markdown code span. The renderer reads single-backtick spans only,
+   so an internal backtick is shown as an apostrophe."
+  [s]
+  (str "`" (str/replace (str s) "`" "'") "`"))
+
+(defn- code-block
+  "S as a fenced Markdown code block tagged LANG. The renderer reads
+   three-backtick fences, so a literal triple-backtick run in S is split with
+   a zero-width space."
+  [lang s]
+  (str "```" lang "\n" (str/replace (str s) "```" "``\u200b`") "\n```"))
+
 (defn- entry-line
-  "One definition listing line: name, kind, arglists, scope and the first
-   docstring line. The file is omitted — the scope names its root."
+  "One Markdown definition list item: name, kind, arglists, scope and the
+   first docstring line. The file is omitted — the scope names its root."
   [{:keys [name kind arglists doc] :as entry}]
-  (let [arg (eval-format/arglists-text arglists)
+  (let [arg (some-> (eval-format/arglists-text arglists) str/trim not-empty)
         doc-line (eval-format/doc-line doc)]
-    (str name "  " (kind-name kind) (or arg "")
-         "  " (scope-tag entry)
-         (when (and (nil? doc-line) (nil? arg)) "  (no docstring)")
-         (when doc-line (str "  — " doc-line)))))
+    (str "- " (inline-code name)
+         " · " (inline-code (kind-name kind))
+         (when arg (str " " (inline-code arg)))
+         " · " (inline-code (scope-tag entry))
+         " — " (or doc-line "*no docstring*"))))
 
-(defn- indented
-  "TEXT with every line indented four spaces."
-  [text]
-  (str/join "\n" (map #(str "    " %) (str/split-lines (str text)))))
-
-(defn- describe-text "The human view of one `(eval/describe)` entry: its interface, file, source,\n   and the docstring only when the entry has no source." [cwd {:keys [name kind doc arglists file scope source]}] (let [arg (eval-format/arglists-text arglists) has-source? (not (str/blank? (str source))) scope-label (cond (some? scope) (str "(" (clojure.core/name scope) ")") has-source? "(source)" :else "(built-in)") doc (when (and doc (not has-source?)) doc)] (str name "  " (kind-name kind) (or arg "") "  " scope-label "\n  file: " (entry-path cwd file) (when doc (str "\n  doc: " doc)) (when has-source? (str "\n  source:\n" (indented source))))))
+(defn- describe-text
+  "The Markdown view of one `(eval/describe)` entry: its interface, file,
+   source, and the docstring only when the entry has no source."
+  [cwd {:keys [name kind doc arglists file scope source]}]
+  (let [arg (some-> (eval-format/arglists-text arglists) str/trim not-empty)
+        has-source? (not (str/blank? (str source)))
+        scope-label (cond
+                      (some? scope) (str "(" (clojure.core/name scope) ")")
+                      has-source? "(source)"
+                      :else "(built-in)")
+        doc (when (and (seq (str doc)) (not has-source?)) doc)]
+    (str/join
+     "\n\n"
+     (remove nil?
+             [(str "### " (inline-code name))
+              (str (inline-code (kind-name kind))
+                   (when arg (str " " (inline-code arg)))
+                   " · " (inline-code scope-label))
+              (str "**File:** "
+                   (if file (inline-code (entry-path cwd file)) "*none*"))
+              doc
+              (when has-source? (code-block "clojure" source))]))))
 
 (defn- describe-outcome
   "Resolve NAME for `/eval`: `{:text ...}` when it is defined, `{:not-found
@@ -104,20 +136,30 @@
   (concat (sort-by (juxt #(if (= :global (:scope %)) 0 1) :name) entries)
           (sort-by :name (map #(assoc % :scope :live) live))))
 
-(defn- failure-note [failures]
-  (when-let [n (seq failures)]
-    (let [n (count n)]
-      (str n " file" (when (not= 1 n) "s") " failed to load"))))
+(defn- failure-line
+  "One Markdown failure bullet: the file, scope and error."
+  [failure]
+  (str "- " (inline-code (or (:file failure) (:name failure) (:source failure)
+                             (:root failure) "?"))
+       (when-let [scope (:scope failure)]
+         (str " · " (inline-code (str "(" (name scope) ")"))))
+       " — " (or (:error failure) "unknown error")))
 
 (defn- list-text [entries failures]
-  (let [lines (map #(str "* " (entry-line %)) entries)
-        n (count lines)
-        note (failure-note failures)]
-    (if (zero? n)
-      (str "No eval definitions." (when note (str " (" note ")")))
-      (str/join "\n" (concat lines
-                             [(str n " definition" (when (not= 1 n) "s"))]
-                             (when note [note]))))))
+  (let [entries (vec entries)
+        n (count entries)]
+    (str/join
+     "\n\n"
+     (concat
+      ["### Eval library"
+       (if (pos? n)
+         (str/join "\n" (map entry-line entries))
+         "*No eval definitions.*")]
+      (when (pos? n)
+        [(str "**" n " definition" (when (not= 1 n) "s") "**")])
+      (when (seq failures)
+        ["### Failures"
+         (str/join "\n" (map failure-line failures))])))))
 
 (defn- source-line [file p]
   (try
@@ -128,24 +170,27 @@
     (catch Throwable _ nil)))
 
 (defn- search-line [cwd p {:keys [name file] :as entry}]
-  (let [line (str name "  " (scope-tag entry) "  " (entry-path cwd file))
+  (let [line (str "- " (inline-code name)
+                  " · " (inline-code (scope-tag entry))
+                  " · " (inline-code (entry-path cwd file)))
         hit (when (and file (not (name-match? entry p)))
               (source-line file p))]
     (if hit
-      (str line "\n    " hit)
+      (str line "\n  " (inline-code hit))
       line)))
 
 (defn- search-text [entries cwd pattern]
   (if (str/blank? pattern)
-    "Usage: /eval search <text>"
+    (str "**Usage:** " (inline-code "/eval search <text>"))
     (let [p (str/lower-case pattern)
           matches (filter (fn [{:keys [file] :as entry}]
                             (or (name-match? entry p)
                                 (some? (when file (source-line file p)))))
                           entries)]
-      (if (seq matches)
-        (str/join "\n" (map #(search-line cwd p %) matches))
-        (str "No eval definitions match " (pr-str pattern) ".")))))
+      (str "### Matches for " (inline-code pattern) "\n\n"
+           (if (seq matches)
+             (str/join "\n" (map #(search-line cwd p %) matches))
+             (str "*No eval definitions match " (inline-code pattern) ".*"))))))
 
 (defn- names-arg
   "Parse the names after `drop`: whitespace-separated, or EDN strings when a
@@ -175,25 +220,27 @@
         (when (= 1 (count names))
           [(first names) (str/trim (subs arg (inc i)))])))))
 
-(defn- failure-line [failure]
-  (str "  failure: " (or (:file failure) (:name failure) (:source failure)
-                         (:root failure) "?")
-       (when-let [scope (:scope failure)] (str " (" (name scope) ")"))
-       ": " (or (:error failure) "unknown error")))
-
 (defn- sources-text [svc cwd sess]
   (let [sources ((:sources svc) {:cwd cwd})
         entries (:entries ((:index svc) {:cwd cwd :session sess}))
         failures ((:failures svc))
         n (count entries)]
-    (str/join "\n"
-              (concat
-               (if (seq sources)
-                 (map eval-format/source-line sources)
-                 ["No eval sources."])
-               [(str n " definition" (when (not= 1 n) "s") " loaded")]
-               (map entry-line entries)
-               (map failure-line failures)))))
+    (str/join
+     "\n\n"
+     (concat
+      ["### Eval sources"
+       (if (seq sources)
+         (str/join "\n" (map eval-format/source-line sources))
+         "*No registered eval sources.*")
+       "### Eval library"
+       (if (pos? n)
+         (str/join "\n" (map entry-line entries))
+         "*No eval definitions.*")]
+      (when (pos? n)
+        [(str "**" n " saved definition" (when (not= 1 n) "s") "**")])
+      (when (seq failures)
+        ["### Failures"
+         (str/join "\n" (map failure-line failures))])))))
 
 (defn- source-commands [svc cwd]
   (if-let [f (:source-commands svc)] (f {:cwd cwd}) {}))
@@ -204,20 +251,32 @@
     (name verb)))
 
 (defn- help-text [svc cwd]
-  (let [verbs ["/eval list [pattern]     List global, cwd, then live definitions"
-               "/eval search <text>     Search names and source"
-               "/eval describe <name>   Describe one definition or source verb"
-               "/eval <name>            Describe a definition (describe shorthand)"
-               "/eval drop <name>…      Delete actual files and unbind the live names"
-               "/eval drop names sharing a file together; a partial file is refused"
-               "/eval move <name> global|cwd  Move a definition to the other scope"
-               "/eval reload            Rebuild the sandbox from the library files"
-               "/eval sources           List eval sources and loaded definitions"
-               "/eval help              This help"]
+  (let [verbs [["/eval list [pattern]" "List global, cwd, then live definitions"]
+               ["/eval search <text>" "Search names and source"]
+               ["/eval describe <name>" "Describe one definition or source verb"]
+               ["/eval <name>" "Describe a definition (describe shorthand)"]
+               ["/eval drop <name>…" "Delete actual files and unbind the live names"]
+               ["/eval move <name> global|cwd" "Move a definition to the other scope"]
+               ["/eval reload" "Rebuild the sandbox from the library files"]
+               ["/eval sources" "List eval sources and saved definitions"]
+               ["/eval help" "This help"]]
         contributed (map (fn [[verb {:keys [description]}]]
-                           (str "/eval " (display-verb verb) "  " (or description "")))
+                           [(str "/eval " (display-verb verb))
+                            (or description "")])
                          (sort-by key (source-commands svc cwd)))]
-    (str/join "\n" (concat verbs contributed))))
+    (str/join
+     "\n\n"
+     (concat
+      ["### /eval"
+       (str/join "\n" (map (fn [[cmd desc]]
+                             (str "- " (inline-code cmd) " — " desc))
+                           verbs))
+       "> A file shared by several definitions must be dropped together; a partial file is refused."]
+      (when (seq contributed)
+        ["**Source verbs**"
+         (str/join "\n" (map (fn [[cmd desc]]
+                               (str "- " (inline-code cmd) " — " desc))
+                             contributed))])))))
 
 (defn handle
   "The `/eval` handler: `ctx` is the command context (`:runtime` engine and

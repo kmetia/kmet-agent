@@ -64,7 +64,7 @@
         [[level label content]] (run env "")]
     (t/is (= :info level))
     (t/is (= "Eval" label))
-    (t/is (= "No eval definitions." content))))
+    (t/is (= "### Eval library\n\n*No eval definitions.*" content))))
 
 (t/deftest list-shows-and-filters-definitions
   (let [env (eval-env)]
@@ -77,8 +77,8 @@
       (t/is (= :info level))
       (t/is (str/includes? content "user/report"))
       (t/is (str/includes? content "demo/area"))
-      (t/is (str/includes? content "* user/report  defn"))
-      (t/is (str/includes? content "* demo/area  defn"))
+      (t/is (str/includes? content "- `user/report` · `defn`"))
+      (t/is (str/includes? content "- `demo/area` · `defn`"))
       (t/is (str/includes? content "2 definitions"))
       (t/is (str/includes? content "(cwd)"))
       (t/is (not (str/includes? content "report.clj")))
@@ -94,9 +94,9 @@
     (write-def! env {:name "user/plain" :source "(def plain 1)"})
     (let [[[level _ content]] (run env "list")]
       (t/is (= :info level))
-      (t/is (str/includes? content "user/report  defn ([x])  (cwd)"))
+      (t/is (str/includes? content "`user/report` · `defn` `([x])` · `(cwd)`"))
       (t/is (str/includes? content "Render."))
-      (t/is (str/includes? content "user/plain  def  (cwd)  (no docstring)"))
+      (t/is (str/includes? content "`user/plain` · `def` · `(cwd)` — *no docstring*"))
       (t/is (not (str/includes? content "plain.clj"))))
     (let [[_ _ content] (first (run env "list report"))]
       (t/is (str/includes? content "Render."))
@@ -113,10 +113,12 @@
             #(run env "describe user/report"))]
       (t/is (= :info level))
       (t/is (= "Eval" label))
-      (t/is (str/includes? content "user/report  defn ([x])  (cwd)"))
+      (t/is (str/includes? content "### `user/report`"))
+      (t/is (str/includes? content "`defn` `([x])` · `(cwd)`"))
       (t/is (str/includes? content
-                           (str "file: " (eval-files/display-path (:cwd env) path))))
-      (t/is (not (str/includes? content "doc: Render a report."))
+                           (str "**File:** `"
+                                (eval-files/display-path (:cwd env) path) "`")))
+      (t/is (not (str/includes? content "**Doc:**"))
             "the docstring is not repeated outside the source")
       (t/is (str/includes? content source)))
     (let [[level content] (first (run env "describe user/nope"))]
@@ -136,12 +138,14 @@
     (let [[[level label content]] (run env "saved-answer")]
       (t/is (= :info level))
       (t/is (= "Eval" label))
-      (t/is (str/includes? content "user/saved-answer  defn ([x])  (cwd)"))
+      (t/is (str/includes? content "### `user/saved-answer`"))
+      (t/is (str/includes? content "`defn` `([x])` · `(cwd)`"))
       (t/is (str/includes? content "Saved answer.")))
     (let [[[level _ content]] (run env "live-answer")]
       (t/is (= :info level))
-      (t/is (str/includes? content "user/live-answer  defn ([x])  (cwd)"))
-      (t/is (str/includes? content "file: (no file)")))
+      (t/is (str/includes? content "### `user/live-answer`"))
+      (t/is (str/includes? content "`defn` `([x])` · `(cwd)`"))
+      (t/is (str/includes? content "**File:** *none*")))
     (let [[[level content]] (run env "not-a-definition")]
       (t/is (= :warning level))
       (t/is (str/includes? content "Unknown verb: not-a-definition")))))
@@ -155,7 +159,8 @@
                        (throw (ex-info "must not build" {:type :test})))}
       #(let [[[level _ content]] (run env "user/report")]
          (t/is (= :info level))
-         (t/is (str/includes? content "user/report  defn ([x])  (cwd)"))
+         (t/is (str/includes? content "### `user/report`"))
+         (t/is (str/includes? content "`defn` `([x])` · `(cwd)`"))
          (t/is (str/includes? content "Render."))))))
 
 (t/deftest describe-a-source-verb-from-the-built-environment
@@ -176,9 +181,10 @@
         (run (assoc env :engine engine) "describe ext.license/add!")]
     (t/is (= :info level))
     (t/is (= "Eval" label))
-    (t/is (str/includes? content "ext.license/add!  verb ([path])  (source)"))
-    (t/is (str/includes? content "file: (no file)"))
-    (t/is (not (str/includes? content "doc: Add a header."))
+    (t/is (str/includes? content "### `ext.license/add!`"))
+    (t/is (str/includes? content "`verb` `([path])` · `(source)`"))
+    (t/is (str/includes? content "**File:** *none*"))
+    (t/is (not (str/includes? content "**Doc:**"))
           "a source-bearing entry does not repeat the docstring")
     (t/is (str/includes? content "(fn [path] ...)"))))
 
@@ -196,7 +202,7 @@
     (let [[_ _ content] (first (run env "search absent-name"))]
       (t/is (str/includes? content "No eval definitions match")))
     (let [[_ _ content] (first (run env "search"))]
-      (t/is (str/includes? content "Usage: /eval search")))))
+      (t/is (str/includes? content "/eval search <text>")))))
 
 (t/deftest drop-removes-the-file-and-reports
   (let [env (eval-env)
@@ -241,10 +247,10 @@
           at (fn [text] (str/index-of content text))]
       (t/is (= :info level))
       (t/is (str/includes? content "2 definitions"))
-      (t/is (str/includes? content "user/f  defn ([])  (cwd)"))
-      (t/is (str/includes? content "user/f  defn ([])  (global, shadowed)"))
-      (t/is (< (at "user/f  defn ([])  (global, shadowed)")
-               (at "user/f  defn ([])  (cwd)"))))))
+      (t/is (str/includes? content "`user/f` · `defn` `([])` · `(cwd)`"))
+      (t/is (str/includes? content "`user/f` · `defn` `([])` · `(global, shadowed)`"))
+      (t/is (< (at "`user/f` · `defn` `([])` · `(global, shadowed)`")
+               (at "`user/f` · `defn` `([])` · `(cwd)`"))))))
 
 (t/deftest list-orders-global-cwd-then-live
   (let [env (support/eval-ctx)
@@ -267,7 +273,7 @@
           live-pos (at "user/live-tool")]
       (t/is (= :info level))
       (t/is (< global-pos cwd-pos live-pos))
-      (t/is (str/includes? content "user/live-tool  defn ([x])  (live)"))
+      (t/is (str/includes? content "`user/live-tool` · `defn` `([x])` · `(live)`"))
       (t/is (str/includes? content "3 definitions")))
     (let [[_ _ content] (first (run env "list live"))]
       (t/is (str/includes? content "user/live-tool"))
@@ -335,12 +341,12 @@
   (let [env (eval-env)]
     (let [[[level _ content]] (run env "sources")]
       (t/is (= :info level))
-      (t/is (str/includes? content "No eval sources."))
-      (t/is (str/includes? content "0 definitions loaded")))
+      (t/is (str/includes? content "No registered eval sources"))
+      (t/is (str/includes? content "No eval definitions")))
     (let [with-source (eval-env {:service-sources [{:id :license :doc "License verbs"}]})
           [[_ _ content]] (run with-source "sources")]
       (t/is (str/includes? content "- license: License verbs"))
-      (t/is (str/includes? content "0 definitions loaded")))
+      (t/is (str/includes? content "No eval definitions")))
     (let [[_ _ help] (first (run env "help"))]
       (t/is (str/includes? help "/eval list [pattern]"))
       (t/is (str/includes? help "/eval search <text>"))
@@ -379,7 +385,7 @@
                            :source "(defn report [x] x)"})
         [[level _ content]] (run env "sources")]
     (t/is (= :info level))
-    (t/is (str/includes? content "1 definition loaded"))
+    (t/is (str/includes? content "1 saved definition"))
     (t/is (str/includes? content "broken.clj"))
     (t/is (str/includes? content "unreadable"))))
 
@@ -403,7 +409,8 @@
     (t/is (= (:cwd env) (:cwd @called)))
     (t/is (:service? @called))
     (let [[_ _ help] (first (run env "help"))]
-      (t/is (str/includes? help "/eval license/lint  Lint a definition")))))
+      (t/is (str/includes? help "/eval license/lint"))
+      (t/is (str/includes? help "Lint a definition")))))
 
 (t/deftest a-real-source-command-and-sources-report
   (let [env (support/eval-ctx)
@@ -436,7 +443,7 @@
       (t/is (str/includes? content "/eval license-lint"))
       (t/is (str/includes? content "Lint licenses")))))
 
-(t/deftest a-built-in-verb-describes-without-a-source (let [env (support/eval-ctx) got (atom []) engine {:agent-state (atom {:ctx (:ctx env)}), :session (atom (:session env)), :cwd (atom (:cwd env))} run (fn [args] (reset! got []) ((:handler eval-command/command) {:runtime engine, :ui {:info (fn [label content] (swap! got conj [:info label content])), :warning (fn [text] (swap! got conj [:warning text]))}} args) (clojure.core/deref got)) [[level _ content]] (run "describe core/read")] (t/is (= :info level)) (t/is (str/includes? content "(built-in)")) (t/is (not (str/includes? content "source: (not recorded)"))) (t/is (str/includes? content "read tool"))))
+(t/deftest a-built-in-verb-describes-without-a-source (let [env (support/eval-ctx) got (atom []) engine {:agent-state (atom {:ctx (:ctx env)}), :session (atom (:session env)), :cwd (atom (:cwd env))} run (fn [args] (reset! got []) ((:handler eval-command/command) {:runtime engine, :ui {:info (fn [label content] (swap! got conj [:info label content])), :warning (fn [text] (swap! got conj [:warning text]))}} args) (clojure.core/deref got)) [[level _ content]] (run "describe core/read")] (t/is (= :info level)) (t/is (str/includes? content "(built-in)")) (t/is (not (str/includes? content "source: (not recorded)"))) (t/is (str/includes? content "Read PATH"))))
 
 (t/deftest runtime-builtins-register-eval
   (builtins/register-runtime-commands! (constantly nil))
