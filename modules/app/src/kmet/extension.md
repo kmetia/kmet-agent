@@ -417,6 +417,12 @@ source with that call's signal.
 (ext/unregister-eval-source! api :license)
 ```
 
+The optional third argument is registration metadata:
+`{:description "License helpers: ext.license/add!."}` — one line the eval
+manifest lists without invoking the source. Without it the manifest names the
+source id alone. Keep it a summary, not a catalog; `(eval/sources)` and
+`(eval/help)` list the verbs.
+
 - `:ns` and `:macros` namespaces must be exactly `ext.<source-id>` or start
   with `ext.<source-id>.`; any other namespace is refused. The system
   namespaces (`core`, `clj`, `eval`) and the fixed host namespaces are never
@@ -460,9 +466,11 @@ source with that call's signal.
   reported; it never fails an eval call. Sources are removed automatically
   when the extension unloads.
 - There is no system-prompt section for eval sources (it would vary inside the
-  cached prefix). If the model should know about the capability unprompted,
-  register a skill instead. Discovery is `(eval/sources)` for the source and
-  verb listing, `(eval/describe 'name)` for one verb's interface and
+  cached prefix). The optional registration `:description` is listed in the
+  eval manifest, so the model learns the source id and one line without a
+  source call; the manifest never invokes the source. For a fuller manual
+  unprompted, register a skill. Discovery is `(eval/sources)` for the source
+  and verb listing, `(eval/describe 'name)` for one verb's interface and
   implementation, `(eval/help)` for the index, and `(eval/help :library)` for
   the library.
 

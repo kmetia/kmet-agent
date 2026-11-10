@@ -73,12 +73,13 @@
                      "many forms per call; fan out with (spawn f) or pmap. Eval verbs: a "
                      "top-level definition with a docstring is saved; one without is live-only. "
                      "Reuse definitions: (eval/library) lists saved ones; define what recurs. "
-                     "Local let/fn bindings are scratch. Define in user; system namespaces are "
-                     "read-only. Report with (emit value), (emit-image path), or the final "
-                     "value; a multi-form call reports earlier forms one line each and the "
-                     "last value in full; stdout and stderr are discarded. (help) lists every "
-                     "verb with its interface; (describe 'name) reads one.")
-   :prompt-snippet "Persistent Clojure sandbox; no model tool calls; one call per phase; many forms per call; read, write, edit, bash, sh (core/<verb>); (help)."
+                     "Eval sources (ext.mcp): (eval/sources). Local let/fn bindings are "
+                     "scratch. Define in user; system namespaces are read-only. Report with "
+                     "(emit value), (emit-image path), or the final value; a multi-form call "
+                     "reports earlier forms one line each and the last value in full; stdout "
+                     "and stderr are discarded. (help) lists every verb with its interface; "
+                     "(describe 'name) reads one.")
+   :prompt-snippet "Persistent Clojure sandbox; no model tool calls; one call per phase; many forms per call; read, write, edit, bash, sh (core/<verb>); (help: verbs, sources)."
    :prompt-guidelines
    ["Spend findings once: reuse before you rebuild, define what recurs, and prefer one eval call that answers over several probes."
     "Put a whole read→edit→verify sequence in one call — one call per phase, not per command."]

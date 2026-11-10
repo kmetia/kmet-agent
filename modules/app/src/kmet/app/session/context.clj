@@ -170,10 +170,9 @@
          "(no docstring)")))
 
 (defn- eval-listing-text
-  "INTRO plus definition LINES, dropping whole lines from the end until the
-   text fits `max-listing-chars`; a dropped count names `(eval/library)` so
-   the omitted lines can be read. Deterministic: the same entries render the
-   same bytes."
+  "INTRO plus LINES, dropping whole lines from the end until the text fits
+   `max-listing-chars`; a dropped count names `(eval/library)` so the omitted
+   lines can be read. Deterministic: the same entries render the same bytes."
   [intro lines]
   (let [total (count lines)]
     (loop [kept total]
@@ -190,32 +189,44 @@
 
 (defn eval-library-listing
   "The `:eval-library` manifest text for MANIFEST (`{:loaded? :entries
-   :session-only}`): one line per saved definition with its arglists and
-   scope, or an empty-library correction; a session-only count says what
-   (eval/help :library) can show but the saved list cannot.
+   :session-only :sources}`): one line per saved definition with its arglists
+   and scope, or an empty-library correction; a session-only count says what
+   (eval/help :library) can show but the saved list cannot. Mounted eval
+   sources are listed first as one registration-description line each, so the
+   model knows `ext.mcp` and its peers exist without calling help first.
    LOADED? distinguishes this session's built environment from the files a
    first eval will load; the text says which. Bounded and deterministic, so
    `sync-eval-library-listing!` can compare it with the branch's previous
    manifest byte for byte."
-  [{:keys [loaded? entries session-only]}]
+  [{:keys [loaded? entries session-only sources]}]
   (let [entries (vec entries)
         session-only (vec session-only)
+        sources (vec sources)
         n (count entries)
         live (count session-only)
         live-text (when (pos? live) (str ", " live " session-only"))
-        live-hint (when (pos? live) "; (eval/help :library)")]
-    (if (and (empty? entries) (zero? live))
-      "Library: empty."
-      (eval-listing-text
-       (cond
-         (zero? n) (str "Library: 0 saved, " live
-                        " session-only; (eval/help :library).\n")
-         loaded? (str "Library: " n " loaded definition"
-                      (when (not= 1 n) "s") live-text live-hint ".\n")
-         :else (str "Library: " n " saved definition"
-                    (when (not= 1 n) "s") live-text
-                    "; loads on first eval" live-hint ".\n"))
-       (mapv eval-listing-line entries)))))
+        live-hint (when (pos? live) "; (eval/help :library)")
+        sources-text (when (seq sources)
+                       (str "Sources: " (count sources)
+                            " mounted; (eval/help) lists their verbs.\n"))
+        intro (cond
+                (and (empty? entries) (zero? live))
+                (str "Library: empty.\n" sources-text)
+                (zero? n)
+                (str "Library: 0 saved, " live
+                     " session-only; (eval/help :library).\n" sources-text)
+                loaded?
+                (str "Library: " n " loaded definition"
+                     (when (not= 1 n) "s") live-text live-hint ".\n"
+                     sources-text)
+                :else
+                (str "Library: " n " saved definition"
+                     (when (not= 1 n) "s") live-text
+                     "; loads on first eval" live-hint ".\n" sources-text))]
+    (eval-listing-text
+     intro
+     (concat (map #(source-line % max-eval-doc-chars) sources)
+             (map eval-listing-line entries)))))
 
 (defn derive-context-settings
   "Derive {:thinking-level :model :provider} from the branch root→leaf (pi:

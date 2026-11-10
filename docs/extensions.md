@@ -630,6 +630,11 @@ calls, so it can expose current state instead of a snapshot:
 (ext/unregister-eval-source! api :license)
 ```
 
+The optional third argument is registration metadata:
+`{:description "License helpers: ext.license/add!."}` — one line the eval
+manifest lists without invoking the source; the source id alone is listed when
+it is omitted.
+
 - Values must live under `ext.<source-id>` or a subnamespace of it:
   `ext.license`, `ext.license.internal`. The model's `user`, the system
   `core`, `clj` and `eval`, and the fixed host namespaces (`clojure.core`,

@@ -97,7 +97,23 @@
         text (session/eval-library-listing {:loaded? true :entries entries})]
     (t/is (<= (count text) 4096))
     (t/is (str/includes? text "more; (eval/library)"))
-    (t/is (not (str/includes? text "user/definition-399")))))
+    (t/is (not (str/includes? text "user/definition-399"))))
+  (let [text (session/eval-library-listing
+              {:loaded? true
+               :entries []
+               :sources [{:id :mcp
+                          :description "MCP tools: search and call."}]})]
+    (t/is (str/includes? text "Library: empty."))
+    (t/is (str/includes? text "Sources: 1 mounted"))
+    (t/is (str/includes? text "- mcp: MCP tools: search and call.")))
+  (let [sources (mapv (fn [i]
+                        {:id (keyword (str "source-" i))
+                         :description (apply str (repeat 200 "z"))})
+                      (range 20))
+        text (session/eval-library-listing
+              {:loaded? true :entries [] :sources sources})]
+    (t/is (<= (count text) 4096))
+    (t/is (str/includes? text "Sources: 20 mounted"))))
 
 (t/deftest a-live-only-definition-is-counted
   (let [env (support/eval-ctx)
@@ -256,15 +272,17 @@
         _ (tools/register-eval-source! (:tools env) ::counted
                                        (fn [_]
                                          (swap! calls inc)
-                                         {}))]
+                                         {})
+                                       {:description "Counted source."})]
     (try
       ;; the build itself reads sources; the manifest must not
       (support/eval! env "(+ 1 2)")
       (reset! calls 0)
       (let [agent (agent-for env)
             message (without-building #(state/sync-eval-library-listing! agent))]
-        (t/is (nil? message) "an empty loaded library has nothing to say")
-        (t/is (zero? @calls)))
+        (t/is (some? message) "the mounted source is announced")
+        (t/is (str/includes? (:content message) "- counted: Counted source."))
+        (t/is (zero? @calls) "the registration description needs no source call"))
       (let [other (session/create-session (test-tmp/temp-dir! "eval-manifest-")
                                           {:cwd (:cwd env)})
             other-agent (loop-support/make-agent-state
@@ -274,8 +292,23 @@
         (write-definition! env :cwd "user/saved" "(defn saved [] 1)")
         (let [message (without-building #(state/sync-eval-library-listing! other-agent))]
           (t/is (some? message) "the saved view reads the disk index")
-          (t/is (str/includes? (:content message) "user/saved")))
+          (t/is (str/includes? (:content message) "user/saved"))
+          (t/is (str/includes? (:content message) "- counted: Counted source.")))
         (t/is (zero? @calls)
               "the saved view never invokes a source"))
       (finally
         (tools/unregister-eval-source! (:tools env) ::counted)))))
+
+(t/deftest a-source-removal-is-announced
+  (let [env (support/eval-ctx)
+        agent (agent-for env)]
+    (tools/register-eval-source! (:tools env) ::counted
+                                 (fn [_] {})
+                                 {:description "Counted source."})
+    (let [listed (state/sync-eval-library-listing! agent)]
+      (t/is (str/includes? (:content listed) "Sources: 1 mounted")))
+    (tools/unregister-eval-source! (:tools env) ::counted)
+    (let [corrected (state/sync-eval-library-listing! agent)]
+      (t/is (some? corrected))
+      (t/is (str/includes? (:content corrected) "Library: empty."))
+      (t/is (not (str/includes? (:content corrected) "Counted source"))))))

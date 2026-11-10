@@ -784,15 +784,17 @@ built environment lists its loaded records with scope and
 active state, while one without lists the disk index as saved and says it
 loads on the first eval; when the session has live-only definitions, the same
 line adds `N session-only; (eval/help :library)`, so the saved list does not
-hide them and names the way to list both. The sync never builds an
-environment and never invokes an eval source; source verbs stay out of the
-manifest; `(eval/help)` remains the discovery path. The first call that builds
+hide them and names the way to list both. Mounted eval sources add one line
+each, from their registration-time `:description` — the sync never
+builds an environment and never invokes a source, so announcing one costs no
+source call. Source verbs stay out of the manifest; `(eval/help)` and
+`(eval/sources)` remain the detailed discovery paths. The first call that builds
 an environment reports a non-empty loaded set and every load failure in its
 result: `:details :loaded` is a bounded preview with the full `:loaded-count`,
 `:failures` carries every failure, and the result lines bound long lists,
-correcting any drift. A library that has always been empty is silent; when a
-previously listed set
-empties, the next prompt gets one correction.
+correcting any drift. A library that has always been empty and has no mounted
+source is silent; when a previously listed set empties, the next prompt gets
+one correction.
 
 Limits: a definition file is the defining form only — its `(ns …)` requires are
 not stored, so the standard aliases and core refers are replayed and anything

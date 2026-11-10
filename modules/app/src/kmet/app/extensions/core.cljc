@@ -1227,10 +1227,10 @@
       ;; eval sources contribute live values and `/eval` verbs to every eval
       ;; environment; the source is owned by the extension, so unload removes
       ;; it from the `:tools` handle with the other registrations
-      :register-eval-source! (fn [id sources-fn]
+      :register-eval-source! (fn [id sources-fn & [opts]]
                                (tools/register-eval-source!
                                 (handle) id sources-fn
-                                {:owner (extension-owner name)}))
+                                (assoc opts :owner (extension-owner name))))
       :unregister-eval-source! (fn [id]
                                  (tools/unregister-eval-source!
                                   (handle) id

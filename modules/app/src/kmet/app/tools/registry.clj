@@ -302,15 +302,18 @@
    call's `:signal`); `/eval sources` and help read it too. It receives
    `{:cwd :project-dir :agent-dir :signal :verbs}`; a throwing source or a
    bad shape contributes nothing and is reported. OPTS may carry `:owner` —
-   an extension passes its own owner path so unload disposes the source.
-   Returns the deregister fn."
+   an extension passes its own owner path so unload disposes the source — and
+   `:description`, one line the eval manifest lists without invoking the
+   source. Returns the deregister fn."
   ([reg id sources-fn] (register-eval-source! reg id sources-fn nil))
   ([reg id sources-fn opts]
    (when-not (fn? sources-fn)
      (throw (ex-info (str "eval source " (pr-str id) " needs a sources-fn")
                      {:type :kmet.app/bad-eval-source :source id})))
    (registry/register! reg :kmet/eval-source id
-                       {:id id :sources-fn sources-fn}
+                       (cond-> {:id id :sources-fn sources-fn}
+                         (some? (:description opts))
+                         (assoc :description (:description opts)))
                        (or (:owner opts) eval-sources-owner))))
 
 (defn unregister-eval-source!
@@ -323,8 +326,8 @@
 
 (defn get-eval-sources
   "Every eval source registered in REGISTRY, in display order, as
-   `[{:id :sources-fn}]`. The service reads this per call; a source's current
-   values are the ones its fn returns then."
+   `[{:id :sources-fn :description}]`. The service reads this per call; a
+   source's current values are the ones its fn returns then."
   [reg]
   (registered-eval-sources reg))
 

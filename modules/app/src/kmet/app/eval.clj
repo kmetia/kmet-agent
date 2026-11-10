@@ -2306,26 +2306,31 @@
 (defn- service-manifest
   "The prompt manifest for SESSION: the built environment's loaded records when
    it has one, else the disk index described as saved. Never builds an
-   environment and never invokes a source. The disk view is cached per cwd
-   until the files' paths, sizes or modification times change."
+   environment and never invokes a source; a source contributes only its
+   registration-time `:description`. The disk view is cached per cwd until the
+   files' paths, sizes or modification times change."
   [service {:keys [session cwd]}]
   (let [session (or session (extensions/get-session))
-        env (when session (get @(:envs service) (:id session)))]
+        env (when session (get @(:envs service) (:id session)))
+        sources (mapv #(select-keys % [:id :description])
+                      (source-registrations service))]
     (if env
       {:loaded? true
        :entries (library-entries env)
-       :session-only (session-only-entries env)}
+       :session-only (session-only-entries env)
+       :sources sources}
       (let [cwd (or cwd (tool-util/cwd))
             roots (roots-for service cwd)
             fingerprint (eval-files/fingerprint roots)
-            cached (get @(:manifest-cache service) cwd)]
-        (if (= fingerprint (:fingerprint cached))
-          (:manifest cached)
-          (let [{:keys [entries]} (eval-files/index roots)
-                manifest {:loaded? false :entries entries}]
-            (swap! (:manifest-cache service) assoc cwd
-                   {:fingerprint fingerprint :manifest manifest})
-            manifest))))))
+            cached (get @(:manifest-cache service) cwd)
+            manifest (if (= fingerprint (:fingerprint cached))
+                       (:manifest cached)
+                       (let [{:keys [entries]} (eval-files/index roots)
+                             manifest {:loaded? false :entries entries}]
+                         (swap! (:manifest-cache service) assoc cwd
+                                {:fingerprint fingerprint :manifest manifest})
+                         manifest))]
+        (assoc manifest :sources sources)))))
 
 (defn- move-indexed-record!
   "Move NAME in the disk index when SESSION has no built environment. No

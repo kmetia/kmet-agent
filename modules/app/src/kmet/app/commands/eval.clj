@@ -2,8 +2,9 @@
   "The `/eval` slash command: the human-facing view of the eval library and
    the session's live-only definitions.
 
-   Verbs: `list [pattern]`, `search <text>`, `describe <name>`,
-   `drop <name>…`, `move <name> global|cwd`, `reload`, `sources` and `help`.
+   Verbs: `list [pattern]`, `search <text>` (definitions and eval sources),
+   `describe <name>`, `drop <name>…`, `move <name> global|cwd`, `reload`,
+   `sources` and `help`.
    `reload` rebuilds the session's sandbox from both library roots. Entries
    show their cwd/global scope (or `live`) and whether an entry is shadowed.
    Output is Markdown — headings, bullets and fenced code — rendered by the
@@ -179,18 +180,39 @@
       (str line "\n  " (inline-code hit))
       line)))
 
-(defn- search-text [entries cwd pattern]
+(defn- source-match?
+  "Does PATTERN match a source's id, description or one of its verbs?"
+  [p {:keys [id doc verbs]}]
+  (or (str/includes? (str/lower-case (eval-format/source-id id)) p)
+      (str/includes? (str/lower-case (str doc)) p)
+      (some (fn [verb]
+              (str/includes? (str/lower-case (str (:name verb))) p))
+            verbs)))
+
+(defn- sources-section
+  "The eval-sources half of a search result, or nil when none match."
+  [sources p]
+  (when-let [matches (seq (filter #(source-match? p %) sources))]
+    (str "### Eval sources\n\n"
+         (str/join "\n" (map eval-format/source-line matches)))))
+
+(defn- search-text [entries sources cwd pattern]
   (if (str/blank? pattern)
     (str "**Usage:** " (inline-code "/eval search <text>"))
     (let [p (str/lower-case pattern)
           matches (filter (fn [{:keys [file] :as entry}]
                             (or (name-match? entry p)
                                 (some? (when file (source-line file p)))))
-                          entries)]
+                          entries)
+          source-text (sources-section sources p)]
       (str "### Matches for " (inline-code pattern) "\n\n"
-           (if (seq matches)
-             (str/join "\n" (map #(search-line cwd p %) matches))
-             (str "*No eval definitions match " (inline-code pattern) ".*"))))))
+           (cond
+             (seq matches) (str (str/join "\n" (map #(search-line cwd p %) matches))
+                                "\n\n")
+             source-text ""
+             :else (str "*No eval definitions or sources match "
+                        (inline-code pattern) ".*"))
+           source-text))))
 
 (defn- names-arg
   "Parse the names after `drop`: whitespace-separated, or EDN strings when a
@@ -252,7 +274,7 @@
 
 (defn- help-text [svc cwd]
   (let [verbs [["/eval list [pattern]" "List global, cwd, then live definitions"]
-               ["/eval search <text>" "Search names and source"]
+               ["/eval search <text>" "Search names, source and eval sources"]
                ["/eval describe <name>" "Describe one definition or source verb"]
                ["/eval <name>" "Describe a definition (describe shorthand)"]
                ["/eval drop <name>…" "Delete actual files and unbind the live names"]
@@ -299,8 +321,10 @@
                                         failures)))
 
       (= verb "search")
-      (out ui :info "Eval" (search-text (:entries ((:index svc) {:cwd cwd :session sess}))
-                                        cwd arg))
+      (let [sources (when-not (str/blank? arg)
+                      (if-let [f (:sources svc)] (f {:cwd cwd}) []))]
+        (out ui :info "Eval" (search-text (:entries ((:index svc) {:cwd cwd :session sess}))
+                                          sources cwd arg)))
 
       (= verb "describe")
       (if (str/blank? arg)

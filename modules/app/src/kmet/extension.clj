@@ -77,7 +77,7 @@
 ;;   :register-tool! :unregister-tool! :get-all-tools :create-bash-tool
 ;;   :get-active-tools :set-active-tools
 ;;   :register-tool-source! :unregister-tool-source!  — sandbox tool sources
-;;   :register-eval-source! :unregister-eval-source!  — eval values and verbs
+;;   :register-eval-source! :unregister-eval-source!  — eval values, verbs, a manifest line
 ;;   :on-event :emit-event!                             — event bus
 ;;   :on-input :on-before-agent-start                   — hooks
 ;;   :on-tool                                           — the around tool hook
@@ -146,9 +146,12 @@
    (for example `license/add!`). A source-provided key is never written to the
    eval library; a model redefinition shadows it live and a drop restores the
    source value while the source is mounted. `:commands` adds `/eval` verbs;
-   the built-in verb names are reserved. Removed automatically when the
-   extension unloads. Returns the deregister fn."
-  [api id sources-fn] ((:register-eval-source! api) id sources-fn))
+   the built-in verb names are reserved. OPTS may carry `:description`, one
+   line the eval manifest shows without invoking the source. Removed
+   automatically when the extension unloads. Returns the deregister fn."
+  ([api id sources-fn] ((:register-eval-source! api) id sources-fn))
+  ([api id sources-fn opts]
+   ((:register-eval-source! api) id sources-fn opts)))
 (defn unregister-eval-source!
   "Remove an eval source by ID."
   [api id] ((:unregister-eval-source! api) id))

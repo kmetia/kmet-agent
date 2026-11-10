@@ -200,9 +200,29 @@
       (t/is (str/includes? content "user/other"))
       (t/is (str/includes? content "(defn other [] :ok)")))
     (let [[_ _ content] (first (run env "search absent-name"))]
-      (t/is (str/includes? content "No eval definitions match")))
+      (t/is (str/includes? content "No eval definitions or sources match")))
     (let [[_ _ content] (first (run env "search"))]
       (t/is (str/includes? content "/eval search <text>")))))
+
+(t/deftest search-finds-eval-sources
+  (let [source {:id :license
+                :doc "License helpers"
+                :verbs [{:name "ext.license/add!"
+                         :kind :verb
+                         :doc "Add a header."
+                         :arglists '([path])}]}
+        env (eval-env {:service-sources [source]})]
+    (let [[_ _ content] (first (run env "search license"))]
+      (t/is (str/includes? content "### Eval sources"))
+      (t/is (str/includes? content "- license: License helpers"))
+      (t/is (not (str/includes? content "No eval definitions"))
+            "a source match is a match"))
+    (let [[_ _ content] (first (run env "search add!"))]
+      (t/is (str/includes? content "### Eval sources"))
+      (t/is (str/includes? content "ext.license/add! ([path]) — Add a header.")))
+    (let [[_ _ content] (first (run env "search absent-name"))]
+      (t/is (str/includes? content "No eval definitions or sources match"))
+      (t/is (not (str/includes? content "### Eval sources"))))))
 
 (t/deftest drop-removes-the-file-and-reports
   (let [env (eval-env)
@@ -438,6 +458,9 @@
               @got)]
     (t/is (= [[:info "Eval" "linted x"]] (run "license-lint x")))
     (let [[[_ _ content]] (run "sources")]
+      (t/is (str/includes? content "- license: License helpers")))
+    (let [[[_ _ content]] (run "search license")]
+      (t/is (str/includes? content "### Eval sources"))
       (t/is (str/includes? content "- license: License helpers")))
     (let [[[_ _ content]] (run "help")]
       (t/is (str/includes? content "/eval license-lint"))

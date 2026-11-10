@@ -12,6 +12,11 @@
    not exposed as a verb (call still reaches it)."
   #{"call" "call!" "search" "describe" "status" "connect" "disconnect"})
 
+(def ^:private source-description
+  (str "MCP tools: (ext.mcp/status) lists servers; "
+       "(ext.mcp/search \"...\") finds tools; "
+       "(ext.mcp/call \"tool\" args) calls one."))
+
 (defn- verb-symbol
   "NAME as a readable Clojure symbol, or nil when it is not one (a bare
    numeric-leading tool name under :tool-prefix :none)."
@@ -91,8 +96,7 @@
                                (when (and sym (not (contains? gateway-names name)))
                                  [sym (direct-verb state signal spec)]))))
                      (surface/direct-tools-specs state))]
-    {:doc (str "MCP tools: (ext.mcp/call \"tool\" args) for any cached tool; "
-               "search/describe discover the rest.")
+    {:doc source-description
      :ns {'ext.mcp
           (into
            {'call (with-meta
@@ -136,5 +140,6 @@
   (if (not= false (:eval-source (:settings (:config @state))))
     (ext/register-eval-source! api :mcp
                                (fn [ctx]
-                                 (source state (:signal ctx))))
+                                 (source state (:signal ctx)))
+                               {:description source-description})
     (ext/unregister-eval-source! api :mcp)))

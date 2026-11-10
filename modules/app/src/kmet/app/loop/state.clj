@@ -493,9 +493,11 @@ Be precise and concise in your responses."}}]
    or its loaded/saved state changed since the branch's last manifest. With a
    built environment the text lists its loaded records with scope and active
    state; without one it lists the disk index as saved, loaded on the first
-   eval. Never builds an environment and never invokes a source. Selection-aware:
-   appended only while the eval tool is selected. Returns the message, or nil
-   when there was nothing new to say."
+   eval. Never builds an environment and never invokes a source: mounted eval
+   sources are announced from their registration descriptions, so the model
+   learns `ext.mcp` and its peers exist. Selection-aware: appended only while
+   the eval tool is selected. Returns the message, or nil when there was
+   nothing new to say."
   [agent]
   (when-let [sess (:session agent)]
     (let [selected (tools/select-tools (tool-table agent) (tool-selection agent))
@@ -506,16 +508,18 @@ Be precise and concise in your responses."}}]
                       {:session sess
                        :cwd (or (session/session-cwd sess) (tool-util/cwd))}))
           entries (:entries manifest)
-          live (:session-only manifest)]
+          live (:session-only manifest)
+          sources (:sources manifest)]
       ;; an empty library is only worth a message when something was listed
-      ;; before: a session that never had a definition stays silent
+      ;; before: a session with no definitions and no sources stays silent
       (when-let [text (when manifest (session/eval-library-listing manifest))]
         (when (and (not= text previous)
-                   (or (seq entries) (seq live) previous))
+                   (or (seq entries) (seq live) (seq sources) previous))
           (append-listing! agent session/eval-library-custom-type text
                            {:loaded? (:loaded? manifest)
                             :count (count entries)
-                            :session-only (count live)}))))))
+                            :session-only (count live)
+                            :sources (count sources)}))))))
 
 (defn append-persisted-message!
   "Append MSG to both the live context and the session (pi: append + append-entry).
