@@ -47,8 +47,9 @@
   "§9.5 status text: per server — name, lifecycle, state, auth state when
    configured, tool count (from cache or live), negotiated protocol
    revision when connected, error tail when failed, cache age. Plus the
-   global settings line and cache file age."
-  [state]
+   global settings line and cache file age. OPTS: `:surface :eval` prints
+   the eval source's follow-up commands instead of the proxy tool's."
+  [state & [opts]]
   (let [config (:config state)
         lines (atom [])]
     (doseq [[server-name definition] (sort-by key (:mcp-servers config))]
@@ -82,7 +83,10 @@
                   " proxy-tool=" (if (:disable-proxy-tool s) "disabled" "enabled"))))
     (if (seq (:mcp-servers config))
       (str (str/join "\n" @lines)
-           "\n\nmcp({ server: \"name\" }) to list tools, mcp({ search: \"...\" }) to search")
+           "\n\n"
+           (if (= :eval (:surface opts))
+             "(ext.mcp/search \"...\") to search, (ext.mcp/call \"tool\" args) to call"
+             "mcp({ server: \"name\" }) to list tools, mcp({ search: \"...\" }) to search"))
       "No MCP servers configured.")))
 
 ;; ─── Describe (§9.4) ───────────────────────────────────────────────────
@@ -91,24 +95,27 @@
   "§9.4 full listing: server, tool name, description, each param with
    type, required/optional, description, enum/default when present.
    Ambiguous (same tool name on multiple servers) → instruct to add
-   server."
-  [state tool-name]
+   server. OPTS: `:surface :eval` appends a copyable `ext.mcp/call` line."
+  [state tool-name & [opts]]
   (let [match (catalog/find-tool state tool-name)]
     (cond
       (= :ambiguous match)
-      (catalog/return-error (str "Tool \"" tool-name "\" matches multiple servers. "
-                                 "Specify a server with mcp({ tool: ..., server: \"...\" })."))
+      (catalog/return-error
+       (str "Tool \"" tool-name "\" matches multiple servers. Specify a server with "
+            (catalog/usage-hint (:surface opts) :server) "."))
 
       (nil? match)
-      (catalog/return-error (str "Tool \"" tool-name "\" not found. Use mcp({ search: \"...\" }) to search."))
+      (catalog/return-error
+       (str "Tool \"" tool-name "\" not found. Use "
+            (catalog/usage-hint (:surface opts) :search) " to search."))
 
       :else
       (let [{:keys [server tool]} match
             schema (or (:inputSchema tool) {})
             properties (:properties schema)
             required (set (:required schema))
-            out (atom [(str (catalog/display-name state server :tool (:name tool) (:name tool))
-                            "\nServer: " server "\n\n"
+            display (catalog/display-name state server :tool (:name tool) (:name tool))
+            out (atom [(str display "\nServer: " server "\n\n"
                             (or (:description tool) "(no description)"))])]
         (if (seq properties)
           (do
@@ -127,6 +134,8 @@
                        (when (seq (:description spec))
                          (str "      " (:description spec)))))))
           (swap! out conj "\nNo parameters defined."))
+        (when (= :eval (:surface opts))
+          (swap! out conj (str "\ncall: " (catalog/call-example display schema))))
         {:content (str/join "\n" @out) :is-error false}))))
 
 ;; ─── List (cache view) ─────────────────────────────────────────────────
@@ -134,12 +143,16 @@
 (defn list-text
   "List a server's tools (cache; §9.2 `server` mode). Resource templates
    are listed after the tools — a server whose resources are all
-   templates (`file:///{path}`) shows nothing in its tool list."
-  [state server]
+   templates (`file:///{path}`) shows nothing in its tool list. OPTS:
+   `:surface :eval` spells the follow-up commands for the eval source."
+  [state server & [opts]]
   (let [definition (catalog/server-definition state server)]
     (cond
       (nil? definition)
-      (catalog/return-error (str "Server \"" server "\" not found. Use mcp({}) to see available servers."))
+      (catalog/return-error
+       (str "Server \"" server "\" not found. Use "
+            (catalog/usage-hint (:surface opts) :status)
+            " to see available servers."))
 
       (catalog/disabled? state server)
       (catalog/return-error (str "Server \"" server "\" is disabled. Run /mcp enable " server
@@ -170,8 +183,11 @@
             {:content (str/join "\n" @out) :is-error false})
           (if (= :connected (state-label state server definition))
             {:content (str "Server \"" server "\" has no tools.") :is-error false}
-            {:content (str "Server \"" server "\" is configured but not connected. "
-                           "Use mcp({ connect: \"" server "\" }) to retry.")
+            {:content (str "Server \"" server "\" is configured but not connected. Use "
+                           (if (= :eval (:surface opts))
+                             (str "(ext.mcp/connect \"" server "\")")
+                             (str "mcp({ connect: \"" server "\" })"))
+                           " to retry.")
              :is-error false}))))))
 
 (defn list-all-text

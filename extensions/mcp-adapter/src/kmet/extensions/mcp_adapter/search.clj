@@ -116,9 +116,10 @@
 
 (defn search-text
   "§9.3 output: one block per hit — name line, one-line description,
-   indented param lines (omitted when include-schemas? is false). Invalid
+   indented param lines (omitted when include-schemas? is false). OPTS:
+   `:surface :eval` appends a copyable `ext.mcp/call` line per hit. Invalid
    regex → error message."
-  [state query regex? server include-schemas? limit offset]
+  [state query regex? server include-schemas? limit offset & [opts]]
   (let [compiled (when regex?
                    (try
                      (when (> (count query) max-regex-query-length)
@@ -150,7 +151,14 @@
                                " — " (or (:description tool) "(no description)")))
           (when (not= false include-schemas?)
             (doseq [line (schema-param-lines (:inputSchema tool))]
-              (swap! out conj line))))
+              (swap! out conj line)))
+          (when (= :eval (:surface opts))
+            (swap! out conj
+                   (str "  call: "
+                        (catalog/call-example
+                         (catalog/display-name state server :tool (:name tool)
+                                               (:name tool))
+                         (:inputSchema tool))))))
         (when (< (+ (or offset 0) (count items)) total)
           (swap! out conj (str "\n" (count items) " of " total
                                " — offset: " (+ (or offset 0) (count items)) " for more")))

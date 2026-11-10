@@ -90,7 +90,9 @@
     (cond
       (nil? definition)
       {:error (catalog/return-error
-               (str "Server \"" server "\" not found. Use mcp({}) to see available servers."))}
+               (str "Server \"" server "\" not found. Use "
+                    (catalog/usage-hint (:surface opts) :status)
+                    " to see available servers."))}
 
       (catalog/disabled? state server)
       {:error (catalog/return-error
@@ -306,10 +308,13 @@
                      (:server match)))]
     (if (nil? server)
       (if (= :ambiguous match)
-        (catalog/return-error (str "Tool \"" (:tool params) "\" matches multiple servers. "
-                                   "Specify a server with mcp({ tool: ..., server: \"...\" })."))
-        (catalog/return-error (str "Tool \"" (:tool params) "\" not found. "
-                                   "Use mcp({ search: \"...\" }) to search.")))
+        (catalog/return-error
+         (str "Tool \"" (:tool params) "\" matches multiple servers. "
+              "Specify a server with "
+              (catalog/usage-hint (:surface opts) :server) "."))
+        (catalog/return-error
+         (str "Tool \"" (:tool params) "\" not found. Use "
+              (catalog/usage-hint (:surface opts) :search) " to search.")))
       ;; the wire call uses the RAW tool name — prefixed spellings
       ;; (plan §10.4: tool: "server_tool") resolve through the cache
       (call-mcp-tool state server
@@ -319,6 +324,7 @@
                      (:args params)
                      {:on-update on-update
                       :signal (:signal opts)
+                      :surface (:surface opts)
                       ;; the resolved record carries the schema the
                       ;; SEP-2243 Mcp-Param-* headers derive from
                       :input-schema (when (and match (not= :ambiguous match))
@@ -334,7 +340,7 @@
             ;; fresh view after the connect refreshed the cache
             fresh @state-atom]
         (if conn
-          (status/list-text fresh (:connect params))
+          (status/list-text fresh (:connect params) opts)
           (catalog/return-error (str "Failed to connect to \"" (:connect params) "\""))))
       (catch Exception e
         (catalog/return-error (str "Failed to connect to \"" (:connect params) "\": "
@@ -358,10 +364,11 @@
            (cond
              (some? (:search params))
              (search/search-text state (:search params) regex? (:server params)
-                                 include-schemas? (:limit params) (:offset params))
+                                 include-schemas? (:limit params) (:offset params)
+                                 opts)
 
              (some? (:describe params))
-             (status/describe-text state (:describe params))
+             (status/describe-text state (:describe params) opts)
 
              (some? (:tool params))
              (tool-mode state params on-update opts)
@@ -374,10 +381,10 @@
                  {:content (str "Disconnected \"" (:disconnect params) "\".") :is-error false})
 
              (some? (:list params))
-             (status/list-text state (:list params))
+             (status/list-text state (:list params) opts)
 
              (some? (:server params))
-             (status/list-text state (:server params))
+             (status/list-text state (:server params) opts)
 
              :else
-             {:content (status/status-text state) :is-error false}))))))
+             {:content (status/status-text state opts) :is-error false}))))))

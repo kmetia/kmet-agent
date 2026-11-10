@@ -13,9 +13,10 @@
   #{"call" "call!" "search" "describe" "status" "connect" "disconnect"})
 
 (def ^:private source-description
-  (str "MCP tools: (ext.mcp/status) lists servers; "
-       "(ext.mcp/search \"...\") finds tools; "
-       "(ext.mcp/call \"tool\" args) calls one."))
+  (str "MCP tools: (ext.mcp/search \"query\") ranks tools and prints a call "
+       "example per hit; (ext.mcp/describe \"tool\") shows parameters; "
+       "(ext.mcp/call \"tool\" args) calls one. Direct tools are also "
+       "ext.mcp/<name> verbs."))
 
 (defn- verb-symbol
   "NAME as a readable Clojure symbol, or nil when it is not one (a bare
@@ -43,7 +44,7 @@
                  (cond-> {:tool tool :args args}
                    (:server opts) (assoc :server (:server opts)))
                  nil
-                 {:signal signal}))
+                 {:signal signal :surface :eval}))
 
 (defn- search
   [state query opts]
@@ -54,7 +55,8 @@
                     (some? (:include-schemas opts)) (assoc :includeSchemas
                                                            (:include-schemas opts))
                     (some? (:limit opts)) (assoc :limit (:limit opts))
-                    (some? (:offset opts)) (assoc :offset (:offset opts)))))
+                    (some? (:offset opts)) (assoc :offset (:offset opts)))
+                  {:surface :eval}))
 
 (defn- call-spec
   "Normalize the flexible call forms to [tool args opts]. A map as the
@@ -111,19 +113,21 @@
                       (fn
                         ([query] (search state query nil))
                         ([query opts] (search state query opts)))
-                      {:doc "Ranked MCP tool search. OPTS: :server :regex :include-schemas :limit :offset. Returns text."
+                      {:doc "Ranked MCP tool search; each hit prints its ext.mcp/call example. OPTS: :server :regex :include-schemas :limit :offset. Returns text."
                        :arglists '([query] [query opts])})
             'describe (with-meta
-                        (fn [tool] (gateway-result state {:describe tool}))
-                        {:doc "Show one MCP tool's parameters by name."
+                        (fn [tool]
+                          (gateway-result state {:describe tool} {:surface :eval}))
+                        {:doc "Show one MCP tool's parameters and call example by name."
                          :arglists '([tool])})
             'status (with-meta
-                      (fn [] (gateway-result state {}))
+                      (fn [] (gateway-result state {} {:surface :eval}))
                       {:doc "List configured MCP servers and their connection state."
                        :arglists '([])})
             'connect (with-meta
                        (fn [server]
-                         (gateway-result state {:connect server} {:signal signal}))
+                         (gateway-result state {:connect server}
+                                         {:signal signal :surface :eval}))
                        {:doc "Connect a server now and refresh its catalog."
                         :arglists '([server])})
             'disconnect (with-meta

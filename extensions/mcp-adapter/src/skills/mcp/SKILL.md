@@ -116,7 +116,9 @@ adapter registers an eval source with a small gateway:
 
 Only tools enabled as direct tools also appear as
 `ext.mcp/<assigned-name>` verbs in `(eval/sources)`; the rest stay
-reachable through `search`/`describe` and `call`. The functions are
+reachable through `search`/`describe` and `call`. In the eval source both
+print a copyable `(ext.mcp/call "assigned_name" {...})` example, so the
+name a hit displays is exactly the name `call` accepts. The functions are
 synchronous — no promise and no `@` — and carry the eval call's cancel
 signal, unlike `codemode`'s promise-based `tools/call`.
 

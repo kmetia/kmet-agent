@@ -116,6 +116,26 @@
         (testing "a parameter description is indented under its line"
           (is (str/includes? out "      Search text")))))))
 
+(deftest describe-eval-surface
+  (tu/with-agent-dir
+    (fn [_]
+      (let [schema {:type "object"
+                    :properties {"query" {:type "string"}
+                                 "limit" {:type "integer"}}
+                    :required ["query"]}
+            state (tu/cached-state
+                   {:settings {} :mcp-servers {"a" {:command "bb"}}}
+                   {"a" {:tools [{:name "echo" :description "Echo it"
+                                  :inputSchema schema}]}}
+                   {})]
+        (testing "the eval surface appends a copyable call line"
+          (is (str/includes? (:content (status/describe-text state "echo" {:surface :eval}))
+                             "call: (ext.mcp/call \"a_echo\" {:query \"...\"})")))
+        (testing "the not-found hint names the eval search verb"
+          (is (= {:content "Tool \"nope\" not found. Use (ext.mcp/search \"...\") to search."
+                  :is-error true}
+                 (status/describe-text state "nope" {:surface :eval}))))))))
+
 (deftest describe-without-parameters
   (tu/with-agent-dir
     (fn [_]

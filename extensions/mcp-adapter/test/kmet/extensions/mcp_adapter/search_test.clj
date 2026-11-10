@@ -40,7 +40,8 @@
   ([query opts]
    (:content (search/search-text (state) query (:regex opts)
                                  (:server opts) (:schemas opts)
-                                 (:limit opts) (:offset opts)))))
+                                 (:limit opts) (:offset opts)
+                                 (select-keys opts [:surface])))))
 
 (deftest ranked-search
   (tu/with-agent-dir
@@ -61,6 +62,15 @@
       (let [out (text "read" {:schemas false})]
         (is (str/includes? out "fs: fs_read_file — Read a file from disk"))
         (is (not (str/includes? out "path (string, required)")))))))
+
+(deftest eval-surface-call-example
+  (tu/with-agent-dir
+    (fn [_]
+      (testing "the eval surface appends a copyable call line per hit"
+        (is (str/includes? (text "read" {:surface :eval})
+                           "  call: (ext.mcp/call \"fs_read_file\" {:path \"...\"})")))
+      (testing "the default (agent) rendering has no eval call line"
+        (is (not (str/includes? (text "read") "ext.mcp/call")))))))
 
 (deftest search-multiplicity-and-footer
   (tu/with-agent-dir

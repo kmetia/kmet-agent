@@ -57,6 +57,24 @@
   (testing "with no space it cuts at the character limit"
     (is (= "abcdefghij…" (catalog/truncate-at-word "abcdefghijklmno" 10)))))
 
+(deftest call-example
+  (testing "required parameters drive the example"
+    (is (= "(ext.mcp/call \"srv_tool\" {:path \"...\"})"
+           (catalog/call-example "srv_tool"
+                                 {:properties {"path" {:type "string"}}
+                                  :required ["path"]}))))
+  (testing "no required parameters falls back to the properties"
+    (is (= "(ext.mcp/call \"srv_tool\" {:limit 0 :query \"...\"})"
+           (catalog/call-example "srv_tool"
+                                 {:properties {"query" {:type "string"}
+                                               "limit" {:type "integer"}}}))))
+  (testing "no parameters means no args"
+    (is (= "(ext.mcp/call \"ping\")" (catalog/call-example "ping" {}))))
+  (testing "a colon-prefixed schema key becomes a normal keyword"
+    (is (= "(ext.mcp/call \"exa\" {:query \"...\"})"
+           (catalog/call-example "exa"
+                                 {:properties {":query" {:type "string"}}})))))
+
 ;; ─── Definitions and runtime cells ────────────────────────────────────────
 
 (deftest misconfigured-and-disabled

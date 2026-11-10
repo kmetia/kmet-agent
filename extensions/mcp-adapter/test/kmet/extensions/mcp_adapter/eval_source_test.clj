@@ -83,7 +83,8 @@
             (is (= {:content "ok" :is-error false}
                    (call "web_search" {:query "x"})))
             (is (= {:tool "web_search" :args {:query "x"}} (:params @seen)))
-            (is (= signal (get-in @seen [:opts :signal]))))
+            (is (= signal (get-in @seen [:opts :signal])))
+            (is (= :eval (get-in @seen [:opts :surface]))))
           (testing "the server option disambiguates"
             (call "web_search" {:query "x"} {:server "web"})
             (is (= "web" (get-in @seen [:params :server]))))
@@ -111,22 +112,26 @@
             ns-map (get-in source [:ns 'ext.mcp])
             seen (atom nil)]
         (with-redefs [proxy/execute
-                      (fn [_ params & _]
-                        (reset! seen params)
+                      (fn [_ params _ opts]
+                        (reset! seen {:params params :opts opts})
                         {:content "text" :is-error false})]
           (is (= "text" ((get ns-map 'search) "shot")))
-          (is (= {:search "shot"} @seen))
+          (is (= {:search "shot"} (:params @seen)))
+          (is (= :eval (get-in @seen [:opts :surface])))
           (is (= "text" ((get ns-map 'search) "shot" {:regex true
                                                       :include-schemas false
                                                       :limit 5
                                                       :offset 2})))
           (is (= {:search "shot" :regex true :includeSchemas false
                   :limit 5 :offset 2}
-                 @seen))
+                 (:params @seen)))
+          (is (= :eval (get-in @seen [:opts :surface])))
           (is (= "text" ((get ns-map 'describe) "web_search")))
-          (is (= {:describe "web_search"} @seen))
+          (is (= {:describe "web_search"} (:params @seen)))
+          (is (= :eval (get-in @seen [:opts :surface])))
           (is (= "text" ((get ns-map 'status))))
-          (is (= {} @seen)))))))
+          (is (= {} (:params @seen)))
+          (is (= :eval (get-in @seen [:opts :surface]))))))))
 
 (deftest a-name-that-is-not-a-readable-symbol-is-skipped
   (tu/with-agent-dir
@@ -157,4 +162,5 @@
                         {:content "ok" :is-error false})]
           (is (= "ok" (connect "fs")))
           (is (= {:connect "fs"} (:params @seen)))
-          (is (= signal (get-in @seen [:opts :signal]))))))))
+          (is (= signal (get-in @seen [:opts :signal])))
+          (is (= :eval (get-in @seen [:opts :surface]))))))))

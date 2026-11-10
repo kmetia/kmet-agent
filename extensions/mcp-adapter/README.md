@@ -246,7 +246,9 @@ same direct set is projected into the eval source as
   map form: `(ext.mcp/call {:tool "server_tool" :server "name"})`.
   `call!` returns the content string and throws on failure. Settings
   `:eval-source false` drops the eval source. `search`, `describe`, `status`, `connect` and
-  `disconnect` mirror the proxy's read modes. Only tools enabled as
+  `disconnect` mirror the proxy's read modes; `search` and `describe`
+  print a copyable `(ext.mcp/call "assigned_name" {...})` example per tool.
+  Only tools enabled as
   direct tools also appear as `ext.mcp/<assigned-name>` verbs in
   `(eval/sources)`; the rest stay discoverable through `search` and
   `describe` and callable through `call`. Direct-tool names are the

@@ -96,6 +96,52 @@
       (names/prefixed-name server-name raw-name
                            (tool-prefix-mode state server-name))))
 
+(defn call-example
+  "A copyable eval-source invocation for TOOL-NAME: the displayed name and
+   one placeholder per required parameter (or, when none are required, the
+   first three properties), or no args."
+  [tool-name input-schema]
+  (let [schema (or input-schema {})
+        properties (sort-by (comp str key) (:properties schema))
+        required (set (:required schema))
+        required-params (filter (fn [[param _]] (required param)) properties)
+        picked (vec (take 3 (if (seq required-params) required-params properties)))
+        placeholder (fn [spec]
+                      (case (:type spec)
+                        "string" "..."
+                        ("integer" "number") 0
+                        "boolean" true
+                        "array" []
+                        "object" {}
+                        nil))
+        param-key (fn [param] (keyword (str/replace (name param) #"^:" "")))
+        args (into (array-map)
+                   (map (fn [[param spec]] [(param-key param) (placeholder spec)]))
+                   picked)
+        args-text (when (seq args)
+                    (str "{" (str/join " "
+                                       (map (fn [[k v]] (str (pr-str k) " " (pr-str v)))
+                                            args))
+                         "}"))]
+    (str "(ext.mcp/call " (pr-str tool-name)
+         (when args-text (str " " args-text))
+         ")")))
+
+(defn usage-hint
+  "The surface-specific spelling of a gateway OPERATION for error text: the
+   agent's `mcp` proxy tool by default, the `ext.mcp` eval source when
+   SURFACE is :eval."
+  [surface op]
+  (if (= :eval surface)
+    (case op
+      :search "(ext.mcp/search \"...\")"
+      :status "(ext.mcp/status)"
+      :server "(ext.mcp/call \"tool\" args {:server \"...\"})")
+    (case op
+      :search "mcp({ search: \"...\" })"
+      :status "mcp({})"
+      :server "mcp({ tool: ..., server: \"...\" })")))
+
 (defn return-error
   "A kmet tool result carrying MESSAGE as an error."
   [message]
