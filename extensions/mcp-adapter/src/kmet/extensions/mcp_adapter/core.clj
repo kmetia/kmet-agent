@@ -13,6 +13,7 @@
             [kmet.extensions.mcp-adapter.auth :as auth]
             [kmet.extensions.mcp-adapter.catalog :as catalog]
             [kmet.extensions.mcp-adapter.config :as config]
+            [kmet.extensions.mcp-adapter.eval-source :as eval-source]
             [kmet.extensions.mcp-adapter.metadata :as metadata]
             [kmet.extensions.mcp-adapter.names :as names]
             [kmet.extensions.mcp-adapter.panel :as panel]
@@ -21,6 +22,7 @@
             [kmet.extensions.mcp-adapter.status :as status]
             [kmet.extensions.mcp-adapter.tool-proxy :as proxy]
             [kmet.extensions.mcp-adapter.tool-source :as script-source]
+            [kmet.extensions.mcp-adapter.tool-surface :as surface]
             [kmet.extensions.mcp-adapter.setup :as setup]
             [kmet.extension :as ext]
             [kmet.srce.core :as srce]
@@ -381,128 +383,6 @@
 
 ;; ─── Direct tools (§10.5) ─────────────────────────────────────────────────
 
-(defn- template-vars
-  "The {var} placeholders of a level-1 URI template, in order — the
-   parameter names of a template read tool."
-  [uri-template]
-  (mapv second (re-seq #"\{([^{}]+)\}" (str uri-template))))
-
-(defn- template-schema
-  "Input schema for a template read tool: one required string per {var}."
-  [vars]
-  {:type "object"
-   :properties (into {} (map (fn [v] [v {:type "string"
-                                         :description (str "Value for " v)}])
-                             vars))
-   :required (vec vars)})
-
-(defn- catalog-entries
-  "Assignment input for names/assign-names: every cached tool plus its
-   read_<resource> entries for enabled, configured servers. Independent of
-   the direct-tools / include / exclude filters — which tools are
-   registered must never rename the ones that are."
-  [state]
-  (let [config (:config @state)
-        settings (:settings config)]
-    (vec
-     (mapcat
-      (fn [[name definition]]
-        (when-not (or (true? (:disabled definition))
-                      (and (not (:command definition)) (not (:url definition))))
-          (let [entry (metadata/server-entry (:cache @state) name definition settings)]
-            (concat
-             (for [tool (:tools entry)]
-               {:server name :kind :tool :id (:name tool) :name (:name tool)})
-             (when (not= false (:expose-resources definition))
-               (concat
-                (for [resource (:resources entry)]
-                  {:server name :kind :resource :id (:uri resource)
-                   :name (str "read_" (names/resource-tool-name (:name resource)))})
-                (for [template (:resource-templates entry)]
-                  {:server name :kind :resource :id (:uriTemplate template)
-                   :name (str "read_" (names/resource-tool-name (:name template)))})))))))
-      (sort-by key (:mcp-servers config))))))
-
-(defn- direct-tools-specs
-  "Resolve direct-tool specs from the metadata cache only (never spawns;
-   §10.5.1): MCP_DIRECT_TOOLS env → only listed servers (config ignored),
-   __none__ → none; else server :direct-tools (bool | name list), else
-   settings :direct-tools, else false. Skips disabled and misconfigured
-   servers. Names come from the deterministic catalog assignment
-   (:tool-names, names/assign-names — computed by sync-direct-tools!) so
-   display and registration always agree. Phase 2: server
-   :include-tools/:exclude-tools globs filter the registration (pi
-   isToolAllowed), and :expose-resources (default true) registers
-   read_<resource> tools alongside the tool list (pi resource tools).
-   STATE is the §10.1 atom."
-  [state]
-  (let [config (:config @state)
-        settings (:settings config)
-        env-raw (System/getenv "MCP_DIRECT_TOOLS")
-        env-servers (when (and env-raw (not= "__none__" env-raw))
-                      (set (map str/trim (str/split env-raw #","))))
-        env-none? (= "__none__" env-raw)
-        assigned (:tool-names @state)
-        specs (atom [])]
-    (doseq [[name definition] (sort-by key (:mcp-servers config))]
-      (when-not (or (true? (:disabled definition))
-                    (and (not (:command definition)) (not (:url definition))))
-        (let [filter (cond
-                       env-none? false
-                       env-servers (contains? env-servers name)
-                       :else (if (contains? definition :direct-tools)
-                               (:direct-tools definition)
-                               (if (:direct-tools settings) true false)))
-              include (:include-tools definition)
-              exclude (:exclude-tools definition)]
-          (when filter
-            (let [entry (metadata/server-entry (:cache @state) name definition settings)
-                  name-for (fn [kind id raw]
-                             (or (get assigned [name kind id])
-                                 (names/prefixed-name
-                                  name raw
-                                  (names/effective-mode definition settings))))
-                  add-spec! (fn [kind id tool-name description schema
-                                 & [resource-uri resource-template]]
-                              (when (names/tool-allowed? name tool-name include exclude)
-                                (swap! specs conj
-                                       (cond-> {:server name
-                                                :original tool-name
-                                                :prefixed (name-for kind id tool-name)
-                                                :description description
-                                                :input-schema schema}
-                                         resource-uri (assoc :resource-uri resource-uri)
-                                         resource-template
-                                         (assoc :resource-template resource-template)))))]
-              (doseq [tool (:tools entry)]
-                (when (or (true? filter) (some #{(:name tool)} filter))
-                  (add-spec! :tool (:name tool) (:name tool)
-                             (or (:description tool) "")
-                             (:inputSchema tool))))
-              (when (not= false (:expose-resources definition))
-                (doseq [resource (:resources entry)]
-                  (let [base-name (str "read_" (names/resource-tool-name (:name resource)))]
-                    (when (or (true? filter) (some #{base-name} filter))
-                      (add-spec! :resource (:uri resource) base-name
-                                 (or (:description resource)
-                                     (str "Read resource: " (:uri resource)))
-                                 nil
-                                 (:uri resource)))))
-                ;; a parameterized resource (file:///{path}) becomes a
-                ;; read tool whose parameters are the template variables
-                (doseq [template (:resource-templates entry)]
-                  (let [base-name (str "read_" (names/resource-tool-name (:name template)))
-                        vars (template-vars (:uriTemplate template))]
-                    (when (or (true? filter) (some #{base-name} filter))
-                      (add-spec! :resource (:uriTemplate template) base-name
-                                 (str (or (:description template)
-                                          "Read resource: ")
-                                      " (" (:uriTemplate template) ")")
-                                 (template-schema vars)
-                                 nil
-                                 (:uriTemplate template)))))))))))
-    @specs))
-
 (defn- title-str
   [v]
   (when (and (string? v) (seq v)) v))
@@ -621,40 +501,23 @@
    proxy/call-mcp-tool. All declare :streams? — progress notifications
    stream as partial content while a call runs. Also syncs the script
    sandbox's MCP tool source (architecture.md § Tools and the script
-   sandbox) — same trigger, same catalog."
+   sandbox) — same trigger, same catalog. The eval source reads these
+   specs directly, so only direct tools appear in its help listing."
   [state]
   (let [config (:config @state)
         mode-for (fn [server]
                    (names/effective-mode (get-in config [:mcp-servers server])
                                          (:settings config)))
         _ (swap! state assoc
-                 :tool-names (names/assign-names (catalog-entries state) mode-for))
-        specs (direct-tools-specs state)
+                 :tool-names (names/assign-names (surface/catalog-entries state) mode-for))
+        specs (surface/direct-tools-specs state)
         next-names (set (map :prefixed specs))
         registered @(:registered-direct @state)
         fingerprint (fn [spec]
                       (pr-str (select-keys spec
                                            [:server :original :prefixed
                                             :description :input-schema
-                                            :resource-uri :resource-template])))
-        make-execute (fn [spec]
-                       (fn [args & [on-update]]
-                         (cond
-                           (:resource-uri spec)
-                           (proxy/read-mcp-resource @state (:server spec)
-                                                    (:resource-uri spec))
-
-                           (:resource-template spec)
-                           (proxy/read-mcp-resource @state (:server spec)
-                                                    (mcp/expand-uri-template
-                                                     (:resource-template spec)
-                                                     (or args {})))
-
-                           :else
-                           (proxy/call-mcp-tool @state (:server spec)
-                                                (:original spec) args
-                                                {:on-update on-update
-                                                 :input-schema (:input-schema spec)}))))]
+                                            :resource-uri :resource-template])))]
     (doseq [spec specs]
       (let [fp (fingerprint spec)]
         (when (not= fp (get registered (:prefixed spec)))
@@ -664,8 +527,13 @@
                                :description (or (:description spec) "(no description)")
                                :prompt-snippet (catalog/prompt-snippet (:description spec) 100)
                                :parameters (normalize-direct-schema (:input-schema spec))
+                               ;; contextual: receive the run's cancel signal
+                               :contextual? true
                                :streams? true
-                               :execute (make-execute spec)
+                               :execute (fn [args & [on-update signal _ctx]]
+                                          (surface/execute-spec state spec args
+                                                                {:on-update on-update
+                                                                 :signal signal}))
                                :title (title-direct-tool (:prefixed spec))})
           (swap! (:registered-direct @state) assoc (:prefixed spec) fp))))
     (doseq [name (remove next-names (keys registered))]
@@ -694,7 +562,7 @@
            (str "Servers: " (str/join ", " summaries) ". ")
            "No servers with cached tools. ")
          "Servers connect lazily on first use. "
-         "For several MCP calls in one request, use an enabled script tool (`codemode` or `eval`) — MCP tools are in the script's surface by name. "
+         "For several MCP calls in one request, use an enabled script tool: codemode's tools/call, or eval's `(ext.mcp/call \"tool\" args)` (direct tools are eval verbs). "
          "search: \"screenshot\" · tool: \"" (name prefix) "_tool\" args: {...}.")))
 
 (defn- register-proxy-tool!
@@ -735,9 +603,12 @@
                                      "offset" {:type "number"
                                                :description "Search offset (default 0)"}}
                                     :required []}
+                       ;; contextual: receive the run's cancel signal
+                       :contextual? true
                        :streams? true
-                       :execute (fn [params & [on-update]]
-                                  (proxy/execute state params on-update))
+                       :execute (fn [params & [on-update signal _ctx]]
+                                  (proxy/execute state params on-update
+                                                 {:signal signal}))
                        :title title-mcp}))
 
 ;; ─── /mcp command (§10.6) ─────────────────────────────────────────────────
@@ -811,6 +682,7 @@
     (sync-direct-tools! state)
     (prompts/sync-prompt-commands! state)
     (register-proxy-tool! state)
+    (eval-source/sync! (:api @state) state)
     (update-status-bar! state)
     config))
 
@@ -1310,6 +1182,9 @@
     ;; gates it; the shared engine retired the separate mcpScript tool)
     ;; 3. direct tools from cache (§10.5)
     (sync-direct-tools! state)
+    ;; 3a. eval source: the ext.mcp gateway plus one verb per direct tool;
+    ;; the rest of the catalog stays searchable/describeable
+    (eval-source/sync! api state)
     ;; 3b. prompt commands from cache (pi resolveCachedPrompts)
     (prompts/sync-prompt-commands! state)
     ;; 3c. direct-tools bootstrap (pi init.ts): background-connect servers

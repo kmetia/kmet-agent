@@ -73,23 +73,34 @@
    {:result-type :input-required
     :retries mrtr-max-retries}))
 
+(defn- check-signal!
+  "Throw a :cancelled MCP error when SIGNAL has fired. The request
+   serialization lock is not interruptible; callers that must wait for it
+   re-check after acquiring it."
+  [signal method]
+  (when (and signal @signal)
+    (throw (protocol/cancelled-error method))))
+
 (defn request!
   "Send a JSON-RPC request and return its :result. OPTS:
    {:timeout-ms n (default 120000) :on-notification (fn [notification])
    — receives notifications/progress events arriving mid-request
    (streaming tool-call progress)}. :http-headers — per-request custom
    headers for HTTP transports (a tools/call's Mcp-Param-*, SEP-2243;
-   stdio and SSE ignore them). Throws ex-info on JSON-RPC error,
-   timeout, or transport death (§7.7).
+   stdio and SSE ignore them); :signal — a cancel signal (a non-blocking
+   derefable, usually an atom) polled while the request waits, throwing a
+   :cancelled MCP error. Throws ex-info on
+   JSON-RPC error, timeout, cancellation, or transport death (§7.7).
 
    On a modern conn the era _meta is merged into params, and an
    input_required result (MRTR) is retried with its requestState echoed
    while the server asked for no client input; an inputRequests entry
    throws — kmet declares no elicitation/sampling/roots capabilities."
-  [conn method params & [{:keys [timeout-ms on-notification http-headers]}]]
+  [conn method params & [{:keys [timeout-ms on-notification http-headers signal]}]]
   (let [timeout (or timeout-ms protocol/default-request-timeout-ms)
         modern? (protocol/modern-conn? conn)
-        request-opts {:http-headers http-headers}
+        request-opts (cond-> {:http-headers http-headers}
+                       signal (assoc :signal signal))
         dispatch (fn [params]
                    (case (:transport conn)
                      :stdio (stdio/request! conn method params timeout on-notification request-opts)
@@ -105,6 +116,7 @@
     ;; body and stays concurrent).
     (loop [params (with-request-meta conn params)
            retries 0]
+      (check-signal! signal method)
       (let [result (if (= :streamable-http (:transport conn))
                      (dispatch params)
                      ;; clj-kondo flags the map lookup as locally created;
@@ -112,7 +124,9 @@
                      ;; (stdio/http/sse) and shared by every caller of that
                      ;; conn
                      #_{:clj-kondo/ignore [:locking-suspicious-lock]}
-                     (locking (:req-lock conn) (dispatch params)))]
+                     (locking (:req-lock conn)
+                       (check-signal! signal method)
+                       (dispatch params)))]
         (if (and modern? (= "input_required" (protocol/result-type result)))
           (cond
             (seq (:inputRequests result)) (throw (input-required-error result))
@@ -289,10 +303,12 @@
       [])))
 
 (defn read-resource
-  "resources/read — result contains :contents (text or blob blocks)."
-  [conn uri & [{:keys [timeout-ms]}]]
+  "resources/read — result contains :contents (text or blob blocks).
+   OPTS: :timeout-ms and :signal (the cancel signal)."
+  [conn uri & [{:keys [timeout-ms signal]}]]
   (request! conn "resources/read" {:uri uri}
-            {:timeout-ms (or timeout-ms protocol/default-request-timeout-ms)}))
+            {:timeout-ms (or timeout-ms protocol/default-request-timeout-ms)
+             :signal signal}))
 
 (defn- uri-escape
   "Percent-escape a template variable's value: everything outside the

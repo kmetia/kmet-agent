@@ -4,6 +4,7 @@
          "../../modules/tui/src" "../../modules/ai/src"
          "../../modules/loader/src"
          "../../modules/srce/src" "../../modules/app/src"
+         "../../modules/app/test"
          "../../modules/tk/src"]
  :deps {;; the module trees require kmet.libs.json (clojure.data.json, bundled
         ;; by bb >= 1.13.224 but declared for a standalone classpath) and
@@ -24,6 +25,7 @@
                               kmet.extensions.mcp-adapter.catalog-test
                               kmet.extensions.mcp-adapter.config-test
                               kmet.extensions.mcp-adapter.core-test
+                              kmet.extensions.mcp-adapter.eval-source-test
                               kmet.extensions.mcp-adapter.metadata-test
                               kmet.extensions.mcp-adapter.names-test
                               kmet.extensions.mcp-adapter.output-guard-test

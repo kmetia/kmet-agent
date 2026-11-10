@@ -60,7 +60,11 @@
             (is (= "mcp-adapter:skills/mcp/SKILL.md" (get-in skill [:opts :location])))
             (is (str/includes? (str (:content skill)) "name: mcp"))))
         (testing "script mode contributes the sandbox tool source"
-          (is (fn? (get-in s [:tool-sources :mcp]))))))))
+          (is (fn? (get-in s [:tool-sources :mcp]))))
+        (testing "eval mode contributes the ext.mcp source"
+          (is (fn? (get-in s [:eval-sources :mcp])))
+          (let [source ((get-in s [:eval-sources :mcp]) {})]
+            (is (contains? (get-in source [:ns 'ext.mcp]) 'call))))))))
 
 (deftest mcp-command-completions-and-status
   (with-extension
@@ -167,3 +171,17 @@
             (is (= #{"srv"} (set (keys (:servers @ext-state))))
                 "a server dropped from the file leaves the live map")))))))
 
+(deftest eval-source-can-be-disabled
+  (with-extension
+    {:settings {:eval-source false}}
+    (fn [_api state]
+      (is (nil? (get-in @state [:eval-sources :mcp]))))))
+
+(deftest eval-source-can-be-disabled-on-reload
+  (with-extension
+    nil
+    (fn [_api state]
+      (is (fn? (get-in @state [:eval-sources :mcp])))
+      (tu/write-edn! (config/global-config-path) {:settings {:eval-source false}})
+      (@#'mcp/reload-servers! @@#'mcp/state-atom)
+      (is (nil? (get-in @state [:eval-sources :mcp]))))))

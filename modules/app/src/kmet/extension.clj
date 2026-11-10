@@ -140,7 +140,8 @@
 
    `:ns` and `:macros` contribute values to the eval environment; `:verbs` in
    the argument map are the shared file operations (`:edit`, `:write-file`) as
-   values, and are only valid during the call that produced them. `user` and
+   values, and are only valid during the call that produced them. The build's
+   read (reused by the first call) receives that call's `:signal`. `user` and
    `clj` are reserved for the built-in sources; namespace what you contribute
    (for example `license/add!`). A source-provided key is never written to the
    eval library; a model redefinition shadows it live and a drop restores the

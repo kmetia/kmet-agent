@@ -5,7 +5,8 @@
             [clojure.string :as str]
             [clojure.test :as t]
             [kmet.app.test-eval-support :as support]
-            [kmet.app.tools.registry :as tools]))
+            [kmet.app.tools.registry :as tools]
+            [kmet.libs.concurrent :as concurrent]))
 
 (defn- register!
   [env id sources-fn]
@@ -34,7 +35,8 @@
              (:content (support/eval! env "(ext.license/project)"))))
     (t/is (= (:agent-dir env)
              (:content (support/eval! env "(ext.license/agent-home)"))))
-    (t/is (= "false" (:content (support/eval! env "(ext.license/signalled?)"))))
+    ;; the combined run/abort view is always present for an eval call
+    (t/is (= "true" (:content (support/eval! env "(ext.license/signalled?)"))))
     (t/is (= "true" (:content (support/eval! env "(ext.license/has-verbs?)"))))))
 
 (t/deftest source-verbs-match-the-file-tools
@@ -274,3 +276,40 @@
     (t/is (= "2" (:content (support/eval! env "ext.counter/value"))))
     (t/is (= 2 @reads))))
 
+(t/deftest the-first-call-s-signal-reaches-the-build-source
+  (let [env (support/eval-ctx)
+        run-signal (atom false)
+        captured (atom nil)]
+    (register! env :probe
+               (fn [{:keys [signal]}]
+                 (reset! captured signal)
+                 {:ns {'ext.probe {'warm (fn [] "warm")}}}))
+    ;; the build source receives a live combined view
+    (t/is (= "warm"
+             (:content (support/eval! env "(ext.probe/warm)"
+                                      :signal run-signal))))
+    (t/is (some? @captured))
+    ;; firing the run signal after the call is visible through the captured
+    ;; build-time view
+    (reset! run-signal true)
+    (t/is (true? @(deref captured)))))
+
+(t/deftest ^:slow eval-timeout-reaches-a-source-s-signal
+  (let [env (support/eval-ctx)
+        seen (atom nil)]
+    (register! env :probe
+               (fn [{:keys [signal]}]
+                 (reset! seen signal)
+                 {:ns {'ext.probe {'wait!
+                                   (fn []
+                                     (let [deadline (+ (concurrent/monotonic-ms) 5000)]
+                                       (loop []
+                                         (when-not @signal
+                                           (when (< (concurrent/monotonic-ms) deadline)
+                                             (Thread/sleep 10)
+                                             (recur))))))}}}))
+    (let [r (support/eval! env "(ext.probe/wait!)" :timeout 0.1)]
+      (t/is (:is-error r))
+      (t/is (= :timeout (get-in r [:details :error]))))
+    (t/is (true? @(deref seen))
+          "the source saw the script timeout signal")))

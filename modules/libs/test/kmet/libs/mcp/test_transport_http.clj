@@ -487,3 +487,58 @@
                     :request-fn (fn [_ _] (response 200 "application/json" "{}")))]
     (is (thrown-with-msg? Exception #"answered 200 application/json"
                           (http/listen! conn {:toolsListChanged true} nil)))))
+
+(deftest request!-cancels-on-signal
+  (let [signal (atom false)
+        started (promise)
+        release (promise)
+        conn (assoc (http/connect! "http://server" {})
+                    :request-fn (fn [_ _]
+                                  (deliver started true)
+                                  (deref release 5000 nil)
+                                  (response 200 "application/json"
+                                            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}")))
+        call (future
+               (try (http/request! conn "tools/call" {} 5000 nil {:signal signal})
+                    (catch Exception e e)))]
+    (try
+      (is (true? (deref started 2000 false)))
+      (reset! signal true)
+      (let [e (deref call 2000 ::timeout)]
+        (is (instance? Exception e))
+        (is (= :mcp-error (:type (ex-data e))))
+        (is (true? (:cancelled (ex-data e))))
+        (is (http/alive? conn)
+            "cancellation leaves the conn usable"))
+      (finally
+        (deliver release true)))))
+
+(deftest request!-closes-the-response-on-cancellation
+  (let [signal (atom false)
+        started (promise)
+        release (promise)
+        closed (atom false)
+        body (proxy [java.io.InputStream] []
+               (read
+                 ([] (deliver started true) (deref release 2000 -1) -1)
+                 ([_b] (deliver started true) (deref release 2000 -1) -1)
+                 ([_b _off _len] (deliver started true) (deref release 2000 -1) -1))
+               (close [] (deliver release true) (reset! closed true)))
+        conn (assoc (http/connect! "http://server" {})
+                    :request-fn (fn [_ _]
+                                  {:status 200
+                                   :headers {"content-type" "application/json"}
+                                   :body body}))
+        call (future
+               (try (http/request! conn "tools/call" {} 5000 nil {:signal signal})
+                    (catch Exception e e)))]
+    (try
+      (is (true? (deref started 2000 false)))
+      (reset! signal true)
+      (let [e (deref call 2000 ::timeout)]
+        (is (instance? Exception e))
+        (is (true? (:cancelled (ex-data e)))))
+      (is (true? @closed) "the abandoned response body is closed")
+      (is (http/alive? conn) "the conn stays usable")
+      (finally
+        (deliver release true)))))

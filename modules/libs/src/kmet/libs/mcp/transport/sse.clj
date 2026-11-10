@@ -161,10 +161,14 @@
   "POST a request and wait for its id-matched message on the stream. A
    dropped stream reopens once and re-establishes the session. OPTS is
    the transport-neutral request options map — the legacy SSE binding
-   consumes none of it (:http-headers is streamable-HTTP
-   only)."
-  [conn method params timeout-ms on-notification _opts]
+   consumes :signal (a cancel signal, a non-blocking derefable, polled
+   while the response waits; an
+   initial POST already in flight is bounded by the request timeout);
+   :http-headers is streamable-HTTP only."
+  [conn method params timeout-ms on-notification {:keys [signal]}]
   (transport/touch! conn)
+  (when (and signal @signal)
+    (throw (protocol/cancelled-error method)))
   (let [id (swap! (:id-counter conn) inc)]
     (loop [attempts 0]
       (let [ch @(:ch conn)]
@@ -185,7 +189,8 @@
             (let [wait-result (if (and (map? parsed) (contains? parsed :id))
                                 parsed
                                 (transport/wait-for-response conn ch id method timeout-ms
-                                                             on-notification send-async!))]
+                                                             on-notification send-async!
+                                                             signal))]
               (if (= transport/eof-marker wait-result)
               ;; Stream dropped — reopen + re-initialize (bounded retry).
                 (if (< attempts 1)

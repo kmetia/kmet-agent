@@ -177,3 +177,16 @@
     (is (= [] (concurrent/await-all [a c] 100)))
     (deliver b :b)
     (is (= [] (concurrent/await-all [a b c] 100)) "and everything once it settles")))
+
+(deftest deref-signal-answers-value-timeout-and-cancellation
+  (testing "a delivered value wins"
+    (let [p (promise)]
+      (deliver p :v)
+      (is (= {:status :done :value :v}
+             (concurrent/deref-signal p nil 10)))))
+  (testing "a deadline reports :timeout"
+    (is (= {:status :timeout}
+           (concurrent/deref-signal (promise) nil 1))))
+  (testing "a fired signal reports :cancelled"
+    (is (= {:status :cancelled}
+           (concurrent/deref-signal (promise) (atom true) 1000)))))

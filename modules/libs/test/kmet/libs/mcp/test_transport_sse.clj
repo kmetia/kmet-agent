@@ -78,3 +78,17 @@
     (is (true? @(:closed conn)) "close! marks the conn closed"))
   (let [conn (sse/connect! "http://h/sse" {:reconnect-fn (fn [_] nil)})]
     (is (fn? (:reconnect-fn conn)) "the client's reconnect hook is captured")))
+
+(deftest wait-for-response-cancels-on-signal
+  (let [ch (async/chan 1)
+        signal (atom false)
+        call (future
+               (try (transport/wait-for-response
+                     {:transport :sse} ch 1 "tools/call" 5000 nil
+                     (fn [_conn _msg] nil) signal)
+                    (catch Exception e e)))]
+    (reset! signal true)
+    (let [e (deref call 2000 ::timeout)]
+      (is (instance? Exception e))
+      (is (= :mcp-error (:type (ex-data e))))
+      (is (true? (:cancelled (ex-data e)))))))

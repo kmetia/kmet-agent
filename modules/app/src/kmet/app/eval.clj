@@ -1352,8 +1352,10 @@
 
 (defn- build-environment
   "Build a fresh environment: the SCI context, the library index, and every
-   library definition evaluated into it."
-  [service cwd]
+   library definition evaluated into it. SIGNAL is the first call's cancel
+   signal, passed to the sources so a source value captured at build time
+   (and reused by that first call) still observes cancellation."
+  [service cwd signal]
   (let [roots (roots-for service cwd)
         failures (atom [])
         library (atom {})
@@ -1423,7 +1425,7 @@
                   "eval")
         env (assoc env :sci-ctx sci-ctx :interrupt interrupt)
         _ (reset! env-ref env)
-        sources (refresh-sources! service env cwd nil)
+        sources (refresh-sources! service env cwd signal)
         deadline (+ (concurrent/monotonic-ms) build-budget-ms)]
     (binding [tool-util/*cwd* cwd
               bash-tool/*shell* bash-tool/*shell*
@@ -1447,10 +1449,10 @@
   "The current environment for SESSION, built from the library on first use.
    An existing environment is reused until an explicit `/eval reload`: a session
    is a runtime cache, not a branch-scoped definition log."
-  [service session cwd]
+  [service session cwd signal]
   (let [id (:id session)]
     (or (get @(:envs service) id)
-        (let [env (build-environment service cwd)]
+        (let [env (build-environment service cwd signal)]
           (when @(:disposed? service)
             (throw (ex-info "the agent's eval service is disposed"
                             {:type :eval/disposed})))
@@ -1482,7 +1484,7 @@
    broken file cannot empty a working session. The fresh environment's
    first-eval build report is cleared: the reload itself reports the outcome."
   [service old]
-  (let [fresh (build-environment service (:cwd old))
+  (let [fresh (build-environment service (:cwd old) nil)
         build-failures (vec @(:failures fresh))]
     (if (seq build-failures)
       {:env old :kept? true :failures build-failures}
@@ -1493,6 +1495,9 @@
             (when-let [sticky (some-> @(:sticky-ns old) sci/ns-name)]
               (reset! (:sticky-ns fresh) (sci/find-ns (:sci-ctx fresh) sticky)))
             (reset! (:build-report fresh) nil)
+            ;; the reload had no call signal; let the next eval call re-read
+            ;; sources with its own
+            (reset! (:fresh-sources? fresh) false)
             {:env fresh :replayed (count @(:unwritten-records old))}))))))
 
 ;; ─── Request normalization ────────────────────────────────────────────────
@@ -2011,7 +2016,8 @@
                                         :else :eval/unbind-failed)))))))
 
 (defn- eval!*
-  [service env cwd {:keys [code timeout limits signal on-update ctx drop scope]}]
+  [service env cwd {:keys [code timeout limits signal source-signal abort
+                           on-update ctx drop scope]}]
   (let [code (some-> code str)
         scope (normalize-scope scope)
         lock (:lock env)]
@@ -2033,12 +2039,13 @@
                                               (= @(:source-ids env)
                                                  (mapv :id (source-registrations service))))
                                        (current-source-seed env)
-                                       (refresh-sources! service env cwd signal))]
+                                       (refresh-sources! service env cwd source-signal))]
                          (script/run {:tool "eval"
                                       :code code
                                       :timeout timeout
                                       :limits limits
                                       :signal signal
+                                      :abort abort
                                       :ctx ctx
                                       :cwd cwd
                                       :on-update on-update
@@ -2151,7 +2158,7 @@
             (let [n (count (library-entries env))]
               (swap! (:envs service) assoc (:id session) env)
               (reload-result "reloaded" n (or replayed 0) nil))))
-        (let [env (ensure-environment! service session (or cwd (tool-util/cwd)))
+        (let [env (ensure-environment! service session (or cwd (tool-util/cwd)) nil)
               n (count (library-entries env))
               failures (take-failures! env)]
           ;; the command reports this build; do not repeat it as the first eval
@@ -2179,7 +2186,10 @@
        (let [env (get @(:envs service) (:id session))
              _ (when env
                  (refresh-sources! service env
-                                   (or cwd (tool-util/cwd)) nil))
+                                   (or cwd (tool-util/cwd)) nil)
+                 ;; the drop had no call signal; let the next eval call
+                 ;; re-read sources with its own
+                 (reset! (:fresh-sources? env) false))
              roots (if env (:roots env) (roots-for service (or cwd (tool-util/cwd))))
              names (mapv #(qualify-name (or (some-> env env-ns) "user") %)
                          (normalize-drop names))
@@ -2402,8 +2412,13 @@
         (bad-request! "eval needs code or drop" {}))
       (let [lock (session-lock (:session-locks service) (:id session))]
         (locking lock
-          (let [env (ensure-environment! service session cwd)]
-            (eval!* service env cwd opts)))))))
+          ;; the eval timeout aborts the script through ABORT; sources and
+          ;; extension verbs see the same signal the script's host calls do
+          (let [abort (atom nil)
+                source-signal (concurrent/or-signal (:signal opts) abort)
+                env (ensure-environment! service session cwd source-signal)]
+            (eval!* service env cwd (assoc opts :abort abort
+                                           :source-signal source-signal))))))))
 
 (defn value
   "The `:eval` service for AGENT-CTX. The environments are keyed by session

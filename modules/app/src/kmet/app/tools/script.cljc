@@ -1620,10 +1620,12 @@
   "Resolve the per-call state the sandbox runs on: the callable surface, the
    bridge, the emit/capture channels, the abort/trace atoms, the budgets and
    the dynamic values the loop bound for this run. CWD defaults to the
-   runtime cwd; LIMITS is `resolve-limits`' map (or the default). `:tools?
-   false` omits the surface and bridge, so the call has no `tools` namespace
-   and cannot reach a tool (the `eval` sandbox)."
-  [{:keys [tool cwd timeout limits signal ctx on-update
+   runtime cwd; LIMITS is `resolve-limits`' map (or the default). `:abort`
+   may supply the timeout/output-limit abort atom (the eval service needs
+   the same atom it gave its sources); `:tools? false` omits the surface and
+   bridge, so the call has no `tools` namespace and cannot reach a tool
+   (the `eval` sandbox)."
+  [{:keys [tool cwd timeout limits signal abort ctx on-update
            get-all-tools get-contributed-tools select-tools execute-tool
            source-namespaces tools?]
     :or {tools? true}}]
@@ -1639,7 +1641,7 @@
                                   (get-all-tools)
                                   (if get-contributed-tools (get-contributed-tools) {})
                                   (when *enabled-tools-fn* (*enabled-tools-fn*))))
-        abort (atom nil)
+        abort (or abort (atom nil))
         cancelled (combined-signal signal abort)
         emitted (atom [])
         emitted-bytes (atom 0)
@@ -1793,7 +1795,9 @@
    and a multi-form call reports earlier forms one line each and the last value
    in full (the eval tool's shape). RESULT-STORE receives the full pre-truncation
    result map and returns the id used in the truncation notice and error
-   tail. EXTRA-DETAILS merges into the result's :details."
+   tail. EXTRA-DETAILS merges into the result's :details. `:abort` may supply
+   the timeout/output-limit abort atom `prepare` would create — the eval
+   service shares that atom with its sources."
   [{:keys [ctx] :as opts}]
   (require-tool! (:tool opts))
   (let [realm (when-not (false? (:tools? opts)) (sandbox-realm ctx))

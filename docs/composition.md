@@ -370,7 +370,7 @@ Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) na
 
 **Description:**
 
-Evaluate Clojure in this session's persistent SCI sandbox (babashka surface: fs, slurp, spit, require; no tool calls). Files: (read path {:offset N :limit N}) for a range, (write path text) whole, (edit path old new) one occurrence. Shell: (bash "cmd") returns output; (sh ...) a process map. Calls serialize: fan out with (spawn f) or pmap. Eval verbs: a top-level definition with a docstring is saved; one without is live-only. Reuse definitions: (eval/library) lists saved ones; define what recurs. Local let/fn bindings are scratch. Define in user; system namespaces are read-only. Report with (emit value), (emit-image path), or the final value; stdout and stderr are discarded. (help) lists every verb with its interface; (describe 'name) reads one.
+Evaluate Clojure in this session's persistent SCI sandbox (babashka surface: fs, slurp, spit, require; no model tool calls). Files: (read path {:offset N :limit N}) for a range, (write path text) whole, (edit path old new) one occurrence. Shell: (bash "cmd") returns output; (sh ...) a process map. Calls serialize: use one call per phase, many forms per call; fan out with (spawn f) or pmap. Eval verbs: a top-level definition with a docstring is saved; one without is live-only. Reuse definitions: (eval/library) lists saved ones; define what recurs. Local let/fn bindings are scratch. Define in user; system namespaces are read-only. Report with (emit value), (emit-image path), or the final value; a multi-form call reports earlier forms one line each and the last value in full; stdout and stderr are discarded. (help) lists every verb with its interface; (describe 'name) reads one.
 
 ---
 

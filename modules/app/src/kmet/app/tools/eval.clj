@@ -66,7 +66,7 @@
    :name "eval"
    :label "Eval"
    :description (str "Evaluate Clojure in this session's persistent SCI sandbox "
-                     "(babashka surface: fs, slurp, spit, require; no tool calls). "
+                     "(babashka surface: fs, slurp, spit, require; no model tool calls). "
                      "Files: (read path {:offset N :limit N}) for a range, (write path text) "
                      "whole, (edit path old new) one occurrence. Shell: (bash \"cmd\") returns "
                      "output; (sh ...) a process map. Calls serialize: use one call per phase, "
@@ -78,7 +78,7 @@
                      "value; a multi-form call reports earlier forms one line each and the "
                      "last value in full; stdout and stderr are discarded. (help) lists every "
                      "verb with its interface; (describe 'name) reads one.")
-   :prompt-snippet "Persistent Clojure sandbox; no tool calls; one call per phase, many forms per call; read, write, edit, bash, sh (also core/<verb>); (help) for the surface."
+   :prompt-snippet "Persistent Clojure sandbox; no model tool calls; one call per phase; many forms per call; read, write, edit, bash, sh (core/<verb>); (help)."
    :prompt-guidelines
    ["Spend findings once: reuse before you rebuild, define what recurs, and prefer one eval call that answers over several probes."
     "Put a whole read→edit→verify sequence in one call — one call per phase, not per command."]

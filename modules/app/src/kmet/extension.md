@@ -392,7 +392,10 @@ the sources remain, but nothing can promote them (the run warns; see
 An eval source contributes live values and `/eval` verbs to every eval
 environment. Register it with a 1-arg fn; the eval service reads that fn when
 the environment is built and on later calls (the build's read is reused by the
-first call), so the contribution is current, not a snapshot:
+first call), so the contribution is current, not a snapshot. The build read
+receives the first call's `:signal`, so a source that captures it still sees
+cancellation; after an explicit `/eval reload` the next call re-reads the
+source with that call's signal.
 
 ```clojure
 (ext/register-eval-source! api :license

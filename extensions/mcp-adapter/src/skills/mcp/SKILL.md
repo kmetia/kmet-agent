@@ -1,9 +1,9 @@
 ---
 name: mcp
-description: Access MCP (Model Context Protocol) servers through kmet's mcp gateway tool. Use when the user asks to work with MCP servers, MCP tools, or when you need tools from servers like filesystem, chrome-devtools, notion, or any other configured MCP server.
+description: Access MCP (Model Context Protocol) servers through kmet's mcp gateway tool or the `ext.mcp` eval source. Use when the user asks to work with MCP servers, MCP tools, or when you need tools from servers like filesystem, chrome-devtools, notion, or any other configured MCP server.
 ---
 
-# MCP access via the `mcp` proxy tool
+# MCP access via the `mcp` proxy, `codemode`, or `ext.mcp`
 
 kmet talks to MCP servers through one lazy `mcp` proxy tool (~200 tokens)
 instead of registering every server tool in your context. Servers are
@@ -95,6 +95,30 @@ separate runtime retired into this engine):
   `:tool-prefix :server` keeps names unique).
 - `:script-mode false` (settings) drops the MCP contribution: the sandbox
   then only has kmet's own tools.
+
+## Eval-only MCP — the `ext.mcp` source
+
+When `eval` is the only tool (or you prefer a persistent sandbox), the
+adapter registers an eval source with a small gateway:
+
+```clojure
+;; any cached tool, by raw or assigned name
+(ext.mcp/call "chrome_devtools_take_screenshot" {:format "png"})
+;; → {:content "..." :is-error false :details ...}; branch on :is-error
+(ext.mcp/call! "chrome_devtools_take_screenshot" {:format "png"})
+;; → the content string, throwing when the call fails
+(ext.mcp/call "server_tool" args {:server "name"}) ; disambiguate/lazy-connect
+(ext.mcp/call {:tool "server_tool" :server "name"}) ; unambiguous no-arg form
+(ext.mcp/search "screenshot")
+(ext.mcp/describe "chrome_devtools_take_screenshot")
+(ext.mcp/status)
+```
+
+Only tools enabled as direct tools also appear as
+`ext.mcp/<assigned-name>` verbs in `(eval/sources)`; the rest stay
+reachable through `search`/`describe` and `call`. The functions are
+synchronous — no promise and no `@` — and carry the eval call's cancel
+signal, unlike `codemode`'s promise-based `tools/call`.
 
 ## Prompts → slash commands
 

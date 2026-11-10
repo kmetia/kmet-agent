@@ -1,9 +1,9 @@
 (ns kmet.extensions.mcp-adapter.tool-source
-  "The MCP catalog as a script-sandbox tool source (codemode or eval; architecture.md
+  "The MCP catalog as a script-sandbox tool source (codemode; architecture.md
    § Tools and the script sandbox): the adapter contributes its cached MCP
-   tools to the script sandbox (`codemode` or `eval`)
-   instead of shipping a runtime of its own (the retired mcpScript tool and
-   its bb-subprocess JSON-lines engine).
+   tools to the `codemode` sandbox instead of shipping a runtime of its
+   own (the retired mcpScript tool and its bb-subprocess JSON-lines engine).
+   The eval tool has a separate eval source (`eval_source.clj`).
 
    The contribution is a tool source — register-tool-source! on the
    extension api — so MCP tools appear in the script sandbox's surface

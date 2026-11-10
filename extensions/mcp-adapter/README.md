@@ -131,7 +131,8 @@ paths itself, or that should land in the session's own project after
 
 Settings keys: `:direct-tools`, `:tool-prefix`, `:disable-proxy-tool`,
 `:script-mode` (default true — contributes the MCP catalog to the script
-sandbox, see below),
+sandbox, see below), `:eval-source` (default true — contributes the
+ext.mcp eval source, see below),
 `:idle-timeout` (minutes, default 10, 0 disables reaping),
 `:output-guard` (false disables, or `{:max-bytes :max-lines
 :details-max-bytes}` tuning), `:token-storage` (`:auto` default |
@@ -174,7 +175,11 @@ mcp({})                              → status
 
 Two calls instead of N tools cluttering the context. Servers are lazy by
 default — they don't connect until you call one of their tools. Search and
-describe read the local metadata cache only (no server spawn).
+describe read the local metadata cache only (no server spawn). The `mcp`
+and direct tools carry the run's cancel signal: cancelling an in-flight
+request sends `notifications/cancelled` on stdio/SSE. On streamable HTTP
+the response stream is closed once it arrives, but a POST already in
+flight cannot be aborted in babashka and finishes on its own timeout.
 
 ## Direct tools (opt-in)
 
@@ -185,7 +190,9 @@ name list (`:direct-tools ["tool-a" "tool-b"]`), globally via
 registered as `server_toolname` (or bare name with
 `:tool-prefix :none`/`:short`, `mcp_` prefix with `:mcp`), registered from
 cached metadata so no server spawns at startup. Names are lowercased with
-`[^a-z0-9_]` → `_`; collisions fall back to the server prefix.
+`[^a-z0-9_]` → `_`; collisions fall back to the server prefix. The
+same direct set is projected into the eval source as
+`ext.mcp/<assigned-name>` verbs.
 
 ## Commands
 
@@ -218,19 +225,35 @@ cached metadata so no server spawns at startup. Names are lowercased with
   expanded into the URI (`file:///{path}` + `{path "src/main.clj"}` →
   `file:///src/main.clj`; `/` survives inside a variable, `? # %` and
   spaces are escaped). Templates are listed by `/mcp list <server>`.
-- **Scripted MCP** (settings `:script-mode false` stops the
-  contribution): the adapter contributes its cached MCP catalog to
+- **Scripted MCP — `codemode`** (settings `:script-mode false` stops
+  the contribution): the adapter contributes its cached MCP catalog to
   kmet's builtin **`codemode`** tool as a tool source
   (`tool_source.clj`) — MCP tools are in the sandbox surface by their
   prefixed names, `(tools/list)`/`(tools/describe)` discover them, and
   `@(tools/call "server_tool" args)` runs one (a promise settling with
   the kmet result map `{:content :is-error :details}`, not the old
   `{:ok :data}` envelope). Calls go through `proxy/call-mcp-tool`, so
-  lazy connect, failure backoff, auth and the output guard match the
-  proxy; progress notifications stream while a call runs. The separate
-  `mcpScript` tool and its `bb`-subprocess runtime retired
-  (architecture.md § Tools and the script sandbox) — scripts are the one
-  scripted-MCP surface. See `skills/mcp/SKILL.md`.
+  lazy connect, failure backoff, auth, cancellation and the output guard
+  match the proxy; progress notifications stream while a call runs. The
+  separate `mcpScript` tool and its `bb`-subprocess runtime retired
+  (architecture.md § Tools and the script sandbox). See
+  `skills/mcp/SKILL.md`.
+- **Eval source — `ext.mcp`** (`eval_source.clj`): an eval-only
+  composition can call MCP without the `mcp` or `codemode` tool.
+  `(ext.mcp/call "server_tool" args)` reaches any cached tool;
+  `(ext.mcp/call "server_tool" args {:server "name"})` disambiguates or
+  lazy-connects an uncached tool. For a no-arg tool, pass the unambiguous
+  map form: `(ext.mcp/call {:tool "server_tool" :server "name"})`.
+  `call!` returns the content string and throws on failure. Settings
+  `:eval-source false` drops the eval source. `search`, `describe`, `status`, `connect` and
+  `disconnect` mirror the proxy's read modes. Only tools enabled as
+  direct tools also appear as `ext.mcp/<assigned-name>` verbs in
+  `(eval/sources)`; the rest stay discoverable through `search` and
+  `describe` and callable through `call`. Direct-tool names are the
+  assigned, sanitized names (`server_toolname`, `-` → `_`). Every call
+  carries the eval call's cancel signal, and the model-facing `mcp` and
+  direct tools carry the run's signal; an in-flight stdio call sends
+  `notifications/cancelled`, and the HTTP transports cancel best-effort.
 - **include/exclude globs**: server `:include-tools`/`:exclude-tools`
   (`["server_*"]`) filter which tools register as direct tools;
   `:search-keywords {"server_*" ["capture"]}` boost proxy search.

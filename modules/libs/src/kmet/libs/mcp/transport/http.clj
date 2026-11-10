@@ -399,6 +399,16 @@
 
 ;; ─── Request + async send ─────────────────────────────────────────────────
 
+(defn- await-result
+  "Wait for the response promise P. Returns the delivered value,
+   ::cancelled when SIGNAL fires, or ::timeout at the deadline."
+  [p signal timeout-ms]
+  (let [{:keys [status value]} (concurrent/deref-signal p signal timeout-ms)]
+    (case status
+      :done value
+      :cancelled ::cancelled
+      :timeout ::timeout)))
+
 (def ^:private timeout-exception-classes
   "JVM exception class names that mean the transport timed out. Classified
    by name like kmet.libs.http's network-exception-classes, so the check
@@ -417,53 +427,106 @@
       (str/includes? (str (ex-message e)) "timed out") true
       :else (recur (ex-cause e)))))
 
+(defn- close-response!
+  "Close a response transport, ignoring a failure (the reader may already
+   have closed it)."
+  [response]
+  (when response
+    (try (http/close! response) (catch Exception _ nil))))
+
+(defn- abandon!
+  "Mark an in-flight request abandoned and close its response if it arrived."
+  [abandoned response-atom]
+  (reset! abandoned true)
+  (close-response! @response-atom))
+
+(defn- fetch-response!
+  "POST one request and parse its response. Returns the parsed response, an
+   exception, or ::abandoned when the caller cancelled before the response
+   arrived (the response stream is closed)."
+  [conn method params timeout-ms http-headers id on-notification abandoned
+   response-atom]
+  (try
+    (let [body (json/generate-string
+                {:jsonrpc "2.0" :id id :method method :params params})
+          response (http-post! conn (:url conn)
+                               (http-request-headers conn method params http-headers)
+                               body (+ timeout-ms 5000))]
+      (reset! response-atom response)
+      (if @abandoned
+        (do (close-response! response)
+            ::abandoned)
+        (do
+          ;; a modern conn has no session: a header a probe or discovery
+          ;; response carried is never captured (nor mirrored later)
+          (when-let [session-id (and (not (protocol/modern-conn? conn))
+                                     (transport/header-value
+                                      (:headers response)
+                                      "Mcp-Session-Id"))]
+            (reset! (:session-id conn) session-id))
+          (parse-http-response conn response id on-notification))))
+    (catch Exception e
+      (if (timeout-exception? e)
+        (protocol/mcp-error
+         (str "MCP request timed out after " timeout-ms "ms: " method)
+         {:timeout-ms timeout-ms :method method})
+        e))))
+
 (defn request!
   "POST a request and wait for its response (a background thread reads the
    body; the caller's deadline bounds the wait). OPTS is the request
    options map: :http-headers — per-request custom headers for HTTP
    transports (a tools/call's Mcp-Param-*, SEP-2243; stdio and SSE ignore
-   them). On timeout the request is cancelled and the conn is marked
-   closed — the abandoned response has no transport to read it."
-  [conn method params timeout-ms on-notification {:keys [http-headers]}]
+   them); :signal — a cancel signal (a non-blocking derefable) polled
+   while the response waits. On
+   timeout the request is cancelled and the conn is marked closed — the
+   abandoned response has no transport to read it. On cancellation the
+   request is cancelled best-effort, the response stream is closed once it
+   is available, and the conn stays open; a POST already in flight cannot
+   be aborted in babashka and finishes on its own timeout."
+  [conn method params timeout-ms on-notification {:keys [http-headers signal]}]
   (transport/touch! conn)
+  (when (and signal @signal)
+    (throw (protocol/cancelled-error method)))
   (let [id (swap! (:id-counter conn) inc)
         result-p (promise)
+        abandoned (atom false)
+        response-atom (atom nil)
+        notify (when on-notification
+                 (fn [msg]
+                   (when-not @abandoned
+                     (on-notification msg))))
         _ (spawn
            (fn []
-             (let [value (try
-                           (let [body (json/generate-string
-                                       {:jsonrpc "2.0" :id id :method method :params params})
-                                 response (http-post! conn (:url conn)
-                                                      (http-request-headers conn method params
-                                                                            http-headers)
-                                                      body (+ timeout-ms 5000))]
-                             ;; a modern conn has no session: a header a
-                             ;; probe or discovery response carried is
-                             ;; never captured (nor mirrored later)
-                             (when-let [session-id (and (not (protocol/modern-conn? conn))
-                                                        (transport/header-value
-                                                         (:headers response)
-                                                         "Mcp-Session-Id"))]
-                               (reset! (:session-id conn) session-id))
-                             (parse-http-response conn response id on-notification))
-                           (catch Exception e
-                             (if (timeout-exception? e)
-                               (protocol/mcp-error
-                                (str "MCP request timed out after " timeout-ms "ms: " method)
-                                {:timeout-ms timeout-ms :method method})
-                               e)))]
-               (deliver result-p value))))
-        response (deref result-p timeout-ms ::timeout)]
-    (if (= ::timeout response)
+             (deliver result-p
+                      (fetch-response! conn method params timeout-ms
+                                       http-headers id notify abandoned
+                                       response-atom))))
+        response (await-result result-p signal timeout-ms)]
+    (cond
+      (= ::cancelled response)
+      (do
+        ;; stop the background reader as soon as a response stream exists;
+        ;; a POST still in flight cannot be aborted (no abort transport in
+        ;; bb), so it finishes on its own timeout
+        (abandon! abandoned response-atom)
+        (transport/cancel! conn id method "cancelled" send-async!)
+        (throw (protocol/cancelled-error method)))
+
+      (= ::timeout response)
       (do
         ;; The server may still complete the call; the result is lost (no
         ;; abort transport in bb) — documented limitation (§7.3). The conn
         ;; is dead after this: the client was closed. Tell the server to
-        ;; stop working on the abandoned request.
+        ;; stop working on the abandoned request and drop a late response /
+        ;; progress the same way a cancelled call does.
+        (abandon! abandoned response-atom)
         (reset! (:closed conn) true)
         (transport/cancel! conn id method "timed out" send-async!)
         (throw (protocol/mcp-error (str "MCP request timed out after " timeout-ms "ms: " method)
                                    {:timeout-ms timeout-ms :method method})))
+
+      :else
       (if (instance? Exception response)
         (throw response)
         (if (:error response)

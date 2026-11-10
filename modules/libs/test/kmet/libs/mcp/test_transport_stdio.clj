@@ -261,3 +261,27 @@
                           (mcp/request! conn "tools/call" {:name "echo"})))))
       (finally
         (mcp/close! conn)))))
+
+(deftest translate-exception-maps-cancellation
+  (let [sent (atom [])
+        conn {:stderr-tail (atom [])}]
+    (with-redefs [jrpc/notify! (fn [_conn method params]
+                                 (swap! sent conj [method params]))]
+      (let [e (translate-exception conn
+                                   (ex-info "cancelled"
+                                            {:type :kmet.libs.jsonrpc/cancelled
+                                             :id 9 :method "tools/call"})
+                                   "tools/call" 1000)]
+        (is (= :mcp-error (:type (ex-data e))))
+        (is (true? (:cancelled (ex-data e))))
+        (is (= "notifications/cancelled" (ffirst @sent)))
+        (is (= 9 (get-in @sent [0 1 :requestId]))))
+      (testing "a pre-send cancellation has no id and sends no notification"
+        (reset! sent [])
+        (let [e (translate-exception conn
+                                     (ex-info "cancelled"
+                                              {:type :kmet.libs.jsonrpc/cancelled
+                                               :method "tools/call"})
+                                     "tools/call" 1000)]
+          (is (true? (:cancelled (ex-data e))))
+          (is (empty? @sent)))))))

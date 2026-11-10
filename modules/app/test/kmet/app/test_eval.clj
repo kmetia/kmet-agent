@@ -243,7 +243,7 @@
     (t/is (str/includes? text "(spawn f)"))
     (t/is (str/includes? text "read, write, edit, bash, sh"))
     (t/is (str/includes? text "core/<verb>"))
-    (t/is (str/includes? text "no tool calls"))
+    (t/is (str/includes? text "no model tool calls"))
     (t/is (not (str/includes? text "tools/call")))
     (t/is (not (str/includes? text "tools/list")))
     (t/is (str/includes? text "Define in user"))

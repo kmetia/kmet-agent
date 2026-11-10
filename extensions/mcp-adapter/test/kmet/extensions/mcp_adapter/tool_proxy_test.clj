@@ -5,6 +5,8 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.libs.concurrent]
+            [kmet.libs.mcp.client :as mcp-client]
+            [kmet.libs.mcp.protocol :as protocol]
             [kmet.extensions.mcp-adapter.test-util :as tu]
             [kmet.extensions.mcp-adapter.tool-proxy :as proxy]))
 
@@ -159,3 +161,48 @@
                                  {"fs" {:command "bb" :disabled true}})
                           cached)]
             (is (empty? (proxy/script-tool-records @disabled)))))))))
+
+(deftest dispatch-forwards-the-cancel-signal
+  (tu/with-agent-dir
+    (fn [_]
+      (let [signal (atom false)
+            st (state-atom config cached)
+            seen (atom nil)]
+        (with-redefs [proxy/call-mcp-tool
+                      (fn [_state _server _tool _args opts]
+                        (reset! seen opts)
+                        {:content "ok" :is-error false})]
+          (is (= {:content "ok" :is-error false}
+                 (proxy/execute st {:tool "read_file"} nil {:signal signal})))
+          (is (= signal (:signal @seen))))))))
+
+(deftest call-mcp-tool-reports-cancellation
+  (tu/with-agent-dir
+    (fn [_]
+      (let [state (assoc (tu/cached-state config cached (:settings config))
+                         :ensure-connected-fn (fn [_] {:transport :streamable-http})
+                         :read-state-fn (fn [] nil))]
+        (with-redefs [mcp-client/request!
+                      (fn [& _] (throw (protocol/cancelled-error "tools/call")))]
+          (is (= {:content "MCP call cancelled." :is-error true}
+                 (proxy/call-mcp-tool state "fs" "read_file" {}))))))))
+
+(deftest a-cancelled-call-returns-before-connecting
+  (tu/with-agent-dir
+    (fn [_]
+      (let [attempts (atom 0)
+            state (assoc (tu/cached-state config cached (:settings config))
+                         :ensure-connected-fn (fn [_] (swap! attempts inc) nil))]
+        (testing "tool call"
+          (is (= {:content "MCP call cancelled." :is-error true}
+                 (proxy/call-mcp-tool state "fs" "read_file" {}
+                                      {:signal (atom true)}))))
+        (testing "resource read"
+          (is (= {:content "MCP resource read cancelled." :is-error true}
+                 (proxy/read-mcp-resource state "fs" "file:///x"
+                                          {:signal (atom true)}))))
+        (testing "connect"
+          (is (= {:content "MCP connect cancelled." :is-error true}
+                 (proxy/execute (atom state) {:connect "fs"} nil
+                                {:signal (atom true)}))))
+        (is (zero? @attempts))))))

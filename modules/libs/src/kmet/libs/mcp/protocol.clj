@@ -156,6 +156,14 @@
   ([message] (ex-info message {:type :mcp-error}))
   ([message data] (ex-info message (assoc data :type :mcp-error))))
 
+(defn cancelled-error
+  "ex-info for a request stopped by the caller's cancel signal. The
+   transports carry :cancelled true so callers can distinguish it from a
+   timeout or a transport failure."
+  [method]
+  (mcp-error (str "MCP request cancelled: " method)
+             {:cancelled true :method method}))
+
 ;; ─── Result formatting (§7.6) ─────────────────────────────────────────────
 
 (defn- base64-byte-size

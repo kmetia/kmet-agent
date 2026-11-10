@@ -11,7 +11,10 @@
                                    custom headers (a tools/call's
                                    Mcp-Param-*, SEP-2243) and is consumed
                                    only by :streamable-http — stdio and
-                                   the legacy SSE binding ignore it
+                                   the legacy SSE binding ignore it;
+                                   :signal is a cancel signal (a
+                                   non-blocking derefable) polled while the
+                                   request waits
      (listen! conn filter on-frame)  2026-07-28 subscriptions/listen: open
                                    the conn's long-lived subscription and
                                    return {:stop! f :ended promise} (the
@@ -192,43 +195,62 @@
 
     :else nil))
 
+(def ^:private signal-poll-ms
+  "How often a signal-aware wait re-checks the cancel signal."
+  100)
+
 (defn wait-for-response
   "Wait on CH for the message with :id = ID. Anything else that arrives
    (notifications, server->client requests, stale responses) is
    dispatched and the wait continues. Returns the response map (with
    :result or :error), or ::eof when the channel closed (transport
    death) before the response arrived. The timeout is an overall deadline
-   — notifications do not extend it; on expiry the request is cancelled."
-  [conn ch id method timeout-ms on-notification send-async!]
+   — notifications do not extend it; on expiry the request is cancelled.
+   SIGNAL, when present, is a cancel signal polled in short slices; on
+   cancellation the request is cancelled and a :cancelled MCP error is
+   thrown."
+  [conn ch id method timeout-ms on-notification send-async! & [signal]]
   (let [deadline (+ (concurrent/monotonic-ms) timeout-ms)]
     (loop []
-      (let [remaining (- deadline (concurrent/monotonic-ms))
-            timeout-ch (async/timeout (max 1 remaining))
-            [value port] (async/alts!! [ch timeout-ch])]
-        (cond
-          (identical? port timeout-ch)
-          (do (cancel! conn id method "timed out" send-async!)
-              (throw (protocol/mcp-error (str "MCP request timed out after " timeout-ms "ms: " method)
-                                         {:timeout-ms timeout-ms :method method})))
-
-          (or (nil? value) (= eof-marker value)) eof-marker
-
-          :else
-          (let [msg value]
-            (cond
-              (not (map? msg)) (recur)
-              (= id (:id msg))
+      (if (and signal @signal)
+        (do (cancel! conn id method "cancelled" send-async!)
+            (throw (protocol/cancelled-error method)))
+        (let [remaining (- deadline (concurrent/monotonic-ms))]
+          (if (<= remaining 0)
+            (do (cancel! conn id method "timed out" send-async!)
+                (throw (protocol/mcp-error
+                        (str "MCP request timed out after " timeout-ms "ms: " method)
+                        {:timeout-ms timeout-ms :method method})))
+            (let [wait-ms (if signal (min remaining signal-poll-ms) remaining)
+                  timeout-ch (async/timeout (max 1 wait-ms))
+                  [value port] (async/alts!! [ch timeout-ch])]
               (cond
-                (contains? msg :error)
-                (throw (protocol/mcp-error (str "MCP error " (:code (:error msg)) ": "
-                                                (:message (:error msg)))
-                                           {:code (:code (:error msg))
-                                            :message (:message (:error msg))}))
-                :else msg)
+                (identical? port timeout-ch)
+                (if (and signal (< (concurrent/monotonic-ms) deadline))
+                  (recur)
+                  (do (cancel! conn id method "timed out" send-async!)
+                      (throw (protocol/mcp-error
+                              (str "MCP request timed out after " timeout-ms "ms: " method)
+                              {:timeout-ms timeout-ms :method method}))))
 
-              ;; not our response: a server->client request or notification
-              (or (contains? msg :id) (:method msg))
-              (do (dispatch-server-message! conn msg on-notification send-async!)
-                  (recur))
+                (or (nil? value) (= eof-marker value)) eof-marker
 
-              :else (recur))))))))
+                :else
+                (let [msg value]
+                  (cond
+                    (not (map? msg)) (recur)
+                    (= id (:id msg))
+                    (cond
+                      (contains? msg :error)
+                      (throw (protocol/mcp-error (str "MCP error " (:code (:error msg)) ": "
+                                                      (:message (:error msg)))
+                                                 {:code (:code (:error msg))
+                                                  :message (:message (:error msg))}))
+                      :else msg)
+
+                    ;; not our response: a server->client request or notification
+                    (or (contains? msg :id) (:method msg))
+                    (do (dispatch-server-message! conn msg on-notification send-async!)
+                        (recur))
+
+                    :else (recur)))))))))))

@@ -435,3 +435,30 @@
      (is (= {:late 2} (jsonrpc/request! conn "slow" {}
                                         {:timeout-ms jsonrpc/no-deadline}))
          "no-deadline waits instead of dropping the pending entry"))))
+
+(deftest request-cancels-on-signal
+  (let [signal (atom false)]
+    (run-with-conn
+     :content-length
+     (fn [_msg _send!] (reset! signal true))
+     (fn [conn]
+       (let [e (try (jsonrpc/request! conn "hang" {}
+                                      {:timeout-ms 5000 :signal signal})
+                    nil
+                    (catch Exception e e))]
+         (is (some? e))
+         (is (= :kmet.libs.jsonrpc/cancelled (:type (ex-data e))))
+         (is (= "hang" (:method (ex-data e))))
+         (is (empty? @(:pending conn))
+             "the abandoned request is removed from the pending map"))))))
+
+(deftest request-cancels-before-send
+  (run-with-conn
+   :content-length
+   (fn [_msg _send!] nil)
+   (fn [conn]
+     (let [e (try (jsonrpc/request! conn "hang" {}
+                                    {:timeout-ms 5000 :signal (atom true)})
+                  nil
+                  (catch Exception e e))]
+       (is (= :kmet.libs.jsonrpc/cancelled (:type (ex-data e))))))))

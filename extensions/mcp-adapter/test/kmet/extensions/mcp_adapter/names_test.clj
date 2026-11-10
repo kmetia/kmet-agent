@@ -4,11 +4,11 @@
    registration read the same assignment."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [kmet.extensions.mcp-adapter.core :as core]
             [kmet.extensions.mcp-adapter.metadata :as metadata]
             [kmet.extensions.mcp-adapter.names :as names]
             [kmet.extensions.mcp-adapter.status :as status]
-            [kmet.extensions.mcp-adapter.test-util :as tu]))
+            [kmet.extensions.mcp-adapter.test-util :as tu]
+            [kmet.extensions.mcp-adapter.tool-surface :as surface]))
 
 ;; ─── Sanitization ─────────────────────────────────────────────────────────
 
@@ -158,10 +158,10 @@
                                   "beta" {:conn (atom nil) :error (atom nil)
                                           :failed-at (atom nil)}}
                         :cache cache}
-            entries (@#'core/catalog-entries (atom base-state))
+            entries (surface/catalog-entries (atom base-state))
             assigned (names/assign-names entries {"alpha" :none "beta" :none})
             state (assoc base-state :tool-names assigned)
-            specs (@#'core/direct-tools-specs (atom state))]
+            specs (surface/direct-tools-specs (atom state))]
         (testing "catalog-entries covers every cached tool"
           (is (= #{["alpha" :tool "echo"] ["beta" :tool "echo"]}
                  (set (map (fn [e] [(:server e) (:kind e) (:id e)]) entries)))))

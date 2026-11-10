@@ -262,6 +262,38 @@
   []
   (quot (System/nanoTime) 1000000))
 
+(def ^:private signal-poll-ms
+  "How often a signal-aware wait re-checks the cancel signal."
+  100)
+
+(defn deref-signal
+  "Deref P until it delivers, SIGNAL fires, or TIMEOUT-MS elapses. TIMEOUT-MS
+   nil waits without a deadline; SIGNAL nil disables cancellation. SIGNAL is
+   a non-blocking derefable (an atom or an or-signal view). Returns
+   {:status :done :value v}, {:status :cancelled}, or {:status :timeout}."
+  [p signal timeout-ms]
+  (let [deadline (when timeout-ms (+ (monotonic-ms) timeout-ms))
+        no-value (Object.)]
+    (if (nil? signal)
+      (if timeout-ms
+        (let [v (deref p timeout-ms no-value)]
+          (if (identical? v no-value) {:status :timeout} {:status :done :value v}))
+        {:status :done :value (deref p)})
+      (loop []
+        (cond
+          @signal {:status :cancelled}
+          :else
+          (let [slice (if deadline
+                        (min signal-poll-ms
+                             (max 1 (- deadline (monotonic-ms))))
+                        signal-poll-ms)
+                v (deref p slice no-value)]
+            (cond
+              (not (identical? v no-value)) {:status :done :value v}
+              @signal {:status :cancelled}
+              (and deadline (>= (monotonic-ms) deadline)) {:status :timeout}
+              :else (recur))))))))
+
 (defn await-all
   "Deref every awaitable in HANDLES against one deadline of TIMEOUT-MS from now,
    spent on `monotonic-ms`. Answers the handles that did not settle in time —

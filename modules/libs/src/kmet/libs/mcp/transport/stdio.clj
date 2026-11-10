@@ -83,6 +83,19 @@
       (protocol/mcp-error (str "MCP request timed out after " timeout-ms "ms: " method)
                           {:timeout-ms timeout-ms :method method}))
 
+    ::jrpc/cancelled
+    (do
+      ;; the caller stopped waiting — tell the server to stop working; a
+      ;; signal that fired before the write has no request id to cancel
+      (when-let [id (:id (ex-data e))]
+        (try (jrpc/notify! conn "notifications/cancelled"
+                           (cond-> {:requestId id
+                                    :reason (str "kmet: " method " — cancelled")}
+                             (protocol/modern-conn? conn)
+                             (update :_meta merge (protocol/conn-meta conn))))
+             (catch Exception _ nil)))
+      (protocol/cancelled-error method))
+
     ::jrpc/request-error
     (let [{:keys [code message]} (:error (ex-data e))]
       (protocol/mcp-error (str "MCP error " code ": " message)
@@ -191,13 +204,14 @@
   "Send one request and return its :result. The jsonrpc session owns the
    id and the response correlation; the timeout is translated into the MCP
    error contract (and the abandoned request cancelled). OPTS is the
-   transport-neutral request options map — stdio consumes none of it
-   (:http-headers is streamable-HTTP only)."
-  [conn method params timeout-ms on-notification _opts]
+   transport-neutral request options map — stdio consumes :signal (a
+   cancel signal, a non-blocking derefable); :http-headers is
+   streamable-HTTP only."
+  [conn method params timeout-ms on-notification {:keys [signal]}]
   (transport/touch! conn)
   (reset! (:progress-callback conn) on-notification)
   (try
-    (jrpc/request! conn method params {:timeout-ms timeout-ms})
+    (jrpc/request! conn method params {:timeout-ms timeout-ms :signal signal})
     (catch Exception e
       (throw (translate-exception conn e method timeout-ms)))
     (finally

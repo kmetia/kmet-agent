@@ -346,24 +346,43 @@
     (deref done timeout-ms nil))
   @(:stderr-tail conn))
 
+(defn- await-response
+  "Wait for the response promise P. Returns the delivered response,
+   ::cancelled when SIGNAL fires, or ::timeout at the caller's deadline
+   (`no-deadline` waits without one)."
+  [p signal timeout-ms]
+  (let [timeout (when-not (= no-deadline timeout-ms)
+                  (or timeout-ms default-timeout-ms))
+        {:keys [status value]} (concurrent/deref-signal p signal timeout)]
+    (case status
+      :done value
+      :cancelled ::cancelled
+      :timeout ::timeout)))
+
 (defn request!
   "Sends METHOD/PARAMS and blocks for the matching response (up to
    TIMEOUT-MS, default 30000; no-deadline waits without one). Returns the
    response's :result; throws ex-info on a JSON-RPC error
-   (::request-error), timeout (::timeout) or transport death
-   (::transport-dead); every failure carries the request :id and :method
-   in ex-data (MCP correlates a notifications/cancelled on the abandoned
-   id). Late responses after a timeout are dropped as stale.
+   (::request-error), timeout (::timeout), transport death
+   (::transport-dead) or cancellation (::cancelled); every failure carries
+   the request :id and :method in ex-data (MCP correlates a
+   notifications/cancelled on the abandoned id). Late responses after a
+   timeout are dropped as stale.
 
    OPTS: :timeout-ms as above, :id to use a caller-allocated id instead
-   of allocating one. A caller that must reference the request later (a
-   cancelled subscriptions/listen) allocates it with (swap! (:id-counter
-   conn) inc) so it stays unique."
+   of allocating one, and :signal — a cancel signal (a non-blocking
+   derefable, usually an atom) polled while the wait runs. A caller that must reference the request later (a cancelled
+   subscriptions/listen) allocates it with (swap! (:id-counter conn) inc)
+   so it stays unique."
   ([conn method params] (request! conn method params {}))
-  ([conn method params {:keys [timeout-ms id]}]
+  ([conn method params {:keys [timeout-ms id signal]}]
    (bump-last-used! conn)
    (when @(:closed conn)
      (throw (ex-info* ::transport-dead "jsonrpc connection is closed")))
+   ;; a signal that fired before the request was written has no id to cancel
+   (when (and signal @signal)
+     (throw (ex-info* ::cancelled "jsonrpc request cancelled"
+                      {:method method})))
    (let [id (or id (swap! (:id-counter conn) inc))
          p (promise)
          wl (:write-lock conn)]
@@ -377,10 +396,13 @@
                           (str "jsonrpc write failed: "
                                (or (ex-message e) (str e)))
                           {:id id :method method}))))
-     (let [res (if (= no-deadline timeout-ms)
-                 (deref p)
-                 (deref p (or timeout-ms default-timeout-ms) ::timeout))]
+     (let [res (await-response p signal timeout-ms)]
        (cond
+         (= res ::cancelled)
+         (do (locking wl (swap! (:pending conn) dissoc id))
+             (throw (ex-info* ::cancelled "jsonrpc request cancelled"
+                              {:id id :method method})))
+
          (= res ::timeout)
          (do (locking wl (swap! (:pending conn) dissoc id))
              (throw (ex-info* ::timeout

@@ -298,8 +298,8 @@
       :commands {:lint {:description \"Lint\" :run (fn [{:keys [args]}] ...)}}}
 
    The service reads it when an eval environment is built and on each later
-   eval call (the build's read is reused by the first call); `/eval sources`
-   and help read it too. It receives
+   eval call (the build's read is reused by the first call and receives that
+   call's `:signal`); `/eval sources` and help read it too. It receives
    `{:cwd :project-dir :agent-dir :signal :verbs}`; a throwing source or a
    bad shape contributes nothing and is reported. OPTS may carry `:owner` —
    an extension passes its own owner path so unload disposes the source.
@@ -418,7 +418,7 @@
 (defn execute-tool
   "Execute REGISTRY's tool by name with given arguments.
    opts — {:on-update (fn [partial]) streaming callback (passed to the
-   tool's execute when it declares :streams?); :signal — cancel atom; :ctx
+   tool's execute when it declares :streams?); :signal — cancel signal; :ctx
    — extension context map for :contextual? tools (pi: execute(toolCallId,
    params, signal, onUpdate, ctx)), carrying the run's ctx under :srce-ctx
    when the call belongs to one (`kmet.app.loop.tool-exec`, and the sandbox

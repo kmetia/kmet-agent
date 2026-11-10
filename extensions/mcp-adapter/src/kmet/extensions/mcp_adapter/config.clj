@@ -264,6 +264,7 @@
        "            :tool-prefix :server          ;; :server | :none | :short | :mcp\n"
        "            :disable-proxy-tool false}\n"
        "            ;; :script-mode true            ;; contribute MCP tools to the codemode sandbox\n"
+       "            ;; :eval-source true            ;; contribute the ext.mcp eval source\n"
        "            ;; :mcp-footer-status :full     ;; :full | :compact | :off (footer)\n"
        "            ;; :show-status-icon true      ;; show the 🔌 prefix (footer)\n"
        "            ;; :idle-timeout 10             ;; minutes; 0 disables reaping\n"

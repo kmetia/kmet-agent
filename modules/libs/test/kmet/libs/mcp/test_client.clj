@@ -7,6 +7,7 @@
             [kmet.libs.mcp.client :as mcp]
             [kmet.libs.mcp.protocol :as protocol]
             [kmet.libs.mcp.transport.http :as http]
+            [kmet.libs.mcp.transport.sse :as sse]
             [kmet.libs.mcp.transport.stdio :as stdio]))
 
 ;; ─── URI templates ────────────────────────────────────────────────────────
@@ -972,3 +973,73 @@
           (mcp/listen! conn {:toolsListChanged true})
           (is (wait-for #(= {:toolsListChanged true} @filter)))
           (is (wait-for #(true? (:failed? (listen-state conn))))))))))
+
+(deftest request!-forwards-the-cancel-signal
+  (let [signal (atom false)
+        seen (atom nil)]
+    (with-redefs [http/request! (fn [_conn _method _params _timeout _on-notification opts]
+                                  (reset! seen opts)
+                                  {:ok true})]
+      (is (= {:ok true}
+             (mcp/request! (era-conn :legacy) "tools/call" {} {:signal signal})))
+      (is (= signal (:signal @seen))))))
+
+(deftest request!-stops-before-dispatch-when-cancelled
+  (let [called (atom false)]
+    (with-redefs [http/request! (fn [& _]
+                                  (reset! called true)
+                                  {:ok true})]
+      (let [e (try (mcp/request! (era-conn :legacy) "tools/call" {}
+                                 {:signal (atom true)})
+                   nil
+                   (catch Exception e e))]
+        (is (= :mcp-error (:type (ex-data e))))
+        (is (true? (:cancelled (ex-data e))))
+        (is (false? @called))))))
+
+(deftest read-resource-forwards-the-cancel-signal
+  (let [signal (atom false)
+        seen (atom nil)]
+    (with-redefs [mcp/request! (fn [_conn method params opts]
+                                 (reset! seen {:method method :params params
+                                               :opts opts})
+                                 {:contents []})]
+      (is (= {:contents []}
+             (mcp/read-resource {:transport :streamable-http}
+                                "file:///x" {:signal signal})))
+      (is (= "resources/read" (:method @seen)))
+      (is (= signal (get-in @seen [:opts :signal]))))))
+
+(deftest ^:slow request!-rechecks-the-signal-after-the-request-lock
+  (let [lock (Object.)
+        held (promise)
+        release (promise)
+        signal (atom false)
+        dispatched (atom false)
+        holder (future
+                 (locking lock
+                   (deliver held true)
+                   (deref release 5000 nil)))]
+    (try
+      (is (true? (deref held 2000 false)))
+      (with-redefs [sse/request! (fn [& _]
+                                   (reset! dispatched true)
+                                   {:ok true})]
+        (let [call (future
+                     (try (mcp/request! {:transport :sse :req-lock lock}
+                                        "tools/call" {}
+                                        {:timeout-ms 5000 :signal signal})
+                          (catch Exception e e)))]
+          ;; let the request reach the lock, then cancel while it waits
+          (Thread/sleep 50)
+          (reset! signal true)
+          (deliver release true)
+          (let [e (deref call 2000 ::timeout)]
+            (is (instance? Exception e))
+            (is (= :mcp-error (:type (ex-data e))))
+            (is (true? (:cancelled (ex-data e))))
+            (is (false? @dispatched)
+                "the request is abandoned before the transport dispatch"))))
+      (finally
+        (deliver release true)
+        (deref holder 2000 nil)))))
