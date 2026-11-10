@@ -496,6 +496,10 @@ An idle UI runs zero bodies.
   ref and forces a render (`kmet.ui.tui.plugins`).
 - **Error contract**: a throwing component fn crashes the render loop
   (Throwable → kmet-render-crash.log → tui-stop) — loud beats silently wrong.
+  An input-read throw never writes to stderr (it would corrupt the live
+  frame): class, message and stack go to kmet-input-error.log, and five
+  consecutive read failures stop the TUI instead of spinning behind a frozen
+  frame.
 
 **The three forms** (Reagent's taxonomy):
 
@@ -1712,6 +1716,7 @@ per run.
 |---|---|
 | `kmet-crash.log` | a rendered line exceeds the terminal width — dumps all rendered lines with visible widths + the offending index; the frame truncates the line and keeps running |
 | `kmet-render-crash.log` | a render body threw — full stack trace, then the TUI stops (loud-crash contract, §2.5) |
+| `kmet-input-error.log` | the input reader's bounded read threw, or a processed batch threw — full stack trace; an identical class+message is logged once per reader session, and five consecutive read failures also stop the TUI |
 | `kmet-debug.log` | opt-in via `--debug`: lifecycle events (submit, cancel, agent turns) and the exit survivor report (live components/reactions/armed timers, §5.1); in `logs/` under the process cwd, size-capped |
 | `kmet-error.log` | unhandled top-level exceptions; in `logs/` under the process cwd, size-capped |
 

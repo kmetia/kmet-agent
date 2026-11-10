@@ -872,6 +872,48 @@
       (Thread/sleep 5)))
   (pred))
 
+(defn- failing-terminal
+  "ITerminal stub whose bounded read always throws EX."
+  [ex]
+  (reify term/ITerminal
+    (start! [_ _ _] nil)
+    (stop! [_] nil)
+    (started? [_] true)
+    (write-output [_ _] nil)
+    (read-input [_ _] (throw ex))
+    (columns [_] 80)
+    (rows [_] 24)
+    (set-progress! [_ _] nil)))
+
+(t/deftest ^:slow test-reader-read-failures-log-and-stop
+  ;; The reader printed only (ex-message e) to stderr, corrupting the live
+  ;; frame, and kept spinning: a backend whose reads always threw looked
+  ;; like a frozen session with no diagnostic. One class+message goes to
+  ;; kmet-input-error.log with its stack; five in a row stop the TUI.
+  (let [log (fs/create-temp-file {:dir (fs/create-dirs "target")
+                                  :prefix "kmet-input-error-"
+                                  :suffix ".log"})
+        tui (core/create-tui (failing-terminal (NullPointerException.)))]
+    (try
+      (with-redefs [frame/log-path (fn [_] (str log))]
+        (reset! (:running? tui) true)
+        ((var kmet.tui.core/start-input-reader) tui)
+        (when-let [f @(:input-reader tui)]
+          (deref f 5000 nil)))
+      (t/is @(:stopped? tui) "consecutive read failures stop the TUI")
+      (t/is (not @(:running? tui)))
+      (let [text (slurp (str log))]
+        (t/is (str/includes? text "reading input"))
+        (t/is (str/includes? text "java.lang.NullPointerException: <no message>"))
+        (t/is (= 1 (count (re-seq #"java\.lang\.NullPointerException" text)))
+              "an identical failure is logged once, not on every retry"))
+      (finally
+        (reset! (:running? tui) false)
+        (reset! (:stopped? tui) true)
+        (when-let [f @(:input-reader tui)]
+          (deref f 3000 nil))
+        (fs/delete-if-exists log)))))
+
 (t/deftest ^:slow test-reader-thread-kitty-enter-submits
   ;; End-to-end through the real reader thread: the flags report activates
   ;; kitty, the arrow's press+release is filtered, and Enter submits — the

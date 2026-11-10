@@ -1698,6 +1698,32 @@
                          out state)
       out)))
 
+(def ^:private input-error-log
+  "The input reader's diagnostic log: class, message and full stack for a
+   failed terminal read or input-processing pass (see report-input-error!)."
+  "kmet-input-error.log")
+
+(def ^:private max-consecutive-read-failures
+  "Consecutive failing bounded reads before the reader treats the terminal
+   backend as dead: log once more and stop the TUI rather than spin on an
+   error every 100ms behind a frozen frame."
+  5)
+
+(defn- report-input-error!
+  "Append E (class, message, stack) to kmet-input-error.log under CONTEXT.
+   SEEN dedupes an identical context+class+message for one reader session, so a
+   persistent failure cannot grow the file without bound. Never writes to
+   stderr: it would corrupt the live frame."
+  [e context seen]
+  (let [k [context (.getName (class e)) (ex-message e)]]
+    (when-not (contains? @seen k)
+      (swap! seen conj k)
+      (frame/append-log!
+       (frame/log-path input-error-log)
+       (str "[" (java.time.LocalDateTime/now) "] " context "\n"
+            (.getName (class e)) ": " (or (ex-message e) "<no message>") "\n"
+            (str/join "\n" (.getStackTrace e)) "\n")))))
+
 (defn- start-input-reader [tui]
   (let [term @(:terminal tui)
         read-fn (fn [timeout-ms] (terminal/read-input term timeout-ms))]
@@ -1705,7 +1731,9 @@
     ;; session) exits as soon as a fresh backend is installed by resume.
     (reset! (:current-reader tui) term)
     (let [f (future
-              (let [buf (atom "")]
+              (let [buf (atom "")
+                    seen-errors (atom #{})
+                    read-failures (atom 0)]
                 (while (and @(:running? tui) (not @(:stopped? tui))
                             (identical? term @(:current-reader tui)))
                   (try
@@ -1717,6 +1745,7 @@
                     ;; in-flight read; the FFM pump thread never wakes it); the
                     ;; native backend's poll(read) honors the same bound.
                     (let [ch (terminal/read-input term 100)]
+                      (reset! read-failures 0)
                       (when (>= ch 0)
                         ;; Drain everything ALREADY QUEUED behind the first
                         ;; char (pi: stdin 'data' events deliver chunks, not
@@ -1768,13 +1797,22 @@
                             (swap! buf str batch)
                             (process-input-buffer! tui read-fn buf)
                             (catch Exception e
-                              (binding [*out* *err*]
-                                (println "input:" (ex-message e))))))))
+                              (when (and @(:running? tui)
+                                         (identical? term @(:current-reader tui)))
+                                (report-input-error! e "processing input" seen-errors)))))))
                     (catch Exception e
                       (when (and @(:running? tui)
                                  (identical? term @(:current-reader tui)))
-                        (binding [*out* *err*]
-                          (println "input:" (ex-message e)))))))))]
+                        (report-input-error! e "reading input" seen-errors)
+                        (when (>= (swap! read-failures inc)
+                                  max-consecutive-read-failures)
+                          (frame/append-log!
+                           (frame/log-path input-error-log)
+                           (str "[" (java.time.LocalDateTime/now) "] "
+                                max-consecutive-read-failures
+                                " consecutive read failures; stopping the TUI\n"))
+                          (when (identical? term @(:current-reader tui))
+                            (tui-stop tui)))))))))]
       (reset! (:input-reader tui) f))))
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Start / Stop
