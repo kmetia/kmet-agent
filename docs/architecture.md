@@ -706,15 +706,19 @@ inner tool calls fan out as promises and local work can use `spawn`. A
 broken library file is reported under `:failures` and skipped. The pure parse
 and address rules live in `kmet.app.eval.definitions`.
 
-Every eval call's full result body is kept in a bounded per-session ring,
+Eval keeps each call's output/error body in a bounded per-session ring,
 newest first. `(eval/result)` lists the recent ids with status, size and a
-clipped head; `(eval/result ID)` reads the first 6,000 characters and
-`(eval/result ID :offset N :limit M)` reads a slice. A truncated result keeps
-its tail and names the read form in its notice; an errored result carries its
-id after the error. Eval evaluates a call's top-level forms one at a time, so
-an error begins `ERROR` and, with several forms, names the failing form and
-what already ran; `codemode` keeps the whole-source path. `(eval/help :results)`
-states the emission, cap, truncation and error contract.
+clipped head; `(eval/result :last)` reads the newest, `(eval/result ID)`
+reads the first 6,000 characters and `(eval/result ID :offset N :limit M)`
+reads a slice. A call using `eval/result` is not stored back, so slicing a
+large result cannot evict it. The ring holds the script body, not the final
+`[eval: …]` change report or error status. A truncated result keeps its tail
+and names the read form in its notice; an errored result carries its id
+after the error. Eval evaluates a call's top-level forms one at a time, so
+an error begins `ERROR` and, with several forms, names the failing form
+and what already ran; `codemode` keeps the whole-source path.
+`(eval/help :results)` states the emission, cap, truncation and error
+contract.
 
 Every library record carries its model-visible interface, parsed from the
 defining form without evaluation: `:doc` (the docstring, else an attr-map or
@@ -745,9 +749,10 @@ saved name without a docstring is not written; the saved file keeps its
 documented version. A `defmethod` is covered by its multimethod.
 `(eval/keep 'name "doc")` saves a live-only definition without
 re-evaluating or resending it: it inserts the docstring into the retained
-source, writes the record, and the next prompt manifest shows it saved. It
-refuses an already saved name, a source-provided or extension definition,
-and a kind without a docstring slot (a `defmethod`, `declare`, or
+source, writes the record, and the next prompt manifest shows it saved. A
+`defmethod` is saved with its already-saved multimethod. It refuses an already
+saved name, a source-provided or extension definition, a method whose
+multimethod is not saved, and a kind without a docstring slot (`declare` or
 `defonce`).
 
 Prompt discovery. Prompt start appends one hidden `:eval-library` custom

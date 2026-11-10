@@ -554,14 +554,35 @@
         (:truncated? entry) (assoc :truncated? true)
         (< end total) (assoc :next-offset end)))))
 
+(defn- latest-result-id
+  "The newest stored result id, or nil when the ring is empty."
+  [env]
+  (:id (peek @(:results env))))
+
+(defn- resolve-result-id
+  "Resolve :last, -1, or \"last\" to ENV's newest result id."
+  [env id]
+  (if (or (= id :last)
+          (= id -1)
+          (and (string? id) (= "last" (str/lower-case id))))
+    (latest-result-id env)
+    id))
+
 (defn- result-command
-  "The (eval/result) command: no args lists, ID reads, and the remaining
-   args are an opts map or keyword pairs (:offset N :limit M)."
+  "The (eval/result) command: no args lists; ID reads (:last, -1 or
+   \"last\" reads the newest); the remaining args are an opts map or
+   keyword pairs (:offset N :limit M). A call using (eval/result) is not
+   stored back into the ring, so slicing a large result cannot evict it."
   [env & args]
+  (reset! (:skip-result-store? env) true)
   (case (count args)
     0 (result-list env)
-    1 (result-read env (first args))
-    (let [[id & more] args
+    1 (let [id (resolve-result-id env (first args))]
+        (when (nil? id)
+          (bad-request! "no eval results yet" {:id (first args)}))
+        (result-read env id))
+    (let [[raw-id & more] args
+          id (resolve-result-id env raw-id)
           opts (cond
                  (and (= 1 (count more)) (map? (first more))) (first more)
                  (and (= 1 (count more)) (nil? (first more))) {}
@@ -569,6 +590,8 @@
                  (bad-request! "eval/result needs an opts map or keyword pairs"
                                {:args (vec args)})
                  :else (apply hash-map more))]
+      (when (nil? id)
+        (bad-request! "no eval results yet" {:id raw-id}))
       (result-read env id opts))))
 
 (def ^:private build-report-name-limit
@@ -724,10 +747,10 @@
                    :doc "List every loaded library definition with its scope; (eval/help :library) also lists session-only definitions."
                    :arglists '([])}
    "eval/keep" {:name "eval/keep" :kind :verb
-                :doc "Save a session-only definition, adding DOC when the live form has none; nothing is re-evaluated."
+                :doc "Save a session-only definition, adding DOC when the live form has none; a defmethod uses its address string and saved multimethod."
                 :arglists '([name] [name doc])}
    "eval/result" {:name "eval/result" :kind :verb
-                  :doc "List recent eval results, or read one result or slice: :offset N :limit M, or an {:offset N :limit M} map."
+                  :doc "List recent eval results, or read one result or slice (ID may be :last; :offset N :limit M or a map); a call using it is not stored."
                   :arglists '([] [id] [id & opts])}
    "eval/sources" {:name "eval/sources" :kind :verb
                    :doc "List the mounted eval sources and their contributed verbs."
@@ -894,12 +917,14 @@
        "call reports its final value instead. stdout and stderr are discarded. "
        "The result is bounded at 16 KiB / 2,000 lines by default; "
        ":max-output-bytes raises it to 50 KiB. A truncated result keeps its "
-       "tail and names its result id. Every eval result is kept in the "
-       "session's recent-result ring: (eval/result) lists them, (eval/result "
-       "ID) reads the first 6,000 characters, and (eval/result ID {:offset N "
-       ":limit M}) reads a slice. Errors begin with ERROR and, in a multi-form "
-       "call, name the failing form and what ran. (emit-image path) attaches "
-       "an image."))
+       "tail and names its result id. The session's recent-result ring keeps "
+       "each eval call's output/error body: (eval/result) lists "
+       "them, (eval/result :last) reads the newest, (eval/result ID) reads the "
+       "first 6,000 characters, and (eval/result ID {:offset N :limit M}) "
+       "reads a slice. A call using eval/result is not stored back. The ring holds "
+       "the script body, not the final [eval: ...] change report or error status. Errors begin "
+       "with ERROR and, in a multi-form call, name the failing form and what "
+       "ran. (emit-image path) attaches an image."))
 
 (defn- core-help
   []
@@ -1335,6 +1360,7 @@
              :sticky-ns (atom nil)
              :results (atom [])
              :result-next (atom 0)
+             :skip-result-store? (atom false)
              :lock (Object.)}
         interrupt (script/interrupt-holder)
         env-ref (atom nil)
@@ -1744,9 +1770,10 @@
 (defn- keep-definition!
   "Save RAW-NAME's live-only definition, adding DOC as its docstring when
    the live form has none. The source is edited structurally; nothing is
-   re-evaluated, because the live definition already runs. Refuses a name
-   that is already saved, source-provided, an extension, or whose kind has
-   no docstring slot."
+   re-evaluated, because the live definition already runs. A defmethod is
+   saved with its multimethod when that multimethod is already saved.
+   Refuses a name that is already saved, source-provided, an extension, a
+   method whose multimethod is not saved, or a kind with no docstring slot."
   [env cwd raw-name doc]
   (let [name (when-let [raw (->name raw-name)]
                (qualify-name (env-ns env) raw))]
@@ -1763,7 +1790,11 @@
                     {:name name})
 
       :else
-      (let [record (get @(:unwritten-records env) name)]
+      (let [record (get @(:unwritten-records env) name)
+            method? (= :defmethod (:kind record))
+            parent-saved? (and method?
+                               (some? (active-record env
+                                                     (defmethod-multimethod name))))]
         (cond
           (nil? record)
           (bad-request! (if (active-record env name)
@@ -1771,28 +1802,32 @@
                           (str "no session-only definition named " name))
                         {:name name})
 
-          (= :defmethod (:kind record))
-          (bad-request! (str name " is a defmethod; keep its multimethod instead")
+          (and method? (not parent-saved?))
+          (bad-request! (str name " is a defmethod; keep its multimethod first")
                         {:name name})
 
-          (not (defs/docstring-kind? (:kind record)))
+          (and (not method?)
+               (not (defs/docstring-kind? (:kind record))))
           (bad-request! (str name " is a " (name (:kind record))
                              "; that form has no docstring slot")
                         {:name name})
 
           :else
-          (let [doc (or (some-> doc str/trim not-empty)
-                        (some-> (:doc record) str/trim not-empty))]
-            (when-not doc
+          (let [doc (when-not method?
+                      (or (some-> doc str/trim not-empty)
+                          (some-> (:doc record) str/trim not-empty)))]
+            (when (and (not method?) (not doc))
               (bad-request! (str "keep needs a docstring for " name)
                             {:name name}))
-            (let [source (if (str/blank? (:doc record))
+            (let [source (if (and (not method?) (str/blank? (:doc record)))
                            (or (defs/add-docstring (:source record) doc)
                                (bad-request! (str "cannot add a docstring to " name)
                                              {:name name}))
                            (:source record))
-                  result (apply-definition! env cwd
-                                            (assoc record :doc doc :source source))]
+                  record (if method?
+                           record
+                           (assoc record :doc doc :source source))
+                  result (apply-definition! env cwd record)]
               (if-let [error (:error result)]
                 (bad-request! (str "keep failed: " error) {:name name})
                 (do (swap! (:change-lines env) conj (:line result))
@@ -1977,6 +2012,7 @@
                 (bad-request! (str "eval " (:name bad)
                                    " is system-owned; define it in user or a model namespace")
                               {:name (:name bad)}))
+            _ (reset! (:skip-result-store? env) false)
             codemode (fn []
                        (let [sources (if (and (compare-and-set! (:fresh-sources? env) true false)
                                               (= @(:source-ids env)
@@ -1996,7 +2032,8 @@
                                       :ns-atom (:sticky-ns env)
                                       :split-forms? true
                                       :result-store (fn [result]
-                                                      (store-result! env result))
+                                                      (when-not @(:skip-result-store? env)
+                                                        (store-result! env result)))
                                       :source-namespaces (:namespaces sources)
                                       :extra-details (cond-> {:sources (:info sources)}
                                                        (seq (:errors sources))

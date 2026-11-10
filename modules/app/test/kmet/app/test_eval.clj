@@ -43,6 +43,21 @@
               (support/eval! env
                              "(some #(= \"user/loose\" (:name %)) (eval/library))"))))))
 
+(t/deftest test-a-defmethod-follows-its-saved-multimethod
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(defmulti pick identity)")
+    (support/eval! env "(defmethod pick :x [_] :x)")
+    (let [kept-multi (support/eval! env "(eval/keep 'user/pick \"Pick.\")")
+          kept-method (support/eval! env "(eval/keep \"user/pick :x\")")]
+      (t/is (not (:is-error kept-multi)) (:content kept-multi))
+      (t/is (not (:is-error kept-method)) (:content kept-method))
+      (t/is (str/includes? (:content kept-method)
+                           "[eval: defined user/pick :x")))
+    (t/is (= ":x" (:content (support/eval! env "(pick :x)"))))
+    (t/is (str/includes?
+           (:content (support/eval! env "(eval/describe \"user/pick :x\")"))
+           ":defmethod"))))
+
 (t/deftest test-an-error-names-the-failing-form
   (let [env (support/eval-ctx)
         result (support/eval! env "(+ 1 2) (inc \"a\")")]
@@ -59,13 +74,19 @@
     (t/is (str/includes?
            (:content (support/eval! env "(eval/result 1 :offset 0 :limit 20)"))
            "content"))
-    (t/is (str/includes? (:content (support/eval! env "(eval/result)"))
-                         ":id 1"))))
+    (let [listed (:content (support/eval! env "(eval/result)"))]
+      (t/is (str/includes? listed ":id 1"))
+      (t/is (not (str/includes? listed ":id 2"))
+            "result reads do not enter the ring"))
+    (t/is (str/includes? (:content (support/eval! env "(eval/result :last)"))
+                         "content"))))
 
 (t/deftest test-help-explains-results
-  (let [env (support/eval-ctx)]
-    (t/is (str/includes? (:content (support/eval! env "(eval/help :results)"))
-                         "eval/result"))))
+  (let [env (support/eval-ctx)
+        text (:content (support/eval! env "(eval/help :results)"))]
+    (t/is (str/includes? text "eval/result"))
+    (t/is (str/includes? text ":last"))
+    (t/is (str/includes? text "not stored"))))
 
 (t/deftest test-two-services-are-two-agents
   (let [a (support/eval-ctx)
