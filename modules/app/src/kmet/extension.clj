@@ -447,7 +447,7 @@
                                        (swap! state assoc-in [:tool-sources id] tools-fn)
                                        (fn [] (swap! state update :tool-sources dissoc id)))
               :unregister-tool-source! (fn [id] (swap! state update :tool-sources dissoc id))
-              :register-eval-source! (fn [id sources-fn]
+              :register-eval-source! (fn [id sources-fn & [_opts]]
                                        (swap! state assoc-in [:eval-sources id] sources-fn)
                                        (fn [] (swap! state update :eval-sources dissoc id)))
               :unregister-eval-source! (fn [id] (swap! state update :eval-sources dissoc id))
