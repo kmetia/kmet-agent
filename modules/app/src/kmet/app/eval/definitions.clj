@@ -12,7 +12,8 @@
    written."
   (:require [clojure.string :as str]
             [rewrite-clj.node :as n]
-            [rewrite-clj.parser :as p]))
+            [rewrite-clj.parser :as p]
+            [rewrite-clj.zip :as z]))
 
 (def ^:private defining-heads
   "The top-level defining forms the eval tool tracks. `defmethod` is
@@ -103,6 +104,38 @@
                 (name-doc named))]
     {:doc doc
      :arglists arglists}))
+
+(def ^:private keep-docstring-heads
+  "Forms whose source can gain a docstring without changing its meaning."
+  (disj docstring-heads "defonce"))
+
+(defn docstring-kind?
+  "True when a definition of KIND can carry a docstring."
+  [kind]
+  (contains? keep-docstring-heads (name kind)))
+
+(defn add-docstring
+  "SOURCE, one defining form, with DOC inserted as its docstring. Returns
+   nil when the form takes no docstring (a method, a declaration, or a
+   `def` without an init form). The source is edited structurally, so its
+   formatting and any comments stay as written."
+  [source doc]
+  (when (and (string? doc) (not (str/blank? doc)))
+    (try
+      (let [zl (z/of-string source)
+            node (z/node zl)]
+        (when (= :list (n/tag node))
+          (let [children (remove n/whitespace-or-comment? (n/children node))
+                head (some-> (first children) n/string)]
+            (when (and (contains? keep-docstring-heads head)
+                       (or (not= head "def") (>= (count children) 3)))
+              (-> zl
+                  z/down
+                  z/right
+                  (z/insert-right* (p/parse-string (pr-str doc)))
+                  (z/insert-right* (n/spaces 1))
+                  z/root-string)))))
+      (catch Throwable _ nil))))
 
 (defn- name-key
   "The definition address of NAMED in NS: a qualified name keeps its own

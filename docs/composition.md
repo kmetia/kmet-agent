@@ -370,7 +370,7 @@ Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) na
 
 **Description:**
 
-Evaluate Clojure in this session's persistent SCI sandbox (babashka surface: fs, slurp, spit, require; no tool calls). File and shell verbs: read, write, edit, bash, sh (also core/<verb>). Calls serialize: put independent work in one call and fan out with (spawn f) or pmap. Eval verbs: a top-level definition with a docstring is saved; one without is live-only. Local let/fn bindings are scratch. Define in user; system namespaces are read-only. Report with (emit value) or the final value; stdout and stderr are discarded. (eval/help) lists the surface.
+Evaluate Clojure in this session's persistent SCI sandbox (babashka surface: fs, slurp, spit, require; no tool calls). File and shell verbs: read, write, edit, bash, sh (also core/<verb>). Calls serialize: put independent work in one call and fan out with (spawn f) or pmap. Eval verbs: a top-level definition with a docstring is saved; one without is live-only. Reuse definitions: (eval/library) lists saved ones; define what recurs. Local let/fn bindings are scratch. Define in user; system namespaces are read-only. Report with (emit value) or the final value; stdout and stderr are discarded. (eval/help) lists the surface.
 
 ---
 

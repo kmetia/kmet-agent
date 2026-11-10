@@ -23,6 +23,50 @@
     (t/is (str/includes? (:content result) "[eval: defined user/kept"))
     (t/is (= "43" (:content (support/eval! env "(+ kept 1)"))))))
 
+(t/deftest test-a-session-only-definition-is-kept
+  (let [env (support/eval-ctx)
+        live (support/eval! env "(defn loose [] :ok)")]
+    (t/is (str/includes? (:content live) "live only, not saved"))
+    (t/is (str/includes? (:content live) "(eval/keep 'user/loose"))
+    (let [kept (support/eval! env "(eval/keep 'loose \"Loose doc.\")")]
+      (t/is (not (:is-error kept)) (:content kept))
+      (t/is (str/includes? (:content kept) "[eval: defined user/loose")))
+    (t/is (fs/exists? (support/library-file env :cwd "user" "loose.clj")))
+    (t/is (str/includes?
+           (slurp (support/library-file env :cwd "user" "loose.clj"))
+           "Loose doc."))
+    (t/is (str/includes? (:content (support/eval! env "(eval/describe 'loose :doc)"))
+                         "Loose doc."))
+    (t/is (= ":ok" (:content (support/eval! env "(loose)"))))
+    (t/is (= "true"
+             (:content
+              (support/eval! env
+                             "(some #(= \"user/loose\" (:name %)) (eval/library))"))))))
+
+(t/deftest test-an-error-names-the-failing-form
+  (let [env (support/eval-ctx)
+        result (support/eval! env "(+ 1 2) (inc \"a\")")]
+    (t/is (:is-error result))
+    (t/is (str/starts-with? (:content result) "ERROR in form 2 of 2"))
+    (t/is (str/includes? (:content result) "form 1 evaluated and stands"))
+    (t/is (str/includes? (:content result) "ClassCastException"))))
+
+(t/deftest test-a-truncated-result-can-be-read
+  (let [env (support/eval-ctx)
+        result (support/eval! env "(apply str (repeat 20000 \"x\"))")]
+    (t/is (str/includes? (:content result) "output truncated"))
+    (t/is (str/includes? (:content result) "(eval/result 1 :offset 0)"))
+    (t/is (str/includes?
+           (:content (support/eval! env "(eval/result 1 :offset 0 :limit 20)"))
+           "content"))
+    (t/is (str/includes? (:content (support/eval! env "(eval/result)"))
+                         ":id 1"))))
+
+(t/deftest test-help-explains-results
+  (let [env (support/eval-ctx)]
+    (t/is (str/includes? (:content (support/eval! env "(eval/help :results)"))
+                         "eval/result"))))
+
 (t/deftest test-two-services-are-two-agents
   (let [a (support/eval-ctx)
         b (support/eval-ctx)]
@@ -144,6 +188,9 @@
     (t/is (str/includes? text "Eval verbs"))
     (t/is (str/includes? text "docstring"))
     (t/is (str/includes? text "live-only"))
+    (t/is (str/includes? text "Reuse definitions"))
+    (t/is (str/includes? text "(eval/library) lists saved ones"))
+    (t/is (str/includes? text "define what recurs"))
     (t/is (str/includes? text "let/fn"))
     (t/is (str/includes? text "(eval/help)"))
     (t/is (str/includes? text "serialize"))

@@ -163,47 +163,50 @@
 
 (defn- eval-listing-text
   "INTRO plus definition LINES, dropping whole lines from the end until the
-   text fits `max-listing-chars`; the dropped count and the discovery pointers
-   are always stated. Deterministic: the same entries render the same bytes."
+   text fits `max-listing-chars`; a dropped count names `(eval/library)` so
+   the omitted lines can be read. Deterministic: the same entries render the
+   same bytes."
   [intro lines]
   (let [total (count lines)]
     (loop [kept total]
       (let [omitted (- total kept)
             text (str intro
-                      (str/join "\n" (take kept lines))
-                      "\n"
+                      (let [shown (str/join "\n" (take kept lines))]
+                        (when (seq shown)
+                          (str shown (when (pos? omitted) "\n"))))
                       (when (pos? omitted)
-                        (str "… " omitted " more; "))
-                      "(eval/describe 'name) for one; (eval/library) for all.")]
+                        (str "… " omitted " more; (eval/library)")))]
         (if (or (<= (count text) max-listing-chars) (zero? kept))
-          text
+          (str/trimr text)
           (recur (dec kept)))))))
 
-(def ^:private eval-library-rule
-  "The one-sentence rule the prompt manifest states: eval creates verbs, and
-   only a documented top-level definition is saved."
-  "Eval verbs: a documented top-level definition is saved; an undocumented one is session-only.\n")
-
 (defn eval-library-listing
-  "The `:eval-library` manifest text for MANIFEST (`{:loaded? :entries}`):
-   the save rule, then one line per definition with its arglists and scope,
-   or an empty-library correction. LOADED? distinguishes this
-   session's built environment from the files a first eval will load; the text
-   says which. Bounded and deterministic, so `sync-eval-library-listing!` can
-   compare it with the branch's previous manifest byte for byte."
-  [{:keys [loaded? entries]}]
+  "The `:eval-library` manifest text for MANIFEST (`{:loaded? :entries
+   :session-only}`): one line per saved definition with its arglists and
+   scope, or an empty-library correction; a session-only count says what
+   (eval/help :library) can show but the saved list cannot.
+   LOADED? distinguishes this session's built environment from the files a
+   first eval will load; the text says which. Bounded and deterministic, so
+   `sync-eval-library-listing!` can compare it with the branch's previous
+   manifest byte for byte."
+  [{:keys [loaded? entries session-only]}]
   (let [entries (vec entries)
-        n (count entries)]
-    (if (empty? entries)
-      (str eval-library-rule "Eval library: empty.")
+        session-only (vec session-only)
+        n (count entries)
+        live (count session-only)
+        live-text (when (pos? live) (str ", " live " session-only"))
+        live-hint (when (pos? live) "; (eval/help :library)")]
+    (if (and (empty? entries) (zero? live))
+      "Library: empty."
       (eval-listing-text
-       (str eval-library-rule
-            (if loaded?
-              (str "Eval library: " n " loaded definition"
-                   (when (not= 1 n) "s") ".\n")
-              (str "Eval library: " n " saved definition"
-                   (when (not= 1 n) "s")
-                   ", loaded on the first eval.\n")))
+       (cond
+         (zero? n) (str "Library: 0 saved, " live
+                        " session-only; (eval/help :library).\n")
+         loaded? (str "Library: " n " loaded definition"
+                      (when (not= 1 n) "s") live-text live-hint ".\n")
+         :else (str "Library: " n " saved definition"
+                    (when (not= 1 n) "s") live-text
+                    "; loads on first eval" live-hint ".\n"))
        (mapv eval-listing-line entries)))))
 
 (defn derive-context-settings

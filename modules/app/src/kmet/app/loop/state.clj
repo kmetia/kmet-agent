@@ -505,15 +505,17 @@ Be precise and concise in your responses."}}]
                      (manifest-fn
                       {:session sess
                        :cwd (or (session/session-cwd sess) (tool-util/cwd))}))
-          entries (:entries manifest)]
+          entries (:entries manifest)
+          live (:session-only manifest)]
       ;; an empty library is only worth a message when something was listed
       ;; before: a session that never had a definition stays silent
       (when-let [text (when manifest (session/eval-library-listing manifest))]
         (when (and (not= text previous)
-                   (or (seq entries) previous))
+                   (or (seq entries) (seq live) previous))
           (append-listing! agent session/eval-library-custom-type text
                            {:loaded? (:loaded? manifest)
-                            :count (count entries)}))))))
+                            :count (count entries)
+                            :session-only (count live)}))))))
 
 (defn append-persisted-message!
   "Append MSG to both the live context and the session (pi: append + append-entry).

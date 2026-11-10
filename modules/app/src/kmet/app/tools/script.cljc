@@ -35,6 +35,8 @@
             [kmet.libs.host :as host]
             [kmet.libs.process :as kprocess]
             [kmet.srce.core :as srce]
+            [rewrite-clj.node :as n]
+            [rewrite-clj.parser :as p]
             [sci.core :as sci]))
 
 ;; ─── Constants ────────────────────────────────────────────────────────────
@@ -1209,17 +1211,21 @@
 
 ;; ─── Result assembly ──────────────────────────────────────────────────────
 
-(defn- truncation-notice [tool t]
+(defn- truncation-notice [tool t result-id]
   (str "[" tool " output truncated: " (:total-lines t) " lines / "
        (bash-out/format-size (:total-bytes t))
-       " total, showing the last " (:shown-lines t)
-       " lines. Print less or return distilled data instead.]"))
+       " total, showing the last " (:shown-lines t) " lines. "
+       (if result-id
+         (str "Stored result: (eval/result " result-id " :offset 0).")
+         "Print less or return distilled data instead.")
+       "]"))
 
 (defn- bound-content
   "Cap BODY at the per-call byte/line budget (bash-output's tail truncation
    — the end holds the return value). TOTALS carries the capture's full
-   byte/line counts, which the retained tail no longer knows."
-  [tool body totals max-bytes max-lines]
+   byte/line counts, which the retained tail no longer knows. RESULT-ID,
+   when present, turns the truncation notice into a read form."
+  [tool body totals max-bytes max-lines result-id]
   (let [t (bash-out/truncate-tail body
                                   :max-bytes max-bytes
                                   :max-lines max-lines)
@@ -1232,7 +1238,8 @@
       {:content (str (:content t) "\n\n"
                      (truncation-notice tool {:total-lines total-lines
                                               :total-bytes total-bytes
-                                              :shown-lines (:output-lines t)}))
+                                              :shown-lines (:output-lines t)}
+                                        result-id))
        :truncation {:total-lines total-lines
                     :total-bytes total-bytes
                     :shown-lines (:output-lines t)
@@ -1302,6 +1309,77 @@
         val))
     (fn [form] (sci/eval-string* sci-ctx form))))
 
+(defn- top-level-forms
+  "CODE's top-level forms as strings, comments and uneval nodes dropped,
+   or nil when CODE cannot be read. A nil result falls back to evaluating
+   the whole source, so the reader's own verdict reaches the model."
+  [code]
+  (try
+    (->> (n/children (p/parse-string-all code))
+         (remove #(or (n/whitespace-or-comment? %) (= :uneval (n/tag %))))
+         (mapv n/string))
+    (catch Throwable _ nil)))
+
+(defn- form-preview
+  "One line naming FORM in an error, clipped to 60 characters."
+  [form]
+  (let [line (str/trim (or (first (str/split-lines form)) ""))]
+    (if (> (count line) 60)
+      (str (subs line 0 60) "…")
+      line)))
+
+(defn- form-progress-text
+  "What ran and what did not around the failed form INDEX of TOTAL."
+  [index total]
+  (let [before (dec index)
+        after (- total index)]
+    (str (cond
+           (zero? before) "nothing before it ran"
+           (= 1 before) "form 1 evaluated and stands"
+           :else (str "forms 1-" before " evaluated and stand"))
+         (cond
+           (zero? after) ""
+           (= 1 after) (str "; form " total " not evaluated")
+           :else (str "; forms " (inc index) "-" total " not evaluated")))))
+
+(defn- form-error-message
+  "The error text for a failed form: the form, the failure, and what ran."
+  [index total form cause]
+  (let [message (error-message cause)]
+    (if (= 1 total)
+      (str "ERROR: " message)
+      (str "ERROR in form " index " of " total
+           " [" (form-preview form) "]: " message
+           "; " (form-progress-text index total)))))
+
+(defn- eval-forms
+  "Evaluate CODE one top-level form at a time, so a failure names the form
+   and what already ran. A reader failure or an empty form list falls back
+   to EVAL-FORM's whole-source verdict."
+  [eval-form code]
+  (if-let [forms (top-level-forms code)]
+    (let [forms (vec forms)
+          total (count forms)]
+      (if (zero? total)
+        (eval-form code)
+        (loop [index 1
+               remaining forms
+               value nil]
+          (if-let [form (first remaining)]
+            (let [value (try
+                          (eval-form form)
+                          (catch Throwable t
+                            (if (contains? (ex-data t) :reason)
+                              (throw t)
+                              (throw (ex-info "form failed"
+                                              {:form index
+                                               :total total
+                                               :form-text form
+                                               :cause t})))))]
+              (recur (inc index) (rest remaining) value))
+            value))))
+    (eval-form code)))
+
 (defn eval-source!
   "Evaluate one SOURCE string in a kept SCI context during an environment
    rebuild: the forms start in NS-ATOM's namespace and the namespace they end
@@ -1324,7 +1402,7 @@
    *call-state* for the whole run, so kept definitions use this call's
    emit/tools/cwd. Returns {:done promise :result atom}; the thread closes the
    writers in its finally, which ends the readers."
-  [sci-ctx code prelude capture ns-atom state]
+  [sci-ctx code prelude capture ns-atom state split-forms?]
   (let [done (promise)
         result (atom nil)
         thread (Thread. (fn []
@@ -1342,14 +1420,24 @@
                                                     (fn []
                                                       (when prelude
                                                         (eval-form prelude))
-                                                      (eval-form code))))]
+                                                      (if split-forms?
+                                                        (eval-forms eval-form code)
+                                                        (eval-form code)))))]
                               (reset! result {:status :ok :value v}))
                             (catch Throwable t
-                              (let [reason (:reason (ex-data t))]
-                                (reset! result (if reason
-                                                 {:status reason}
-                                                 {:status :error
-                                                  :error (error-message t)}))))
+                              (let [data (ex-data t)
+                                    reason (:reason data)]
+                                (reset! result
+                                        (cond
+                                          reason {:status reason}
+                                          (:form data)
+                                          {:status :error
+                                           :error (form-error-message (:form data)
+                                                                      (:total data)
+                                                                      (:form-text data)
+                                                                      (:cause data))}
+                                          :else {:status :error
+                                                 :error (error-message t)}))))
                             (finally
                               (try (.close (:out-w capture)) (catch Throwable _ nil))
                               (try (.close (:err-w capture)) (catch Throwable _ nil))
@@ -1391,18 +1479,23 @@
    wins when set: a script unwound by the interrupt (however it reports, e.g. a
    catch that rethrows) cannot outlive its deadline. TIMEOUT-MS nil = no
    deadline (bash parity) and the result's :timeout is nil; ELAPSED-MS is the
-   measured wall clock."
+   measured wall clock. RESULT-STORE, when given, keeps the full body and
+   returns the id the truncation notice and error tail name."
   [{:keys [tool res emitted images timeout-ms trace abort-reason elapsed-ms
-           output-bytes output-lines capture-bytes extra-details]}]
+           output-bytes output-lines capture-bytes extra-details result-store]}]
   (let [status (or abort-reason (:status res))
-        error-text (case status
-                     :timeout (str tool " timed out after " (ms->sec timeout-ms) "s")
-                     :aborted (str tool " aborted")
-                     :output-limit (str tool " output exceeded "
-                                        (bash-out/format-size capture-bytes)
-                                        " — stopped")
-                     :error (:error res)
-                     nil)
+        error-text (when status
+                     (let [text (case status
+                                  :timeout (str tool " timed out after "
+                                                (ms->sec timeout-ms) "s")
+                                  :aborted (str tool " aborted")
+                                  :output-limit (str tool " output exceeded "
+                                                     (bash-out/format-size capture-bytes)
+                                                     " — stopped")
+                                  :error (or (:error res) "evaluation failed")
+                                  nil)]
+                       (when text
+                         (if (str/starts-with? text "ERROR") text (str "ERROR: " text)))))
         parts (cond-> (vec emitted)
                 error-text (conj error-text))
         ;; a silent success reports its final value (the REPL rule); emit is
@@ -1415,7 +1508,27 @@
                value-text value-text
                :else "(no output)")
         totals {:bytes (bash-out/byte-length body) :lines (text-lines body)}
-        {:keys [content truncation]} (bound-content tool body totals output-bytes output-lines)
+        {:keys [content truncation]} (bound-content tool body totals output-bytes
+                                                    output-lines nil)
+        result-id (when result-store
+                    (try
+                      (result-store {:content body
+                                     :status status
+                                     :error? (not= :ok status)
+                                     :elapsed-ms elapsed-ms
+                                     :chars (count body)
+                                     :lines (:lines totals)
+                                     :truncated? (boolean truncation)})
+                      (catch Throwable t
+                        (debug/log "script: result store failed: " t)
+                        nil)))
+        content (if (and result-id truncation)
+                  (:content (bound-content tool body totals output-bytes output-lines
+                                           result-id))
+                  content)
+        content (if (and result-id (not truncation) (not= :ok status))
+                  (str content "\n[result " result-id "]")
+                  content)
         calls @trace]
     (cond-> {:content content
              :is-error (not= :ok status)
@@ -1427,7 +1540,8 @@
                                       :elapsed-ms elapsed-ms}
                                (not= :ok status) (assoc :error status)
                                (seq calls) (assoc :calls calls)
-                               (seq images) (assoc :images (count images))))}
+                               (seq images) (assoc :images (count images))
+                               result-id (assoc :result-id result-id)))}
       truncation (assoc :truncation truncation)
       (seq images) (assoc :images images))))
 
@@ -1537,7 +1651,8 @@
       (when-not (identical? realm base) realm))))
 
 (defn- run*
-  [{:keys [tool code prelude sci-ctx state interrupt started-at deadline ctx ns-atom]
+  [{:keys [tool code prelude sci-ctx state interrupt started-at deadline ctx ns-atom
+           split-forms? result-store]
     :as opts}]
   (let [started-at (or started-at (concurrent/monotonic-ms))
         state (or state (prepare (assoc opts :ctx ctx)))
@@ -1560,7 +1675,8 @@
                                    (:abort state)
                                    (:capture-bytes (:limits state)))
             _ (reset! (:writers state) capture)
-            {:keys [done result]} (start-eval-thread! sci-ctx code prelude capture ns-atom state)
+            {:keys [done result]} (start-eval-thread! sci-ctx code prelude capture ns-atom state
+                                                      split-forms?)
             ;; Escape must end the call whether or not the model set a
             ;; deadline; the grace lets interpreted code unwind.
             outcome (await-script done (:cancelled state) deadline)]
@@ -1580,6 +1696,7 @@
                             :trace (:trace state)
                             :abort-reason @(:abort state)
                             :elapsed-ms (- (concurrent/monotonic-ms) started-at)
+                            :result-store result-store
                             :extra-details (:extra-details opts)})))
       (finally
         (when-let [capture @(:writers state)]
@@ -1602,8 +1719,11 @@
    the work starts; an explicit :deadline nil means no deadline (otherwise a
    :timeout computes it). NS-ATOM, when given, holds the namespace object a
    kept context's previous successful call ended in — the prelude and the code
-   start there and the final namespace is stored back. EXTRA-DETAILS merges
-   into the result's :details."
+   start there and the final namespace is stored back. SPLIT-FORMS? evaluates
+   each top-level form separately, so a failure names the form and what ran
+   (the eval tool's shape). RESULT-STORE receives the full pre-truncation
+   result map and returns the id used in the truncation notice and error
+   tail. EXTRA-DETAILS merges into the result's :details."
   [{:keys [ctx] :as opts}]
   (require-tool! (:tool opts))
   (let [realm (when-not (false? (:tools? opts)) (sandbox-realm ctx))

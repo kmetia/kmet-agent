@@ -706,6 +706,16 @@ inner tool calls fan out as promises and local work can use `spawn`. A
 broken library file is reported under `:failures` and skipped. The pure parse
 and address rules live in `kmet.app.eval.definitions`.
 
+Every eval call's full result body is kept in a bounded per-session ring,
+newest first. `(eval/result)` lists the recent ids with status, size and a
+clipped head; `(eval/result ID)` reads the first 6,000 characters and
+`(eval/result ID :offset N :limit M)` reads a slice. A truncated result keeps
+its tail and names the read form in its notice; an errored result carries its
+id after the error. Eval evaluates a call's top-level forms one at a time, so
+an error begins `ERROR` and, with several forms, names the failing form and
+what already ran; `codemode` keeps the whole-source path. `(eval/help :results)`
+states the emission, cap, truncation and error contract.
+
 Every library record carries its model-visible interface, parsed from the
 defining form without evaluation: `:doc` (the docstring, else an attr-map or
 symbol `:doc`) and `:arglists` (for `defn`/`defn-`/`defmacro`, and the
@@ -733,27 +743,36 @@ says `live only, not saved`, `(eval/help)` lists it under session-only
 definitions, and `(eval/describe 'name :doc)` is nil. A redefinition of a
 saved name without a docstring is not written; the saved file keeps its
 documented version. A `defmethod` is covered by its multimethod.
+`(eval/keep 'name "doc")` saves a live-only definition without
+re-evaluating or resending it: it inserts the docstring into the retained
+source, writes the record, and the next prompt manifest shows it saved. It
+refuses an already saved name, a source-provided or extension definition,
+and a kind without a docstring slot (a `defmethod`, `declare`, or
+`defonce`).
 
 Prompt discovery. Prompt start appends one hidden `:eval-library` custom
 message (`kmet.app.session.context/eval-library-listing`,
 `kmet.app.loop.state/sync-eval-library-listing!`) only when its text changed
 since the branch's last one and only while the `eval` tool is selected. The
-message starts with the save rule (`Eval verbs: a documented top-level
-definition is saved; an undocumented one is session-only.`) and is a
-bounded, deterministic preview — `name [arglists] (scope[, shadowed]) — first
-doc line` (or `(no docstring)` for a legacy entry), with whole definitions
-dropped behind `… N more; (eval/library)
-for all` — never a source dump and never a system-prompt
-rebuild, so listing a definition costs no prefix miss. Loaded is not saved: a
-session with a built environment lists its loaded records with scope and
+message is a bounded, deterministic preview — `name [arglists] (scope[,
+shadowed]) — first doc line` (or `(no docstring)` for a legacy entry), with
+whole definitions dropped behind `… N more; (eval/library)`. The tool
+description owns the save rule and already names `(eval/help)` and
+`(eval/library)`, so an unbounded saved manifest carries no repeated rule or
+help line. Never a source dump and never a system-prompt rebuild, so listing
+a definition costs no prefix miss. Loaded is not saved: a session with a
+built environment lists its loaded records with scope and
 active state, while one without lists the disk index as saved and says it
-loads on the first eval. The sync never builds an environment and never
-invokes an eval source; source verbs stay out of the manifest, which points at
-`(eval/help)`. The first call that builds an environment reports a non-empty
-loaded set and every load failure in its result: `:details :loaded` is a
-bounded preview with the full `:loaded-count`, `:failures` carries every
-failure, and the result lines bound long lists, correcting any drift. A
-library that has always been empty is silent; when a previously listed set
+loads on the first eval; when the session has live-only definitions, the same
+line adds `N session-only; (eval/help :library)`, so the saved list does not
+hide them and names the way to list both. The sync never builds an
+environment and never invokes an eval source; source verbs stay out of the
+manifest; `(eval/help)` remains the discovery path. The first call that builds
+an environment reports a non-empty loaded set and every load failure in its
+result: `:details :loaded` is a bounded preview with the full `:loaded-count`,
+`:failures` carries every failure, and the result lines bound long lists,
+correcting any drift. A library that has always been empty is silent; when a
+previously listed set
 empties, the next prompt gets one correction.
 
 Limits: a definition file is the defining form only — its `(ns …)` requires are

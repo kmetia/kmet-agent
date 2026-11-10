@@ -22,7 +22,9 @@
    Sessions share the files but not the environment. A broken file is recorded
    under `:failures` and skipped, never fatal. One build is bounded by a
    per-file and an overall deadline; source functions themselves are ordinary
-   extension code and are not interrupted.
+   extension code and are not interrupted. A session-only definition is saved
+   without resending it by `(eval/keep ...)`; every call's full body is kept
+   in a bounded ring read by `(eval/result ...)`.
 
    `kmet.app.tools.eval` owns the model-facing tool; `kmet.app.eval.files`
    owns the reviewable files and `kmet.app.eval.definitions` the pure parse
@@ -489,6 +491,86 @@
        (sort-by (juxt :name #(if (= :cwd (:scope %)) 0 1)))
        vec))
 
+(def ^:private result-ring-size
+  "How many recent eval results a session keeps for (eval/result)."
+  8)
+
+(def ^:private result-read-default-chars
+  "How much of a stored result (eval/result) returns by default. Kept
+   below the tool's 16 KiB default so a map of escaped text still fits."
+  6000)
+
+(def ^:private result-read-max-chars
+  "The most (eval/result) returns in one slice."
+  50000)
+
+(defn- result-head
+  "The first line of a stored result, clipped for a result list."
+  [content]
+  (let [line (str/trim (or (first (str/split-lines content)) ""))]
+    (if (> (count line) 100)
+      (str (subs line 0 100) "…")
+      line)))
+
+(defn- store-result!
+  "Keep RESULT in ENV's result ring and return its id. The content is the
+   full pre-truncation body; the ring is bounded and oldest-first."
+  [env result]
+  (let [id (swap! (:result-next env) inc)]
+    (swap! (:results env)
+           (fn [results]
+             (let [results (conj (vec results) (assoc result :id id))]
+               (subvec results (max 0 (- (count results) result-ring-size))))))
+    id))
+
+(defn- result-list
+  "The compact (eval/result) listing, newest first."
+  [env]
+  (->> @(:results env)
+       reverse
+       (mapv (fn [{:keys [id content status error? elapsed-ms chars lines truncated?]}]
+               (cond-> {:id id :status status :chars chars :lines lines
+                        :truncated? truncated? :head (result-head content)}
+                 error? (assoc :error? true)
+                 elapsed-ms (assoc :elapsed-ms elapsed-ms))))))
+
+(defn- result-read
+  "Read one stored result, or a slice of it. OPTS is {:offset N :limit N}."
+  [env id & [opts]]
+  (let [entry (first (filter #(= id (:id %)) @(:results env)))]
+    (when-not entry
+      (bad-request! (str "no eval result " id "; (eval/result) lists them")
+                    {:id id}))
+    (let [content (:content entry)
+          total (count content)
+          offset (max 0 (long (or (:offset opts) 0)))
+          limit (max 1 (min result-read-max-chars
+                            (long (or (:limit opts) result-read-default-chars))))
+          start (min offset total)
+          end (min total (+ start limit))]
+      (cond-> {:id id :status (:status entry) :chars total :offset start
+               :content (subs content start end)}
+        (:error? entry) (assoc :error? true)
+        (:truncated? entry) (assoc :truncated? true)
+        (< end total) (assoc :next-offset end)))))
+
+(defn- result-command
+  "The (eval/result) command: no args lists, ID reads, and the remaining
+   args are an opts map or keyword pairs (:offset N :limit M)."
+  [env & args]
+  (case (count args)
+    0 (result-list env)
+    1 (result-read env (first args))
+    (let [[id & more] args
+          opts (cond
+                 (and (= 1 (count more)) (map? (first more))) (first more)
+                 (and (= 1 (count more)) (nil? (first more))) {}
+                 (odd? (count more))
+                 (bad-request! "eval/result needs an opts map or keyword pairs"
+                               {:args (vec args)})
+                 :else (apply hash-map more))]
+      (result-read env id opts))))
+
 (def ^:private build-report-name-limit
   "Definitions named in the first eval's loaded-set line before `… N more`."
   12)
@@ -639,8 +721,14 @@
                      :doc "Evaluate Clojure code in a running nREPL server (same arguments as the clojure_eval tool)."
                      :arglists '([args])}
    "eval/library" {:name "eval/library" :kind :verb
-                   :doc "List every loaded library definition with its scope."
+                   :doc "List every loaded library definition with its scope; (eval/help :library) also lists session-only definitions."
                    :arglists '([])}
+   "eval/keep" {:name "eval/keep" :kind :verb
+                :doc "Save a session-only definition, adding DOC when the live form has none; nothing is re-evaluated."
+                :arglists '([name] [name doc])}
+   "eval/result" {:name "eval/result" :kind :verb
+                  :doc "List recent eval results, or read one result or slice: :offset N :limit M, or an {:offset N :limit M} map."
+                  :arglists '([] [id] [id & opts])}
    "eval/sources" {:name "eval/sources" :kind :verb
                    :doc "List the mounted eval sources and their contributed verbs."
                    :arglists '([])}
@@ -798,7 +886,20 @@
 
 (defn- scope-help [env] (str "Scope: cwd " (get-in env [:roots :cwd]) " (shadows the global layer)" "\n       global " (get-in env [:roots :global]) "\nNew definitions write to cwd; pass :scope :global for a new global " "name. A redefinition keeps the active layer."))
 
-(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate to keep it; a defmethod is " "saved with its loaded multimethod. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. System namespaces (core, clj, eval) are read-only; " "ext.* definitions stay live-only. Drop/forget resolve unqualified names in the " "namespace the call ends in; a file that also defines other addresses " "must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed."))
+(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate, or use (eval/keep 'name \"doc\"), to keep it; a defmethod is " "saved with its loaded multimethod. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. System namespaces (core, clj, eval) are read-only; " "ext.* definitions stay live-only. Drop/forget resolve unqualified names in the " "namespace the call ends in; a file that also defines other addresses " "must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed."))
+
+(defn- results-help
+  []
+  (str "Results: (emit value) appends curated output; a silent successful "
+       "call reports its final value instead. stdout and stderr are discarded. "
+       "The result is bounded at 16 KiB / 2,000 lines by default; "
+       ":max-output-bytes raises it to 50 KiB. A truncated result keeps its "
+       "tail and names its result id. Every eval result is kept in the "
+       "session's recent-result ring: (eval/result) lists them, (eval/result "
+       "ID) reads the first 6,000 characters, and (eval/result ID {:offset N "
+       ":limit M}) reads a slice. Errors begin with ERROR and, in a multi-form "
+       "call, name the failing form and what ran. (emit-image path) attaches "
+       "an image."))
 
 (defn- core-help
   []
@@ -815,14 +916,15 @@
        "\nOwnership: define in user; core, clj and eval are read-only; "
        "ext.* is live-only."
        "\nEval verbs: (eval/library), (eval/sources), (eval/describe 'name), "
-       "(eval/describe 'name key), (eval/forget 'name), "
+       "(eval/describe 'name key), (eval/forget 'name), (eval/keep 'name [doc]), "
        "(eval/patch 'name old new), (eval/edit-form 'name new-source), "
-       "(eval/move 'name :global|:cwd)."
+       "(eval/move 'name :global|:cwd), (eval/result [id opts])."
        "\nDiscovery: (all-ns) lists namespaces; (ns-publics 'ns) lists a "
        "namespace's vars, including session-only definitions. A patch or "
        "edit-form result must keep a docstring."
        "\nReporting: (emit value) or end on the final value; (core/emit value) "
-       "also works; stdout and stderr are discarded."))
+       "also works; stdout and stderr are discarded; (eval/help :results) has the "
+       "result contract."))
 
 (defn- help-entry-text
   [entry]
@@ -844,9 +946,10 @@
   (case topic
     :library (library-help env)
     :persistence (persistence-help)
+    :results (results-help)
     :core (core-help)
     (bad-request! (str "unknown eval help topic " (pr-str topic)
-                       "; use :library, :persistence, :core")
+                       "; use :library, :persistence, :results, :core")
                   {:topic topic})))
 
 (defn- help-index
@@ -854,7 +957,7 @@
   (let [entries (library-entries env)
         session-only (session-only-entries env)]
     (str "Eval help: (eval/help), (eval/help :library), "
-         "(eval/help :persistence), (eval/help :core), "
+         "(eval/help :persistence), (eval/help :results), (eval/help :core), "
          "or (eval/help 'name)."
          "\n" (source-help env)
          "\nBuilt-in verbs:\n" (str/join "\n" (builtin-verb-lines))
@@ -866,7 +969,7 @@
 
 (defn- environment-help
   "The `(eval/help)` text: an index, a topic, or one definition's interface.
-   Topics: :library, :persistence, :core."
+   Topics: :library, :persistence, :results, :core."
   ([env] (help-index env))
   ([env what]
    (cond
@@ -1201,6 +1304,8 @@
     (swap! (:forgotten env) conj {:name raw :scope scope})
     raw))
 
+(declare keep-definition!)
+
 (defn- build-environment
   "Build a fresh environment: the SCI context, the library index, and every
    library definition evaluated into it."
@@ -1228,6 +1333,8 @@
              :forgotten (atom #{})
              :call-scope (atom nil)
              :sticky-ns (atom nil)
+             :results (atom [])
+             :result-next (atom 0)
              :lock (Object.)}
         interrupt (script/interrupt-holder)
         env-ref (atom nil)
@@ -1235,6 +1342,8 @@
         forget-fn (fn [name] (request-forget! @env-ref name))
         sources-fn (fn [] @(:source-info @env-ref))
         help-fn (fn [& [what]] (environment-help @env-ref what))
+        keep-fn (fn [name & [doc]] (keep-definition! @env-ref cwd name doc))
+        result-fn (fn [& args] (apply result-command @env-ref args))
         sci-ctx (script/context
                   (assoc (script/base-namespaces)
                          'clj {'nrepl-eval
@@ -1245,6 +1354,8 @@
                                   (:cancelled script/*call-state*)))}
                          'eval {'library library-fn
                                 'forget forget-fn
+                                'keep keep-fn
+                                'result result-fn
                                 'patch (fn [name old new]
                                          (patch-definition! @env-ref cwd name old new
                                                             @(:call-scope @env-ref)))
@@ -1622,11 +1733,70 @@
        "; live only, not saved: "
        (cond
          (= :defmethod (:kind record)) "its multimethod is not saved"
-         saved? "no docstring — the saved file is unchanged; add one and re-evaluate to update it"
-         :else "no docstring — add one and re-evaluate to keep it")
+         saved? (str "no docstring — the saved file is unchanged; add one and "
+                     "re-evaluate, or (eval/keep '" (:name record) " \"doc\"), to update it")
+         :else (str "no docstring — add one and re-evaluate, or "
+                    "(eval/keep '" (:name record) " \"doc\"), to keep it"))
        "]"))
 
 (defn- apply-definition! "Write RECORD to its scope's library and index it. A source-provided key\n   stays live but is never written, and is remembered as a model shadow so\n   later source reads do not overwrite it. A definition in an extension\n   namespace is live-only for the same reason. An undocumented definition\n   stays live for the session and is not written, so a saved definition\n   redefined without a docstring keeps its saved file unchanged. A defmethod\n   of a loaded multimethod is written with it. A failed write is recorded and\n   reported; the live definition remains." [env cwd record] (let [name (:name record) scope (or (:scope record) :cwd) record (assoc record :scope scope)] (cond (contains? (clojure.core/deref (:source-keys env)) name) (do (swap! (:model-shadows env) conj name) {:line (str "[eval: redefined " name " (source; not stored)]")}) (extension-name? name) (do (swap! (:model-shadows env) conj name) (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) {:line (str "[eval: defined " name " (extension; live only, not saved)]"), :entry (assoc (library-entry record) :active true)}) (not (documented? env record)) (let [saved? (some? (existing-record env name scope))] (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) {:line (live-only-line record scope saved?), :entry (assoc (library-entry record) :active true)}) :else (try (let [root (root-for env scope) [path record] (write-redefinition! env root record) record (assoc record :file path :root root)] (add-record! env record) (clear-unwritten! env name) {:line (str "[eval: defined " name " (" (scope-label scope) ") → " (eval-files/display-path cwd path) (doc-note record) "]"), :entry (assoc (library-entry record) :active true)}) (catch Throwable t (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) (record-failure! (:failures env) {:name name, :error (ex-message t), :scope scope}) {:line (str "[eval: define failed " name " (" (scope-label scope) "): " (ex-message t) "]"), :error (ex-message t)})))))
+
+(defn- keep-definition!
+  "Save RAW-NAME's live-only definition, adding DOC as its docstring when
+   the live form has none. The source is edited structurally; nothing is
+   re-evaluated, because the live definition already runs. Refuses a name
+   that is already saved, source-provided, an extension, or whose kind has
+   no docstring slot."
+  [env cwd raw-name doc]
+  (let [name (when-let [raw (->name raw-name)]
+               (qualify-name (env-ns env) raw))]
+    (when-not name
+      (bad-request! (str "keep needs a definition name, got " (pr-str raw-name))
+                    {:name raw-name}))
+    (cond
+      (contains? @(:source-keys env) name)
+      (bad-request! (str name " is provided by a source; source definitions stay live-only")
+                    {:name name})
+
+      (extension-name? name)
+      (bad-request! (str name " is an extension definition; extensions stay live-only")
+                    {:name name})
+
+      :else
+      (let [record (get @(:unwritten-records env) name)]
+        (cond
+          (nil? record)
+          (bad-request! (if (active-record env name)
+                          (str name " is already saved; use eval/patch or eval/edit-form")
+                          (str "no session-only definition named " name))
+                        {:name name})
+
+          (= :defmethod (:kind record))
+          (bad-request! (str name " is a defmethod; keep its multimethod instead")
+                        {:name name})
+
+          (not (defs/docstring-kind? (:kind record)))
+          (bad-request! (str name " is a " (name (:kind record))
+                             "; that form has no docstring slot")
+                        {:name name})
+
+          :else
+          (let [doc (or (some-> doc str/trim not-empty)
+                        (some-> (:doc record) str/trim not-empty))]
+            (when-not doc
+              (bad-request! (str "keep needs a docstring for " name)
+                            {:name name}))
+            (let [source (if (str/blank? (:doc record))
+                           (or (defs/add-docstring (:source record) doc)
+                               (bad-request! (str "cannot add a docstring to " name)
+                                             {:name name}))
+                           (:source record))
+                  result (apply-definition! env cwd
+                                            (assoc record :doc doc :source source))]
+              (if-let [error (:error result)]
+                (bad-request! (str "keep failed: " error) {:name name})
+                (do (swap! (:change-lines env) conj (:line result))
+                    nil)))))))))
 
 (defn- drop-report-line
   "One drop result line. A restored source value is named as such; a record
@@ -1824,6 +1994,9 @@
                                       :sci-ctx (:sci-ctx env)
                                       :interrupt (:interrupt env)
                                       :ns-atom (:sticky-ns env)
+                                      :split-forms? true
+                                      :result-store (fn [result]
+                                                      (store-result! env result))
                                       :source-namespaces (:namespaces sources)
                                       :extra-details (cond-> {:sources (:info sources)}
                                                        (seq (:errors sources))
@@ -2078,7 +2251,8 @@
         env (when session (get @(:envs service) (:id session)))]
     (if env
       {:loaded? true
-       :entries (library-entries env)}
+       :entries (library-entries env)
+       :session-only (session-only-entries env)}
       (let [cwd (or cwd (tool-util/cwd))
             roots (roots-for service cwd)
             fingerprint (eval-files/fingerprint roots)

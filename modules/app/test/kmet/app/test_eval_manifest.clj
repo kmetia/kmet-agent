@@ -56,29 +56,24 @@
         manifest {:loaded? true :entries [entry]}
         text (session/eval-library-listing manifest)]
     (t/is (= text (session/eval-library-listing manifest)))
-    (t/is (= 1 (count (re-seq #"Eval verbs" text)))
-          "the rule is stated once")
-    (t/is (str/includes? text "undocumented one is session-only"))
     (t/is (str/includes? text "- user/report ([x]) (cwd)"))
     (t/is (not (str/includes? text "Render x."))
           "docstrings stay behind (eval/describe 'name)")
-    (t/is (str/includes? text "(eval/library) for all"))
-    (t/is (str/includes? text "(eval/describe 'name) for one")))
+    (t/is (not (str/includes? text "(eval/help)"))
+          "an unbounded saved list needs no discovery pointer"))
   (let [saved (session/eval-library-listing
                {:loaded? false
                 :entries [{:name "user/a" :scope :global :active true
                            :arglists '([]) :doc "Saved."}]})]
-    (t/is (= 1 (count (re-seq #"Eval verbs" saved))))
     (t/is (str/includes? saved "1 saved definition"))
-    (t/is (str/includes? saved "loaded on the first eval"))
+    (t/is (str/includes? saved "loads on first eval"))
     (t/is (not (str/includes? saved "loaded definition")))
     (t/is (str/includes? saved "- user/a ([]) (global)"))
     (t/is (str/includes?
            (session/eval-library-listing
             {:loaded? true
              :entries [{:name "user/plain" :scope :cwd :active true}]})
-           "- user/plain (cwd)"))
-    (t/is (str/includes? saved "saved")))
+           "- user/plain (cwd)")))
   (t/is (str/includes?
          (session/eval-library-listing
           {:loaded? true
@@ -86,8 +81,12 @@
                       :arglists '([x]) :doc "Old."}]})
          "- user/shadowed ([x]) (global, shadowed)"))
   (let [empty-text (session/eval-library-listing {:loaded? true :entries []})]
-    (t/is (str/includes? empty-text "Eval verbs"))
-    (t/is (str/includes? empty-text "Eval library: empty.")))
+    (t/is (str/includes? empty-text "Library: empty.")))
+  (let [live-text (session/eval-library-listing
+                   {:loaded? true :entries []
+                    :session-only [{:name "user/live" :scope :cwd :active true}]})]
+    (t/is (str/includes? live-text "0 saved, 1 session-only"))
+    (t/is (str/includes? live-text "(eval/help :library)")))
   (let [entries (mapv (fn [i]
                         {:name (str "user/definition-" i)
                          :scope :cwd
@@ -97,8 +96,16 @@
                       (range 400))
         text (session/eval-library-listing {:loaded? true :entries entries})]
     (t/is (<= (count text) 4096))
-    (t/is (str/includes? text "more; (eval/describe 'name) for one; (eval/library) for all"))
+    (t/is (str/includes? text "more; (eval/library)"))
     (t/is (not (str/includes? text "user/definition-399")))))
+
+(t/deftest a-live-only-definition-is-counted
+  (let [env (support/eval-ctx)
+        agent (agent-for env)]
+    (support/eval! env "(defn live [] :ok)")
+    (let [message (state/sync-eval-library-listing! agent)]
+      (t/is (some? message))
+      (t/is (str/includes? (:content message) "1 session-only")))))
 
 (t/deftest a-saved-library-is-announced-once-and-corrected
   (let [env (support/eval-ctx)
@@ -122,7 +129,7 @@
     (fs/delete (support/library-file env :cwd "user" "a.clj"))
     (fs/delete (support/library-file env :cwd "user" "b.clj"))
     (t/is (str/includes? (:content (state/sync-eval-library-listing! agent))
-                         "Eval library: empty.")
+                         "Library: empty.")
           "a vanished set is corrected instead of left standing")
     (t/is (nil? (state/sync-eval-library-listing! agent))
           "and corrected once")))
