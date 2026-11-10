@@ -239,8 +239,7 @@
 
 (defn- run-command [opts task mode session-dir]
   (cond-> (into (kmet-command opts)
-                ["--profile" "print"
-                 "--mode" "text"
+                ["--mode" "text"
                  "--thinking" (:thinking opts)
                  "--no-context-files"
                  "--session-dir" session-dir

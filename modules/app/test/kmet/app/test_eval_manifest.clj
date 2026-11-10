@@ -56,9 +56,9 @@
         manifest {:loaded? true :entries [entry]}
         text (session/eval-library-listing manifest)]
     (t/is (= text (session/eval-library-listing manifest)))
-    (t/is (str/includes? text "- user/report ([x]) (cwd)"))
-    (t/is (not (str/includes? text "Render x."))
-          "docstrings stay behind (eval/describe 'name)")
+    (t/is (str/includes? text "- user/report ([x]) (cwd) — Render x."))
+    (t/is (not (str/includes? text "More detail."))
+          "only the first doc line is listed")
     (t/is (not (str/includes? text "(eval/help)"))
           "an unbounded saved list needs no discovery pointer"))
   (let [saved (session/eval-library-listing

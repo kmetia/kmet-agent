@@ -89,6 +89,9 @@
 (def ^:private interrupt-grace-ms 1500)
 (def ^:private error-preview-chars 300)
 (def ^:private error-preview-lines 3)
+(def ^:private form-value-line-chars
+  "Characters of one form's value line in a multi-form eval result."
+  500)
 (def script-tool-names
   "The script tools themselves: neither can start the other, and neither is
    callable from inside a script."
@@ -1333,6 +1336,53 @@
       (str (subs line 0 60) "…")
       line)))
 
+(def ^:private silent-form-pattern
+  "Top-level forms whose value is reported by their own receipt (definitions)
+   or carries no result (ns), so a multi-form call skips them."
+  #"^\s*\((?:def(?:n-?|macro|method|once|protocol|type|record|interface|multi|inline)?|declare|ns)(?=[\s\)\]])")
+
+(defn- silent-form?
+  "True when FORM's value should not be listed in a multi-form result."
+  [form]
+  (boolean (re-find silent-form-pattern (str form))))
+
+(defn- form-value-line
+  "One line for VALUE in a multi-form result: the first line of its rendered
+   value, clipped; nil when VALUE is nil (a side-effect-only form)."
+  [value]
+  (when (some? value)
+    (let [s (try (format-value value) (catch Throwable _ ""))
+          line (first (str/split-lines s))]
+      (cond
+        (nil? line) ""
+        (> (count line) form-value-line-chars)
+        (str (subs line 0 form-value-line-chars) "…")
+        :else line))))
+
+(defn- form-value-text
+  "Earlier non-silent form values as `INDEX => VALUE`, the last one in full on
+   success (the final-value rule) or with its index on failure. TOTAL is the
+   call's top-level form count, so a failure still reports the forms that ran;
+   a single-form call keeps the final-value rule, so returns nil."
+  [forms total ok?]
+  (when (and (seq forms) (> (or total (count forms)) 1))
+    (let [entries (vec (keep-indexed
+                        (fn [i {:keys [form value]}]
+                          (when (and (some? value) (not (silent-form? form)))
+                            [(inc i) value]))
+                        forms))]
+      (when (seq entries)
+        (let [[last-index last-value] (peek entries)
+              earlier (butlast entries)
+              last-text (if ok?
+                          (try (format-value last-value)
+                               (catch Throwable _ (form-value-line last-value)))
+                          (str last-index " => " (form-value-line last-value)))]
+          (str/join "\n"
+                    (conj (mapv (fn [[i v]] (str i " => " (form-value-line v)))
+                                earlier)
+                          last-text)))))))
+
 (defn- form-progress-text
   "What ran and what did not around the failed form INDEX of TOTAL."
   [index total]
@@ -1359,17 +1409,19 @@
 
 (defn- eval-forms
   "Evaluate CODE one top-level form at a time, so a failure names the form
-   and what already ran. A reader failure or an empty form list falls back
-   to EVAL-FORM's whole-source verdict."
+   and what already ran. Returns `{:value LAST :form-values TEXT}`; a reader
+   failure or an empty form list falls back to EVAL-FORM's whole-source
+   verdict."
   [eval-form code]
   (if-let [forms (top-level-forms code)]
     (let [forms (vec forms)
           total (count forms)]
       (if (zero? total)
-        (eval-form code)
+        {:value (eval-form code)}
         (loop [index 1
                remaining forms
-               value nil]
+               value nil
+               acc []]
           (if-let [form (first remaining)]
             (let [value (try
                           (eval-form form)
@@ -1380,10 +1432,14 @@
                                               {:form index
                                                :total total
                                                :form-text form
-                                               :cause t})))))]
-              (recur (inc index) (rest remaining) value))
-            value))))
-    (eval-form code)))
+                                               :cause t
+                                               :form-values (form-value-text
+                                                             acc total false)})))))]
+              (recur (inc index) (rest remaining) value
+                     (conj acc {:form form :value value})))
+            {:value value
+             :form-values (form-value-text acc total true)}))))
+    {:value (eval-form code)}))
 
 (defn eval-source!
   "Evaluate one SOURCE string in a kept SCI context during an environment
@@ -1413,22 +1469,25 @@
         thread (Thread. (fn []
                           (try
                             (let [eval-form (form-evaluator sci-ctx ns-atom)
-                                  v (binding [*call-state* state
-                                              tool-util/*cwd* (:cwd state)
-                                              ;; direct host tool executes from eval
-                                              ;; code (extension source verbs)
-                                              bash-tool/*cancel-signal* (:cancelled state)
-                                              bash-tool/*shell* (get-in state [:bridge :shell])
-                                              bash-tool/*session-env-fn* (get-in state [:bridge :session-env-fn])
-                                              read-tool/*skill-resolver* (get-in state [:bridge :skill-resolver])]
-                                      (eval-with-io (:out-w capture) (:err-w capture)
-                                                    (fn []
-                                                      (when prelude
-                                                        (eval-form prelude))
-                                                      (if split-forms?
-                                                        (eval-forms eval-form code)
-                                                        (eval-form code)))))]
-                              (reset! result {:status :ok :value v}))
+                                  outcome (binding [*call-state* state
+                                                    tool-util/*cwd* (:cwd state)
+                                                    ;; direct host tool executes from eval
+                                                    ;; code (extension source verbs)
+                                                    bash-tool/*cancel-signal* (:cancelled state)
+                                                    bash-tool/*shell* (get-in state [:bridge :shell])
+                                                    bash-tool/*session-env-fn* (get-in state [:bridge :session-env-fn])
+                                                    read-tool/*skill-resolver* (get-in state [:bridge :skill-resolver])]
+                                            (eval-with-io (:out-w capture) (:err-w capture)
+                                                          (fn []
+                                                            (when prelude
+                                                              (eval-form prelude))
+                                                            (if split-forms?
+                                                              (eval-forms eval-form code)
+                                                              {:value (eval-form code)}))))]
+                              (reset! result
+                                      (cond-> {:status :ok :value (:value outcome)}
+                                        (:form-values outcome)
+                                        (assoc :form-values (:form-values outcome)))))
                             (catch Throwable t
                               (let [data (ex-data t)
                                     reason (:reason data)]
@@ -1440,7 +1499,8 @@
                                            :error (form-error-message (:form data)
                                                                       (:total data)
                                                                       (:form-text data)
-                                                                      (:cause data))}
+                                                                      (:cause data))
+                                           :form-values (:form-values data)}
                                           :else {:status :error
                                                  :error (error-message t)}))))
                             (finally
@@ -1484,8 +1544,10 @@
    wins when set: a script unwound by the interrupt (however it reports, e.g. a
    catch that rethrows) cannot outlive its deadline. TIMEOUT-MS nil = no
    deadline (bash parity) and the result's :timeout is nil; ELAPSED-MS is the
-   measured wall clock. RESULT-STORE, when given, keeps the full body and
-   returns the id the truncation notice and error tail name."
+   measured wall clock. A multi-form eval call reports earlier non-definition
+   forms one line each and the last value in full, before an error. RESULT-STORE,
+   when given, keeps the full body and returns the id the truncation notice
+   and error tail name."
   [{:keys [tool res emitted images timeout-ms trace abort-reason elapsed-ms
            output-bytes output-lines capture-bytes extra-details result-store]}]
   (let [status (or abort-reason (:status res))
@@ -1501,7 +1563,9 @@
                                   nil)]
                        (when text
                          (if (str/starts-with? text "ERROR") text (str "ERROR: " text)))))
+        form-text (when (empty? emitted) (:form-values res))
         parts (cond-> (vec emitted)
+                form-text (conj form-text)
                 error-text (conj error-text))
         ;; a silent success reports its final value (the REPL rule); emit is
         ;; the curated channel, so a non-empty emit never adds it
@@ -1726,7 +1790,8 @@
    kept context's previous successful call ended in — the prelude and the code
    start there and the final namespace is stored back. SPLIT-FORMS? evaluates
    each top-level form separately, so a failure names the form and what ran
-   (the eval tool's shape). RESULT-STORE receives the full pre-truncation
+   and a multi-form call reports earlier forms one line each and the last value
+   in full (the eval tool's shape). RESULT-STORE receives the full pre-truncation
    result map and returns the id used in the truncation notice and error
    tail. EXTRA-DETAILS merges into the result's :details."
   [{:keys [ctx] :as opts}]

@@ -152,14 +152,22 @@
    manifest can be found and compared."
   :eval-library)
 
+(def ^:private max-eval-doc-chars
+  "Characters of one definition's first doc line in the manifest."
+  160)
+
 (defn- eval-listing-line
-  "One manifest line: `- name [arglists] (scope[, shadowed])`. Docstrings
-   stay behind `(eval/describe 'name)`."
+  "One manifest line: `- name [arglists] (scope[, shadowed]) — first doc
+   line`, or `(no docstring)` for a legacy undocumented entry."
   [entry]
   (str "- " (:name entry)
        (eval-format/arglists-text (:arglists entry))
        " (" (name (or (:scope entry) :global))
-       (when (false? (:active entry)) ", shadowed") ")"))
+       (when (false? (:active entry)) ", shadowed") ")"
+       " — "
+       (if-let [line (eval-format/doc-line (:doc entry))]
+         (truncate line max-eval-doc-chars)
+         "(no docstring)")))
 
 (defn- eval-listing-text
   "INTRO plus definition LINES, dropping whole lines from the end until the

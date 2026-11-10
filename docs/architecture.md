@@ -709,10 +709,11 @@ evaluating the library, and each definition's per-call primitives (`emit`, `cwd`
 wrappers and the tool bridge) read the current call's state rather than the
 call that compiled them. Parallel calls serialize on a per-session lock, the
 deadline starts after it is taken, and `:dispose!` clears every environment;
-the tool's guidelines therefore steer a multi-step task into one call, where
-inner tool calls fan out as promises and local work can use `spawn`. A
-broken library file is reported under `:failures` and skipped. The pure parse
-and address rules live in `kmet.app.eval.definitions`.
+the tool's `:prompt-guidelines` therefore steer a multi-step task into one
+call — one call per phase, many forms per call, with `spawn`/`pmap` for
+parallel work. A broken library file is reported under `:failures` and
+skipped. The pure parse and address rules live in
+`kmet.app.eval.definitions`.
 
 Eval keeps each call's output/error body in a bounded per-session ring,
 newest first. `(eval/result)` lists the recent ids with status, size and a
@@ -723,8 +724,10 @@ large result cannot evict it. The ring holds the script body, not the final
 `[eval: …]` change report or error status. A truncated result keeps its tail
 and names the read form in its notice; an errored result carries its id
 after the error. Eval evaluates a call's top-level forms one at a time, so
-an error begins `ERROR` and, with several forms, names the failing form
-and what already ran; `codemode` keeps the whole-source path.
+an error begins `ERROR` (after the values of earlier forms) and, with several
+forms, names the failing form and what already ran; a successful multi-form
+call reports earlier forms one line each and the last value in full.
+`codemode` keeps the whole-source path.
 `(eval/help :results)` states the emission, cap, truncation and error
 contract. The index is the one-call discovery path: every built-in verb with
 its arglists and one-line contract, then the topics, library counts, sources

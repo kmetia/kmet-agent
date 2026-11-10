@@ -62,7 +62,8 @@
   (let [env (support/eval-ctx)
         result (support/eval! env "(+ 1 2) (inc \"a\")")]
     (t/is (:is-error result))
-    (t/is (str/starts-with? (:content result) "ERROR in form 2 of 2"))
+    (t/is (str/includes? (:content result) "1 => 3"))
+    (t/is (str/includes? (:content result) "ERROR in form 2 of 2"))
     (t/is (str/includes? (:content result) "form 1 evaluated and stands"))
     (t/is (str/includes? (:content result) "ClassCastException"))))
 
@@ -122,13 +123,19 @@
       (t/is (= "false" (:content r))
             "codemode keeps its fresh-context contract"))))
 
-(t/deftest test-the-eval-prompt-puts-one-call-first
+(t/deftest test-the-eval-prompt-puts-one-call-per-phase
   (t/is (str/includes? (:description eval-tool/definition)
                        "Calls serialize"))
+  (t/is (str/includes? (:description eval-tool/definition)
+                       "one call per phase"))
   (t/is (str/includes? (:prompt-snippet eval-tool/definition)
-                       "one call per batch"))
-  (t/is (empty? (:prompt-guidelines eval-tool/definition))
-        "details live in (eval/help), not per-request guidelines"))
+                       "one call per phase"))
+  (t/is (str/includes? (:prompt-snippet eval-tool/definition)
+                       "many forms per call"))
+  (let [guidelines (str/join "\n" (:prompt-guidelines eval-tool/definition))]
+    (t/is (str/includes? guidelines "reuse before you rebuild"))
+    (t/is (str/includes? guidelines "one call per phase"))
+    (t/is (str/includes? guidelines "read→edit→verify"))))
 
 (t/deftest test-the-sticky-namespace-is-re-entered
   (let [env (support/eval-ctx)]
@@ -143,6 +150,23 @@
                                                          {:code "(def via-tool \"Via tool.\" 9) via-tool"}))
                             "9"))
     (t/is (= "10" (:content (support/call-tool env "eval" {:code "(+ via-tool 1)"}))))))
+
+(t/deftest test-a-multi-form-call-reports-each-form-value
+  (let [env (support/eval-ctx)]
+    (t/is (= "1 => 3\n7"
+             (:content (support/eval! env "(+ 1 2)\n(+ 3 4)"))))
+    (t/is (= "3" (:content (support/eval! env "(+ 1 2)")))
+          "a single form keeps the final-value rule")
+    (t/is (= ":a" (:content (support/eval! env "(emit :a)\n(+ 1 2)")))
+          "emit stays the curated channel")
+    (let [r (support/eval! env "(defn f \"F.\" [] 1)\n(+ 1 2)")]
+      (t/is (not (:is-error r)))
+      (t/is (str/starts-with? (:content r) "3"))
+      (t/is (str/includes? (:content r) "[eval: defined user/f")))
+    (let [r (support/eval! env "(+ 1 2)\n(throw (ex-info \"boom\" {}))\n(+ 3 4)")]
+      (t/is (:is-error r))
+      (t/is (str/includes? (:content r) "1 => 3"))
+      (t/is (str/includes? (:content r) "ERROR in form 2 of 3")))))
 
 (t/deftest test-an-eval-batch-runs-sequentially-when-it-defines
   ;; Regression: a later call can read a definition an earlier call made —
@@ -223,9 +247,10 @@
     (t/is (not (str/includes? text "tools/call")))
     (t/is (not (str/includes? text "tools/list")))
     (t/is (str/includes? text "Define in user"))
-    (t/is (empty? prompt-guidelines)
-          "details live in (help), not per-request guidelines")
-    (t/is (<= (count text) 900) "the per-request prompt stays compact")
+    (t/is (str/includes? text "Spend findings once"))
+    (t/is (str/includes? text "one call per phase"))
+    (t/is (str/includes? text "many forms per call"))
+    (t/is (<= (count text) 1300) "the per-request prompt stays compact")
     (t/is (not (str/includes? text "codemode"))
           "eval's prompt must stand alone when codemode is not selected")
     (t/is (not (str/includes? text "Jolt")))
