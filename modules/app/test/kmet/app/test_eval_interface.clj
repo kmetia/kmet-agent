@@ -103,6 +103,17 @@
       (t/is (:is-error unknown))
       (t/is (str/includes? (:content unknown) "no eval definition named")))))
 
+(t/deftest test-help-on-an-unknown-name-is-the-index
+  (let [env (support/eval-ctx)
+        result (support/eval! env "(eval/help 'user/nope)")]
+    (t/is (not (:is-error result)) (:content result))
+    (t/is (str/includes? (:content result) "No help for user/nope"))
+    (t/is (str/includes? (:content result) "Built-in verbs:"))
+    (let [topic (support/eval! env "(eval/help :nope)")]
+      (t/is (not (:is-error topic)) (:content topic))
+      (t/is (str/includes? (:content topic) "No help for topic :nope"))
+      (t/is (str/includes? (:content topic) "Built-in verbs:")))))
+
 (t/deftest test-an-existing-library-file-gains-its-interface
   (let [env (support/eval-ctx)
         path (str (fs/path (:agent-dir env) "eval" "user" "legacy.clj"))]
@@ -182,6 +193,8 @@
       (t/is (str/includes? index "Eval help:"))
       (t/is (str/includes? index "Library: 1 saved, 0 session-only"))
       (t/is (str/includes? library "user/documented defn ([x]) (cwd) — Doc."))
+      (t/is (str/includes? library "Scope: cwd"))
+      (t/is (not (str/includes? index "Scope: cwd")) "the index leaves roots to :library")
       (t/is (str/includes? core "Core:"))
       (t/is (str/includes? core "Ownership: define in user"))
       (t/is (str/includes? core "ext.* is live-only"))
@@ -194,16 +207,20 @@
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'core/read)"))
                            "core/read verb ([path] [path opts]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/describe 'core/read :doc)"))
-                           "read tool"))
+                           "Read PATH as text"))
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'read)"))
                            "core/read verb ([path] [path opts]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/describe 'emit :doc)"))
-                           "Emit VALUE"))
+                           "Report VALUE"))
       (t/is (str/includes? core "also referred unqualified"))
-      (t/is (str/includes? index "  core/read - "))
+      (t/is (str/includes? index "  core/read ([path] [path opts]) - "))
+      (t/is (<= (count index) 4096) "the index stays one bounded discovery call")
+      (t/is (str/includes? index "Topics: :core"))
+      (t/is (str/includes? index "core/sh ([command] [command opts]) - "))
+      (t/is (str/includes? index "core/bash ([command] [command opts]) - "))
       (t/is (not (str/includes? index "tools/")))
       (t/is (not (str/includes? index "Active tools")))
-      (t/is (str/includes? index "  eval/library - "))
+      (t/is (str/includes? index "  eval/library ([]) - "))
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'eval/library)"))
                            "eval/library verb ([]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'clj/edit-form)"))
@@ -214,6 +231,18 @@
                            "clj/nrepl-eval verb ([args]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/describe 'clj/nrepl-eval :doc)"))
                            "running nREPL server")))))
+
+(t/deftest test-bare-help-and-describe-aliases
+  (let [env (support/eval-ctx)]
+    (t/is (= (:content (support/eval! env "(help)"))
+             (:content (support/eval! env "(eval/help)"))))
+    (t/is (= (:content (support/eval! env "(help :results)"))
+             (:content (support/eval! env "(eval/help :results)"))))
+    (support/eval! env "(defn aliased \"Aliased doc.\" [x] x)")
+    (t/is (= "Aliased doc." (:content (support/eval! env "(describe 'aliased :doc)"))))
+    (support/eval! env "(ns demo)")
+    (t/is (str/includes? (:content (support/eval! env "(help)")) "Built-in verbs:"))
+    (t/is (= ":defn" (:content (support/eval! env "(describe 'user/aliased :kind)"))))))
 
 (t/deftest test-an-unwritten-definition-is-described
   (let [env (support/eval-ctx)
@@ -332,7 +361,7 @@
         result (support/eval! env "(defn undocumented [] 1)")]
     (t/is (not (:is-error result)) (:content result))
     (t/is (str/includes? (:content result)
-                         "[eval: defined user/undocumented (cwd; live only, not saved:"))
+                         "[eval: defined user/undocumented (cwd; live-only:"))
     (t/is (str/includes? (:content result) "no docstring"))
     (t/is (not (fs/exists? path)))
     (t/is (= "1" (:content (support/eval! env "(undocumented)")))
@@ -353,7 +382,7 @@
         _ (support/eval! env "(defn kept \"Old.\" [] :old)")
         result (support/eval! env "(defn kept [] :new)")]
     (t/is (not (:is-error result)) (:content result))
-    (t/is (str/includes? (:content result) "live only, not saved"))
+    (t/is (str/includes? (:content result) "live-only"))
     (t/is (str/includes? (:content result) "the saved file is unchanged"))
     (t/is (= ":new" (:content (support/eval! env "(kept)")))
           "the redefinition is live")
@@ -393,8 +422,8 @@
                                (support/eval-library env)))]
       (t/is (not (:is-error result)) (:content result))
       (t/is (not (:is-error method)) (:content method))
-      (t/is (str/includes? (:content result) "user/shape (cwd) → "))
-      (t/is (str/includes? (:content method) "(method)"))
+      (t/is (str/includes? (:content result) "user/shape (cwd)]"))
+      (t/is (str/includes? (:content method) "user/shape :rect (cwd)]"))
       (t/is (fs/exists? (:file entry)))
       (t/is (= "Shape area." (:doc (first (filter #(= "user/shape" (:name %))
                                                   (support/eval-library env)))))))))
@@ -403,5 +432,5 @@
   (let [env (support/eval-ctx)
         path (support/library-file env :cwd "user" "blank.clj")
         result (support/eval! env "(defn blank \"  \" [] 1)")]
-    (t/is (str/includes? (:content result) "live only, not saved"))
+    (t/is (str/includes? (:content result) "live-only"))
     (t/is (not (fs/exists? path)))))

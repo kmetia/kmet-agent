@@ -927,12 +927,17 @@
     (if (:is-error result) (verb-failed! "edit" result) (:content result))))
 
 (defn bash-text
-  "Run COMMAND through the bash tool's implementation; OPTS may carry
-   :timeout. Throws on error."
+  "Run COMMAND through the bash tool's implementation and return its
+   rendered output. A nonzero exit is reported in that output, not thrown;
+   a timeout, abort or spawn failure stays an error."
   [command opts signal]
   (binding [bash-tool/*cancel-signal* signal]
-    (let [result (bash-tool/run-bash (merge {:command (str command)} opts) nil {})]
-      (if (:is-error result) (verb-failed! "bash" result) (:content result)))))
+    (let [result (bash-tool/run-bash (merge {:command (str command)} opts) nil {})
+          content (or (:content result) "")]
+      (if (and (:is-error result)
+               (not (str/includes? content "Command exited with code ")))
+        (verb-failed! "bash" result)
+        content))))
 
 (declare tools-namespace)
 

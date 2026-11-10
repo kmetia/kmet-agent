@@ -23,8 +23,9 @@
         result (support/eval! env "(defn report \"Render R.\" [x] (str \"R\" x))")
         path (library-file env "user" "report.clj")]
     (t/is (not (:is-error result)) (:content result))
-    (t/is (str/includes? (:content result) "[eval: defined user/report (cwd) → "))
+    (t/is (str/includes? (:content result) "[eval: defined user/report (cwd)]"))
     (t/is (fs/exists? path))
+    (t/is (= path (:content (support/eval! env "(eval/describe 'report :file)"))))
     (t/is (str/includes? (slurp path) ";; kmet eval: written by the eval tool"))
     (t/is (str/includes? (slurp path) "(ns user)"))
     (t/is (str/includes? (slurp path) "(defn report \"Render R.\" [x] (str \"R\" x))"))
@@ -45,7 +46,7 @@
 
 (t/deftest test-user-bash-does-not-depend-on-the-tool-surface (let [env (support/eval-ctx)] (binding [script/*enabled-tools-fn* (constantly #{})] (let [result (support/eval! env "(core/bash \"printf hi\")")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "hi"))))))
 
-(t/deftest test-system-namespaces-are-refused-and-extension-namespaces-are-live-only (let [env (support/eval-ctx)] (let [result (support/call-tool env "eval" {:code "(ns core) (defn read \"Mine.\" [path] :mine)"})] (t/is (:is-error result)) (t/is (str/includes? (:content result) "system-owned"))) (let [result (support/call-tool env "eval" {:code "(ns clj) (defn edit-form \"Mine.\" [args] :mine)"})] (t/is (:is-error result)) (t/is (str/includes? (:content result) "system-owned"))) (let [result (support/eval! env "(ns ext.license) (defn custom \"Doc.\" [] :ok)")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "extension; live only, not saved")) (t/is (not (fs/exists? (support/library-file env :cwd "ext.license" "custom.clj")))))))
+(t/deftest test-system-namespaces-are-refused-and-extension-namespaces-are-live-only (let [env (support/eval-ctx)] (let [result (support/call-tool env "eval" {:code "(ns core) (defn read \"Mine.\" [path] :mine)"})] (t/is (:is-error result)) (t/is (str/includes? (:content result) "system-owned"))) (let [result (support/call-tool env "eval" {:code "(ns clj) (defn edit-form \"Mine.\" [args] :mine)"})] (t/is (:is-error result)) (t/is (str/includes? (:content result) "system-owned"))) (let [result (support/eval! env "(ns ext.license) (defn custom \"Doc.\" [] :ok)")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "extension; live-only")) (t/is (not (fs/exists? (support/library-file env :cwd "ext.license" "custom.clj")))))))
 
 (t/deftest test-clj-structure-verbs-do-not-depend-on-the-tool-surface (let [env (support/eval-ctx) path (str (fs/path (:cwd env) "edit-me.clj"))] (spit path "(ns edit-me)\n\n(defn f [] 1)\n") (binding [script/*enabled-tools-fn* (constantly #{})] (let [result (support/eval! env (str "(:content (clj/edit-form {:file_path \"edit-me.clj\" " ":form_type \"defn\" :form_identifier \"f\" " ":operation \"replace\" " ":content \"(defn f [] 2)\"}))"))] (t/is (= "Edit applied." (:content result))) (t/is (str/includes? (slurp path) "(defn f [] 2)"))) (let [result (support/eval! env (str "(:content (clj/replace-sexp {:file_path \"edit-me.clj\" " ":match_form \"(defn f [] 2)\" " ":new_form \"(defn f [] 3)\" " ":operation \"replace\"}))"))] (t/is (= "Edit applied." (:content result))) (t/is (str/includes? (slurp path) "(defn f [] 3)"))) (spit path "(defn f []\n") (let [result (support/eval! env "(:content (clj/paren-repair {:file_path \"edit-me.clj\" :format false}))")] (t/is (not (:is-error result)) (:content result)) (t/is (str/includes? (:content result) "Fixed"))))))
 
@@ -55,7 +56,7 @@
         _ (support/eval! env "(defn f \"One.\" [] :one)")
         result (support/eval! env "(defn f \"Two.\" [] :two)")
         content (slurp path)]
-    (t/is (str/includes? (:content result) "[eval: defined user/f (cwd) → "))
+    (t/is (str/includes? (:content result) "[eval: defined user/f (cwd)]"))
     (t/is (str/includes? content ":two"))
     (t/is (not (str/includes? content ":one")))
     (let [restarted (support/restart-service env)]
@@ -545,7 +546,7 @@
     (let [result (support/eval! env "(def b \"B.\" 2)" :drop ["user/a"])]
       (t/is (not (:is-error result)) (:content result))
       (t/is (str/includes? (:content result) "[eval: forgot user/a (cwd)]"))
-      (t/is (str/includes? (:content result) "[eval: defined user/b (cwd) → "))
+      (t/is (str/includes? (:content result) "[eval: defined user/b (cwd)]"))
       (t/is (not (fs/exists? a)))
       (t/is (fs/exists? b)))))
 

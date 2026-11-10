@@ -26,7 +26,7 @@
 (t/deftest test-a-session-only-definition-is-kept
   (let [env (support/eval-ctx)
         live (support/eval! env "(defn loose [] :ok)")]
-    (t/is (str/includes? (:content live) "live only, not saved"))
+    (t/is (str/includes? (:content live) "live-only"))
     (t/is (str/includes? (:content live) "(eval/keep 'user/loose"))
     (let [kept (support/eval! env "(eval/keep 'loose \"Loose doc.\")")]
       (t/is (not (:is-error kept)) (:content kept))
@@ -213,7 +213,8 @@
     (t/is (str/includes? text "(eval/library) lists saved ones"))
     (t/is (str/includes? text "define what recurs"))
     (t/is (str/includes? text "let/fn"))
-    (t/is (str/includes? text "(eval/help)"))
+    (t/is (str/includes? text "(help)"))
+    (t/is (str/includes? text "(describe 'name)"))
     (t/is (str/includes? text "serialize"))
     (t/is (str/includes? text "(spawn f)"))
     (t/is (str/includes? text "read, write, edit, bash, sh"))
@@ -223,7 +224,7 @@
     (t/is (not (str/includes? text "tools/list")))
     (t/is (str/includes? text "Define in user"))
     (t/is (empty? prompt-guidelines)
-          "details live in (eval/help), not per-request guidelines")
+          "details live in (help), not per-request guidelines")
     (t/is (<= (count text) 900) "the per-request prompt stays compact")
     (t/is (not (str/includes? text "codemode"))
           "eval's prompt must stand alone when codemode is not selected")
@@ -236,6 +237,9 @@
     (spit (str (fs/path cwd "note.txt")) "bare")
     (t/is (= ":ok" (:content (support/eval! env "(emit :ok)"))))
     (t/is (= "bare" (:content (support/eval! env "(read \"note.txt\")"))))
+    (spit (str (fs/path cwd "lines.txt")) "one\ntwo\nthree\n")
+    (t/is (str/includes? (:content (support/eval! env "(read \"lines.txt\" {:offset 2 :limit 1})"))
+                         "two"))
     (support/eval! env "(write \"out.txt\" \"alpha\")")
     (support/eval! env "(edit \"out.txt\" \"alpha\" \"beta\")")
     (t/is (= "beta" (slurp (str (fs/path cwd "out.txt")))))
@@ -245,6 +249,19 @@
                          "bare-sh"))
     (t/is (= ":spawned"
              (:content (support/eval! env "@(spawn (fn [] (emit :spawned)))"))))))
+
+(t/deftest test-a-nonzero-shell-exit-is-a-result
+  (let [env (support/eval-ctx)
+        result (support/eval! env "(bash \"printf bad; exit 3\")")]
+    (t/is (not (:is-error result)) (:content result))
+    (t/is (str/includes? (:content result) "bad"))
+    (t/is (str/includes? (:content result) "Command exited with code 3"))))
+
+(t/deftest test-a-timed-out-shell-command-is-an-error
+  (let [env (support/eval-ctx)
+        result (support/eval! env "(bash \"sleep 5\" {:timeout 0.1})")]
+    (t/is (:is-error result) (:content result))
+    (t/is (str/includes? (:content result) "timed out"))))
 
 (t/deftest test-the-tool-schema-exposes-both-scopes
   (t/is (= ["cwd" "global"]

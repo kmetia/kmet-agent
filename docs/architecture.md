@@ -637,6 +637,8 @@ immediately to one of two durable layers: the global
 source slice per generated definition; a hand-written file can hold several;
 `kmet.app.eval.files`). A new definition without a docstring stays live in
 the session and is not written; `(eval/help)` lists it as session-only. A
+written definition's result line names its name and scope only;
+`(eval/describe 'name :file)` names its file. A
 `defmethod` is written with its loaded multimethod, since a method has no
 docstring slot. Existing `<agent-dir>/eval`
 files are the global layer; nothing is moved automatically. The key is the
@@ -677,7 +679,13 @@ and its service. An unknown leading
 name that resolves to a definition or source verb is a `describe` shorthand;
 an unresolvable one keeps the unknown-verb hint. The system already provides
 `read`, `write`, `edit`, `bash` and `sh` (also `core/...`); the row does not
-mount a separate eval source for them, and there is no `tools` namespace. The
+mount a separate eval source for them, and there is no `tools` namespace.
+`bash` is the plain-output shell verb: its result carries the command output
+and a status footer, and a nonzero exit is a normal result; `sh` is the
+`babashka.process` map (`:out`, `:err`, `:exit`) for callers that need the
+streams. `help` and `describe` are bare aliases of `eval/help` and
+`eval/describe` in `clojure.core`, so they resolve in the sticky namespace and
+a model definition can shadow them. The
 alias prelude refers those verbs unqualified, so `(read ...)` and
 `(core/read ...)` are one call. The clojure extension's tools wrap the shared
 `kmet.libs.clj-edit` engine; an eval script can use the direct `clj/edit-form`,
@@ -718,7 +726,10 @@ after the error. Eval evaluates a call's top-level forms one at a time, so
 an error begins `ERROR` and, with several forms, names the failing form
 and what already ran; `codemode` keeps the whole-source path.
 `(eval/help :results)` states the emission, cap, truncation and error
-contract.
+contract. The index is the one-call discovery path: every built-in verb with
+its arglists and one-line contract, then the topics, library counts, sources
+and failures; the scope roots stay in `(eval/help :library)`, so the first
+`(eval/help)` stays bounded.
 
 Every library record carries its model-visible interface, parsed from the
 defining form without evaluation: `:doc` (the docstring, else an attr-map or

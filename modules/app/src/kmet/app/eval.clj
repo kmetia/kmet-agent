@@ -696,25 +696,25 @@
 
 (def ^:private builtin-verb-help
   {"core/read" {:name "core/read" :kind :verb
-                :doc "Read PATH with the read tool's implementation; OPTS may carry :offset and :limit."
+                :doc "Read PATH as text; OPTS may carry :offset and :limit (lines) — read a long file in ranges rather than slurping it whole."
                 :arglists '([path] [path opts])}
    "core/write" {:name "core/write" :kind :verb
-                 :doc "Write CONTENT to PATH with the write tool's implementation."
+                 :doc "Write CONTENT to PATH whole, creating parents; success is silent."
                  :arglists '([path content])}
    "core/edit" {:name "core/edit" :kind :verb
-                :doc "Replace OLD-TEXT with NEW-TEXT in PATH with the edit tool's implementation."
+                :doc "Replace the one occurrence of OLD-TEXT with NEW-TEXT in PATH; zero or several occurrences is an error."
                 :arglists '([path old-text new-text])}
    "core/bash" {:name "core/bash" :kind :verb
-                :doc "Run COMMAND with the bash tool's implementation; OPTS may carry the tool's command options."
+                :doc "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result."
                 :arglists '([command] [command opts])}
    "core/sh" {:name "core/sh" :kind :verb
-              :doc "Run COMMAND through the process shell; OPTS may carry :in, :dir, or :out."
+              :doc "Run COMMAND through babashka.process and return its process map (:out :err :exit); pass :in or :dir in an opts map; use bash for plain output."
               :arglists '([command] [command opts])}
    "core/emit" {:name "core/emit" :kind :verb
-                :doc "Emit VALUE as this call's result."
+                :doc "Report VALUE as the call's result; without emit, a silent success reports its final value."
                 :arglists '([value])}
    "core/emit-image" {:name "core/emit-image" :kind :verb
-                      :doc "Attach an image path or image map to this call."
+                      :doc "Attach an image file (PNG, JPEG, GIF or WebP) or a {:data :mime-type} map to the call."
                       :arglists '([x])}
    "core/cwd" {:name "core/cwd" :kind :verb
                :doc "The call's working directory."
@@ -729,7 +729,7 @@
                  :doc "Sleep MS milliseconds."
                  :arglists '([ms])}
    "core/spawn" {:name "core/spawn" :kind :verb
-                 :doc "Run F on a daemon thread and return a derefable result."
+                 :doc "Run F on a daemon thread and return a derefable result; bindings do not cross threads."
                  :arglists '([f])}
    "clj/edit-form" {:name "clj/edit-form" :kind :verb
                     :doc "Apply a structured whole-form edit (same arguments as the clojure_edit tool)."
@@ -756,7 +756,7 @@
                    :doc "List the mounted eval sources and their contributed verbs."
                    :arglists '([])}
    "eval/describe" {:name "eval/describe" :kind :verb
-                    :doc "Describe one definition or source verb; KEY selects one field."
+                    :doc "Describe one definition or source verb (also bare describe); KEY selects one field."
                     :arglists '([name] [name key])}
    "eval/forget" {:name "eval/forget" :kind :verb
                   :doc "Forget a saved definition or restore a source value."
@@ -771,7 +771,7 @@
                 :doc "Move a saved definition between the cwd and global scopes."
                 :arglists '([name scope])}
    "eval/help" {:name "eval/help" :kind :verb
-                :doc "The eval manual: index, topic, or one definition."
+                :doc "The eval manual (also bare help): index, topic, or one definition."
                 :arglists '([] [what])}})
 
 (def ^:private system-namespaces
@@ -888,13 +888,16 @@
 
 (defn- builtin-verb-lines
   []
-  (map (fn [[name {:keys [doc]}]]
-         (str "  " name " - " (first-sentence (or doc ""))))
+  (map (fn [[name {:keys [doc arglists]}]]
+         (str "  " name (or (eval-format/arglists-text arglists) "")
+              " - " (first-sentence (or doc ""))))
        (sort-by (fn [[name _]] [(verb-family name) name]) builtin-verb-help)))
 
 (defn- indent-text "TEXT with every line indented four spaces." [text] (str/join "\n" (map (fn [line] (str "    " line)) (str/split-lines (str text)))))
 
 (defn- source-help [env] (let [sources (clojure.core/deref (:source-info env))] (str "Eval sources:\n" (if (seq sources) (str/join "\n" (map (fn [source] (eval-format/source-line source :keyword)) sources)) "  (none)"))))
+
+(defn- scope-help [env] (str "Scope: cwd " (get-in env [:roots :cwd]) " (shadows the global layer)" "\n       global " (get-in env [:roots :global]) "\nNew definitions write to cwd; pass :scope :global for a new global " "name. A redefinition keeps the active layer."))
 
 (defn- library-help
   [env]
@@ -905,11 +908,10 @@
            (str "\n" (str/join "\n" (map definition-line entries))))
          "\nSession-only definitions (live, not saved): " (count session-only)
          (when (seq session-only)
-           (str "\n" (str/join "\n" (map definition-line session-only)))))))
+           (str "\n" (str/join "\n" (map definition-line session-only))))
+         "\n" (scope-help env))))
 
-(defn- scope-help [env] (str "Scope: cwd " (get-in env [:roots :cwd]) " (shadows the global layer)" "\n       global " (get-in env [:roots :global]) "\nNew definitions write to cwd; pass :scope :global for a new global " "name. A redefinition keeps the active layer."))
-
-(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate, or use (eval/keep 'name \"doc\"), to keep it; a defmethod is " "saved with its loaded multimethod. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. System namespaces (core, clj, eval) are read-only; " "ext.* definitions stay live-only. Drop/forget resolve unqualified names in the " "namespace the call ends in; a file that also defines other addresses " "must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed."))
+(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate, or use (eval/keep 'name \"doc\"), to keep it; a defmethod is " "saved with its loaded multimethod. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. System namespaces (core, clj, eval) are read-only; " "ext.* definitions stay live-only. Drop/forget resolve unqualified names in the " "namespace the call ends in; a file that also defines other addresses " "must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed. A result line names the definition and scope; " "(eval/describe 'name :file) names its file."))
 
 (defn- results-help
   []
@@ -930,10 +932,11 @@
   []
   (str "Core: Clojure/SCI — " script/core-summary
        "\n" (builtin-help-line)
-       "\nCore verbs are also referred unqualified: read, write, edit, bash, "
-       "sh, cwd, env, now, sleep, emit, emit-image, spawn; core/<verb> stays "
-       "canonical. Unqualified read is the file reader; clojure.core/read "
-       "remains available."
+       "\nUnqualified read is the file reader; clojure.core/read remains "
+       "available. Read a long file in ranges with "
+       "(read path {:offset N :limit N}) instead of slurping it whole."
+       "\nShell: (bash \"cmd\") returns output; a nonzero exit is a normal "
+       "result. (sh ...) returns a process map when you need :in, :err, :exit or :dir."
        "\nFor stdin or process options, pass a command vector and an opts map: "
        "(core/sh [\"cmd\" \"arg\"] {:in text})."
        "\nLocal let/fn bindings are scratch; the next call starts in the "
@@ -981,27 +984,43 @@
   [env]
   (let [entries (library-entries env)
         session-only (session-only-entries env)]
-    (str "Eval help: (eval/help), (eval/help :library), "
-         "(eval/help :persistence), (eval/help :results), (eval/help :core), "
-         "or (eval/help 'name)."
+    (str "Eval help: (help) or (eval/help) index, (eval/help :topic) a topic, "
+         "or (help 'name) one verb or definition."
+         "\nTopics: :core sandbox, :library definitions and scopes, "
+         ":persistence save/drop, :results output."
          "\n" (source-help env)
          "\nBuilt-in verbs:\n" (str/join "\n" (builtin-verb-lines))
          "\nLibrary: " (count entries) " saved, "
-         (count session-only) " session-only; (eval/help :library) lists both."
-         "\n" (scope-help env)
+         (count session-only) " session-only; (eval/help :library) lists both "
+         "and the scope roots."
          "\nFailures: " (count @(:failures env))
-         "\n(eval/help 'name) describes one definition or verb.")))
+         "\n(help 'name) describes one definition or verb.")))
+
+(defn- help-or-index
+  "Run F; a bad help request returns MISSING plus the index instead of an
+   error, so a typo costs one call rather than two."
+  [env missing f]
+  (try
+    (f)
+    (catch clojure.lang.ExceptionInfo e
+      (if (= :eval/bad-request (:type (ex-data e)))
+        (str missing "; the index:\n" (help-index env))
+        (throw e)))))
 
 (defn- environment-help
   "The `(eval/help)` text: an index, a topic, or one definition's interface.
-   Topics: :library, :persistence, :results, :core."
+   `help` and `describe` are the bare aliases. Topics: :library,
+   :persistence, :results, :core."
   ([env] (help-index env))
   ([env what]
    (cond
      (nil? what) (help-index env)
-     (keyword? what) (help-topic-text env what)
+     (keyword? what)
+     (help-or-index env (str "No help for topic " (pr-str what))
+                    #(help-topic-text env what))
      (or (symbol? what) (string? what))
-     (help-entry-text (describe-entry env what))
+     (help-or-index env (str "No help for " (pr-str what))
+                    #(help-entry-text (describe-entry env what)))
      :else (bad-request! (str "eval help needs a topic or name, got "
                               (pr-str what))
                          {:help what}))))
@@ -1152,7 +1171,7 @@
    A failed evaluation or write restores RECORD in the live environment and
    leaves the old file authoritative; LABEL names the operation in errors.
    VERB is the report line's past-tense verb."
-  [env cwd {:keys [name record path patched patched-record label verb]}]
+  [env {:keys [name record path patched patched-record label verb]}]
   (let [{:keys [error]} (eval-definition! env patched-record)]
     (if error
       (do
@@ -1173,7 +1192,7 @@
         (add-record! env (assoc patched-record :file path))
         (swap! (:change-lines env) conj
                (str "[eval: " verb " " name " (" (scope-label (record-scope patched-record))
-                    ") → " (eval-files/display-path cwd path) "]"))
+                    ")]"))
         nil))))
 
 (defn- patch-definition!
@@ -1182,7 +1201,7 @@
    The definition name and namespace must stay. A source-provided key or an
    unwritten live definition has no authoritative file and is refused; a
    failed re-evaluation restores the old live definition and writes nothing."
-  [env cwd raw-name old new scope]
+  [env raw-name old new scope]
   (let [{:keys [name record path]} (definition-target! env raw-name "patch" scope)
         content (slurp path)
         patched (try (patch/patched-content content record old new)
@@ -1194,20 +1213,20 @@
                                          (ex-message t))
                                     {:name name :file path})))
         patched-record (patched-record! name record parsed "patch")]
-    (commit-definition! env cwd {:name name
-                                 :record record
-                                 :path path
-                                 :patched patched
-                                 :patched-record patched-record
-                                 :label "patch"
-                                 :verb "patched"})))
+    (commit-definition! env {:name name
+                             :record record
+                             :path path
+                             :patched patched
+                             :patched-record patched-record
+                             :label "patch"
+                             :verb "patched"})))
 
 (defn- edit-form-definition!
   "Replace NAME's whole library definition with NEW-SOURCE, re-evaluate it,
    then write the file. The definition name and namespace must stay; nothing
    is written when the replacement does not parse, changes the name, or fails
    to evaluate."
-  [env cwd raw-name new-source scope]
+  [env raw-name new-source scope]
   (let [new-source (if (string? new-source) new-source (pr-str new-source))
         {:keys [name record path]} (definition-target! env raw-name "edit-form" scope)
         content (slurp path)
@@ -1223,13 +1242,13 @@
                                          (ex-message t))
                                     {:name name :file path})))
         patched-record (patched-record! name record parsed "edit-form")]
-    (commit-definition! env cwd {:name name
-                                 :record record
-                                 :path path
-                                 :patched patched
-                                 :patched-record patched-record
-                                 :label "edit-form"
-                                 :verb "edited"})))
+    (commit-definition! env {:name name
+                             :record record
+                             :path path
+                             :patched patched
+                             :patched-record patched-record
+                             :label "edit-form"
+                             :verb "edited"})))
 
 (defn- source-siblings
   "Other names named by RECORD's own source form (a multi-name `declare`)."
@@ -1368,10 +1387,14 @@
         forget-fn (fn [name] (request-forget! @env-ref name))
         sources-fn (fn [] @(:source-info @env-ref))
         help-fn (fn [& [what]] (environment-help @env-ref what))
-        keep-fn (fn [name & [doc]] (keep-definition! @env-ref cwd name doc))
+        describe-fn (fn
+                      ([name] (describe @env-ref name))
+                      ([name key] (describe @env-ref name key)))
+        keep-fn (fn [name & [doc]] (keep-definition! @env-ref name doc))
         result-fn (fn [& args] (apply result-command @env-ref args))
         sci-ctx (script/context
-                  (assoc (script/base-namespaces)
+                  (assoc (update (script/base-namespaces) 'clojure.core merge
+                                 {'help help-fn 'describe describe-fn})
                          'clj {'nrepl-eval
                                (fn [args]
                                  (clj-eval/evaluate
@@ -1383,19 +1406,17 @@
                                 'keep keep-fn
                                 'result result-fn
                                 'patch (fn [name old new]
-                                         (patch-definition! @env-ref cwd name old new
+                                         (patch-definition! @env-ref name old new
                                                             @(:call-scope @env-ref)))
                                 'edit-form (fn [name new-source]
-                                             (edit-form-definition! @env-ref cwd
+                                             (edit-form-definition! @env-ref
                                                                     name new-source
                                                                     @(:call-scope @env-ref)))
                                 'move (fn [name scope]
                                         (let [line (move-record-line! @env-ref name scope)]
                                           (swap! (:change-lines @env-ref) conj line)
                                           nil))
-                                'describe (fn
-                                            ([name] (describe @env-ref name))
-                                            ([name key] (describe @env-ref name key)))
+                                'describe describe-fn
                                 'sources sources-fn
                                 'help help-fn})
                   (script/interrupt-fn interrupt "eval")
@@ -1744,28 +1765,22 @@
       (and (= :defmethod (:kind record))
            (some? (active-record env (defmethod-multimethod (:name record)))))))
 
-(defn- doc-note
-  "The result-line note for a written definition: a method is covered by its
-   multimethod."
-  [record]
-  (if (= :defmethod (:kind record)) " (method)" ""))
-
 (defn- live-only-line
   "The result line for a definition that stays live without a library file:
    an undocumented definition (new or redefining a saved name), or a method
    whose multimethod is not saved."
   [record scope saved?]
   (str "[eval: defined " (:name record) " (" (scope-label scope)
-       "; live only, not saved: "
+       "; live-only: "
        (cond
          (= :defmethod (:kind record)) "its multimethod is not saved"
-         saved? (str "no docstring — the saved file is unchanged; add one and "
-                     "re-evaluate, or (eval/keep '" (:name record) " \"doc\"), to update it")
-         :else (str "no docstring — add one and re-evaluate, or "
-                    "(eval/keep '" (:name record) " \"doc\"), to keep it"))
+         saved? (str "no docstring; the saved file is unchanged; (eval/keep '"
+                     (:name record) " \"doc\") updates it")
+         :else (str "no docstring; (eval/keep '" (:name record)
+                    " \"doc\") saves it"))
        "]"))
 
-(defn- apply-definition! "Write RECORD to its scope's library and index it. A source-provided key\n   stays live but is never written, and is remembered as a model shadow so\n   later source reads do not overwrite it. A definition in an extension\n   namespace is live-only for the same reason. An undocumented definition\n   stays live for the session and is not written, so a saved definition\n   redefined without a docstring keeps its saved file unchanged. A defmethod\n   of a loaded multimethod is written with it. A failed write is recorded and\n   reported; the live definition remains." [env cwd record] (let [name (:name record) scope (or (:scope record) :cwd) record (assoc record :scope scope)] (cond (contains? (clojure.core/deref (:source-keys env)) name) (do (swap! (:model-shadows env) conj name) {:line (str "[eval: redefined " name " (source; not stored)]")}) (extension-name? name) (do (swap! (:model-shadows env) conj name) (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) {:line (str "[eval: defined " name " (extension; live only, not saved)]"), :entry (assoc (library-entry record) :active true)}) (not (documented? env record)) (let [saved? (some? (existing-record env name scope))] (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) {:line (live-only-line record scope saved?), :entry (assoc (library-entry record) :active true)}) :else (try (let [root (root-for env scope) [path record] (write-redefinition! env root record) record (assoc record :file path :root root)] (add-record! env record) (clear-unwritten! env name) {:line (str "[eval: defined " name " (" (scope-label scope) ") → " (eval-files/display-path cwd path) (doc-note record) "]"), :entry (assoc (library-entry record) :active true)}) (catch Throwable t (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) (record-failure! (:failures env) {:name name, :error (ex-message t), :scope scope}) {:line (str "[eval: define failed " name " (" (scope-label scope) "): " (ex-message t) "]"), :error (ex-message t)})))))
+(defn- apply-definition! "Write RECORD to its scope's library and index it. A source-provided key\n   stays live but is never written, and is remembered as a model shadow so\n   later source reads do not overwrite it. A definition in an extension\n   namespace is live-only for the same reason. An undocumented definition\n   stays live for the session and is not written, so a saved definition\n   redefined without a docstring keeps its saved file unchanged. A defmethod\n   of a loaded multimethod is written with it. A failed write is recorded and\n   reported; the live definition remains." [env record] (let [name (:name record) scope (or (:scope record) :cwd) record (assoc record :scope scope)] (cond (contains? (clojure.core/deref (:source-keys env)) name) (do (swap! (:model-shadows env) conj name) {:line (str "[eval: redefined " name " (source; not stored)]")}) (extension-name? name) (do (swap! (:model-shadows env) conj name) (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) {:line (str "[eval: defined " name " (extension; live-only)]"), :entry (assoc (library-entry record) :active true)}) (not (documented? env record)) (let [saved? (some? (existing-record env name scope))] (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) {:line (live-only-line record scope saved?), :entry (assoc (library-entry record) :active true)}) :else (try (let [root (root-for env scope) [path record] (write-redefinition! env root record) record (assoc record :file path :root root)] (add-record! env record) (clear-unwritten! env name) {:line (str "[eval: defined " name " (" (scope-label scope) ")]"), :entry (assoc (library-entry record) :active true)}) (catch Throwable t (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) (record-failure! (:failures env) {:name name, :error (ex-message t), :scope scope}) {:line (str "[eval: define failed " name " (" (scope-label scope) "): " (ex-message t) "]"), :error (ex-message t)})))))
 
 (defn- keep-definition!
   "Save RAW-NAME's live-only definition, adding DOC as its docstring when
@@ -1774,7 +1789,7 @@
    saved with its multimethod when that multimethod is already saved.
    Refuses a name that is already saved, source-provided, an extension, a
    method whose multimethod is not saved, or a kind with no docstring slot."
-  [env cwd raw-name doc]
+  [env raw-name doc]
   (let [name (when-let [raw (->name raw-name)]
                (qualify-name (env-ns env) raw))]
     (when-not name
@@ -1827,7 +1842,7 @@
                   record (if method?
                            record
                            (assoc record :doc doc :source source))
-                  result (apply-definition! env cwd record)]
+                  result (apply-definition! env record)]
               (if-let [error (:error result)]
                 (bad-request! (str "keep failed: " error) {:name name})
                 (do (swap! (:change-lines env) conj (:line result))
@@ -1852,7 +1867,7 @@
    in, like `(eval/forget …)`. All targets resolve before anything is deleted.
    Returns the report the tool result carries; a failure keeps the partial
    report."
-  [env cwd records drop forgotten scope]
+  [env records drop forgotten scope]
   (let [env-ns (env-ns env)
         forgotten (mapv (fn [{:keys [name scope]}]
                           {:name (qualify-name env-ns name) :scope scope})
@@ -1890,7 +1905,7 @@
                 (record-failure! (:failures env) {:name name :error error
                                                   :scope actual-scope}))))))
       (doseq [record records]
-        (let [{:keys [line entry error]} (apply-definition! env cwd record)]
+        (let [{:keys [line entry error]} (apply-definition! env record)]
           (swap! lines conj line)
           (when entry (swap! defined conj entry))
           (when error (swap! write-errors inc))))
@@ -1969,10 +1984,10 @@
 (defn- finish-call!
   "Merge the script result with the definition report: content lines after
    the emitted output, and the defined/forgotten vocabulary in :details."
-  [env cwd records drop forgotten scope base started]
+  [env records drop forgotten scope base started]
   (let [base (base-result base started)
         report (take-build-report! env)
-        changes (apply-changes! env cwd records drop forgotten scope)
+        changes (apply-changes! env records drop forgotten scope)
         _ (when (:error changes) (mark-transient! env records))
         lines (concat (:lines report) (:lines changes))
         content (content-with-lines (:content base) lines)
@@ -2055,7 +2070,7 @@
                                            (get-in result [:details :error]))
                         (mark-transient! env records))
                       (error-result env result started))
-                    (finish-call! env cwd records drop
+                    (finish-call! env records drop
                                   @(:forgotten env) scope result started)))
                 (finally
                   (reset! (:call-scope env) nil))))))))))
