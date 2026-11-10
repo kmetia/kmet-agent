@@ -380,6 +380,36 @@
                 "the marker is recorded after the tool result")))
       (finally (fs/delete-tree dir)))))
 
+(t/deftest test-a-mid-batch-selection-still-declares-the-new-tool
+  ;; `/tools` toggled while a call awaits its result records nothing (the
+  ;; marker must not split the call from its result). The next request must
+  ;; declare the selection itself, not replay the old record minus a removal
+  ;; — that would lose a selected tool the transcript never held.
+  (let [{:keys [session dir]} (temp-session)
+        agent (support/make-agent-state
+               :session session
+               :enabled-tool-names (support/tool-names ["bash"]))]
+    (try
+      (state/sync-tool-declarations! agent)
+      (t/is (= #{"bash"} (names (state/active-tools agent))))
+      (swap! (:messages agent) conj
+             {:role :assistant :content []
+              :tool-calls [{:id "tc1" :name "bash" :arguments {}}]})
+      (state/set-active-tools! agent #{"eval"})
+      (t/is (= #{"eval"} (names (state/active-tools agent)))
+            "the wire reads the selection before the mid-batch change is recorded")
+      (state/append-persisted-message!
+       agent {:role :tool :tool-name "bash"
+              :content [{:type :tool_result :tool_use_id "tc1"
+                         :content "ok"}]})
+      (state/sync-resumed-declarations! agent)
+      (t/is (= #{"eval"} (names (state/active-tools agent)))
+            "the request boundary declares the mid-batch selection")
+      (let [entry (peek (changes session))]
+        (t/is (= ["eval"] (mapv :name (:added entry))))
+        (t/is (= ["bash"] (:removed entry))))
+      (finally (fs/delete-tree dir)))))
+
 (t/deftest test-the-request-messages-carry-the-markers-at-their-position
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)

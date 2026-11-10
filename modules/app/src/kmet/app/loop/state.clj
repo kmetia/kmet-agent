@@ -804,21 +804,31 @@ Be precise and concise in your responses."}}]
    the declarations it was sent rather than re-deriving them from a registry
    that may have changed. Before the first :tool-change entry (a session that
    predates the record, a bare test state) it falls back to the live
-   derivation. Read once per request and threaded through it — the wire list,
+   derivation. An explicit session selection (`set-active-tools!`) is the
+   declared set itself — the live derivation under that selection, never the
+   transcript — so a change held past a tool batch still reaches the next
+   request. Read once per request and threaded through it — the wire list,
    the declared set and dispatch all resolve against that one capture, so a
    tool unloaded mid-request still executes for the request that was offered
    it."
   [agent]
-  (let [recorded (some-> (:session agent) session/session-tool-state)
+  (let [override @(:active-tools agent)
+        recorded (some-> (:session agent) session/session-tool-state)
         table (tool-table agent)
         contributed (ctx-contributed-tools (:ctx agent))
-        selection (selection agent
-                             (into (set (keys table))
-                                   (keys recorded)))]
-    (declared-tools recorded
-                    #(runtime-tool-map (:ctx agent))
-                    #(live-declared-tools agent selection)
-                    #(recorded-selected? (:enabled selection) table contributed %))))
+        selection (selection-from override (:enabled-tool-names agent)
+                                  (into (set (keys table))
+                                        (keys recorded)))]
+    (if (some? override)
+      ;; an explicit session selection (`/tools`, `--tools`) is the declared
+      ;; set: the transcript record cannot hold out a name the selection took
+      ;; or add one it dropped (a change held past a tool batch has no entry
+      ;; yet)
+      (vals (live-declared-tools agent selection))
+      (declared-tools recorded
+                      #(runtime-tool-map (:ctx agent))
+                      #(live-declared-tools agent selection)
+                      #(recorded-selected? (:enabled selection) table contributed %)))))
 
 (defn- tool-declaration
   "The model-visible half of a tool record: the declaration a :tool-change
@@ -961,22 +971,31 @@ Be precise and concise in your responses."}}]
   "Record the loadout a resumed or running branch restores against its record
    (pi: _restoreToolsFromTranscript): its recorded declarations, a live
    redefinition, and extension tools the branch never mentioned; a recorded
-   removal stays removed and a tool this state watched unmount is dropped. The
-   loop calls this once before every request."
+   removal stays removed and a tool this state watched unmount is dropped. An
+   explicit session selection (`set-active-tools!`) replaces that restore: the
+   live set under it is recorded, so a change made while a tool batch ran is
+   declared at the request boundary. The loop calls this once before every
+   request."
   [agent]
   (when-let [sess (:session agent)]
-    (let [table (tool-table agent)
+    (let [override @(:active-tools agent)
+          table (tool-table agent)
           contributed (ctx-contributed-tools (:ctx agent))
           branch-previous (session/session-tool-state sess)
-          selection (selection agent
-                               (into (set (keys table))
-                                     (keys branch-previous)))
+          selection (selection-from override (:enabled-tool-names agent)
+                                    (into (set (keys table))
+                                          (keys branch-previous)))
           live (live-declaration-map agent selection)
           seen (seen-tools! agent (set (keys live)))
-          current (or (resume-declarations sess branch-previous live seen
-                                           #(recorded-selected?
-                                             (:enabled selection) table contributed %))
-                      live)]
+          current (if (some? override)
+                    ;; an explicit selection wins over the transcript; the
+                    ;; request boundary is where a change held past a tool
+                    ;; batch is recorded
+                    live
+                    (or (resume-declarations sess branch-previous live seen
+                                             #(recorded-selected?
+                                               (:enabled selection) table contributed %))
+                        live))]
       (record-tool-change! agent (context-tool-state agent) current))))
 
 (defn refresh-system-prompt!
