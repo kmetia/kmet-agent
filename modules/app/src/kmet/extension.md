@@ -471,8 +471,9 @@ source id alone. Keep it a summary, not a catalog; `(eval/sources)` and
   source call; the manifest never invokes the source. For a fuller manual
   unprompted, register a skill. Discovery is `(eval/sources)` for the source
   and verb listing, `(eval/describe 'name)` for one verb's interface and
-  implementation, `(eval/help)` for the index, and `(eval/help :library)` for
-  the library.
+  implementation, `(eval/help)` for the index (a mounted source id is also a
+  topic, e.g. `(eval/help :license)`), and `(eval/help :library)` for the
+  library.
 
 ### Tool execute contract
 

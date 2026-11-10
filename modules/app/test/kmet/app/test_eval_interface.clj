@@ -346,7 +346,12 @@
                                       "(core/emit (nil? (eval/describe 'ext.license/bare :source)))"))))
     (let [help (:content (support/eval! env "(eval/help)"))]
       (t/is (str/includes? help "ext.license/add! ([path]) — Add a header."))
-      (t/is (str/includes? help "ext.license/bare — (no docstring)")))
+      (t/is (str/includes? help "ext.license/bare — (no docstring)"))
+      (t/is (str/includes? help "source topics :license")))
+    (let [help (:content (support/eval! env "(eval/help :license)"))]
+      (t/is (str/includes? help "Eval source license:"))
+      (t/is (str/includes? help "License helpers"))
+      (t/is (str/includes? help "ext.license/add! ([path]) — Add a header.")))
     (let [help (:content (support/eval! env "(eval/help 'ext.license/add!)"))]
       (t/is (str/includes? help "ext.license/add! verb ([path]) (source)"))
       (t/is (str/includes? help "doc: Add a header.")))

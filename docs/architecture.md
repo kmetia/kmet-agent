@@ -695,7 +695,10 @@ alias prelude refers those verbs unqualified, so `(read ...)` and
 eval tool's description and `(eval/help)` name the shared script surface
 (aliases, require-able namespaces and bundled libs) without depending on
 `codemode`, since either row can be selected alone; host-specific sandbox
-differences stay in this section, not in the model-facing text. `list` and
+differences stay in this section, not in the model-facing text. A mounted eval
+source's id is also a help topic — `(eval/help :license)` lists that source's
+description and verbs, and `(eval/help)` derives the topic list from the
+mounted sources. `list` and
 `search` read the disk index across both roots (the built environment's pinned
 roots when the session has one, else the command cwd), so they show the
 library rather than one session's cache and mark each entry `(cwd)` or

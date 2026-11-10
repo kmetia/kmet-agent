@@ -969,6 +969,22 @@
          (when-not (str/blank? (str source))
            (str "\n  source:\n" (indent-text source))))))
 
+(defn- source-topic
+  "SOURCE's id as a help-topic keyword, or nil."
+  [{:keys [id]}]
+  (let [topic (eval-format/source-id id)]
+    (when-not (str/blank? topic) (keyword topic))))
+
+(defn- source-topics
+  "The mounted sources' ids as help-topic keywords, sorted."
+  [env]
+  (->> @(:source-info env) (keep source-topic) sort))
+
+(defn- source-for-topic
+  "The mounted source whose id names TOPIC, or nil."
+  [env topic]
+  (some #(when (= topic (source-topic %)) %) @(:source-info env)))
+
 (defn- help-topic-text
   [env topic]
   (case topic
@@ -976,18 +992,26 @@
     :persistence (persistence-help)
     :results (results-help)
     :core (core-help)
-    (bad-request! (str "unknown eval help topic " (pr-str topic)
-                       "; use :library, :persistence, :results, :core")
-                  {:topic topic})))
+    (if-let [source (source-for-topic env topic)]
+      (str "Eval source " (name topic) ":\n"
+           (eval-format/source-line source))
+      (bad-request! (str "unknown eval help topic " (pr-str topic)
+                         "; use :library, :persistence, :results, :core, "
+                         "or a mounted source id")
+                    {:topic topic}))))
 
 (defn- help-index
   [env]
   (let [entries (library-entries env)
-        session-only (session-only-entries env)]
+        session-only (session-only-entries env)
+        topics (source-topics env)]
     (str "Eval help: (help) or (eval/help) index, (eval/help :topic) a topic, "
          "or (help 'name) one verb or definition."
          "\nTopics: :core sandbox, :library definitions and scopes, "
-         ":persistence save/drop, :results output."
+         ":persistence save/drop, :results output"
+         (when (seq topics)
+           (str ", source topics " (str/join ", " (map str topics))))
+         "."
          "\n" (source-help env)
          "\nBuilt-in verbs:\n" (str/join "\n" (builtin-verb-lines))
          "\nLibrary: " (count entries) " saved, "
