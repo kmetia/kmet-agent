@@ -1053,6 +1053,19 @@ Be precise and concise in your responses."}}]
      (refresh-system-prompt! agent)
      nil)))
 
+(defn apply-run-tools!
+  "Apply a run's `--tools` ENTRIES (a plain allowlist or only `+name`/`-name`
+   modifiers) to AGENT over its effective selection, exactly as `/tools`
+   applies a selection. The driver applies them when it creates the state; a
+   front end applies them again after a startup session restore, which applies
+   the session's own settings and clears the session override. ENTRIES nil is
+   no run selection and changes nothing."
+  [agent entries]
+  (when entries
+    (set-active-tools!
+     agent
+     (tools/resolve-selection entries (enabled-tool-names agent)))))
+
 (defn add-bash-result!
   "Record a !/!! bash execution result in the agent context and session.
    While the agent is streaming the entry is deferred (pi: recordBashResult

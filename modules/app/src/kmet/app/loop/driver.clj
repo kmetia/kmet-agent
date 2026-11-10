@@ -31,7 +31,6 @@
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]
             [kmet.app.session.submission :as submission]
-            [kmet.app.tools.registry :as tools]
             [kmet.app.tools.shell :as shell]
             [kmet.ai.models :as models]
             [kmet.srce.core :as srce]))
@@ -169,9 +168,7 @@
     ;; the next turn rebuilds it from the session again.
     (when-let [entries (:tools config)]
       (loop-state/restore-session-context! state)
-      (loop-state/set-active-tools!
-       state
-       (tools/resolve-selection entries (loop-state/enabled-tool-names state))))
+      (loop-state/apply-run-tools! state entries))
     ;; the session's scoped-model list is the config's (pi: resolveModelScope at
     ;; runtime creation): seeded here, so kmet1's engine and every handle start
     ;; with the same scope rather than only the bootstrapped one

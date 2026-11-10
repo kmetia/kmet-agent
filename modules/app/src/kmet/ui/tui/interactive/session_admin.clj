@@ -366,10 +366,15 @@
    session_info entries are metadata — never rendered (pi: only message
    entries are replayed on resume). When APPLY-SETTINGS? is true (startup
    resume, /resume — pi: createAgentSession), the footer refreshes with the
-   applied model/thinking; fork and clone pass false (pi: navigateTree
-   keeps the current agent state)."
+   applied model/thinking and a run-level --tools selection is re-applied:
+   the switch applies the session's own settings and clears the session tool
+   override, which is not the run's. Fork and clone pass false (pi:
+   navigateTree keeps the current agent state)."
   [cs sess apply-settings?]
   ((:switch-session! (:engine cs)) sess {:apply-settings? apply-settings?})
+  (when apply-settings?
+    (when-let [entries (:tools (runtime/config (:engine cs)))]
+      (runtime/apply-run-tools! (:engine cs) entries)))
   (install-live-session! cs)
   (replay-session! cs sess apply-settings?))
 

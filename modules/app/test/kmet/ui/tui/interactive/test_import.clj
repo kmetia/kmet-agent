@@ -247,6 +247,24 @@
                 "and the rebuilt prompt options agree"))
         (finally (fs/delete-tree dir))))))
 
+(deftest test-the-startup-restore-keeps-the-run-tools
+  (testing "a --tools run whose session has entries (the driver records the
+            selection as a :tool-change entry) keeps its selection across the
+            startup restore, which applies the session's settings and clears
+            the override"
+    (let [dir (test-tmp/temp-dir! "test-startup-tools-")
+          sess (session/create-session dir)
+          handle (hs/handle-with {:session sess :config {:tools ["eval"]}})
+          cs (hs/core-state handle {:tui nil})]
+      (try
+        (t/is (= #{"eval"} @(:active-tools (runtime/agent-state handle))))
+        (with-redefs [tui/tui-request-render (fn [_])]
+          (session-admin/restore-session! cs sess true))
+        (t/is (= #{"eval"} @(:active-tools (runtime/agent-state handle)))
+              "the run's --tools selection survives the startup restore")
+        (t/is (= #{"eval"} (runtime/enabled-tool-names handle)))
+        (finally (fs/delete-tree dir))))))
+
 (deftest test-a-session-switch-installs-the-front-ends-session
   (testing "the handle's session ops install nothing; the front end installs
             the process-wide extension session after every move — a command

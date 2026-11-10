@@ -404,6 +404,16 @@
     (loop-state/set-active-tools! agent names))
   nil)
 
+(defn apply-run-tools!
+  "Apply a run's `--tools` selection ENTRIES to ENGINE's agent over its
+   effective selection (see `kmet.app.loop.state/apply-run-tools!`). The
+   startup session restore uses it after applying the session's own settings,
+   which clears the session override. Returns nil."
+  [engine entries]
+  (when-let [agent (agent-state engine)]
+    (loop-state/apply-run-tools! agent entries))
+  nil)
+
 (defn refresh-resources!
   "Apply a persisted resource-selection change to ENGINE's live agent without
    remounting providers: a tool change clears the session override and records
