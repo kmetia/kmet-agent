@@ -78,7 +78,7 @@
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"
-                         :description "Clojure forms. Omit when only dropping definitions."}
+                         :description "One or more Clojure forms, evaluated in order. Omit when only dropping definitions."}
                  "timeout" {:type "number"
                             :description "Seconds; omit or 0 = no deadline."}
                  "drop" {:type "array"

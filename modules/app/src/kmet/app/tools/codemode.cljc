@@ -60,7 +60,7 @@
     "Use codemode when a command's output would flood the context: compute inside the script and (emit) only the digest — counts, matches, the lines that matter — instead of chaining bash cat/head/rg; println is discarded (emit the digest, or end on the value you want reported)."
     "Inside a script prefer (slurp path), fs/* and (sh ...) for local work over the bash and read tools — they return values, not rendered text — and call a tool only when its result is too large to read (a web fetch, an MCP call), emitting the filtered part: @(tools/call \"name\" args), or its per-tool var @(tools/read {…}). The bare read, write, edit and bash wrappers (also core/*) are available when you need the matching implementation's behavior."
     "When the answer is an image (a screenshot, a chart, a rendered page), attach it with (emit-image path) rather than describing it."]
-   :params {:code {:type :string :description "One Clojure script; definitions do not persist."}
+   :params {:code {:type :string :description "One Clojure script (one or more top-level forms), evaluated in order; definitions do not persist."}
             :timeout {:type :number
                       :description "Seconds; omit or 0 = no deadline."
                       :optional? true}
