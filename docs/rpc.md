@@ -167,10 +167,10 @@ subscribed client sees the swap happen.
 outcome arrives as `:compaction-end` / `:session-compact(-failed)` events
 (kmet's manual compaction stays escape-cancellable). `:keep-user-turns`
 overrides the cut for that compaction (0 compacts everything). With
-`:compactor :vcc`, free-form `:custom-instructions` become a follow-up prompt
-after the compaction; use `:keep-user-turns` to control the cut, or switch to
-`:llm` to apply the instructions during summarization. A run in flight defers
-the compaction instead of aborting it: the request is queued and starts when
+`:compactor :vcc`, free-form `:custom-instructions` are rejected before the
+compaction runs; use `:keep-user-turns` or switch to `:llm`. A run in flight
+defers the compaction instead of aborting it: the request is queued and starts
+when
 the run settles, and the response carries `:scheduled true`. `cycle-model` and
 `cycle-thinking-level` answer nil data when the model offers fewer than two
 choices.

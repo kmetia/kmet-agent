@@ -457,9 +457,9 @@ the summary. Without `keep:N`, the LLM compactor uses `:keep-recent-tokens`
 An explicit `keep:N` that would keep a tail larger than the model's context
 window falls back to the token cut under the LLM compactor and records
 `:keep-fallback :tail-too-large`; VCC respects explicit `keep:N` absolutely.
-Free-form `/compact` instructions are applied by the LLM compactor; under VCC
-they become a post-compaction follow-up prompt. Branch summaries remain LLM
-summaries regardless of `:compactor`. The summary's own output is capped at
+Free-form `/compact` instructions are applied by the LLM compactor; VCC
+rejects them, so use `keep:N` or switch the compactor. Branch summaries remain
+LLM summaries regardless of `:compactor`. The summary's own output is capped at
 `0.8 ×` the effective reserve, plus the session level's thinking budget
 when the model reasons, bounded by the model's maximum output tokens (pi:
 `adjustMaxTokensForThinking`). The token budgets can be tuned per model

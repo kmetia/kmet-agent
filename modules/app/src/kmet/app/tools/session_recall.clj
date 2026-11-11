@@ -660,24 +660,27 @@
 (defn- cap-output [text]
   (if (<= (count text) output-cap)
     text
-    (str "Warning: output clipped at " output-cap " of " (count text)
-         " chars (one recall result is capped at 50 KB). Ask for less at once: "
-         "fewer expand indices, a narrower query, or a line range for file "
-         "content ('#N:path:offset:limit').\n\n"
-         (subs text 0 output-cap) "\n...[clipped at 50 KB]")))
+    (let [end (if (re-find #"[\uD800-\uDBFF]$" (subs text 0 output-cap))
+                (dec output-cap)
+                output-cap)]
+      (str "Warning: output clipped at " end " of " (count text)
+           " chars (one recall result is capped at 50 KB). Ask for less at once: "
+           "fewer expand indices, a narrower query, or a line range for file "
+           "content ('#N:path:offset:limit').\n\n"
+           (subs text 0 end) "\n...[clipped at 50 KB]"))))
 
 (defn- off-path-note []
   "Nothing on the current conversation path; showing edited or retried branches (scope:'all').\n\n")
 
 (defn- run-action [sess {:keys [scope action]}]
-  (let [{:keys [entries index-by-id]} (rendered-entries sess scope)
-        all (rendered-entries sess :all)]
+  (let [{:keys [entries index-by-id]} (rendered-entries sess scope)]
     (case (:kind action)
       :drill
       (let [target (:target action)
-            on-path? (some #(= (:index %) (:index target)) entries)]
+            on-path? (some #(= (:index %) (:index target)) entries)
+            all (if on-path? entries (:entries (rendered-entries sess :all)))]
         (str (when-not on-path? (off-path-note))
-             (run-drill (:entries all) target scope)))
+             (run-drill all target scope)))
 
       :touched
       (str (when (= scope :all) "Scope: all\n\n")
@@ -685,16 +688,19 @@
                                                    (str (fs/cwd)))))
 
       :expand
-      (let [text (run-expand entries (:entries all) (:indices action) scope)]
+      (let [all (if (= scope :all)
+                  entries
+                  (:entries (rendered-entries sess :all)))
+            text (run-expand entries all (:indices action) scope)]
         (if (and (= scope :lineage) (str/starts-with? text "Cannot expand"))
-          (str (off-path-note) (run-expand (:entries all) (:entries all)
-                                           (:indices action) :all))
+          (str (off-path-note) (run-expand all all (:indices action) :all))
           text))
 
       :range
       (let [text (run-range entries (:range action) (:page action) scope)]
         (if (and (= scope :lineage) (str/starts-with? text "No messages"))
-          (let [wide (run-range (:entries all) (:range action) (:page action) :all)]
+          (let [wide (run-range (:entries (rendered-entries sess :all))
+                                (:range action) (:page action) :all)]
             (if (str/starts-with? wide "No messages") text (str (off-path-note) wide)))
           text))
 
@@ -702,11 +708,14 @@
       (let [skip (current-turn-indices sess index-by-id)
             text (run-search entries (:query action) (:page action) scope skip)
             text (if (and (= scope :lineage) (str/starts-with? text "No matches"))
-                   (let [wide (run-search (:entries all) (:query action) (:page action) :all
-                                          (current-turn-indices sess
-                                                                (:index-by-id
-                                                                 (rendered-entries sess :all))))]
-                     (if (str/starts-with? wide "No matches") text (str (off-path-note) wide)))
+                   (let [wide (rendered-entries sess :all)
+                         wide-text (run-search (:entries wide) (:query action)
+                                               (:page action) :all
+                                               (current-turn-indices
+                                                sess (:index-by-id wide)))]
+                     (if (str/starts-with? wide-text "No matches")
+                       text
+                       (str (off-path-note) wide-text)))
                    text)
             in-turn (when (and (seq skip) (str/starts-with? text "No matches"))
                       (count (filter #(contains? skip (:index %))

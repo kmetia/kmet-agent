@@ -64,8 +64,7 @@
    attached to the initial user message; they flow to the provider as OpenAI
    image_url / Anthropic image blocks. The wire filter that honors
    :block-images lives in kmet.app.loop.message."
-  (:require [clojure.string :as str]
-            [kmet.app.config :as cfg]
+  (:require [kmet.app.config :as cfg]
             [kmet.app.permissions :as permissions]
             [kmet.app.projections :as projections]
             [kmet.app.compaction :as compact]
@@ -403,11 +402,10 @@
    continueAfterThresholdCompact without a Pi-version gate."
   [agent]
   (let [cfg @(:cfg agent)
-        vcc (cfg/get-vcc-settings cfg)
-        provider (some-> @(:provider agent) name str/lower-case)
-        skipped (set (:skip-for-providers vcc))]
+        vcc (cfg/get-vcc-settings cfg)]
     (and (= :vcc (get cfg :compactor :llm))
-         (not (contains? skipped provider))
+         (not (cfg/vcc-provider-skipped? @(:provider agent)
+                                         (:skip-for-providers vcc)))
          (not= false (:continue-after-threshold-compact vcc true)))))
 
 (defn- complete-turn!

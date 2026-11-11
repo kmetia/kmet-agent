@@ -1886,8 +1886,7 @@
 (def strategy
   "The builtin VCC compactor: pi-vcc's cut and smart keep plus the
    deterministic summary. It cannot apply free-form instructions; the
-   orchestrator turns them into a post-compaction follow-up prompt via
-   :supports-custom-instructions?."
+   orchestrator rejects them via :supports-custom-instructions?."
   {:prepare prepare
    :summarize summarize
    :supports-custom-instructions? false})

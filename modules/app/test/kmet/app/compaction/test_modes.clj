@@ -1,7 +1,7 @@
 (ns kmet.app.compaction.test-modes
   "Compactor selection and keep:N orchestration: VCC runs without the LLM,
-   VCC turns free-form instructions into a follow-up prompt, and an explicit
-   keep:N cut is honored by both builtin compactors."
+   VCC rejects free-form instructions, and an explicit keep:N cut is honored
+   by both builtin compactors."
   (:require [clojure.string :as str]
             [clojure.test :as t]
             [babashka.fs :as fs]
@@ -86,7 +86,7 @@
                            "BRANCH CONTEXT")
             "a branch summary is not dropped by VCC"))))
 
-(t/deftest vcc-turns-free-form-instructions-into-a-follow-up
+(t/deftest vcc-rejects-free-form-instructions
   (let [events (atom [])]
     (with-session
       {:compactor :vcc :keep-recent-tokens 1
@@ -95,14 +95,13 @@
         (user! sess "one")
         (assistant! sess "a")
         (user! sess "two")
-        (let [result (compact/compact-context! agent "focus on tests" :manual)]
-          (t/is (map? result) "the compaction runs")
-          (t/is (= "focus on tests" (:follow-up-prompt result))
-                "the instructions become a post-compaction prompt")
-          (t/is (some? (compaction-entry sess)))
-          (t/is (not (str/includes? (:summary (compaction-entry sess))
-                                    "focus on tests"))
-                "the instructions are not fed to the summarizer"))))))
+        (t/is (= :failed
+                 (compact/compact-context! agent "focus on tests" :manual)))
+        (t/is (nil? (compaction-entry sess))
+              "a rejected instruction does not compact")
+        (t/is (str/includes?
+               (:error-message (support/event-of events :compaction-end))
+               "cannot apply custom compaction instructions"))))))
 
 (t/deftest vcc-accepts-keep-n-without-instructions
   (with-session

@@ -750,6 +750,16 @@
      :track-commands (vec (distinct (strings (get config :vcc-track-commands))))
      :debug (boolean (get config :vcc-debug false))}))
 
+(defn vcc-provider-skipped?
+  "True when PROVIDER is one of SKIP-FOR-PROVIDERS, matched
+   case-insensitively against the provider id; an absent provider never
+   skips."
+  [provider skip-for-providers]
+  (let [provider (some-> provider name str/lower-case)
+        skipped (into #{} (keep #(some-> % str str/trim not-empty str/lower-case))
+                      skip-for-providers)]
+    (boolean (and provider (contains? skipped provider)))))
+
 (defn get-branch-summary-settings
   "Branch-summary settings (pi: settings-manager branchSummary block —
    reserveTokens, skipPrompt). Returns {:reserve-tokens n :skip-prompt
