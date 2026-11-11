@@ -108,8 +108,8 @@
    `(eval/help)`; the summary itself stays host-neutral."
   (str "aliases fs, str, set, edn, walk, json and p; cwd-resolving slurp, "
        "spit and file-seq; core verbs, also referred unqualified: read, write, "
-       "edit, bash, read-many, bash-many, project-files, cwd, env, now, "
-       "sleep, emit, emit-image, spawn and session-recall "
+       "edit, bash, read-many, bash-many, cwd, env, now, sleep, emit, "
+       "emit-image, spawn and session-recall "
        "(core/<verb> stays available); the core, clj and eval "
        "namespaces; "
        "clojure.*, babashka.*, the bundled libs (rewrite-clj, "
@@ -120,7 +120,7 @@
   "The core verbs the sandbox also refers unqualified. They are the same
    functions the `core` namespace installs, so `(emit v)` and `(core/emit v)`
    are one call; `read` deliberately shadows `clojure.core/read`."
-  '[read read-many write edit bash bash-many project-files cwd env now sleep emit emit-image spawn session-recall])
+  '[read read-many write edit bash bash-many cwd env now sleep emit emit-image spawn session-recall])
 
 (def alias-prelude
   "The aliases and core refers every script gets without its own require — the
@@ -1058,42 +1058,6 @@
                                (str "ERROR: " (ex-message t))))]))
           entries)))
 
-(def ^:private ignored-project-dirs
-  #{".git" ".cpcache" ".m2" ".cache" ".gitlibs" ".venv" ".tox"
-    "__pycache__" ".mypy_cache" ".pytest_cache" "node_modules"
-    "target" "dist" "build" "vendor"})
-
-(defn- ignored-project-path?
-  [path]
-  (boolean (some ignored-project-dirs (str/split (str path) #"/"))))
-
-(defn project-files
-  "List files under the call's cwd. OPTS may carry :glob (default \"**/*\"),
-   :limit (default 300) and :include-ignored? (default false). Ignored build
-   and dependency directories are skipped. Returns {:files [relative...]
-   :more n}."
-  [& [opts]]
-  (let [opts (or opts {})
-        root (call-cwd)
-        glob (str (or (:glob opts) "**/*"))
-        limit (long (or (:limit opts) 300))
-        all (try
-              (->> (if (= "**/*" glob)
-                     (concat (fs/glob root "*") (fs/glob root "**/*"))
-                     (fs/glob root glob))
-                   (map #(str (fs/relativize root %)))
-                   distinct
-                   (remove (fn [p] (and (not (:include-ignored? opts))
-                                        (ignored-project-path? p))))
-                   (filter (fn [p] (fs/regular-file? (fs/path root p))))
-                   sort
-                   vec)
-              (catch Throwable t
-                (throw (ex-info (str "project-files: " (ex-message t))
-                                {:type :eval/bad-argument}))))]
-    {:files (vec (take limit all))
-     :more (max 0 (- (count all) limit))}))
-
 (declare tools-namespace)
 
 (defn call-namespaces
@@ -1132,8 +1096,7 @@
                                                   (bash-text command opts
                                                              (:cancelled *call-state*)))
                                           'read-many read-many
-                                          'bash-many bash-many
-                                          'project-files project-files})
+                                          'bash-many bash-many})
                             'clj {'edit-form (fn [args]
                                                (clj-edit/edit-form
                                                 (assoc args :cwd (call-cwd))))

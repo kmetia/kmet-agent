@@ -290,18 +290,12 @@
         cwd (:cwd env)]
     (spit (str (fs/path cwd "a.txt")) "alpha")
     (spit (str (fs/path cwd "b.txt")) "beta")
-    (fs/create-dirs (str (fs/path cwd "target")))
-    (spit (str (fs/path cwd "target" "ignored.txt")) "ignored")
     (let [r (:content (support/eval! env "(read-many {:a \"a.txt\" :b \"b.txt\"})"))]
       (t/is (str/includes? r ":a \"alpha\"") r)
       (t/is (str/includes? r ":b \"beta\"") r))
     (let [r (:content (support/eval! env "(bash-many [\"printf one\" \"printf two\"])"))]
       (t/is (str/includes? r "one") r)
-      (t/is (str/includes? r "two") r))
-    (let [r (:content (support/eval! env "(project-files)"))]
-      (t/is (str/includes? r ":files") r)
-      (t/is (str/includes? r "a.txt") r)
-      (t/is (not (str/includes? r "target/ignored.txt")) r))))
+      (t/is (str/includes? r "two") r))))
 
 (t/deftest test-the-sandbox-shell-has-no-default-timeout
   (let [env (support/eval-ctx)

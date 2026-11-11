@@ -727,9 +727,6 @@
    "core/bash-many" {:name "core/bash-many" :kind :verb
                      :doc "Run several shell commands in one call; COMMANDS is a vector or a label->command map, OPTS may carry :timeout and :max-bytes. Returns a label->output map."
                      :arglists '([commands] [commands opts])}
-   "core/project-files" {:name "core/project-files" :kind :verb
-                         :doc "List files under the cwd as {:files [relative...] :more n}; OPTS may carry :glob, :limit and :include-ignored?. Build and dependency directories are skipped."
-                         :arglists '([] [opts])}
    "core/emit" {:name "core/emit" :kind :verb
                 :doc "Report VALUE as the call's result; without emit, a silent success reports its final value."
                 :arglists '([value])}
@@ -961,7 +958,7 @@
        "(read path {:offset N :limit N}) instead of slurping it whole."
        "\nShell: (bash \"cmd\") returns output; a nonzero exit is a normal "
        "result. Batch shell commands with (bash-many ...) and reads with "
-       "(read-many ...); (project-files) lists the tree."
+       "(read-many ...)."
        "\nLocal let/fn bindings are scratch; the next call starts in the "
        "namespace the previous call ended in."
        "\nOwnership: define in user; core, clj and eval are read-only; "
