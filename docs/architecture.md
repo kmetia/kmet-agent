@@ -767,7 +767,9 @@ definition stays live for the session and is not written; its result line
 says `live only, not saved`, `(eval/help)` lists it under session-only
 definitions, and `(eval/describe 'name :doc)` is nil. A redefinition of a
 saved name without a docstring is not written; the saved file keeps its
-documented version. A `defmethod` is covered by its multimethod.
+documented version. A redefinition of a saved definition with a docstring is written
+automatically in its active scope; `(eval/keep ...)` is only for a live-only
+definition. A `defmethod` is covered by its multimethod.
 `(eval/keep 'name "doc")` saves a live-only definition without
 re-evaluating or resending it: it inserts the docstring into the retained
 source, writes the record, and the next prompt manifest shows it saved. A

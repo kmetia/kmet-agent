@@ -199,6 +199,8 @@
       (t/is (str/includes? core "Ownership: define in user"))
       (t/is (str/includes? core "ext.* is live-only"))
       (t/is (str/includes? persistence "Persistence:"))
+      (t/is (str/includes? persistence
+                           "A redefinition of a saved definition with a docstring is written automatically"))
       (t/is (str/includes? (:content (support/eval! env "(eval/help :core)"))
                            "eval/forget"))
       (t/is (str/includes? one "user/documented defn ([x]) (cwd)"))
