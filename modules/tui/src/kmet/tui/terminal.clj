@@ -10,7 +10,8 @@
    create-terminal, so neither host touches the other's platform deps and
    neither OS loads the other's FFI surface:
 
-   - kmet.tui.terminal-jline       — Babashka/JVM: JLine 4.4.7 (bundled).
+   - kmet.tui.terminal-jline       — Babashka/JVM: JLine (bb bundles 4.4.7;
+     the JVM uses the pin in modules/tui/deps.edn).
    - kmet.tui.terminal-native-unix — Jolt/Unix: termios + poll(2) over
      jolt.ffi.
    - kmet.tui.terminal-native-win  — Jolt/Windows: the kernel32 console

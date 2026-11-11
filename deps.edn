@@ -195,7 +195,7 @@
                      ;; babashka.ffi and Jolt has jolt.ffi natively. It needs
                      ;; the Class-File/FFM API of JDK 22+; an older JVM falls
                      ;; back to the platform tools.
-                     org.babashka/ffi {:mvn/version "0.1.2"}}
+                     org.babashka/ffi {:mvn/version "0.1.3"}}
         ;; Foreign calls need native access on modern JDKs (older ones ignore
         ;; the flag). The packaged jar carries the same grant as the
         ;; Enable-Native-Access manifest attribute.

@@ -3,4 +3,4 @@
         kmet/reakt {:local/root "../reakt"}
         kmet/hikap {:local/root "../hikap"}
         babashka/fs {:mvn/version "0.5.34"}
-        org.jline/jline-terminal {:mvn/version "4.4.7"}}}
+        org.jline/jline-terminal {:mvn/version "4.6.0"}}}
