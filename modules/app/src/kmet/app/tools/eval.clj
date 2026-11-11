@@ -68,7 +68,7 @@
    :label "Eval"
    :description (str "Persistent Clojure SCI sandbox (babashka surface: fs, slurp, spit, require; no registered tools).\n"
                      "Use read, write, edit and bash (also core/<verb>); batch with read-many, bash-many, project-files and test-summary.\n"
-                     "Shell: (bash \"cmd\") -> output + status; nonzero normal; 60s default. Eval calls run one at a time; put independent forms in one call.\n"
+                     "Shell: (bash \"cmd\") -> output + status; nonzero normal; no default timeout. Eval calls run one at a time; put independent forms in one call.\n"
                      "Multi-form reports one line per form; (emit value) for full output. Define in user; a top-level docstring saves to the eval library, else session-only. Reuse saved definitions; (eval/library) lists them; (eval/keep ...), (eval/forget ...), (eval/move ...).\n"
                      "let/fn bindings are scratch; define what recurs once. Report the final value or (emit value); stdout/stderr are discarded; println is discarded. (help), (describe 'name), (eval/sources), (emit-image path).")
    :prompt-snippet "Persistent Clojure sandbox; batch with read-many/bash-many/test-summary; report value or (emit value); eval/keep,forget,move; (help)."

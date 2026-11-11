@@ -722,7 +722,7 @@
                 :doc "Replace the one occurrence of OLD-TEXT with NEW-TEXT in PATH; zero or several occurrences is an error."
                 :arglists '([path old-text new-text])}
    "core/bash" {:name "core/bash" :kind :verb
-                :doc "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result. The sandbox default timeout is 60s; pass {:timeout N} to change it."
+                :doc "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result. Pass {:timeout N} when a deadline is wanted."
                 :arglists '([command] [command opts])}
    "core/bash-many" {:name "core/bash-many" :kind :verb
                      :doc "Run several shell commands in one call; COMMANDS is a vector or a label->command map, OPTS may carry :timeout and :max-bytes. Returns a label->output map."
@@ -731,7 +731,7 @@
                          :doc "List files under the cwd as {:files [relative...] :more n}; OPTS may carry :glob, :limit and :include-ignored?. Build and dependency directories are skipped."
                          :arglists '([] [opts])}
    "core/test-summary" {:name "core/test-summary" :kind :verb
-                        :doc "Run a test command and return a compact report: first lines, summary/failure lines and the tail. OPTS is passed to bash; the default timeout is 120s."
+                        :doc "Run a test command and return a compact report: first lines, summary/failure lines and the tail. OPTS is passed to bash; there is no default timeout."
                         :arglists '([command] [command opts])}
    "core/emit" {:name "core/emit" :kind :verb
                 :doc "Report VALUE as the call's result; without emit, a silent success reports its final value."
@@ -963,9 +963,9 @@
        "available. Read a long file in ranges with "
        "(read path {:offset N :limit N}) instead of slurping it whole."
        "\nShell: (bash \"cmd\") returns output; a nonzero exit is a normal "
-       "result; the sandbox default timeout is 60s. Batch shell commands with "
-       "(bash-many ...) and reads with (read-many ...); (project-files) lists "
-       "the tree and (test-summary \"cmd\") compacts a test log."
+       "result. Batch shell commands with (bash-many ...) and reads with "
+       "(read-many ...); (project-files) lists the tree and (test-summary "
+       "\"cmd\") compacts a test log."
        "\nLocal let/fn bindings are scratch; the next call starts in the "
        "namespace the previous call ended in."
        "\nOwnership: define in user; core, clj and eval are read-only; "

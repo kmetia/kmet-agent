@@ -130,7 +130,7 @@
   (t/is (str/includes? (:description eval-tool/definition)
                        "read-many"))
   (t/is (str/includes? (:description eval-tool/definition)
-                       "60s default"))
+                       "no default timeout"))
   (t/is (str/includes? (:prompt-snippet eval-tool/definition)
                        "batch with read-many"))
   (let [guidelines (str/join "\n" (:prompt-guidelines eval-tool/definition))]
@@ -306,7 +306,7 @@
       (t/is (str/includes? r "Ran 3 tests") r)
       (t/is (str/includes? r "FAILED case") r))))
 
-(t/deftest test-the-sandbox-shell-defaults-to-60s
+(t/deftest test-the-sandbox-shell-has-no-default-timeout
   (let [env (support/eval-ctx)
         captured (atom nil)]
     (with-redefs [bash-tool/run-bash
@@ -314,7 +314,7 @@
                     (reset! captured args)
                     {:content "ok"})]
       (support/eval! env "(bash \"echo hi\")"))
-    (t/is (= 60 (:timeout @captured)))))
+    (t/is (not (contains? @captured :timeout)))))
 
 (t/deftest test-a-nonzero-shell-exit-is-a-result
   (let [env (support/eval-ctx)

@@ -98,10 +98,6 @@
 (def ^:private batch-min-item-bytes
   "Minimum per-item byte share in a batch helper."
   1000)
-(def ^:private sandbox-bash-timeout-seconds
-  "Default timeout for a shell command run from the sandbox: a broad find or
-   grep cannot hold the call open indefinitely. An explicit :timeout wins."
-  60)
 (def script-tool-names
   "The script tools themselves: neither can start the other, and neither is
    callable from inside a script."
@@ -977,13 +973,11 @@
 (defn bash-text
   "Run COMMAND through the bash tool's implementation and return its
    rendered output. A nonzero exit is reported in that output, not thrown;
-   a timeout, abort or spawn failure stays an error. A sandbox call defaults
-   to a 60s timeout; an explicit :timeout wins."
+   a timeout, abort or spawn failure stays an error. No default timeout:
+   pass :timeout when the caller wants a deadline."
   [command opts signal]
   (binding [bash-tool/*cancel-signal* signal]
-    (let [result (bash-tool/run-bash (merge {:command (str command)
-                                             :timeout sandbox-bash-timeout-seconds}
-                                            opts)
+    (let [result (bash-tool/run-bash (merge {:command (str command)} opts)
                                      nil {})
           content (or (:content result) "")]
       (if (and (:is-error result)
@@ -1047,10 +1041,10 @@
 
 (defn bash-many
   "Run several shell commands in one call. COMMANDS is a vector of commands or
-   a map of labels to commands; OPTS is passed to each command (default
-   timeout 60s) and may carry :max-bytes for the total output budget. Returns
-   a map label -> output; a nonzero exit is normal, a timeout/abort is an
-   ERROR string. The end of each output is kept so the status footer survives."
+   a map of labels to commands; OPTS is passed to each command and may carry
+   :timeout and :max-bytes. Returns a map label -> output; a nonzero exit is
+   normal, a timeout/abort is an ERROR string. There is no default timeout.
+   The end of each output is kept so the status footer survives."
   [commands & [opts]]
   (let [opts (or opts {})
         entries (batch-entries commands "bash-many")
@@ -1106,15 +1100,13 @@
 
 (defn test-summary
   "Run a test command through bash and return a compact report: the first
-   lines, every summary/failure line, and the tail. OPTS is passed to bash
-   (default timeout 120s) and may carry :max-bytes. Use it instead of dumping
-   a whole test log into the call."
+   lines, every summary/failure line, and the tail. OPTS is passed to bash and
+   may carry :timeout and :max-bytes; there is no default timeout. Use it
+   instead of dumping a whole test log into the call."
   [command & [opts]]
   (let [opts (or opts {})
         signal (:cancelled *call-state*)
-        content (bash-text command (merge {:timeout 120}
-                                          (dissoc opts :max-bytes))
-                           signal)
+        content (bash-text command (dissoc opts :max-bytes) signal)
         lines (vec (str/split-lines (str content)))
         n (count lines)
         hits (keep-indexed (fn [i line]
