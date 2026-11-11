@@ -21,7 +21,7 @@
    source that contributes one is refused as a whole."
   #{"eval/library" "eval/forget" "eval/sources" "eval/help" "eval/describe"
     "eval/move" "core/read" "core/write" "core/edit" "core/bash"
-    "core/sh" "core/emit" "core/emit-image" "core/cwd" "core/env"
+    "core/emit" "core/emit-image" "core/cwd" "core/env"
     "core/now" "core/sleep" "core/spawn" "core/session-recall"
     "clj/edit-form" "clj/replace-sexp" "clj/paren-repair"
     "clj/nrepl-eval"})

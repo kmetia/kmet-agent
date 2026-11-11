@@ -777,12 +777,6 @@
                 "all three process shapes report the runtime cwd's leaf")))
       (finally (fs/delete-tree dir)))))
 
-(t/deftest ^:slow test-codemode-preloaded-sh
-  ;; sh is preloaded bare (cwd-defaulting), like fs/p
-  (let [r (run "(core/emit (clojure.string/trim (:out (core/sh \"echo\" \"preloaded\"))))")]
-    (t/is (not (:is-error r)) (:content r))
-    (t/is (= "preloaded" (:content r)))))
-
 (t/deftest ^:slow test-codemode-inner-bash
   (let [r (run "(core/emit @(tools/call \"bash\" {:command \"echo inner-ok\"}))")]
     (t/is (not (:is-error r)) (:content r))

@@ -102,7 +102,7 @@
    `(eval/help)`; the summary itself stays host-neutral."
   (str "aliases fs, str, set, edn, walk, json and p; cwd-resolving slurp, "
        "spit and file-seq; core verbs, also referred unqualified: read, write, "
-       "edit, bash, sh, cwd, env, now, sleep, emit, emit-image, spawn and "
+       "edit, bash, cwd, env, now, sleep, emit, emit-image, spawn and "
        "session-recall (core/<verb> stays available); the core, clj and eval "
        "namespaces; "
        "clojure.*, babashka.*, the bundled libs (rewrite-clj, "
@@ -113,7 +113,7 @@
   "The core verbs the sandbox also refers unqualified. They are the same
    functions the `core` namespace installs, so `(emit v)` and `(core/emit v)`
    are one call; `read` deliberately shadows `clojure.core/read`."
-  '[read write edit bash sh cwd env now sleep emit emit-image spawn session-recall])
+  '[read write edit bash cwd env now sleep emit emit-image spawn session-recall])
 
 (def alias-prelude
   "The aliases and core refers every script gets without its own require — the
@@ -432,7 +432,7 @@
 
 (defn- split-token-options
   "Normalize token-form arguments with trailing keyword options into a trailing
-   opts map, so `(sh \"cmd\" :in text)` reaches babashka.process as options
+   opts map, so `(p/sh \"cmd\" :in text)` reaches babashka.process as options
    rather than command tokens. Returns ARGS unchanged without a keyword."
   [args]
   (let [idx (first (keep-indexed (fn [i a] (when (keyword? a) i)) args))]
@@ -982,7 +982,7 @@
   "The per-call half of the sandbox namespaces: SCI core patches
    (slurp/spit/file-seq/pmap), the cwd/pid-tracking process wrappers, the
    `core` namespace (cwd/emit/spawn helpers plus the direct `read`, `write`,
-   `edit`, `bash` and `sh` verbs, which call the tool implementations, not the
+   `edit` and `bash` verbs, which call the tool implementations, not the
    tool bridge), the direct `clj/edit-form`, `clj/replace-sexp` and
    `clj/paren-repair` verbs (which call `kmet.libs.clj-edit` directly), and —
    unless the caller opted out with `:tools? false` — the `tools` namespace
@@ -1022,7 +1022,6 @@
                                   'paren-repair (fn [args]
                                                   (clj-edit/paren-repair
                                                    (assoc args :cwd (call-cwd))))}}
-                     (contains? process 'sh) (assoc-in ['core 'sh] (get process 'sh))
                      tools? (assoc 'tools (tools-namespace (or surface {}))))]
     (reduce-kv (fn [acc ns-name ns-map]
                  (update acc ns-name #(merge (or % {}) ns-map)))

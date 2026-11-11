@@ -678,14 +678,14 @@ independent of the `:tool/eval` row, so removing the row leaves the command
 and its service. An unknown leading
 name that resolves to a definition or source verb is a `describe` shorthand;
 an unresolvable one keeps the unknown-verb hint. The system already provides
-`read`, `write`, `edit`, `bash`, `sh` and `session-recall` (also `core/...`);
+`read`, `write`, `edit`, `bash` and `session-recall` (also `core/...`);
 the row does not mount a separate eval source for them, and there is no
 `tools` namespace. `session-recall` calls the same `run-recall`
 implementation as the `session_recall` tool.
 `bash` is the plain-output shell verb: its result carries the command output
-and a status footer, and a nonzero exit is a normal result; `sh` is the
-`babashka.process` map (`:out`, `:err`, `:exit`) for callers that need the
-streams. `help` and `describe` are bare aliases of `eval/help` and
+and a status footer, and a nonzero exit is a normal result. The namespaced
+`babashka.process/sh` remains available for callers that need the process map
+(`:out`, `:err`, `:exit`). `help` and `describe` are bare aliases of `eval/help` and
 `eval/describe` in `clojure.core`, so they resolve in the sticky namespace and
 a model definition can shadow them. The
 alias prelude refers those verbs unqualified, so `(read ...)` and

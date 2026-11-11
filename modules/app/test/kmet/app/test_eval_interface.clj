@@ -216,7 +216,7 @@
       (t/is (str/includes? index "  core/read ([path] [path opts]) - "))
       (t/is (<= (count index) 4096) "the index stays one bounded discovery call")
       (t/is (str/includes? index "Topics: :core"))
-      (t/is (str/includes? index "core/sh ([command] [command opts]) - "))
+      (t/is (not (str/includes? index "core/sh")))
       (t/is (str/includes? index "core/bash ([command] [command opts]) - "))
       (t/is (not (str/includes? index "tools/")))
       (t/is (not (str/includes? index "Active tools")))

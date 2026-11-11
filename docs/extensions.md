@@ -640,7 +640,7 @@ it is omitted.
   `core`, `clj` and `eval`, and the fixed host namespaces (`clojure.core`,
   `clojure`, `babashka.process`, `kmet.libs.http`, `kmet.libs.json`,
   `kmet.libs.markdown`, `kmet.libs.yaml`) are reserved. `read`, `write`,
-  `edit`, `bash` and `sh` (also `core/...`) call the tool implementations
+  `edit` and `bash` (also `core/...`) call the tool implementations
   directly; `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` call
   `kmet.libs.clj-edit` directly; `clj/nrepl-eval` calls
   `kmet.libs.clj-eval`, the same implementation as the clojure extension's

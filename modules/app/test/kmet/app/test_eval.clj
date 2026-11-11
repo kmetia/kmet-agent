@@ -241,7 +241,7 @@
     (t/is (str/includes? text "(describe 'name)"))
     (t/is (str/includes? text "serialize"))
     (t/is (str/includes? text "(spawn f)"))
-    (t/is (str/includes? text "read, write, edit, bash, sh"))
+    (t/is (str/includes? text "read, write, edit, bash"))
     (t/is (str/includes? text "core/<verb>"))
     (t/is (str/includes? text "no model tool calls"))
     (t/is (not (str/includes? text "tools/call")))
@@ -270,8 +270,8 @@
     (t/is (= "beta" (slurp (str (fs/path cwd "out.txt")))))
     (t/is (str/includes? (:content (support/eval! env "(bash \"printf bare-bash\")"))
                          "bare-bash"))
-    (t/is (str/includes? (:content (support/eval! env "(str (:out (sh [\"printf\" \"bare-sh\"])))"))
-                         "bare-sh"))
+    (t/is (= "true" (:content (support/eval! env "(nil? (resolve 'sh))")))
+          "sh is not part of the unqualified core surface")
     (t/is (= ":spawned"
              (:content (support/eval! env "@(spawn (fn [] (emit :spawned)))"))))))
 

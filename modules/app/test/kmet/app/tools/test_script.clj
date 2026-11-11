@@ -173,11 +173,11 @@
     (t/is (= :done (#'script/await-script done (atom false) 0)))
     (t/is (= :timeout (#'script/await-script (promise) (atom false) 1)))))
 
-(t/deftest ^:slow test-cancellation-kills-a-bare-sh-process
+(t/deftest ^:slow test-cancellation-kills-a-p-sh-process
   (let [{:keys [started? returned? marker-exists?]}
         (run-cancelled-process
          (fn [argv dir]
-           (str "(core/sh " (str/join " " (map pr-str argv))
+           (str "(p/sh " (str/join " " (map pr-str argv))
                 " :dir " (pr-str dir) ")")))]
     (t/is started? "the fixture's parent and child were running")
     (t/is returned? "the call returns on Escape")
@@ -220,9 +220,9 @@
     (t/is (not marker-exists?)
           "Escape kills a process spawned by an already-finished script")))
 
-(t/deftest test-bare-sh-accepts-trailing-keyword-options
+(t/deftest test-p-sh-accepts-trailing-keyword-options
   (let [s (kept-context)
-        code (str "(core/emit (:out (core/sh "
+        code (str "(core/emit (:out (p/sh "
                   (str/join " " (map pr-str (read-stdin-argv)))
                   " :in \"hi\\n\")))")]
     (t/is (= "hi" (str/trim (:content (run-in s {} code)))))))

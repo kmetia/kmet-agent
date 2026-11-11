@@ -11,7 +11,7 @@
    sees both layers. The
    fresh-context, output-economy tool stays `codemode`.
 
-   The shared `read`, `write`, `edit`, `bash` and `sh` verbs (also
+   The shared `read`, `write`, `edit` and `bash` verbs (also
    available as `core/...`) are the file and shell surface. The sandbox has no
    `tools` namespace: an eval call cannot invoke any tool."
   (:require [clojure.string :as str]
@@ -75,7 +75,7 @@
                      "(babashka surface: fs, slurp, spit, require; no model tool calls). "
                      "Files: (read path {:offset N :limit N}) for a range, (write path text) "
                      "whole, (edit path old new) one occurrence. Shell: (bash \"cmd\") returns "
-                     "output; (sh ...) a process map. Calls serialize: use one call per phase, "
+                     "output with a status footer. Calls serialize: use one call per phase, "
                      "many forms per call; fan out with (spawn f) or pmap. Eval verbs: a "
                      "top-level definition with a docstring is saved; one without is live-only. "
                      "Reuse definitions: (eval/library) lists saved ones; define what recurs. "
@@ -85,7 +85,7 @@
                      "reports earlier forms one line each and the last value in full; stdout "
                      "and stderr are discarded. (help) lists every verb with its interface; "
                      "(describe 'name) reads one.")
-   :prompt-snippet "Persistent Clojure sandbox; no model tool calls; one call per phase; many forms per call; read, write, edit, bash, sh (core/<verb>); (help: verbs, sources)."
+   :prompt-snippet "Persistent Clojure sandbox; no model tool calls; one call per phase; many forms per call; read, write, edit, bash (core/<verb>); (help: verbs, sources)."
    :prompt-guidelines
    ["Spend findings once: reuse before you rebuild, define what recurs, and prefer one eval call that answers over several probes."
     "Put a whole read→edit→verify sequence in one call — one call per phase, not per command."]

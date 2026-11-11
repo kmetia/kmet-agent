@@ -721,9 +721,6 @@
    "core/bash" {:name "core/bash" :kind :verb
                 :doc "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result."
                 :arglists '([command] [command opts])}
-   "core/sh" {:name "core/sh" :kind :verb
-              :doc "Run COMMAND through babashka.process and return its process map (:out :err :exit); pass :in or :dir in an opts map; use bash for plain output."
-              :arglists '([command] [command opts])}
    "core/emit" {:name "core/emit" :kind :verb
                 :doc "Report VALUE as the call's result; without emit, a silent success reports its final value."
                 :arglists '([value])}
@@ -953,9 +950,7 @@
        "available. Read a long file in ranges with "
        "(read path {:offset N :limit N}) instead of slurping it whole."
        "\nShell: (bash \"cmd\") returns output; a nonzero exit is a normal "
-       "result. (sh ...) returns a process map when you need :in, :err, :exit or :dir."
-       "\nFor stdin or process options, pass a command vector and an opts map: "
-       "(core/sh [\"cmd\" \"arg\"] {:in text})."
+       "result."
        "\nLocal let/fn bindings are scratch; the next call starts in the "
        "namespace the previous call ended in."
        "\nOwnership: define in user; core, clj and eval are read-only; "
