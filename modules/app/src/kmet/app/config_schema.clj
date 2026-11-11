@@ -23,6 +23,12 @@
     [:map {:closed false}
      [:block-images {:optional true} :boolean]]]
    [:compactor {:optional true} [:enum :llm :vcc]]
+   [:vcc-smart-keep-tail {:optional true} :boolean]
+   [:vcc-continue-after-threshold-compact {:optional true} :boolean]
+   [:vcc-debug {:optional true} :boolean]
+   [:vcc-skip-for-providers {:optional true} [:sequential :string]]
+   [:vcc-skip-custom-types {:optional true} [:sequential [:or :keyword :string]]]
+   [:vcc-track-commands {:optional true} [:sequential :string]]
    [:http-idle-timeout-ms {:optional true} [:or :nil :int]]
    [:http-total-timeout-ms {:optional true} [:or :nil :int]]
    [:resources {:optional true} Resources]])

@@ -102,8 +102,9 @@
    `(eval/help)`; the summary itself stays host-neutral."
   (str "aliases fs, str, set, edn, walk, json and p; cwd-resolving slurp, "
        "spit and file-seq; core verbs, also referred unqualified: read, write, "
-       "edit, bash, sh, cwd, env, now, sleep, emit, emit-image and spawn "
-       "(core/<verb> stays available); the core, clj and eval namespaces; "
+       "edit, bash, sh, cwd, env, now, sleep, emit, emit-image, spawn and "
+       "session-recall (core/<verb> stays available); the core, clj and eval "
+       "namespaces; "
        "clojure.*, babashka.*, the bundled libs (rewrite-clj, "
        "cljfmt, edamame, parinferish) and the kmet.libs ports (json, http, "
        "yaml, markdown) are require-able."))
@@ -112,7 +113,7 @@
   "The core verbs the sandbox also refers unqualified. They are the same
    functions the `core` namespace installs, so `(emit v)` and `(core/emit v)`
    are one call; `read` deliberately shadows `clojure.core/read`."
-  '[read write edit bash sh cwd env now sleep emit emit-image spawn])
+  '[read write edit bash sh cwd env now sleep emit emit-image spawn session-recall])
 
 (def alias-prelude
   "The aliases and core refers every script gets without its own require — the
@@ -635,11 +636,44 @@
   (when-let [state *call-state*]
     (emit-image! (:emit-state state) (:cwd state) x)))
 
+(defn- session-recall-params
+  "Normalize the eval verb's arguments: no args (recent), a params map, a
+   query string, or a query string plus keyword options."
+  [args]
+  (cond
+    (empty? args) {}
+
+    (and (= 1 (count args)) (map? (first args)))
+    (first args)
+
+    (and (= 1 (count args)) (string? (first args)))
+    {:query (first args)}
+
+    (and (= 1 (count args)) (nil? (first args)))
+    {}
+
+    (string? (first args))
+    (let [opts (rest args)]
+      (when (odd? (count opts))
+        (throw (ex-info "session-recall options need a value after each keyword"
+                        {:type :eval/bad-argument})))
+      (merge {:query (first args)} (apply hash-map opts)))
+
+    :else
+    (throw (ex-info "session-recall expects no args, a params map, a query, or a query plus keyword options"
+                    {:type :eval/bad-argument}))))
+
 (defn- core-namespace-fns []
   {'cwd (fn [] (call-cwd))
    'env (fn [k] (System/getenv (str k)))
    'now (fn [] (System/currentTimeMillis))
    'sleep (fn [ms] (Thread/sleep (long ms)))
+   'session-recall
+   (fn [& args]
+     (if-let [recall (:session-recall *call-state*)]
+       (recall (session-recall-params args))
+       (throw (ex-info "session-recall needs an agent session"
+                       {:type :eval/no-session}))))
    'emit emit-with-state
    'emit-image emit-image-with-state
    ;; a derefable result on a daemon thread (babashka/jolt futures are
@@ -1627,7 +1661,7 @@
    (the `eval` sandbox)."
   [{:keys [tool cwd timeout limits signal abort ctx on-update
            get-all-tools get-contributed-tools select-tools execute-tool
-           source-namespaces tools?]
+           source-namespaces session-recall tools?]
     :or {tools? true}}]
   (require-tool! tool)
   (let [cwd (or cwd (tool-util/cwd))
@@ -1681,6 +1715,7 @@
      :tools? tools?
      :surface surface
      :source-namespaces (or source-namespaces {})
+     :session-recall session-recall
      :abort abort
      :emitted emitted
      :emitted-bytes emitted-bytes

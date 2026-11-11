@@ -45,6 +45,7 @@ its layers; this page is what the build ships.
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
+| `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -87,6 +88,7 @@ its layers; this page is what the build ships.
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
+| `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -123,6 +125,7 @@ its layers; this page is what the build ships.
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
+| `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -159,6 +162,7 @@ its layers; this page is what the build ships.
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
+| `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -196,6 +200,7 @@ its layers; this page is what the build ships.
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
+| `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -232,6 +237,7 @@ its layers; this page is what the build ships.
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
+| `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -267,6 +273,7 @@ its layers; this page is what the build ships.
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
+| `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -370,7 +377,7 @@ Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) na
 
 **Description:**
 
-Evaluate Clojure in this session's persistent SCI sandbox (babashka surface: fs, slurp, spit, require; no model tool calls). Files: (read path {:offset N :limit N}) for a range, (write path text) whole, (edit path old new) one occurrence. Shell: (bash "cmd") returns output; (sh ...) a process map. Calls serialize: use one call per phase, many forms per call; fan out with (spawn f) or pmap. Eval verbs: a top-level definition with a docstring is saved; one without is live-only. Reuse definitions: (eval/library) lists saved ones; define what recurs. Local let/fn bindings are scratch. Define in user; system namespaces are read-only. Report with (emit value), (emit-image path), or the final value; a multi-form call reports earlier forms one line each and the last value in full; stdout and stderr are discarded. (help) lists every verb with its interface; (describe 'name) reads one.
+Evaluate Clojure in this session's persistent SCI sandbox (babashka surface: fs, slurp, spit, require; no model tool calls). Files: (read path {:offset N :limit N}) for a range, (write path text) whole, (edit path old new) one occurrence. Shell: (bash "cmd") returns output; (sh ...) a process map. Calls serialize: use one call per phase, many forms per call; fan out with (spawn f) or pmap. Eval verbs: a top-level definition with a docstring is saved; one without is live-only. Reuse definitions: (eval/library) lists saved ones; define what recurs. Eval sources (ext.mcp): (eval/sources). Local let/fn bindings are scratch. Define in user; system namespaces are read-only. Report with (emit value), (emit-image path), or the final value; a multi-form call reports earlier forms one line each and the last value in full; stdout and stderr are discarded. (help) lists every verb with its interface; (describe 'name) reads one.
 
 ---
 
@@ -385,4 +392,28 @@ Evaluate Clojure in this session's persistent SCI sandbox (babashka surface: fs,
 Searches over deferred tool metadata and exposes matching tools for the next model call.
 
 Some of the tools, such as tools of MCP servers, may not have been provided to you upfront, and you should use this tool (`tool_search`) to search for the required tools. For MCP tool discovery, always use `tool_search`.
+
+---
+
+### `session_recall`
+
+**Label:** Session Recall
+
+**Parameters:** `query`, `range`, `expand`, `page`, `scope`, `mode`
+
+**Description:**
+
+Recall earlier parts of this session, including anything dropped by compaction.
+Use it before saying the context is gone.
+
+Pick one per call:
+- query: keyword search (regex works), 5 results per page.
+- range: [from, to]: entries #from..#to in order, 20 per page.
+- expand: [N, ...]: full text of those entries.
+- mode: 'touched': files worked on, with entry indices.
+- query '#N:path': file content from entry N ('#N:path:full' for all lines).
+
+Add to any of them: page: next page; scope: 'lineage' (default) or 'all'.
+#N is the number shown in summary refs like (#12) and in recall results.
+Only the current session is searchable. One result is capped at 50 KB.
 

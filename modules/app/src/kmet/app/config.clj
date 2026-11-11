@@ -25,6 +25,14 @@
    :auto-compact true
    ;; the builtin compactor selected for context compaction: :llm | :vcc
    :compactor :llm
+   ;; VCC compactor settings (pi-vcc: pi-vcc-config.json). The skip lists are
+   ;; fail-closed: a malformed value coerces to an empty list/set.
+   :vcc-smart-keep-tail true
+   :vcc-continue-after-threshold-compact true
+   :vcc-skip-for-providers []
+   :vcc-skip-custom-types [:tool-sources :eval-library]
+   :vcc-track-commands []
+   :vcc-debug false
    ;; pi: reserveTokens — tokens reserved for prompt + response
    :compact-reserve-tokens 16384
    :keep-recent-tokens 20000
@@ -711,6 +719,36 @@
                                                    :keep-recent-tokens :keep-recent-tokens)
      :compactor (let [c (get config :compactor :llm)]
                   (if (contains? #{:llm :vcc} c) c :llm))}))
+
+(defn get-vcc-settings
+  "Effective VCC compactor settings (pi-vcc settings.ts): booleans default
+   as documented, string lists coerce fail-closed, and :vcc-track-commands is
+   trimmed, de-duplicated and blank-free — a blank name would match every
+   command."
+  [config]
+  (let [strings (fn [v]
+                  (if (sequential? v)
+                    (vec (keep #(when (string? %)
+                                  (let [s (str/trim %)] (when (seq s) s)))
+                               v))
+                    []))
+        custom-types (get config :vcc-skip-custom-types
+                          [:tool-sources :eval-library])
+        custom-types (if (sequential? custom-types) custom-types [])]
+    {:smart-keep-tail
+     (boolean (get config :vcc-smart-keep-tail true))
+     :continue-after-threshold-compact
+     (boolean (get config :vcc-continue-after-threshold-compact true))
+     :skip-for-providers
+     (mapv str/lower-case (strings (get config :vcc-skip-for-providers)))
+     :skip-custom-types
+     (->> custom-types
+          (keep (fn [x] (cond (keyword? x) x
+                              (string? x) (keyword x)
+                              :else nil)))
+          set)
+     :track-commands (vec (distinct (strings (get config :vcc-track-commands))))
+     :debug (boolean (get config :vcc-debug false))}))
 
 (defn get-branch-summary-settings
   "Branch-summary settings (pi: settings-manager branchSummary block —

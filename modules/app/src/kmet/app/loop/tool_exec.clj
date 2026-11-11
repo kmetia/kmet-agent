@@ -114,11 +114,16 @@
    with its sandbox realm before a script's inner call goes out, so what a
    script can reach through a tool is the boundary and not the composition
    (`kmet.app.sandbox`, docs/architecture.md § Service catalog). Key absent —
-   a caller outside a run — means no ctx, not the process's."
-  [agent]
+   a caller outside a run — means no ctx, not the process's.
+   TOOL-NAME gates `:session-record`: only the two builtins that inspect
+   history get the live record, not extension tools (their `:session` facade
+   is branch/custom-only)."
+  [agent tool-name]
   (cond-> (extensions/build-extension-context)
     ;; absent when the state has no ctx, so "no :srce-ctx" reads as "no ctx"
-    (:ctx agent) (assoc :srce-ctx (:ctx agent))))
+    (:ctx agent) (assoc :srce-ctx (:ctx agent))
+    (and (:session agent) (contains? #{"session_recall" "eval"} tool-name))
+    (assoc :session-record (:session agent))))
 
 (defn- execute-call!
   "THE place a tool body starts, on the parallel and the sequential path alike:
@@ -139,7 +144,7 @@
     :tool-call-id (:tool-call-id op)
     :assistant-message assistant-msg
     :signal (:signal agent)
-    :ctx (tool-ctx agent)
+    :ctx (tool-ctx agent (:tool-name op))
     :tools declared-tools
     :on-update (tool-on-update agent (:tool-call-id op))}))
 

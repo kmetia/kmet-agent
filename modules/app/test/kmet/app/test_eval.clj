@@ -379,3 +379,38 @@
              [((:library service)) ((:sources service)) ((:failures service))]))
     (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"disposed"
                             (support/eval! env "1")))))
+
+(t/deftest test-session-recall-verb-shapes
+  (let [env (support/eval-ctx)
+        calls (atom [])
+        stub (fn [params]
+               (swap! calls conj params)
+               "RECALL TEXT")]
+    (t/is (= "RECALL TEXT"
+             (:content (support/eval! env "(session-recall \"auth token\")"
+                                      :session-recall stub))))
+    (t/is (= "RECALL TEXT"
+             (:content (support/eval! env "(core/session-recall {:query \"x\" :scope \"all\"})"
+                                      :session-recall stub))))
+    (t/is (= "RECALL TEXT"
+             (:content (support/eval! env "(session-recall \"x\" :page 2)"
+                                      :session-recall stub))))
+    (t/is (= [{:query "auth token"}
+              {:query "x" :scope "all"}
+              {:query "x" :page 2}]
+             @calls))))
+
+(t/deftest test-session-recall-verb-uses-the-live-session
+  (let [env (support/eval-ctx)
+        sess (:session env)]
+    (session/append-entry sess {:role :user
+                                :content [{:type :text :text "auth token decision"}]})
+    (session/append-entry sess {:role :assistant
+                                :content [{:type :text :text "then later work"}]})
+    (let [result (support/call-tool
+                  env "eval" {:code "(session-recall {:range \"[0, 0]\"})"}
+                  {:ctx {:srce-ctx (:ctx env)
+                         :cwd (:cwd env)
+                         :session-record sess}})]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result) "auth token decision")))))

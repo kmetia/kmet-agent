@@ -64,7 +64,9 @@
    attached to the initial user message; they flow to the provider as OpenAI
    image_url / Anthropic image blocks. The wire filter that honors
    :block-images lives in kmet.app.loop.message."
-  (:require [kmet.app.permissions :as permissions]
+  (:require [clojure.string :as str]
+            [kmet.app.config :as cfg]
+            [kmet.app.permissions :as permissions]
             [kmet.app.projections :as projections]
             [kmet.app.compaction :as compact]
             [kmet.app.loop.completion :as completion]
@@ -394,6 +396,20 @@
       (or boundary-continues? (= :continue decision)) :continue
       :else nil)))
 
+(defn- vcc-auto-continue?
+  "The VCC permission for its own continue after a threshold compaction.
+   Kmet's auto-continue is a loop decision (the post-turn compaction happens
+   before the next request), so this is the equivalent of pi-vcc's
+   continueAfterThresholdCompact without a Pi-version gate."
+  [agent]
+  (let [cfg @(:cfg agent)
+        vcc (cfg/get-vcc-settings cfg)
+        provider (some-> @(:provider agent) name str/lower-case)
+        skipped (set (:skip-for-providers vcc))]
+    (and (= :vcc (get cfg :compactor :llm))
+         (not (contains? skipped provider))
+         (not= false (:continue-after-threshold-compact vcc true)))))
+
 (defn- complete-turn!
   "Complete a turn — pi's hook order: prepareNextTurn, then finishTurn (see
    finish-turn!). Returns the merged decision :end | :continue | nil."
@@ -586,12 +602,14 @@
       (state/set-agent-status! agent :thinking)
       ;; pi: the post-turn hooks and the :turn-end boundary run
       ;; unconditionally — even when terminate stops the tool-call continuation
-      (let [decision (complete-turn! agent t assistant-msg results)]
-        ;; Proactive mid-run compaction, after the turn boundary and before
-        ;; the next request (pi: the next turn's preparation compacts)
-        (compact/maybe-compact! agent)
+      (let [decision (complete-turn! agent t assistant-msg results)
+            ;; Proactive mid-run compaction, after the turn boundary and before
+            ;; the next request (pi: the next turn's preparation compacts)
+            compacted? (compact/maybe-compact! agent)]
         (cond
           give-up? :loop-guard
+          (and compacted? (= :end decision) (not terminate?)
+               (vcc-auto-continue? agent)) :continue
           (= :end decision) :settled
           (= :continue decision) :continue
           terminate? :settled

@@ -96,3 +96,39 @@
 (def get-labels tree/get-labels)
 (def get-tree tree/get-tree)
 (def set-label! tree/set-label!)
+
+;; ─── global #N refs ──────────────────────────────────────────────────────
+
+(def ^:private context-roles #{:user :assistant :tool :bash})
+
+(defn context-role?
+  "True for the entry roles that take a session-global #N ref: user,
+   assistant, tool result and bash. Compaction, branch-summary and custom
+   entries do not."
+  [role]
+  (contains? context-roles role))
+
+(defn global-index-by-id
+  "The session-global #N map: every context-role entry in file order, across
+   compaction windows and abandoned branches. A duplicate id is ambiguous and
+   dropped fail-closed (pi-vcc: global-indices.ts). Both VCC summary refs and
+   `session_recall` use this one index."
+  [entries]
+  (loop [entries (seq entries) i 0 by-id {} ambiguous #{}]
+    (if-let [e (first entries)]
+      (if (context-role? (:role e))
+        (let [id (:id e)]
+          (cond
+            (or (not (string? id)) (empty? id))
+            (recur (next entries) (inc i) by-id ambiguous)
+
+            (contains? ambiguous id)
+            (recur (next entries) (inc i) by-id ambiguous)
+
+            (contains? by-id id)
+            (recur (next entries) (inc i) (dissoc by-id id) (conj ambiguous id))
+
+            :else
+            (recur (next entries) (inc i) (assoc by-id id i) ambiguous)))
+        (recur (next entries) i by-id ambiguous))
+      by-id)))

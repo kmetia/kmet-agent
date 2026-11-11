@@ -112,6 +112,12 @@
             {:error "Usage: /compact [keep:N] [instructions]"}))
         {:error "Usage: /compact [keep:N] [instructions]"}))))
 
+(defn- compaction-succeeded?
+  "True for a completed compaction: `true`, or the manual VCC result map that
+   carries a follow-up prompt."
+  [result]
+  (or (true? result) (and (map? result) (true? (:compacted result)))))
+
 (defn- handle-compact
   [{:keys [ui] engine :runtime} args]
   (let [{:keys [custom-instructions keep-user-turns error]} (parse-compact-args args)]
@@ -126,12 +132,18 @@
                           :on-complete
                           (fn [result]
                             (when-not (= :aborted result)
+                              (when-let [prompt (:follow-up-prompt result)]
+                                (if-let [send! (:send! engine)]
+                                  (send! prompt {:target :next-turn})
+                                  (out ui :warning
+                                       (str "Compaction instructions were not applied: "
+                                            "this front end cannot send a follow-up prompt."))))
                               ;; pi: handleCompactCommand ignores the thrown
                               ;; compaction error — compaction_end surfaces it
                               ;; (showError for manual); the completion reply
                               ;; is only for success and nothing-to-compact.
                               (out ui :info "Compact"
-                                   (if result
+                                   (if (compaction-succeeded? result)
                                      "Session compacted."
                                      "Nothing to compact (session too small)."))))})
             ;; A run in flight defers the compaction (kmet's cancel is cooperative,

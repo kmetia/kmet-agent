@@ -1,7 +1,7 @@
 (ns kmet.app.compaction.test-modes
   "Compactor selection and keep:N orchestration: VCC runs without the LLM,
-   VCC rejects free-form instructions, and an explicit keep:N cut is honored
-   by both builtin compactors."
+   VCC turns free-form instructions into a follow-up prompt, and an explicit
+   keep:N cut is honored by both builtin compactors."
   (:require [clojure.string :as str]
             [clojure.test :as t]
             [babashka.fs :as fs]
@@ -86,7 +86,7 @@
                            "BRANCH CONTEXT")
             "a branch summary is not dropped by VCC"))))
 
-(t/deftest vcc-rejects-free-form-instructions
+(t/deftest vcc-turns-free-form-instructions-into-a-follow-up
   (let [events (atom [])]
     (with-session
       {:compactor :vcc :keep-recent-tokens 1
@@ -95,15 +95,14 @@
         (user! sess "one")
         (assistant! sess "a")
         (user! sess "two")
-        (t/is (= :failed (compact/compact-context! agent "focus on tests" :manual)))
-        (t/is (nil? (compaction-entry sess))
-              "a rejected request appends no compaction entry")
-        (t/is (not-any? #(= :session-before-compact (:type %)) @events)
-              "rejection happens before the extension boundary")
-        (t/is (some #(and (= :session-compact-failed (:type %))
-                          (str/includes? (:error-message %)
-                                         "cannot apply custom compaction instructions"))
-                    @events))))))
+        (let [result (compact/compact-context! agent "focus on tests" :manual)]
+          (t/is (map? result) "the compaction runs")
+          (t/is (= "focus on tests" (:follow-up-prompt result))
+                "the instructions become a post-compaction prompt")
+          (t/is (some? (compaction-entry sess)))
+          (t/is (not (str/includes? (:summary (compaction-entry sess))
+                                    "focus on tests"))
+                "the instructions are not fed to the summarizer"))))))
 
 (t/deftest vcc-accepts-keep-n-without-instructions
   (with-session
@@ -166,15 +165,17 @@
         (t/is (= [entry] (context/context-entries (session/get-branch sess)))
               "compact-all keeps only the summary entry")))))
 
-(t/deftest keep-n-larger-than-history-compacts-nothing
+(t/deftest vcc-keep-n-larger-than-history-compacts-all
   (with-session
     {:compactor :vcc :keep-recent-tokens 1}
     (fn [sess agent]
       (user! sess "one")
       (assistant! sess "a")
-      (t/is (false? (compact/compact-context! agent nil :manual
-                                              {:keep-user-turns 5})))
-      (t/is (nil? (compaction-entry sess))))))
+      (t/is (true? (compact/compact-context! agent nil :manual
+                                             {:keep-user-turns 5})))
+      (t/is (some? (compaction-entry sess)))
+      (t/is (nil? (:first-kept-id (compaction-entry sess)))
+            "pi-vcc compacts all when keep:N cannot form a boundary"))))
 
 (t/deftest keep-n-counts-the-projection-not-omitted-users
   (with-session
@@ -190,7 +191,7 @@
           (t/is (= (:id u2) (:first-kept-id entry)))
           (t/is (not (str/includes? (:summary entry) "omitted request"))))))))
 
-(t/deftest keep-n-tail-too-large-falls-back-to-the-token-cut
+(t/deftest vcc-explicit-keep-n-is-respected-without-a-budget-recut
   (with-session
     {:compactor :vcc
      :keep-recent-tokens 1
@@ -206,7 +207,7 @@
         (t/is (true? (compact/compact-context! agent nil :manual
                                                {:keep-user-turns 2})))
         (let [entry (compaction-entry sess)]
-          (t/is (= :tail-too-large (:keep-fallback (:details entry)))
+          (t/is (nil? (:keep-fallback (:details entry)))
                 "the oversized explicit tail reports its fallback")
           (t/is (some? (:first-kept-id entry))
                 "the token cut still keeps a tail"))))))
@@ -267,3 +268,38 @@
                       (throw (ex-info "VCC must not call the LLM" {})))]
         (t/is (true? (compact/compact-context! agent nil :manual))))
       (t/is (= :vcc (get-in (compaction-entry sess) [:details :compactor]))))))
+
+(defn- llm-summary-stub []
+  (fn [_opts]
+    (future
+      (when-let [on-text (:on-text _opts)] (on-text "llm summary"))
+      (when-let [on-done (:on-done _opts)] (on-done :stop))
+      :done)))
+
+(t/deftest vcc-skip-for-providers-defers-to-the-llm
+  (with-session
+    {:compactor :vcc :keep-recent-tokens 1}
+    (fn [sess agent]
+      (reset! (:provider agent) :xai)
+      (swap! (:cfg agent) assoc :vcc-skip-for-providers ["xai"])
+      (user! sess "one")
+      (assistant! sess "a")
+      (user! sess "two")
+      (with-redefs [llm/send-message (llm-summary-stub)]
+        (t/is (true? (compact/compact-context! agent nil :manual)))
+        (t/is (= :llm (get-in (compaction-entry sess) [:details :compactor])))))))
+
+(t/deftest vcc-smart-keep-grows-a-small-tail
+  (with-session
+    {:compactor :vcc :keep-recent-tokens 1}
+    (fn [sess agent]
+      (user! sess "first request here")
+      (assistant! sess "a")
+      (let [u2 (user! sess "second request here")]
+        (assistant! sess "b")
+        (let [u3 (user! sess "third request here")]
+          (assistant! sess "c")
+          (t/is (true? (compact/compact-context! agent nil :manual)))
+          (t/is (= (:id u2) (:first-kept-id (compaction-entry sess)))
+                "smart keep grows from one turn to the largest tail under 25k")
+          (t/is (not= (:id u3) (:first-kept-id (compaction-entry sess)))))))))

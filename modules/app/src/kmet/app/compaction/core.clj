@@ -293,14 +293,18 @@
           cut (find-projected-cut-point (subvec projected boundary-start) keep-recent-tokens)
           cut-idx (+ boundary-start (:first-kept-index cut))
           first-kept-id (:id (:source (nth projected cut-idx)))
-          msgs (vec (mapcat (fn [pe]
-                              (if (= :compaction (:role (:source pe)))
-                                []
-                                (remove #(= :system (:role %)) (:messages pe))))
-                            (subvec projected boundary-start cut-idx)))]
+          pairs (vec (mapcat (fn [pe]
+                               (if (= :compaction (:role (:source pe)))
+                                 []
+                                 (map (fn [m] [(:id (:source pe)) m])
+                                      (remove #(= :system (:role %))
+                                              (:messages pe)))))
+                             (subvec projected boundary-start cut-idx)))
+          msgs (mapv second pairs)]
       (when (and first-kept-id (seq msgs))
         {:first-kept-id first-kept-id
          :messages msgs
+         :source-ids (mapv first pairs)
          :previous-summary previous-summary
          ;; pi: tokensBefore = the projected context's token count (an
          ;; omitted message is not counted, a rewritten one counts its
@@ -354,17 +358,21 @@
           tail-tokens (when (some? cut-idx)
                         (estimated-tokens
                          (vec (mapcat :messages (subvec projected cut-idx)))))
-          msgs (when (some? cut-idx)
-                 (vec (mapcat (fn [pe]
-                                (if (= :compaction (:role (:source pe)))
-                                  []
-                                  (remove #(= :system (:role %)) (:messages pe))))
-                              (subvec projected boundary-start cut-idx))))]
+          pairs (when (some? cut-idx)
+                  (vec (mapcat (fn [pe]
+                                 (if (= :compaction (:role (:source pe)))
+                                   []
+                                   (map (fn [m] [(:id (:source pe)) m])
+                                        (remove #(= :system (:role %))
+                                                (:messages pe)))))
+                               (subvec projected boundary-start cut-idx))))
+          msgs (when (some? cut-idx) (mapv second pairs))]
       (when (and (some? cut-idx)
                  (or (zero? keep-user-turns) (some? first-kept-id))
                  (seq msgs))
         {:first-kept-id first-kept-id
          :messages msgs
+         :source-ids (mapv first pairs)
          :previous-summary previous-summary
          :tokens-before (projected-context-tokens projected entries)
          :tail-tokens tail-tokens

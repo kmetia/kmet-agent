@@ -169,6 +169,8 @@
         (doseq [s signals]
           (when s (remove-watch s watch-key)))))))
 
+(declare effective-compactor)
+
 (defn- compaction-settings
   "Effective compaction settings for the agent's current model (pi:
    settings-manager getCompactionSettings — the exact \"provider/modelId\"
@@ -178,13 +180,17 @@
    next check or compaction; :enabled mirrors the live :auto-compact
    toggle."
   [agent]
-  (cfg/get-compaction-settings
-   (assoc (select-keys agent [:compact-reserve-tokens :keep-recent-tokens
-                              :compact-model-overrides])
-          :auto-compact (boolean (:auto-compact @(:cfg agent)))
-          :compactor (get @(:cfg agent) :compactor :llm))
-   @(:provider agent)
-   @(:model agent)))
+  (let [settings (merge (cfg/get-compaction-settings
+                         (assoc (select-keys agent
+                                             [:compact-reserve-tokens
+                                              :keep-recent-tokens
+                                              :compact-model-overrides])
+                                :auto-compact (boolean (:auto-compact @(:cfg agent)))
+                                :compactor (get @(:cfg agent) :compactor :llm))
+                         @(:provider agent)
+                         @(:model agent))
+                        (cfg/get-vcc-settings @(:cfg agent)))]
+    (assoc settings :compactor (effective-compactor agent settings))))
 
 (defn- summarization-max-tokens
   "The summarization call's output cap (pi: generateSummaryWithUsage's
@@ -516,9 +522,27 @@
                      "the first kept entry is no longer in the session")
             :failed)))))
 
+(defn- vcc-provider-skipped?
+  "True when SETTINGS selects VCC but the agent's current provider is in
+   :skip-for-providers. Matched case-insensitively against the provider id;
+   an unknown provider never skips (pi-vcc: skipForProviders)."
+  [agent settings]
+  (let [provider (some-> @(:provider agent) name str/lower-case)
+        skipped (set (:skip-for-providers settings))]
+    (boolean (and provider (contains? skipped provider)))))
+
+(defn- effective-compactor
+  "The compactor actually used for this call: a skipped provider defers :vcc
+   to :llm."
+  [agent settings]
+  (if (and (= :vcc (:compactor settings))
+           (vcc-provider-skipped? agent settings))
+    :llm
+    (:compactor settings)))
+
 (defn- compaction-settings-for
   "The effective settings for one compaction, with an explicit keep:N cut
-   when the caller supplied one."
+   when the caller supplied one and the compactor this call resolves to."
   [agent keep-user-turns]
   (cond-> (compaction-settings agent)
     (some? keep-user-turns) (assoc :keep-user-turns keep-user-turns)))
@@ -534,37 +558,40 @@
   (if (compaction-aborted? agent)
     :aborted
     (let [settings (compaction-settings-for agent (:keep-user-turns opts))
-          strategy (selected-strategy strategies settings)]
-      (when (and (not (:supports-custom-instructions? strategy true))
-                 (not (str/blank? custom-instructions)))
-        (throw (ex-info
-                (str "The selected compactor cannot apply custom compaction "
-                     "instructions. Remove the instructions, use keep:N, or "
-                     "switch the compactor in /settings.")
-                {:type :kmet/compactor-rejects-instructions
-                 :compactor (:compactor settings)})))
-      (let [{:keys [entries prep problem] :as plan}
-            (prepare-compaction strategy agent reason settings)]
-        (cond
-          problem
-          (do (vreset! failure problem) :failed)
+          strategy (selected-strategy strategies settings)
+          ;; A compactor without instruction support (VCC) treats free-form
+          ;; /compact text as a follow-up prompt after the compaction, the
+          ;; pi-vcc behaviour — never as a silently dropped instruction.
+          supports? (:supports-custom-instructions? strategy true)
+          follow-up (when (and (not supports?)
+                               (not (str/blank? custom-instructions)))
+                      custom-instructions)
+          summary-instructions (when supports? custom-instructions)
+          {:keys [entries prep problem] :as plan}
+          (prepare-compaction strategy agent reason settings)]
+      (cond
+        problem
+        (do (vreset! failure problem) :failed)
 
-          (nil? plan)
-          false
+        (nil? plan)
+        false
 
-          :else
-          (let [{:keys [cancelled supplied]}
-                (ask-before-compact! agent reason custom-instructions entries prep)]
-            (if cancelled
-              ::cancelled
-              (let [supplied-summary (extension-summary supplied)
-                    summary-result
-                    (if supplied-summary
-                      (do (vreset! from-extension true)
-                          supplied-summary)
-                      ((:summarize strategy) agent prep custom-instructions reason))]
-                (apply-summary! agent sess prep summary-result failure
-                                from-extension)))))))))
+        :else
+        (let [{:keys [cancelled supplied]}
+              (ask-before-compact! agent reason custom-instructions entries prep)]
+          (if cancelled
+            ::cancelled
+            (let [supplied-summary (extension-summary supplied)
+                  summary-result
+                  (if supplied-summary
+                    (do (vreset! from-extension true)
+                        supplied-summary)
+                    ((:summarize strategy) agent prep summary-instructions reason))
+                  compacted (apply-summary! agent sess prep summary-result
+                                            failure from-extension)]
+              (if (and follow-up (map? compacted))
+                (assoc compacted :follow-up-prompt follow-up)
+                compacted))))))))
 
 (defn- compaction-outcome
   "The reporting view of RESULT for finish-compaction!: what status to report
@@ -676,8 +703,14 @@
                         (if aborted? :aborted :failed))))))
               {:keys [succeeded? aborted? failed? error-message]}
               (compaction-outcome reason result @failure)]
-          (finish-compaction! agent reason result @from-extension
-                              aborted? failed? succeeded? error-message))
+          (if (and (= :manual reason)
+                   (map? result)
+                   (:follow-up-prompt result))
+            {:compacted (finish-compaction! agent reason result @from-extension
+                                            aborted? failed? succeeded? error-message)
+             :follow-up-prompt (:follow-up-prompt result)}
+            (finish-compaction! agent reason result @from-extension
+                                aborted? failed? succeeded? error-message)))
         (finally
           (reset! (:compacting? agent) false))))))
 
@@ -685,7 +718,9 @@
   "Compact the context with the compactor selected by :compactor (:llm or
    :vcc). OPTS may carry :keep-user-turns (0 compacts everything). Returns
    true when a compaction happened, false when there was nothing to compact
-   (or one is in progress), and :aborted when cancelled."
+   (or one is in progress), and :aborted when cancelled. A manual compaction
+   whose instructions became a follow-up prompt (VCC) returns
+   {:compacted true :follow-up-prompt text}."
   ([agent]
    (compact-context* default-strategies agent nil nil nil))
   ([agent custom-instructions reason]
@@ -737,7 +772,7 @@
               (and window-reserve (pos? window-reserve)
                    has-usage? measured (>= measured window-reserve)))
         (let [result (compact-context* strategies agent nil :threshold nil)]
-          (and (not= :aborted result) result))
+          (or (true? result) (map? result)))
         false))
     false))
 
@@ -748,7 +783,8 @@
   [strategies agent]
   (when-let [sess (:session agent)]
     (when (pos? (count @(:entries sess)))
-      (compact-context* strategies agent nil :overflow nil))))
+      (let [result (compact-context* strategies agent nil :overflow nil)]
+        (or (true? result) (map? result))))))
 
 (defn maybe-compact!
   "Proactively compact before a run with the selected compactor."

@@ -14,7 +14,8 @@
      append-thinking-level-change! branch! branch-summary-entries
      branch-with-summary! build-context build-context-messages build-session-info
      build-session-infos clone-session common-ancestor-id compact-with-summary!
-     context-edit-label context-entries context-messages copy-imported-session!
+     context-edit-label context-entries context-messages context-role?
+     copy-imported-session!
      deferred-sources-listing
      create-session delete-session! delete-session-file
      derive-context-settings detect-cache-miss
@@ -23,7 +24,7 @@
      get-all-custom-entries get-branch get-custom-entries get-entry
      get-first-message get-label get-labels get-last-activity-ms
      get-last-assistant-text get-message-count get-prompt-history get-session-name
-     get-session-stats get-tree legacy-encode-cwd
+     get-session-stats get-tree global-index-by-id legacy-encode-cwd
      legacy-session-dir-for-cwd list-sessions list-sessions-info load-session
      make-bash-entry plan-session-import project-context project-entries
      record-bash-result! replace-entries! reset-leaf! resolve-session-path

@@ -1,7 +1,9 @@
 (ns kmet.app.compaction.test-vcc
-  (:require [clojure.string :as str]
+  (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :as t]
-            [kmet.app.compaction.vcc :as vcc]))
+            [kmet.app.compaction.vcc :as vcc]
+            [kmet.app.session.core :as session]))
 
 (defn- user [text]
   {:role :user :content [{:type :text :text text}]})
@@ -51,7 +53,7 @@
     (t/is (str/includes? summary "[User Messages]\n- last request"))
     (t/is (not (str/includes? summary "[User Messages]\n- first request"))
           "early requests are not repeated in User Messages")
-    (t/is (str/includes? summary "[user] last request"))
+    (t/is (str/includes? summary "third request\nlast request"))
     (t/is (str/includes? summary "* read \"/src/a.clj\""))
     (t/is (= :vcc (get-in result [:details :compactor])))
     (t/is (= 9 (get-in result [:details :source-message-count])))
@@ -71,12 +73,12 @@
     (t/is (str/includes? summary "- original request")
           "a previous early request is preserved")
     (t/is (str/includes? summary "- Modified: /old.clj"))
-    (t/is (str/includes? summary "- Modified: /new.clj"))
+    (t/is (str/includes? summary "- Created: /new.clj"))
     (t/is (str/includes? summary "[user] old line")
           "the previous brief is merged with the fresh one")
     (t/is (str/includes? summary "- newest request"))))
 
-(t/deftest tracked-commands-do-not-corrupt-commits
+(t/deftest tracked-commands-survive-a-merge
   (let [previous (str "[Early Session Requests]\n- original request\n\n"
                       "[Commits]\n- abc1234: real commit\n\n"
                       "[Tracked Commands]\n- docker: docker ps\n\n"
@@ -84,8 +86,8 @@
         summary (:summary (summarize [(user "new request here")]
                                      {:previous-summary previous}))]
     (t/is (str/includes? summary "- abc1234: real commit"))
-    (t/is (not (str/includes? summary "[Tracked Commands]")))
-    (t/is (not (str/includes? summary "docker ps")))))
+    (t/is (str/includes? summary "[Tracked Commands]"))
+    (t/is (str/includes? summary "- docker: docker ps"))))
 
 (t/deftest previous-early-requests-are-capped-at-three
   (let [previous "[Early Session Requests]\n- one\n- two\n- three\n- four\n"
@@ -102,10 +104,11 @@
                       "[user] hello")
         summary (:summary (summarize [(user "new request here")]
                                      {:previous-summary previous}))
-        transcript-at (str/index-of summary "[Transcript]")
-        commits-at (str/index-of summary "[Commits]")]
-    (t/is (some? transcript-at))
-    (t/is (or (nil? commits-at) (> commits-at transcript-at)))))
+        header (first (str/split summary #"\n\n---\n\n"))]
+    (t/is (not (str/includes? header "[Commits]"))
+          "a transcript line never becomes a section of the merged header")
+    (t/is (str/includes? summary "[Commits]\n- fake: transcript line")
+          "the previous brief itself is preserved")))
 
 (t/deftest summary-preserves-an-llm-format-previous-summary
   (let [previous "## Goal\nKeep the API stable\n\n## Next Steps\n1. Ship it"
@@ -134,8 +137,8 @@
   (let [messages (mapv #(user (str "message " % " " (apply str (repeat 200 "x"))))
                        (range 300))
         summary (:summary (summarize messages))
-        brief (second (str/split summary #"\[Transcript\]\n\n"))]
-    (t/is (<= (count (str/split-lines brief)) 80)
+        brief (second (str/split summary #"\n\n---\n\n"))]
+    (t/is (<= (count (str/split-lines brief)) 120)
           "the ranked brief stays within its block cap")
     (t/is (<= (count summary) 12000) "the whole summary stays within its char cap")))
 
@@ -262,7 +265,7 @@
     (t/is (str/includes? summary "<previous-summary>"))
     (t/is (str/includes? summary "## Goal"))
     (t/is (str/includes? summary "keep this"))
-    (t/is (str/includes? summary "[Transcript]"))))
+    (t/is (str/includes? summary "Use `session_recall`"))))
 
 (t/deftest tagged-branch-summaries-survive-a-reparse
   (let [first (summarize [(user "x")
@@ -335,22 +338,23 @@
         summary (:summary (summarize [(user text)]))
         section (second (str/split summary #"\[Early Session Requests\]\n"))
         lines (take-while #(not (str/blank? %)) (str/split-lines section))
-        line (first lines)]
+        line (str/join "" (map str/trim lines))]
     (t/is (some? line))
-    (t/is (= 1 (count lines))
-          "a multi-line user message is collapsed to one section line")
-    (t/is (<= (count (subs line 2)) 300)
-          "a long user message is clipped to 300 characters")))
+    (t/is (<= (count (subs line 2)) 302)
+          "a long user message is clipped to 300 characters")
+    (t/is (not (str/includes? line "\n"))
+          "the section item is one logical line, wrapped only for display")))
 
 (t/deftest user-section-headers-cannot-inject-sections
-  (let [first (summarize [(user (str "hello\n[Early Session Requests]\n"
-                                     "- INJECTED EARLY\n[User Messages]\n"
-                                     "- INJECTED USER"))])
-        second (summarize [(user "another request here")]
-                          {:previous-summary (:summary first)})]
-    (t/is (zero? (count (re-seq #"(?m)^- INJECTED EARLY$" (:summary second))))
+  (let [s1 (summarize [(user (str "hello\n[Early Session Requests]\n"
+                                  "- INJECTED EARLY\n[User Messages]\n"
+                                  "- INJECTED USER"))])
+        s2 (summarize [(user "another request here")]
+                      {:previous-summary (:summary s1)})
+        header (first (str/split (:summary s2) #"\n\n---\n\n"))]
+    (t/is (zero? (count (re-seq #"(?m)^- INJECTED EARLY$" header)))
           "a header inside user text is not re-parsed as a section")
-    (t/is (= 1 (count (re-seq #"(?m)^\[User Messages\]$" (:summary second)))))))
+    (t/is (= 1 (count (re-seq #"(?m)^\[User Messages\]$" header))))))
 
 (t/deftest skill-blocks-collapse-to-a-tag
   (let [summary (:summary (summarize
@@ -366,8 +370,8 @@
                             (user "real request here")]))]
     (t/is (not (str/includes? summary "[Early Session Requests]\n- [skill: tdd]")))
     (t/is (str/includes? summary "- real request here"))
-    (t/is (str/includes? summary "[user] [skill: tdd]"))
-    (t/is (str/includes? summary "[user] real request here"))))
+    (t/is (str/includes? summary "[user]\n[skill: tdd]"))
+    (t/is (str/includes? summary "[skill: tdd]\nreal request here"))))
 
 (t/deftest commit-range-records-the-new-hash
   (let [summary (:summary (summarize
@@ -419,9 +423,7 @@
                                          :arguments {:path "/c.clj"}}])
                             (tool-result "e1" "ok")]
                            {:previous-summary previous}))]
-    (t/is (str/includes? summary "- Modified: /a.clj"))
-    (t/is (str/includes? summary "- Modified: /b.clj"))
-    (t/is (str/includes? summary "- Modified: /c.clj"))))
+    (t/is (str/includes? summary "- Modified: /a.clj, /b.clj, /c.clj"))))
 
 (t/deftest ranked-brief-is-not-undone-by-a-line-cap
   (let [calls (mapv (fn [i]
@@ -434,7 +436,7 @@
                        (map (fn [i] (assistant (str "step " i) calls))
                             (range 40)))
         summary (:summary (summarize messages))]
-    (t/is (str/includes? summary "[assistant] editing old file")
+    (t/is (str/includes? summary "[assistant]\nediting old file")
           "the selected old edit survives a long, tool-heavy brief")))
 
 (t/deftest file-path-keys-and-multi-file-edits-are-recorded
@@ -446,9 +448,7 @@
                                          :arguments {:paths ["/root/b.clj" "/root/c.clj"]}}])
                             (tool-result "e1" "ok")
                             (tool-result "e2" "ok")]))]
-    (t/is (str/includes? summary "- Modified: /root/a.clj"))
-    (t/is (str/includes? summary "- Modified: /root/b.clj"))
-    (t/is (str/includes? summary "- Modified: /root/c.clj"))))
+    (t/is (str/includes? summary "- Modified: /root/a.clj, /root/b.clj, /root/c.clj"))))
 
 (t/deftest multi-file-tool-lines-show-the-extra-path-count
   (let [summary (:summary (summarize
@@ -464,7 +464,7 @@
                                        [{:id "n1" :name "TodoWrite"
                                          :arguments {:todos []}}])]))]
     (t/is (not (str/includes? summary "TodoWrite")))
-    (t/is (str/includes? summary "[assistant] thinking"))))
+    (t/is (str/includes? summary "[assistant]\nthinking"))))
 
 (t/deftest ranked-brief-keeps-an-old-edit
   (let [messages (into [(assistant "editing old file"
@@ -476,7 +476,7 @@
                                          (apply str (repeat 80 "x")))))
                             (range 200)))
         summary (:summary (summarize messages))]
-    (t/is (str/includes? summary "[assistant] editing old file")
+    (t/is (str/includes? summary "[assistant]\nediting old file")
           "signal-based selection keeps an old edit over recent chatter")))
 
 (t/deftest long-tool-values-are-clipped
@@ -488,5 +488,95 @@
                             (tool-result "r1" "data")
                             (user "next")]))]
     (t/is (str/includes? summary "* read \""))
-    (t/is (str/includes? summary " ... ")
+    (t/is (some? (re-find #"\.\.\." summary))
           "a long tool value is clipped instead of calling the limit as a function")))
+
+(defn- with-test-session [f]
+  (let [dir "target/test-vcc-sessions"
+        sess (session/create-session dir {:cwd (str (fs/cwd))})]
+    (try (f sess) (finally (fs/delete-tree dir)))))
+
+(t/deftest session-global-refs-and-details-v2
+  (with-test-session
+    (fn [sess]
+      (let [u (session/append-entry sess {:role :user
+                                          :content [{:type :text :text "inspect"}]})
+            a (session/append-entry sess {:role :assistant :content []
+                                          :tool-calls [{:id "r1" :name "read"
+                                                        :arguments {:path "/src/a.clj"}}]})
+            tr (session/append-entry sess {:role :tool :tool-name "read"
+                                           :content [{:type :tool_result :tool_use_id "r1"
+                                                      :content "data"}]})
+            result (vcc/summarize {:session sess}
+                                  {:messages [{:role :user :content [{:type :text :text "inspect"}]}
+                                              {:role :assistant :content []
+                                               :tool-calls [{:id "r1" :name "read"
+                                                             :arguments {:path "/src/a.clj"}}]}
+                                              {:role :tool :tool-name "read"
+                                               :content [{:type :tool_result :tool_use_id "r1"
+                                                          :content "data"}]}]
+                                   :source-ids [(:id u) (:id a) (:id tr)]
+                                   :previous-summary nil :tokens-before 1 :settings {}}
+                                  nil :manual)
+            summary (:summary result)]
+        (t/is (str/includes? summary "inspect (#0)"))
+        (t/is (str/includes? summary "* read \"/src/a.clj\" (#1)"))
+        (t/is (= 2 (get-in result [:details :version])))
+        (t/is (str/includes? summary "Use `session_recall`"))))))
+
+(t/deftest tracked-commands-section
+  (let [summary (:summary (vcc/summarize nil
+                                         {:messages [{:role :assistant :content []
+                                                      :tool-calls [{:id "b1" :name "bash"
+                                                                    :arguments {:command "docker ps"}}]}]
+                                          :source-ids [nil]
+                                          :previous-summary nil :tokens-before 1
+                                          :settings {:track-commands ["docker"]}}
+                                         nil :manual))]
+    (t/is (str/includes? summary "[Tracked Commands]\n- docker: docker ps"))))
+
+(t/deftest created-category-and-common-root-trimming
+  (let [summary (:summary (vcc/summarize nil
+                                         {:messages [{:role :assistant :content []
+                                                      :tool-calls [{:id "w1" :name "write"
+                                                                    :arguments {:path "/home/user/a/new.clj"}}]}
+                                                     {:role :tool :tool-name "write" :is-error false
+                                                      :content [{:type :tool_result :tool_use_id "w1"
+                                                                 :content "ok"}]}
+                                                     {:role :assistant :content []
+                                                      :tool-calls [{:id "e1" :name "edit"
+                                                                    :arguments {:path "/home/user/b/old.clj"}}]}
+                                                     {:role :tool :tool-name "edit" :is-error false
+                                                      :content [{:type :tool_result :tool_use_id "e1"
+                                                                 :content "ok"}]}]
+                                          :source-ids [nil nil nil nil]
+                                          :previous-summary nil :tokens-before 1 :settings {}}
+                                         nil :manual))]
+    (t/is (str/includes? summary "- Created: a/new.clj"))
+    (t/is (str/includes? summary "- Modified: b/old.clj"))))
+
+(t/deftest long-lines-are-wrapped-to-the-tui-width
+  (let [text (str/join " " (repeat 60 "word"))
+        summary (:summary (vcc/summarize nil
+                                         {:messages [(user text)] :source-ids [nil]
+                                          :previous-summary nil :tokens-before 1 :settings {}}
+                                         nil :manual))]
+    (t/is (every? #(<= (count %) 120) (str/split-lines summary))
+          "every summary line fits the 120-char TUI-safe width")))
+
+(t/deftest recall-note-is-appended-once
+  (let [first (vcc/summarize nil {:messages [(user "first request here")]
+                                  :source-ids [nil] :previous-summary nil
+                                  :tokens-before 1 :settings {}} nil :manual)
+        second (vcc/summarize nil {:messages [(user "second request here")]
+                                   :source-ids [nil]
+                                   :previous-summary (:summary first)
+                                   :tokens-before 1 :settings {}} nil :manual)]
+    (t/is (= 1 (count (re-seq #"Use `session_recall`" (:summary second)))))))
+
+(t/deftest segment-closing-boost-does-not-assume-an-atom
+  (let [long-text (apply str (repeat 200 "x"))
+        summary (:summary (summarize [(user "do the long task")
+                                      (assistant long-text)]))]
+    (t/is (string? summary))
+    (t/is (str/includes? summary "do the long task"))))

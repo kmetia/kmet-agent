@@ -17,6 +17,7 @@
   (:require [clojure.string :as str]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
+            [kmet.app.tools.session-recall :as session-recall]
             [kmet.app.tools.tool :as tool]
             [kmet.app.tools.util :as tool-util]
             [kmet.libs.text :as text]
@@ -54,6 +55,11 @@
                                :signal signal
                                :on-update on-update
                                :ctx ctx
+                               :session-recall
+                               (when-let [sess (:session-record ctx)]
+                                 (fn [params]
+                                   (session-recall/run-recall
+                                    sess (session-recall/normalize-params params))))
                                :cwd (or (:cwd ctx) (tool-util/cwd))}))
           (catch Exception e
             {:content (str "Error evaluating: " (ex-message e)) :is-error true}))

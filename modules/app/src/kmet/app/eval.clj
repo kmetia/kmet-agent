@@ -731,6 +731,9 @@
    "core/spawn" {:name "core/spawn" :kind :verb
                  :doc "Run F on a daemon thread and return a derefable result; bindings do not cross threads."
                  :arglists '([f])}
+   "core/session-recall" {:name "core/session-recall" :kind :verb
+                          :doc "Recall this session's history: no args, a params map, a query string, or a query plus keyword options. Returns the recall text."
+                          :arglists '([] [params] [query] [query & opts])}
    "clj/edit-form" {:name "clj/edit-form" :kind :verb
                     :doc "Apply a structured whole-form edit (same arguments as the clojure_edit tool)."
                     :arglists '([args])}
@@ -2041,7 +2044,7 @@
 
 (defn- eval!*
   [service env cwd {:keys [code timeout limits signal source-signal abort
-                           on-update ctx drop scope]}]
+                           on-update ctx drop scope session-recall]}]
   (let [code (some-> code str)
         scope (normalize-scope scope)
         lock (:lock env)]
@@ -2081,6 +2084,7 @@
                                                       (when-not @(:skip-result-store? env)
                                                         (store-result! env result)))
                                       :source-namespaces (:namespaces sources)
+                                      :session-recall session-recall
                                       :extra-details (cond-> {:sources (:info sources)}
                                                        (seq (:errors sources))
                                                        (assoc :source-errors (:errors sources)))

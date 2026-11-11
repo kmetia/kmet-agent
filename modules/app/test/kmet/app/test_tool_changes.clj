@@ -128,7 +128,7 @@
         fresh (support/make-agent-state :session session)]
     (try
       (state/sync-tool-declarations! fresh)
-      (t/is (= #{"bash" "edit" "read" "write"}
+      (t/is (= #{"bash" "edit" "read" "write" "session_recall"}
                (names (state/active-tools fresh))))
       (let [resumed (support/make-agent-state :session session)]
         (state/restore-session-context! resumed)
@@ -138,7 +138,7 @@
         (let [entry (peek (changes session))]
           (t/is (= ["eval"] (mapv :name (:added entry)))
                 "the opt-in built-in is declared")
-          (t/is (= ["bash" "edit" "write"] (:removed entry))
+          (t/is (= ["bash" "edit" "session_recall" "write"] (:removed entry))
                 "and the tools the selection drops are removed")))
       (finally (fs/delete-tree dir)))))
 
@@ -246,11 +246,11 @@
       (let [resumed (support/make-agent-state :session session
                                               :enabled-tool-names (support/tool-names ["-bash" "-edit" "-write" "-codemode" "-eval"]))]
         (state/sync-resumed-declarations! resumed)
-        (t/is (= #{"read" "tool_search"}
+        (t/is (= #{"read" "tool_search" "session_recall"}
                  (names (state/active-tools resumed)))
               "the discovery tool joins; the recorded removals stay out")
         (state/promote-tools! resumed ["deferred-a"])
-        (t/is (= #{"read" "tool_search" "deferred-a"}
+        (t/is (= #{"read" "tool_search" "deferred-a" "session_recall"}
                  (names (state/active-tools resumed)))
               "the promotion adds the tool without re-adding unrelated ones"))
       (finally

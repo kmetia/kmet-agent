@@ -44,7 +44,9 @@ global agent directory can be changed with `KMET_CODING_AGENT_DIR`.
 | `:theme` | A theme name, or `"light/dark"` to follow the terminal background. |
 | `:thinking` | Startup thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `:auto-compact` | Enables proactive context compaction. |
-| `:compactor` | Compaction strategy: `:llm` (default) or deterministic `:vcc`. Both use the same cut; VCC makes no model call and rejects free-form compaction instructions. |
+| `:compactor` | Compaction strategy: `:llm` (default) or deterministic `:vcc`. VCC makes no model call, uses smart keep-tail/session-global refs, and turns free-form `/compact` instructions into a follow-up prompt. |
+| `:vcc-smart-keep-tail`, `:vcc-skip-for-providers` | VCC cut policy and provider fallback. |
+| `:vcc-skip-custom-types`, `:vcc-track-commands`, `:vcc-debug` | VCC summary input, `[Tracked Commands]` names, and debug snapshot. |
 | `:compact-token-threshold` | Optional fixed estimated-token threshold; `nil` uses the model's context window and `:compact-reserve-tokens`. |
 | `:compact-reserve-tokens`, `:keep-recent-tokens` | Context reserved for the response and recent context retained after compaction. |
 | `:compact-model-overrides` | Per-model compaction budgets keyed by the exact `"provider/modelId"`; entries take `:reserve-tokens`/`:keep-recent-tokens`, each falling back to the ordinary keys. |

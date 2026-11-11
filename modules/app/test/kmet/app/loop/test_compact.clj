@@ -831,7 +831,13 @@
             (binding [*err* (java.io.StringWriter.)]
               (t/is (true? (compact/compact-context! agent nil :manual)))))
           (t/is (= {:enabled true :reserve-tokens 8000 :keep-recent-tokens 40
-                    :compactor :llm}
+                    :compactor :llm
+                    :smart-keep-tail true
+                    :continue-after-threshold-compact true
+                    :skip-for-providers []
+                    :skip-custom-types #{:tool-sources :eval-library}
+                    :track-commands []
+                    :debug false}
                    (get-in (support/event-of events :session-before-compact)
                            [:preparation :settings]))
                 "preparation.settings carries the resolved entry (pi)")

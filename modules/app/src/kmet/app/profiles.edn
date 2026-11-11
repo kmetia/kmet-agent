@@ -55,6 +55,7 @@
           {:id :tool/eval :plugin kmet.app.tools.eval/plugin
            :default-enabled? false}
           {:id :tool/tool_search :plugin kmet.app.tools.search/plugin}
+          {:id :tool/session_recall :plugin kmet.app.tools.session-recall/plugin}
           {:id :commands :plugin kmet.app.registries/commands}
           {:id :prompts :plugin kmet.app.registries/prompts}
           {:id :skills :plugin kmet.app.registries/skills}

@@ -412,26 +412,54 @@ replaced with a summary entry; `:keep-recent-tokens` (default 20000) sets how
 many recent tokens to keep.
 
 `:compactor` selects the builtin summarizer: `:llm` (the default) or `:vcc`.
-VCC is deterministic and makes no model call: it emits fixed
-`[Early Session Requests]`, `[Files And Changes]`, `[Commits]`,
-`[User Messages]`, `[Branch Summary]`, and brief-transcript sections,
-merged with the previous summary and bounded by fixed caps. User messages are
-one line and capped at 300 characters, skill blocks collapse to a
-`[skill: name]` tag, and the brief transcript is selected by signal under a
-size-relative budget. Failed tool calls are marked in the brief and never
-counted as file changes or commits. Both compactors use the same cut and the
-same previous-summary boundary. `/settings` switches the compactor live.
+VCC is deterministic and makes no model call. It emits fixed
+`[Early Session Requests]`, `[Files And Changes]` (Modified/Created/Read),
+`[Commits]`, `[Tracked Commands]` (when `:vcc-track-commands` is set),
+`[User Messages]`, `[Branch Summary]`, and a brief transcript whose `(#N)`
+refs point at the same global index `session_recall` uses. The summary is merged
+with the previous one, wrapped to 120 characters, and closed with a
+`session_recall` note. Skill blocks collapse to a `[skill: name]` tag, and the
+brief is selected by signal under a size-relative budget. User messages and
+tool values are clipped, and failed tool calls are marked but never counted
+as file changes or commits.
+
+VCC settings (all optional):
+
+- `:vcc-smart-keep-tail` (default `true`): when the default keep:1 tail is at
+  most 5k tokens, grow it to the largest user-turn tail under 25k. An explicit
+  `keep:N` is always respected. An oversized default tail is re-cut to the
+  25k token budget; a window with no user anchor uses that budget directly.
+- `:vcc-skip-for-providers` (default `[]`): provider ids for which VCC defers
+  to `:llm`; matched case-insensitively.
+- `:vcc-continue-after-threshold-compact` (default `true`): after a VCC
+  threshold compaction that would otherwise settle the run, continue the
+  turn instead of stopping.
+- `:vcc-skip-custom-types` (default `[:tool-sources :eval-library]`):
+  `custom_message` types left out of the summary input.
+- `:vcc-track-commands` (default `[]`): command names/prefixes remembered in
+  `[Tracked Commands]` (for example `["docker" "gh pr"]`). The 10 most
+  recent invocations per name are kept.
+- `:vcc-debug` (default `false`): write `pi-vcc-debug.json` in the agent dir.
+
+The `session_recall` tool searches the current
+session (including entries dropped by compaction), reads a `#N` range or
+expands entries, lists touched files, and drills into a `#N:path` file
+operation. Results are capped at 50 KB. It is available with both the LLM and
+VCC compactors. Inside the eval sandbox the same implementation is available
+as `(session-recall ...)`, with no args (recent), a params map, a query
+string, or a query plus keyword options.
 
 `/compact keep:N` overrides the cut for that compaction: the last N user turns
 (and everything after the Nth-from-last user message) are kept verbatim and
 everything before is summarized. `keep:0` compacts everything and keeps only
-the summary. Without `keep:N`, `:keep-recent-tokens` (and its per-model
-overrides) chooses the cut. An explicit `keep:N` that would keep a tail larger
-than the model's context window falls back to the token cut and records
-`:keep-fallback :tail-too-large` in the compaction entry details. VCC rejects
-free-form compaction instructions (the LLM compactor applies them); use
-`keep:N` or switch the compactor. Branch summaries remain LLM summaries
-regardless of `:compactor`. The summary's own output is capped at
+the summary. Without `keep:N`, the LLM compactor uses `:keep-recent-tokens`
+(and its per-model overrides); VCC uses its smart keep:1 cut described above.
+An explicit `keep:N` that would keep a tail larger than the model's context
+window falls back to the token cut under the LLM compactor and records
+`:keep-fallback :tail-too-large`; VCC respects explicit `keep:N` absolutely.
+Free-form `/compact` instructions are applied by the LLM compactor; under VCC
+they become a post-compaction follow-up prompt. Branch summaries remain LLM
+summaries regardless of `:compactor`. The summary's own output is capped at
 `0.8 ×` the effective reserve, plus the session level's thinking budget
 when the model reasons, bounded by the model's maximum output tokens (pi:
 `adjustMaxTokensForThinking`). The token budgets can be tuned per model
