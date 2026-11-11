@@ -710,11 +710,8 @@
 
 (def ^:private builtin-verb-help
   {"core/read" {:name "core/read" :kind :verb
-                :doc "Read PATH as text; OPTS may carry :offset and :limit (lines) — read a long file in ranges rather than slurping it whole. Use read-many for several paths."
+                :doc "Read PATH as text; OPTS may carry :offset and :limit (lines) — read a long file in ranges rather than slurping it whole."
                 :arglists '([path] [path opts])}
-   "core/read-many" {:name "core/read-many" :kind :verb
-                     :doc "Read several paths in one call; PATHS is a vector or a label->path map, OPTS may carry :limit and :max-bytes. Returns a label->content map."
-                     :arglists '([paths] [paths opts])}
    "core/write" {:name "core/write" :kind :verb
                  :doc "Write CONTENT to PATH whole, creating parents; success is silent."
                  :arglists '([path content])}
@@ -722,11 +719,8 @@
                 :doc "Replace the one occurrence of OLD-TEXT with NEW-TEXT in PATH; zero or several occurrences is an error."
                 :arglists '([path old-text new-text])}
    "core/bash" {:name "core/bash" :kind :verb
-                :doc "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result. Pass {:timeout N} when a deadline is wanted."
+                :doc "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result. Batch independent commands with && or ; in one command. Pass {:timeout N} when a deadline is wanted."
                 :arglists '([command] [command opts])}
-   "core/bash-many" {:name "core/bash-many" :kind :verb
-                     :doc "Run several shell commands in one call; COMMANDS is a vector or a label->command map, OPTS may carry :timeout and :max-bytes. Returns a label->output map."
-                     :arglists '([commands] [commands opts])}
    "core/emit" {:name "core/emit" :kind :verb
                 :doc "Report VALUE as the call's result; without emit, a silent success reports its final value."
                 :arglists '([value])}
@@ -957,8 +951,8 @@
        "available. Read a long file in ranges with "
        "(read path {:offset N :limit N}) instead of slurping it whole."
        "\nShell: (bash \"cmd\") returns output; a nonzero exit is a normal "
-       "result. Batch shell commands with (bash-many ...) and reads with "
-       "(read-many ...)."
+       "result. Batch shell work in one command: (bash \"cat r.txt && cd /tmp "
+       "&& bb run st\"). Batch reads with several forms in one call."
        "\nLocal let/fn bindings are scratch; the next call starts in the "
        "namespace the previous call ended in."
        "\nOwnership: define in user; core, clj and eval are read-only; "

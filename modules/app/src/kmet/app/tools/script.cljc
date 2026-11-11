@@ -92,12 +92,7 @@
 (def ^:private form-value-line-chars
   "Characters of one form's value line in a multi-form eval result."
   500)
-(def ^:private batch-default-bytes
-  "Default total byte budget for read-many and bash-many output."
-  12000)
-(def ^:private batch-min-item-bytes
-  "Minimum per-item byte share in a batch helper."
-  1000)
+
 (def script-tool-names
   "The script tools themselves: neither can start the other, and neither is
    callable from inside a script."
@@ -108,8 +103,8 @@
    `(eval/help)`; the summary itself stays host-neutral."
   (str "aliases fs, str, set, edn, walk, json and p; cwd-resolving slurp, "
        "spit and file-seq; core verbs, also referred unqualified: read, write, "
-       "edit, bash, read-many, bash-many, cwd, env, now, sleep, emit, "
-       "emit-image, spawn and session-recall "
+       "edit, bash, cwd, env, now, sleep, emit, emit-image, spawn and "
+       "session-recall "
        "(core/<verb> stays available); the core, clj and eval "
        "namespaces; "
        "clojure.*, babashka.*, the bundled libs (rewrite-clj, "
@@ -120,7 +115,7 @@
   "The core verbs the sandbox also refers unqualified. They are the same
    functions the `core` namespace installs, so `(emit v)` and `(core/emit v)`
    are one call; `read` deliberately shadows `clojure.core/read`."
-  '[read read-many write edit bash bash-many cwd env now sleep emit emit-image spawn session-recall])
+  '[read write edit bash cwd env now sleep emit emit-image spawn session-recall])
 
 (def alias-prelude
   "The aliases and core refers every script gets without its own require — the
@@ -985,79 +980,6 @@
         (verb-failed! "bash" result)
         content))))
 
-(defn- batch-entries
-  "Normalize ITEMS for a batch helper to `[[label value] ...]`: a map keeps
-   its labels, a sequential collection uses each value as its own label."
-  [items what]
-  (cond
-    (map? items) (vec items)
-    (sequential? items) (mapv (fn [x] [x x]) items)
-    :else (throw (ex-info (str what " expects a map or a sequential collection")
-                          {:type :eval/bad-argument}))))
-
-(defn- clip-head
-  "Keep the first MAX-BYTES of S, with a truncation marker."
-  [s max-bytes]
-  (let [t (bash-out/truncate-head (str s) :max-bytes max-bytes
-                                  :max-lines 100000)]
-    (if (:truncated t)
-      (str (:content t) "\n… [truncated]")
-      (:content t))))
-
-(defn- clip-tail
-  "Keep the last MAX-BYTES of S, with a truncation marker before it."
-  [s max-bytes]
-  (let [t (bash-out/truncate-tail (str s) :max-bytes max-bytes
-                                  :max-lines 100000)]
-    (if (:truncated t)
-      (str "… [earlier output truncated]\n" (:content t))
-      (:content t))))
-
-(defn- batch-item-bytes
-  "The per-item byte share of a batch's total budget."
-  [opts n]
-  (max batch-min-item-bytes
-       (quot (long (or (:max-bytes opts) batch-default-bytes))
-             (max 1 n))))
-
-(defn read-many
-  "Read several paths in one call. PATHS is a vector of paths or a map of
-   labels to paths; OPTS may carry :limit (lines per file, default 200) and
-   :max-bytes (total output budget). Returns a map label -> content, with an
-   ERROR string for a failed path. Each item gets a bounded share, so one
-   large file cannot hide the rest."
-  [paths & [opts]]
-  (let [opts (or opts {})
-        entries (batch-entries paths "read-many")
-        limit (long (or (:limit opts) 200))
-        per (batch-item-bytes opts (count entries))
-        signal (:cancelled *call-state*)]
-    (into (array-map)
-          (map (fn [[label path]]
-                 [label (try (clip-head (read-text path {:limit limit} signal) per)
-                             (catch Throwable t
-                               (str "ERROR: " (ex-message t))))]))
-          entries)))
-
-(defn bash-many
-  "Run several shell commands in one call. COMMANDS is a vector of commands or
-   a map of labels to commands; OPTS is passed to each command and may carry
-   :timeout and :max-bytes. Returns a map label -> output; a nonzero exit is
-   normal, a timeout/abort is an ERROR string. There is no default timeout.
-   The end of each output is kept so the status footer survives."
-  [commands & [opts]]
-  (let [opts (or opts {})
-        entries (batch-entries commands "bash-many")
-        per (batch-item-bytes opts (count entries))
-        signal (:cancelled *call-state*)
-        command-opts (dissoc opts :max-bytes :limit)]
-    (into (array-map)
-          (map (fn [[label command]]
-                 [label (try (clip-tail (bash-text command command-opts signal) per)
-                             (catch Throwable t
-                               (str "ERROR: " (ex-message t))))]))
-          entries)))
-
 (declare tools-namespace)
 
 (defn call-namespaces
@@ -1094,9 +1016,7 @@
                                                              (:cancelled *call-state*)))
                                           'bash (fn [command & [opts]]
                                                   (bash-text command opts
-                                                             (:cancelled *call-state*)))
-                                          'read-many read-many
-                                          'bash-many bash-many})
+                                                             (:cancelled *call-state*)))})
                             'clj {'edit-form (fn [args]
                                                (clj-edit/edit-form
                                                 (assoc args :cwd (call-cwd))))

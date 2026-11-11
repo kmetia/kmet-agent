@@ -126,17 +126,15 @@
 
 (t/deftest test-the-eval-prompt-steers-batching
   (t/is (str/includes? (:description eval-tool/definition)
-                       "run one at a time"))
+                       "Put independent forms in one call"))
   (t/is (str/includes? (:description eval-tool/definition)
-                       "read-many"))
-  (t/is (str/includes? (:description eval-tool/definition)
-                       "no default timeout"))
+                       "batch shell work"))
   (t/is (str/includes? (:prompt-snippet eval-tool/definition)
-                       "batch with read-many"))
+                       "batch shell work"))
   (let [guidelines (str/join "\n" (:prompt-guidelines eval-tool/definition))]
     (t/is (str/includes? guidelines "Batch independent reads"))
     (t/is (str/includes? guidelines "not one call per file"))
-    (t/is (str/includes? guidelines "bash-many"))
+    (t/is (str/includes? guidelines "compose shell commands"))
     (t/is (str/includes? (:description eval-tool/definition) "define what recurs once"))
     (t/is (str/includes? guidelines "Return the final value"))))
 
@@ -247,7 +245,7 @@
     (t/is (str/includes? text "let/fn"))
     (t/is (str/includes? text "(help)"))
     (t/is (str/includes? text "(describe 'name)"))
-    (t/is (str/includes? text "run one at a time"))
+    (t/is (str/includes? text "Put independent forms in one call"))
     (t/is (str/includes? text "read, write, edit and bash"))
     (t/is (str/includes? text "core/<verb>"))
     (t/is (str/includes? (str/lower-case text) "no registered tools"))
@@ -256,7 +254,7 @@
     (t/is (str/includes? text "Define in user"))
     (t/is (str/includes? text "Batch independent reads"))
     (t/is (str/includes? text "into one eval call"))
-    (t/is (str/includes? text "batch with read-many"))
+    (t/is (str/includes? text "batch shell work"))
     (t/is (str/includes? text "stdout/stderr are discarded"))
     (t/is (str/includes? text "(emit-image path)"))
     (t/is (str/includes? text "println is discarded"))
@@ -283,17 +281,22 @@
     (t/is (= "true" (:content (support/eval! env "(nil? (resolve 'sh))")))
           "sh is not part of the unqualified core surface")
     (t/is (= ":spawned"
-             (:content (support/eval! env "@(spawn (fn [] (emit :spawned)))"))))))
+             (:content (support/eval! env "@(spawn (fn [] (emit :spawned)))"))))
+    (t/is (= "true"
+             (:content (support/eval! env
+                                      "(and (nil? (resolve 'read-many)) (nil? (resolve 'bash-many)))")))
+          "the batch variants are gone from the core surface")))
 
-(t/deftest test-batch-helpers
+(t/deftest test-native-batching
   (let [env (support/eval-ctx)
         cwd (:cwd env)]
     (spit (str (fs/path cwd "a.txt")) "alpha")
     (spit (str (fs/path cwd "b.txt")) "beta")
-    (let [r (:content (support/eval! env "(read-many {:a \"a.txt\" :b \"b.txt\"})"))]
+    (let [r (:content (support/eval! env
+                                     "(let [a (read \"a.txt\") b (read \"b.txt\")] (emit {:a a :b b}))"))]
       (t/is (str/includes? r ":a \"alpha\"") r)
       (t/is (str/includes? r ":b \"beta\"") r))
-    (let [r (:content (support/eval! env "(bash-many [\"printf one\" \"printf two\"])"))]
+    (let [r (:content (support/eval! env "(bash \"printf one && printf two\")"))]
       (t/is (str/includes? r "one") r)
       (t/is (str/includes? r "two") r))))
 

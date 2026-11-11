@@ -378,9 +378,10 @@ Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) na
 **Description:**
 
 Persistent Clojure SCI sandbox (babashka surface: fs, slurp, spit, require; no registered tools).
-Use read, write, edit and bash (also core/<verb>); batch with read-many and bash-many.
-Shell: (bash "cmd") -> output + status; nonzero normal; no default timeout. Eval calls run one at a time; put independent forms in one call.
-Multi-form reports one line per form; (emit value) for full output. Define in user; a top-level docstring saves to the eval library, else session-only. Reuse saved definitions; (eval/library) lists them; (eval/keep ...), (eval/forget ...), (eval/move ...).
+Use read, write, edit and bash (also core/<verb>); batch shell work in one command, reads with several forms in one call.
+Shell: (bash "cat r.txt && cd /tmp && bb run st") -> output + status; nonzero normal.
+Put independent forms in one call. Multi-form reports one line per form; (emit value) for full output.
+Define in user; a top-level docstring saves to the eval library, else session-only. Reuse saved definitions; (eval/library) lists them; (eval/keep ...), (eval/forget ...), (eval/move ...).
 let/fn bindings are scratch; define what recurs once. Report the final value or (emit value); stdout/stderr are discarded; println is discarded. (help), (describe 'name), (eval/sources), (emit-image path).
 
 ---

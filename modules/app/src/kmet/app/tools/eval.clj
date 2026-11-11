@@ -67,13 +67,14 @@
    :name "eval"
    :label "Eval"
    :description (str "Persistent Clojure SCI sandbox (babashka surface: fs, slurp, spit, require; no registered tools).\n"
-                     "Use read, write, edit and bash (also core/<verb>); batch with read-many and bash-many.\n"
-                     "Shell: (bash \"cmd\") -> output + status; nonzero normal; no default timeout. Eval calls run one at a time; put independent forms in one call.\n"
-                     "Multi-form reports one line per form; (emit value) for full output. Define in user; a top-level docstring saves to the eval library, else session-only. Reuse saved definitions; (eval/library) lists them; (eval/keep ...), (eval/forget ...), (eval/move ...).\n"
+                     "Use read, write, edit and bash (also core/<verb>); batch shell work in one command, reads with several forms in one call.\n"
+                     "Shell: (bash \"cat r.txt && cd /tmp && bb run st\") -> output + status; nonzero normal.\n"
+                     "Put independent forms in one call. Multi-form reports one line per form; (emit value) for full output.\n"
+                     "Define in user; a top-level docstring saves to the eval library, else session-only. Reuse saved definitions; (eval/library) lists them; (eval/keep ...), (eval/forget ...), (eval/move ...).\n"
                      "let/fn bindings are scratch; define what recurs once. Report the final value or (emit value); stdout/stderr are discarded; println is discarded. (help), (describe 'name), (eval/sources), (emit-image path).")
-   :prompt-snippet "Persistent Clojure sandbox; batch with read-many/bash-many; report value or (emit value); eval/keep,forget,move; (help)."
+   :prompt-snippet "Persistent Clojure sandbox; batch shell work in one (bash \"a && b\") or several forms; report value or (emit value); eval/keep,forget,move; (help)."
    :prompt-guidelines
-   ["Batch independent reads and commands into one eval call with read-many or bash-many; not one call per file or command."
+   ["Batch independent reads and commands into one eval call: compose shell commands with &&/; in one (bash ...), or put several read/bash forms in one call; not one call per file or command."
     "A multi-form call reports one line per form; use (emit value) for a full result. Return the final value or (emit value); println is discarded."]
    :parameters {:type "object"
                 :properties
