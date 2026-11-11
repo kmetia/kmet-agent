@@ -71,3 +71,26 @@ needed. Our side is fixed portably by the numeric check in
 `kmet.libs.text/splits-surrogate-pair?`, so no kmet path depends on the
 ticket. Workaround for ported code: test code points numerically instead of
 with a surrogate regex.
+
+### [jolt#1628](https://github.com/jolt-lang/jolt/issues/1628) — Built binaries silently serve the bootstrap `clojure.core.async`
+
+Open (filed 2026-11-12; reproduces on the installed
+`v0.8.26-24-gd298e719`, `--opt` and `--dev`). In a built binary, a
+runtime `(require 'clojure.core.async)` marks the namespace loaded at
+its 36 boot primitives and never loads
+`stdlib/clojure/core/async.clj`, so `alts!`, `alts!!`, `mult`, `mix`,
+`pub`/`sub`, `pipeline` and the sequence operators are missing; a static
+ns require or `--include clojure.core.async` yields the complete 103
+publics. The loader deletes core.async from `loaded-ns`
+(`host/chez/loader.ss:533`) so a require pulls the overlay, but with no
+source roots in a built binary `ldr-load-body` takes its `ns-has-vars?`
+fallback (`host/chez/loader.ss:3155`) on the primitives and silently
+no-ops. `clojure.pprint` and `clojure.set` load complete in the same
+binary and `clojure.zip` fails loudly, so this is a silent partial
+namespace, the built-binary arm of #972. kmet hit it in its dist smoke:
+the extension host's `host-requires!` requires core.async at startup, so
+every bundled extension failed with `No such var: async/alts!!`. Our side
+declares `:jolt/build {:include [clojure.core.async]}` in `deps.edn` — the
+ticket asks for the overlay to ship with the primitives, or for the
+require to fail loudly instead of returning a partial namespace — and the
+include goes away when the fix is verified.
