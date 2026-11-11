@@ -377,7 +377,17 @@ Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) na
 
 **Description:**
 
-Evaluate Clojure in this session's persistent SCI sandbox (babashka surface: fs, slurp, spit, require; no model tool calls). Files: (read path {:offset N :limit N}) for a range, (write path text) whole, (edit path old new) one occurrence. Shell: (bash "cmd") returns output with a status footer. Calls serialize: use one call per phase, many forms per call; fan out with (spawn f) or pmap. Eval verbs: a top-level definition with a docstring is saved; one without is live-only. Reuse definitions: (eval/library) lists saved ones; define what recurs. Eval sources (ext.mcp): (eval/sources). Local let/fn bindings are scratch. Define in user; system namespaces are read-only. Report with (emit value), (emit-image path), or the final value; a multi-form call reports earlier forms one line each and the last value in full; stdout and stderr are discarded. (help) lists every verb with its interface; (describe 'name) reads one.
+Persistent Clojure SCI sandbox (babashka surface: fs, slurp, spit, require).
+No registered tools; use read, write, edit and bash (also core/<verb>).
+Files: (read path {:offset N :limit N}), (write path text), (edit path old new).
+Shell: (bash "cmd") returns output with a status footer; nonzero is normal.
+Eval calls run one at a time; batch independent reads, commands and tests into one call.
+A top-level def with a docstring is saved to the eval library; one without is session-only.
+Reuse saved definitions; (eval/library) lists them. let/fn bindings are scratch; define what recurs once.
+Define in user; system namespaces are read-only.
+Report the final value or (emit value); earlier forms print one line, the last in full; stdout/stderr are discarded.
+Attach images with (emit-image path).
+(help) lists verbs, (describe 'name) documents one, (eval/sources) lists extension values.
 
 ---
 

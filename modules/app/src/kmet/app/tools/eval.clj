@@ -71,36 +71,33 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description (str "Evaluate Clojure in this session's persistent SCI sandbox "
-                     "(babashka surface: fs, slurp, spit, require; no model tool calls). "
-                     "Files: (read path {:offset N :limit N}) for a range, (write path text) "
-                     "whole, (edit path old new) one occurrence. Shell: (bash \"cmd\") returns "
-                     "output with a status footer. Calls serialize: use one call per phase, "
-                     "many forms per call; fan out with (spawn f) or pmap. Eval verbs: a "
-                     "top-level definition with a docstring is saved; one without is live-only. "
-                     "Reuse definitions: (eval/library) lists saved ones; define what recurs. "
-                     "Eval sources (ext.mcp): (eval/sources). Local let/fn bindings are "
-                     "scratch. Define in user; system namespaces are read-only. Report with "
-                     "(emit value), (emit-image path), or the final value; a multi-form call "
-                     "reports earlier forms one line each and the last value in full; stdout "
-                     "and stderr are discarded. (help) lists every verb with its interface; "
-                     "(describe 'name) reads one.")
-   :prompt-snippet "Persistent Clojure sandbox; no model tool calls; one call per phase; many forms per call; read, write, edit, bash (core/<verb>); (help: verbs, sources)."
+   :description (str "Persistent Clojure SCI sandbox (babashka surface: fs, slurp, spit, require).\n"
+                     "No registered tools; use read, write, edit and bash (also core/<verb>).\n"
+                     "Files: (read path {:offset N :limit N}), (write path text), (edit path old new).\n"
+                     "Shell: (bash \"cmd\") returns output with a status footer; nonzero is normal.\n"
+                     "Eval calls run one at a time; batch independent reads, commands and tests into one call.\n"
+                     "A top-level def with a docstring is saved to the eval library; one without is session-only.\n"
+                     "Reuse saved definitions; (eval/library) lists them. let/fn bindings are scratch; define what recurs once.\n"
+                     "Define in user; system namespaces are read-only.\n"
+                     "Report the final value or (emit value); earlier forms print one line, the last in full; stdout/stderr are discarded.\n"
+                     "Attach images with (emit-image path).\n"
+                     "(help) lists verbs, (describe 'name) documents one, (eval/sources) lists extension values.")
+   :prompt-snippet "Persistent Clojure sandbox; batch forms into one call; read/write/edit/bash; return a value or (emit value); (help) lists verbs."
    :prompt-guidelines
-   ["Spend findings once: reuse before you rebuild, define what recurs, and prefer one eval call that answers over several probes."
-    "Put a whole read→edit→verify sequence in one call — one call per phase, not per command."]
+   ["Batch independent reads, shell commands and tests into one eval call; not one call per file or command; define what recurs once instead of rebuilding it."
+    "Return the final value or (emit value); earlier forms print one line, the last in full; println is discarded."]
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"
-                         :description "One or more Clojure forms, evaluated in order. Omit when only dropping definitions."}
+                         :description "One or more Clojure forms, evaluated in order. Omit only when dropping definitions."}
                  "timeout" {:type "number"
                             :description "Seconds; omit or 0 = no deadline."}
                  "drop" {:type "array"
                          :items {:type "string"}
-                         :description "Definition names to remove. May be used without code."}
+                         :description "Definition names to remove from the eval library; may be used without code."}
                  "scope" {:type "string"
                           :enum ["cwd" "global"]
-                          :description "cwd (default) or global."}
+                          :description "Where a new definition is saved: cwd (default) or global."}
                  "max-output-bytes" {:type "number"
                                      :description "Max result bytes (default 16 KiB, max 50 KiB)."}}
                 :required []}
