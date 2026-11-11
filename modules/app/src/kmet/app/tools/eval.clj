@@ -66,15 +66,15 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description (str "Persistent Clojure SCI sandbox (babashka surface: fs, slurp, spit, require; no registered tools).\n"
-                     "Use read, write, edit and bash (also core/<verb>); batch shell work in one command, reads with several forms in one call.\n"
-                     "Shell: (bash \"cat r.txt && cd /tmp && bb run st\") -> output + status; nonzero normal.\n"
-                     "Put independent forms in one call. Multi-form reports one line per form; (emit value) for full output.\n"
-                     "Define in user; a top-level docstring saves to the eval library, else session-only. Reuse saved definitions; (eval/library) lists them; (eval/keep ...), (eval/forget ...), (eval/move ...).\n"
-                     "let/fn bindings are scratch; define what recurs once. Report the final value or (emit value); stdout/stderr are discarded; println is discarded. (help), (describe 'name), (eval/sources), (emit-image path).")
-   :prompt-snippet "Persistent Clojure sandbox; batch shell work in one (bash \"a && b\") or several forms; report value or (emit value); eval/keep,forget,move; (help)."
+   :description (str "Persistent Clojure SCI sandbox; no registered tools.\n"
+                     "Files: (read \"p\") or (read \"p\" {:offset N :limit N}); (write \"p\" text); (edit \"p\" old new).\n"
+                     "Shell: (bash \"cmd1 && cmd2\" {:timeout N}) -> output + status; a nonzero exit is normal.\n"
+                     "Batch independent reads/tests in one call; (emit v) for full output. Multi-form calls report one line per form.\n"
+                     "Example: (emit {:spec (read \"SPEC-v2.txt\") :tests (bash \"bash test-v1.sh; bash test-v2.sh\")}).\n"
+                     "Definitions and results persist; return the final value or (emit v); println is discarded. (help) for the eval library, persistence, results, and limits.")
+   :prompt-snippet "Persistent Clojure sandbox. Files: (read \"p\"), (write \"p\" text), (edit \"p\" old new); shell: (bash \"cmd\" {:timeout N}). Batch independent reads/tests in one call; (emit v) for full output; (help)."
    :prompt-guidelines
-   ["Batch independent reads and commands into one eval call: compose shell commands with &&/; in one (bash ...), or put several read/bash forms in one call; not one call per file or command."
+   ["Batch independent reads, commands, and tests into one eval call: compose shell commands with &&/; in one (bash ...), put several read/bash forms in one call, or emit a map of the values; not one call per file, command, or test suite."
     "A multi-form call reports one line per form; use (emit value) for a full result. Return the final value or (emit value); println is discarded."]
    :parameters {:type "object"
                 :properties
