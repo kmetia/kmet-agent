@@ -191,20 +191,17 @@
           "the live var disappears in the same session")
     (t/is (= [] (support/eval-library env)))))
 
-(t/deftest test-a-code-less-call-may-drop
+(t/deftest test-a-code-less-call-is-refused
   (let [env (support/eval-ctx)
         path (library-file env "user" "x.clj")]
     (support/eval! env "(def x \"X.\" 1)")
-    (let [dropped (support/call-tool env "eval" {:drop ["user/x"]})]
+    (let [dropped (support/eval! env "(eval/forget 'user/x)")]
       (t/is (not (:is-error dropped)) (:content dropped))
       (t/is (str/includes? (:content dropped) "[eval: forgot user/x (cwd)]"))
       (t/is (not (fs/exists? path))))
     (let [empty-call (support/call-tool env "eval" {})]
       (t/is (:is-error empty-call))
-      (t/is (str/includes? (:content empty-call) "No code or drop")))
-    (let [unknown (support/call-tool env "eval" {:drop ["user/nope"]})]
-      (t/is (:is-error unknown))
-      (t/is (str/includes? (:content unknown) "no eval library definition")))))
+      (t/is (str/includes? (:content empty-call) "No code provided")))))
 
 (t/deftest test-drop-validation
   (let [env (support/eval-ctx)]

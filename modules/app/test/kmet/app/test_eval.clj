@@ -7,6 +7,7 @@
             [clojure.test :as t]
             [kmet.app.eval.definitions :as eval-defs]
             [kmet.app.loop.tool-exec :as tool-exec]
+            [kmet.app.tools.bash :as bash-tool]
             [kmet.app.session.core :as session]
             [kmet.app.test-eval-support :as support]
             [kmet.app.tools.eval :as eval-tool]
@@ -127,13 +128,16 @@
   (t/is (str/includes? (:description eval-tool/definition)
                        "run one at a time"))
   (t/is (str/includes? (:description eval-tool/definition)
-                       "batch independent reads"))
+                       "read-many"))
+  (t/is (str/includes? (:description eval-tool/definition)
+                       "60s default"))
   (t/is (str/includes? (:prompt-snippet eval-tool/definition)
-                       "batch forms into one call"))
+                       "batch with read-many"))
   (let [guidelines (str/join "\n" (:prompt-guidelines eval-tool/definition))]
     (t/is (str/includes? guidelines "Batch independent reads"))
     (t/is (str/includes? guidelines "not one call per file"))
-    (t/is (str/includes? guidelines "define what recurs once"))
+    (t/is (str/includes? guidelines "test-summary"))
+    (t/is (str/includes? (:description eval-tool/definition) "define what recurs once"))
     (t/is (str/includes? guidelines "Return the final value"))))
 
 (t/deftest test-the-sticky-namespace-is-re-entered
@@ -156,6 +160,11 @@
              (:content (support/eval! env "(+ 1 2)\n(+ 3 4)"))))
     (t/is (= "3" (:content (support/eval! env "(+ 1 2)")))
           "a single form keeps the final-value rule")
+    (let [r (support/eval! env "(+ 1 2)\n(apply str (repeat 1000 \"x\"))")]
+      (t/is (not (:is-error r)) (:content r))
+      (t/is (str/includes? (:content r) "1 => 3"))
+      (t/is (< (count (:content r)) 1000)
+            "a multi-form result clips the last value instead of letting it crowd out earlier ones"))
     (t/is (= ":a" (:content (support/eval! env "(emit :a)\n(+ 1 2)")))
           "emit stays the curated channel")
     (let [r (support/eval! env "(defn f \"F.\" [] 1)\n(+ 1 2)")]
@@ -241,13 +250,13 @@
     (t/is (str/includes? text "run one at a time"))
     (t/is (str/includes? text "read, write, edit and bash"))
     (t/is (str/includes? text "core/<verb>"))
-    (t/is (str/includes? text "No registered tools"))
+    (t/is (str/includes? (str/lower-case text) "no registered tools"))
     (t/is (not (str/includes? text "tools/call")))
     (t/is (not (str/includes? text "tools/list")))
     (t/is (str/includes? text "Define in user"))
     (t/is (str/includes? text "Batch independent reads"))
-    (t/is (str/includes? text "into one call"))
-    (t/is (str/includes? text "batch forms into one call"))
+    (t/is (str/includes? text "into one eval call"))
+    (t/is (str/includes? text "batch with read-many"))
     (t/is (str/includes? text "stdout/stderr are discarded"))
     (t/is (str/includes? text "(emit-image path)"))
     (t/is (str/includes? text "println is discarded"))
@@ -276,6 +285,37 @@
     (t/is (= ":spawned"
              (:content (support/eval! env "@(spawn (fn [] (emit :spawned)))"))))))
 
+(t/deftest test-batch-helpers
+  (let [env (support/eval-ctx)
+        cwd (:cwd env)]
+    (spit (str (fs/path cwd "a.txt")) "alpha")
+    (spit (str (fs/path cwd "b.txt")) "beta")
+    (fs/create-dirs (str (fs/path cwd "target")))
+    (spit (str (fs/path cwd "target" "ignored.txt")) "ignored")
+    (let [r (:content (support/eval! env "(read-many {:a \"a.txt\" :b \"b.txt\"})"))]
+      (t/is (str/includes? r ":a \"alpha\"") r)
+      (t/is (str/includes? r ":b \"beta\"") r))
+    (let [r (:content (support/eval! env "(bash-many [\"printf one\" \"printf two\"])"))]
+      (t/is (str/includes? r "one") r)
+      (t/is (str/includes? r "two") r))
+    (let [r (:content (support/eval! env "(project-files)"))]
+      (t/is (str/includes? r ":files") r)
+      (t/is (str/includes? r "a.txt") r)
+      (t/is (not (str/includes? r "target/ignored.txt")) r))
+    (let [r (:content (support/eval! env "(test-summary \"printf 'Ran 3 tests\\nOK\\nFAILED case\\n'\")\n"))]
+      (t/is (str/includes? r "Ran 3 tests") r)
+      (t/is (str/includes? r "FAILED case") r))))
+
+(t/deftest test-the-sandbox-shell-defaults-to-60s
+  (let [env (support/eval-ctx)
+        captured (atom nil)]
+    (with-redefs [bash-tool/run-bash
+                  (fn [args _ _]
+                    (reset! captured args)
+                    {:content "ok"})]
+      (support/eval! env "(bash \"echo hi\")"))
+    (t/is (= 60 (:timeout @captured)))))
+
 (t/deftest test-a-nonzero-shell-exit-is-a-result
   (let [env (support/eval-ctx)
         result (support/eval! env "(bash \"printf bad; exit 3\")")]
@@ -289,17 +329,13 @@
     (t/is (:is-error result) (:content result))
     (t/is (str/includes? (:content result) "timed out"))))
 
-(t/deftest test-the-tool-schema-exposes-both-scopes
-  (t/is (= ["cwd" "global"]
-           (get-in eval-tool/definition [:parameters :properties "scope" :enum]))))
-
-(t/deftest test-the-tool-passes-scope-to-a-definition
-  (let [env (support/eval-ctx)]
-    (t/is (not (:is-error (support/call-tool env "eval"
-                                             {:code "(defn g \"Global g.\" [] :g)"
-                                              :scope "global"}))))
-    (t/is (fs/exists? (support/library-file env :global "user" "g.clj")))
-    (t/is (not (fs/exists? (support/library-file env :cwd "user" "g.clj"))))))
+(t/deftest test-the-tool-schema-has-no-drop-or-scope
+  (let [params (:parameters eval-tool/definition)]
+    (t/is (= ["code"] (:required params)))
+    (t/is (nil? (get-in params [:properties "drop"])))
+    (t/is (nil? (get-in params [:properties "scope"])))
+    (t/is (not (str/includes? (get-in params [:properties "code" :description])
+                              "Omit only when dropping")))))
 
 (t/deftest test-codemode-and-eval-prompts-are-distinct
   (let [env (support/eval-ctx)

@@ -647,15 +647,16 @@ later
 call's `:cwd` still resolves file verbs and sources, but never moves the
 library root. Global loads first, then cwd; a name's stack is `[global cwd]`
 and the last record is live, so cwd shadows global. New names default to cwd;
-redefining an active name keeps its layer and its file. `:scope :global` or `:cwd` chooses
-a new name's layer and is accepted for an existing name only when it names
-the active layer. A session's first eval scans and evaluates both layers; a
+redefining an active name keeps its layer and its file. New names default to
+cwd; `(eval/move 'name :global|:cwd)` moves a saved definition between the
+layers. The model-facing eval tool has no `:scope` or `:drop` parameters; the
+sandbox verbs and `/eval` carry those operations. A session's first eval scans and evaluates both layers; a
 new session or a restarted process loads them, while an already-built
 environment is a runtime cache that refreshes only on an explicit
 `/eval reload`. The reload builds a fresh sandbox, replays the session-only
 definitions, and keeps the old environment when a file fails to load. Sessions
-share the files but not the environment. `:drop` and `(eval/forget 'name)`
-target the active record by default; a scoped drop targets either layer.
+share the files but not the environment. `(eval/forget 'name)` and `/eval
+drop` target the active record by default; a scoped drop targets either layer.
 Drop/forget resolve an unqualified name in the namespace the call ends in.
 Dropping a record deletes its actual `:file`, unbinds the live name, and
 re-evaluates the next record
@@ -665,8 +666,8 @@ deleted, and a file that also defines other addresses must be requested with
 all of them (a partial file is refused). A mounted source's shadow is
 reported as `restored`, not `forgot`. A rejected drop leaves the call's
 definitions live but unwritten, like any other change failure. A code-less
-drop needs no environment: it reads the disk index and resolves cwd first, or
-`:scope`.
+`/eval drop` needs no environment: it reads the disk index and resolves cwd
+first, or an explicit scope.
 `(eval/move 'name :global|:cwd)` and `/eval move <name> global|cwd` move an
 active definition without
 re-evaluating; they refuse collisions, same-scope moves, and source-provided
@@ -731,7 +732,8 @@ and names the read form in its notice; an errored result carries its id
 after the error. Eval evaluates a call's top-level forms one at a time, so
 an error begins `ERROR` (after the values of earlier forms) and, with several
 forms, names the failing form and what already ran; a successful multi-form
-call reports earlier forms one line each and the last value in full.
+call reports every form as one bounded line; use `(emit value)` for a full
+value.
 `codemode` keeps the whole-source path.
 `(eval/help :results)` states the emission, cap, truncation and error
 contract. The index is the one-call discovery path: every built-in verb with

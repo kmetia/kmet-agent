@@ -459,7 +459,7 @@ source id alone. Keep it a summary, not a catalog; `(eval/sources)` and
   (`ext.license/add!`); a source that uses another namespace, a built-in key,
   or a built-in `/eval` verb is refused as a whole.
 - A source-provided key is never written to the eval library. A model can
-  redefine it live (the call line says `source; not stored`); `:drop` and
+  redefine it live (the call line says `source; not stored`); `/eval drop` and
   `(eval/forget …)` restore the source value while the source is mounted and
   report `restored`. The key stays non-storable after the source unloads.
 - A source that throws or returns a bad shape contributes nothing and is

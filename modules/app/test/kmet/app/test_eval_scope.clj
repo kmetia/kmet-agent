@@ -178,18 +178,20 @@
     (t/is (not (fs/exists? global)))
     (t/is (fs/exists? cwd))))
 
-(t/deftest the-tool-passes-scope-to-a-code-less-drop
+(t/deftest the-eval-verbs-move-and-forget
   (let [env (support/eval-ctx)
         global (support/library-file env :global "user" "f.clj")
         cwd (support/library-file env :cwd "user" "f.clj")]
-    (write-scoped! env :global "user/f" "(defn f \"F.\" [] :global)")
     (write-scoped! env :cwd "user/f" "(defn f \"F.\" [] :cwd)")
-    (let [result (support/call-tool env "eval"
-                                    {:drop ["user/f"] :scope "global"})]
-      (t/is (not (:is-error result)) (:content result))
-      (t/is (str/includes? (:content result) "[eval: forgot user/f (global)]")))
-    (t/is (not (fs/exists? global)))
-    (t/is (fs/exists? cwd))))
+    (let [moved (support/eval! env "(eval/move 'user/f :global)")]
+      (t/is (not (:is-error moved)) (:content moved))
+      (t/is (str/includes? (:content moved) "[eval: moved user/f")))
+    (t/is (fs/exists? global))
+    (t/is (not (fs/exists? cwd)))
+    (let [forgot (support/eval! env "(eval/forget 'user/f)")]
+      (t/is (not (:is-error forgot)) (:content forgot))
+      (t/is (str/includes? (:content forgot) "[eval: forgot user/f (global)]")))
+    (t/is (not (fs/exists? global)))))
 
 (t/deftest an-invalid-scope-fails-before-the-environment-is-built
   (let [env (support/eval-ctx)]

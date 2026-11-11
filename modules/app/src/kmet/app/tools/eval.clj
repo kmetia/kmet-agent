@@ -35,32 +35,27 @@
   "Evaluate the call in this agent's `:eval` service. The service comes from
    the run's ctx (`:srce-ctx`), so the tool is usable only inside a run; a
    direct extension call reports the missing service instead of starting a
-   process-wide environment. A call may carry only `:drop`, in which case it
-   removes a library definition without evaluating forms."
-  [{:keys [code timeout max-output-bytes drop scope]} on-update signal ctx]
+   process-wide environment. Every call carries code; library definitions are
+   managed with the sandbox's `eval/keep`, `eval/forget` and `eval/move`
+   verbs."
+  [{:keys [code timeout max-output-bytes]} on-update signal ctx]
   (let [code (some-> code str)]
-    (if (and (str/blank? code) (empty? drop))
-      {:content "No code or drop provided." :is-error true}
+    (if (str/blank? code)
+      {:content "No code provided." :is-error true}
       (if-let [service (some-> (:srce-ctx ctx) (srce/get :eval))]
         (try
-          (if (str/blank? code)
-            ((:drop! service) {:drop drop
-                               :scope scope
-                               :cwd (or (:cwd ctx) (tool-util/cwd))})
-            ((:eval! service) {:code code
-                               :drop drop
-                               :scope scope
-                               :timeout timeout
-                               :limits (script/resolve-limits max-output-bytes)
-                               :signal signal
-                               :on-update on-update
-                               :ctx ctx
-                               :session-recall
-                               (when-let [sess (:session-record ctx)]
-                                 (fn [params]
-                                   (session-recall/run-recall
-                                    sess (session-recall/normalize-params params))))
-                               :cwd (or (:cwd ctx) (tool-util/cwd))}))
+          ((:eval! service) {:code code
+                             :timeout timeout
+                             :limits (script/resolve-limits max-output-bytes)
+                             :signal signal
+                             :on-update on-update
+                             :ctx ctx
+                             :session-recall
+                             (when-let [sess (:session-record ctx)]
+                               (fn [params]
+                                 (session-recall/run-recall
+                                  sess (session-recall/normalize-params params))))
+                             :cwd (or (:cwd ctx) (tool-util/cwd))})
           (catch Exception e
             {:content (str "Error evaluating: " (ex-message e)) :is-error true}))
         {:content "eval needs an agent's :eval service; call it as a tool in a run."
@@ -71,36 +66,24 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description (str "Persistent Clojure SCI sandbox (babashka surface: fs, slurp, spit, require).\n"
-                     "No registered tools; use read, write, edit and bash (also core/<verb>).\n"
-                     "Files: (read path {:offset N :limit N}), (write path text), (edit path old new).\n"
-                     "Shell: (bash \"cmd\") returns output with a status footer; nonzero is normal.\n"
-                     "Eval calls run one at a time; batch independent reads, commands and tests into one call.\n"
-                     "A top-level def with a docstring is saved to the eval library; one without is session-only.\n"
-                     "Reuse saved definitions; (eval/library) lists them. let/fn bindings are scratch; define what recurs once.\n"
-                     "Define in user; system namespaces are read-only.\n"
-                     "Report the final value or (emit value); earlier forms print one line, the last in full; stdout/stderr are discarded.\n"
-                     "Attach images with (emit-image path).\n"
-                     "(help) lists verbs, (describe 'name) documents one, (eval/sources) lists extension values.")
-   :prompt-snippet "Persistent Clojure sandbox; batch forms into one call; read/write/edit/bash; return a value or (emit value); (help) lists verbs."
+   :description (str "Persistent Clojure SCI sandbox (babashka surface: fs, slurp, spit, require; no registered tools).\n"
+                     "Use read, write, edit and bash (also core/<verb>); batch with read-many, bash-many, project-files and test-summary.\n"
+                     "Shell: (bash \"cmd\") -> output + status; nonzero normal; 60s default. Eval calls run one at a time; put independent forms in one call.\n"
+                     "Multi-form reports one line per form; (emit value) for full output. Define in user; a top-level docstring saves to the eval library, else session-only. Reuse saved definitions; (eval/library) lists them; (eval/keep ...), (eval/forget ...), (eval/move ...).\n"
+                     "let/fn bindings are scratch; define what recurs once. Report the final value or (emit value); stdout/stderr are discarded; println is discarded. (help), (describe 'name), (eval/sources), (emit-image path).")
+   :prompt-snippet "Persistent Clojure sandbox; batch with read-many/bash-many/test-summary; report value or (emit value); eval/keep,forget,move; (help)."
    :prompt-guidelines
-   ["Batch independent reads, shell commands and tests into one eval call; not one call per file or command; define what recurs once instead of rebuilding it."
-    "Return the final value or (emit value); earlier forms print one line, the last in full; println is discarded."]
+   ["Batch independent reads, commands and tests into one eval call with read-many, bash-many, project-files or test-summary; not one call per file or command."
+    "A multi-form call reports one line per form; use (emit value) for a full result. Return the final value or (emit value); println is discarded."]
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"
-                         :description "One or more Clojure forms, evaluated in order. Omit only when dropping definitions."}
+                         :description "The Clojure forms to evaluate, in order."}
                  "timeout" {:type "number"
                             :description "Seconds; omit or 0 = no deadline."}
-                 "drop" {:type "array"
-                         :items {:type "string"}
-                         :description "Definition names to remove from the eval library; may be used without code."}
-                 "scope" {:type "string"
-                          :enum ["cwd" "global"]
-                          :description "Where a new definition is saved: cwd (default) or global."}
                  "max-output-bytes" {:type "number"
                                      :description "Max result bytes (default 16 KiB, max 50 KiB)."}}
-                :required []}
+                :required ["code"]}
    :execute execute
    :streams? true
    :contextual? true

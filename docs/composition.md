@@ -373,21 +373,15 @@ Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) na
 
 **Label:** Eval
 
-**Parameters:** `code`, `timeout`, `drop`, `scope`, `max-output-bytes`
+**Parameters:** `code` (required), `timeout`, `max-output-bytes`
 
 **Description:**
 
-Persistent Clojure SCI sandbox (babashka surface: fs, slurp, spit, require).
-No registered tools; use read, write, edit and bash (also core/<verb>).
-Files: (read path {:offset N :limit N}), (write path text), (edit path old new).
-Shell: (bash "cmd") returns output with a status footer; nonzero is normal.
-Eval calls run one at a time; batch independent reads, commands and tests into one call.
-A top-level def with a docstring is saved to the eval library; one without is session-only.
-Reuse saved definitions; (eval/library) lists them. let/fn bindings are scratch; define what recurs once.
-Define in user; system namespaces are read-only.
-Report the final value or (emit value); earlier forms print one line, the last in full; stdout/stderr are discarded.
-Attach images with (emit-image path).
-(help) lists verbs, (describe 'name) documents one, (eval/sources) lists extension values.
+Persistent Clojure SCI sandbox (babashka surface: fs, slurp, spit, require; no registered tools).
+Use read, write, edit and bash (also core/<verb>); batch with read-many, bash-many, project-files and test-summary.
+Shell: (bash "cmd") -> output + status; nonzero normal; 60s default. Eval calls run one at a time; put independent forms in one call.
+Multi-form reports one line per form; (emit value) for full output. Define in user; a top-level docstring saves to the eval library, else session-only. Reuse saved definitions; (eval/library) lists them; (eval/keep ...), (eval/forget ...), (eval/move ...).
+let/fn bindings are scratch; define what recurs once. Report the final value or (emit value); stdout/stderr are discarded; println is discarded. (help), (describe 'name), (eval/sources), (emit-image path).
 
 ---
 

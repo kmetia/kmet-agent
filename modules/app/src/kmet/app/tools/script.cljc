@@ -92,6 +92,16 @@
 (def ^:private form-value-line-chars
   "Characters of one form's value line in a multi-form eval result."
   500)
+(def ^:private batch-default-bytes
+  "Default total byte budget for read-many and bash-many output."
+  12000)
+(def ^:private batch-min-item-bytes
+  "Minimum per-item byte share in a batch helper."
+  1000)
+(def ^:private sandbox-bash-timeout-seconds
+  "Default timeout for a shell command run from the sandbox: a broad find or
+   grep cannot hold the call open indefinitely. An explicit :timeout wins."
+  60)
 (def script-tool-names
   "The script tools themselves: neither can start the other, and neither is
    callable from inside a script."
@@ -102,8 +112,9 @@
    `(eval/help)`; the summary itself stays host-neutral."
   (str "aliases fs, str, set, edn, walk, json and p; cwd-resolving slurp, "
        "spit and file-seq; core verbs, also referred unqualified: read, write, "
-       "edit, bash, cwd, env, now, sleep, emit, emit-image, spawn and "
-       "session-recall (core/<verb> stays available); the core, clj and eval "
+       "edit, bash, read-many, bash-many, project-files, test-summary, cwd, "
+       "env, now, sleep, emit, emit-image, spawn and session-recall "
+       "(core/<verb> stays available); the core, clj and eval "
        "namespaces; "
        "clojure.*, babashka.*, the bundled libs (rewrite-clj, "
        "cljfmt, edamame, parinferish) and the kmet.libs ports (json, http, "
@@ -113,7 +124,7 @@
   "The core verbs the sandbox also refers unqualified. They are the same
    functions the `core` namespace installs, so `(emit v)` and `(core/emit v)`
    are one call; `read` deliberately shadows `clojure.core/read`."
-  '[read write edit bash cwd env now sleep emit emit-image spawn session-recall])
+  '[read read-many write edit bash bash-many project-files test-summary cwd env now sleep emit emit-image spawn session-recall])
 
 (def alias-prelude
   "The aliases and core refers every script gets without its own require — the
@@ -966,15 +977,165 @@
 (defn bash-text
   "Run COMMAND through the bash tool's implementation and return its
    rendered output. A nonzero exit is reported in that output, not thrown;
-   a timeout, abort or spawn failure stays an error."
+   a timeout, abort or spawn failure stays an error. A sandbox call defaults
+   to a 60s timeout; an explicit :timeout wins."
   [command opts signal]
   (binding [bash-tool/*cancel-signal* signal]
-    (let [result (bash-tool/run-bash (merge {:command (str command)} opts) nil {})
+    (let [result (bash-tool/run-bash (merge {:command (str command)
+                                             :timeout sandbox-bash-timeout-seconds}
+                                            opts)
+                                     nil {})
           content (or (:content result) "")]
       (if (and (:is-error result)
                (not (str/includes? content "Command exited with code ")))
         (verb-failed! "bash" result)
         content))))
+
+(defn- batch-entries
+  "Normalize ITEMS for a batch helper to `[[label value] ...]`: a map keeps
+   its labels, a sequential collection uses each value as its own label."
+  [items what]
+  (cond
+    (map? items) (vec items)
+    (sequential? items) (mapv (fn [x] [x x]) items)
+    :else (throw (ex-info (str what " expects a map or a sequential collection")
+                          {:type :eval/bad-argument}))))
+
+(defn- clip-head
+  "Keep the first MAX-BYTES of S, with a truncation marker."
+  [s max-bytes]
+  (let [t (bash-out/truncate-head (str s) :max-bytes max-bytes
+                                  :max-lines 100000)]
+    (if (:truncated t)
+      (str (:content t) "\n… [truncated]")
+      (:content t))))
+
+(defn- clip-tail
+  "Keep the last MAX-BYTES of S, with a truncation marker before it."
+  [s max-bytes]
+  (let [t (bash-out/truncate-tail (str s) :max-bytes max-bytes
+                                  :max-lines 100000)]
+    (if (:truncated t)
+      (str "… [earlier output truncated]\n" (:content t))
+      (:content t))))
+
+(defn- batch-item-bytes
+  "The per-item byte share of a batch's total budget."
+  [opts n]
+  (max batch-min-item-bytes
+       (quot (long (or (:max-bytes opts) batch-default-bytes))
+             (max 1 n))))
+
+(defn read-many
+  "Read several paths in one call. PATHS is a vector of paths or a map of
+   labels to paths; OPTS may carry :limit (lines per file, default 200) and
+   :max-bytes (total output budget). Returns a map label -> content, with an
+   ERROR string for a failed path. Each item gets a bounded share, so one
+   large file cannot hide the rest."
+  [paths & [opts]]
+  (let [opts (or opts {})
+        entries (batch-entries paths "read-many")
+        limit (long (or (:limit opts) 200))
+        per (batch-item-bytes opts (count entries))
+        signal (:cancelled *call-state*)]
+    (into (array-map)
+          (map (fn [[label path]]
+                 [label (try (clip-head (read-text path {:limit limit} signal) per)
+                             (catch Throwable t
+                               (str "ERROR: " (ex-message t))))]))
+          entries)))
+
+(defn bash-many
+  "Run several shell commands in one call. COMMANDS is a vector of commands or
+   a map of labels to commands; OPTS is passed to each command (default
+   timeout 60s) and may carry :max-bytes for the total output budget. Returns
+   a map label -> output; a nonzero exit is normal, a timeout/abort is an
+   ERROR string. The end of each output is kept so the status footer survives."
+  [commands & [opts]]
+  (let [opts (or opts {})
+        entries (batch-entries commands "bash-many")
+        per (batch-item-bytes opts (count entries))
+        signal (:cancelled *call-state*)
+        command-opts (dissoc opts :max-bytes :limit)]
+    (into (array-map)
+          (map (fn [[label command]]
+                 [label (try (clip-tail (bash-text command command-opts signal) per)
+                             (catch Throwable t
+                               (str "ERROR: " (ex-message t))))]))
+          entries)))
+
+(def ^:private ignored-project-dirs
+  #{".git" ".cpcache" ".m2" ".cache" ".gitlibs" ".venv" ".tox"
+    "__pycache__" ".mypy_cache" ".pytest_cache" "node_modules"
+    "target" "dist" "build" "vendor"})
+
+(defn- ignored-project-path?
+  [path]
+  (boolean (some ignored-project-dirs (str/split (str path) #"/"))))
+
+(defn project-files
+  "List files under the call's cwd. OPTS may carry :glob (default \"**/*\"),
+   :limit (default 300) and :include-ignored? (default false). Ignored build
+   and dependency directories are skipped. Returns {:files [relative...]
+   :more n}."
+  [& [opts]]
+  (let [opts (or opts {})
+        root (call-cwd)
+        glob (str (or (:glob opts) "**/*"))
+        limit (long (or (:limit opts) 300))
+        all (try
+              (->> (if (= "**/*" glob)
+                     (concat (fs/glob root "*") (fs/glob root "**/*"))
+                     (fs/glob root glob))
+                   (map #(str (fs/relativize root %)))
+                   distinct
+                   (remove (fn [p] (and (not (:include-ignored? opts))
+                                        (ignored-project-path? p))))
+                   (filter (fn [p] (fs/regular-file? (fs/path root p))))
+                   sort
+                   vec)
+              (catch Throwable t
+                (throw (ex-info (str "project-files: " (ex-message t))
+                                {:type :eval/bad-argument}))))]
+    {:files (vec (take limit all))
+     :more (max 0 (- (count all) limit))}))
+
+(def ^:private test-summary-limit-bytes 8000)
+(def ^:private test-summary-line-pattern
+  #"(?i)(tests?|assertions?|passed|failed|failure|error|expected|actual|traceback|FAIL|ERROR)")
+
+(defn test-summary
+  "Run a test command through bash and return a compact report: the first
+   lines, every summary/failure line, and the tail. OPTS is passed to bash
+   (default timeout 120s) and may carry :max-bytes. Use it instead of dumping
+   a whole test log into the call."
+  [command & [opts]]
+  (let [opts (or opts {})
+        signal (:cancelled *call-state*)
+        content (bash-text command (merge {:timeout 120}
+                                          (dissoc opts :max-bytes))
+                           signal)
+        lines (vec (str/split-lines (str content)))
+        n (count lines)
+        hits (keep-indexed (fn [i line]
+                             (when (re-find test-summary-line-pattern line) i))
+                           lines)
+        indexes (set (concat (range (min 8 n))
+                             hits
+                             (range (max 0 (- n 40)) n)))
+        selected (mapv second
+                       (filter (fn [[i _]] (contains? indexes i))
+                               (map-indexed vector lines)))
+        text (str/join "\n" selected)
+        max-bytes (long (or (:max-bytes opts) test-summary-limit-bytes))
+        out (if (<= (bash-out/byte-length text) max-bytes)
+              text
+              (clip-head text max-bytes))
+        omitted (- n (count selected))]
+    (str out
+         (when (pos? omitted)
+           (str "\n[test output: " n " lines; showing "
+                (count selected) " summary/tail lines]")))))
 
 (declare tools-namespace)
 
@@ -1012,7 +1173,11 @@
                                                              (:cancelled *call-state*)))
                                           'bash (fn [command & [opts]]
                                                   (bash-text command opts
-                                                             (:cancelled *call-state*)))})
+                                                             (:cancelled *call-state*)))
+                                          'read-many read-many
+                                          'bash-many bash-many
+                                          'project-files project-files
+                                          'test-summary test-summary})
                             'clj {'edit-form (fn [args]
                                                (clj-edit/edit-form
                                                 (assoc args :cwd (call-cwd))))
@@ -1393,10 +1558,12 @@
         :else line))))
 
 (defn- form-value-text
-  "Earlier non-silent form values as `INDEX => VALUE`, the last one in full on
-   success (the final-value rule) or with its index on failure. TOTAL is the
-   call's top-level form count, so a failure still reports the forms that ran;
-   a single-form call keeps the final-value rule, so returns nil."
+  "Earlier non-silent values as `INDEX => LINE`, the last on success as one
+   bounded line (the final-value rule, never in full) or labeled on failure.
+   Every form gets one line, so no value can crowd out the rest; use emit
+   when a full value is needed. TOTAL is the call's top-level form count, so
+   a failure still reports the forms that ran; a single-form call keeps the
+   final-value rule, so returns nil."
   [forms total ok?]
   (when (and (seq forms) (> (or total (count forms)) 1))
     (let [entries (vec (keep-indexed
@@ -1408,8 +1575,7 @@
         (let [[last-index last-value] (peek entries)
               earlier (butlast entries)
               last-text (if ok?
-                          (try (format-value last-value)
-                               (catch Throwable _ (form-value-line last-value)))
+                          (form-value-line last-value)
                           (str last-index " => " (form-value-line last-value)))]
           (str/join "\n"
                     (conj (mapv (fn [[i v]] (str i " => " (form-value-line v)))
@@ -1577,8 +1743,8 @@
    wins when set: a script unwound by the interrupt (however it reports, e.g. a
    catch that rethrows) cannot outlive its deadline. TIMEOUT-MS nil = no
    deadline (bash parity) and the result's :timeout is nil; ELAPSED-MS is the
-   measured wall clock. A multi-form eval call reports earlier non-definition
-   forms one line each and the last value in full, before an error. RESULT-STORE,
+   measured wall clock. A multi-form eval call reports every non-definition
+   form as one bounded line, before an error. RESULT-STORE,
    when given, keeps the full body and returns the id the truncation notice
    and error tail name."
   [{:keys [tool res emitted images timeout-ms trace abort-reason elapsed-ms

@@ -710,8 +710,11 @@
 
 (def ^:private builtin-verb-help
   {"core/read" {:name "core/read" :kind :verb
-                :doc "Read PATH as text; OPTS may carry :offset and :limit (lines) — read a long file in ranges rather than slurping it whole."
+                :doc "Read PATH as text; OPTS may carry :offset and :limit (lines) — read a long file in ranges rather than slurping it whole. Use read-many for several paths."
                 :arglists '([path] [path opts])}
+   "core/read-many" {:name "core/read-many" :kind :verb
+                     :doc "Read several paths in one call; PATHS is a vector or a label->path map, OPTS may carry :limit and :max-bytes. Returns a label->content map."
+                     :arglists '([paths] [paths opts])}
    "core/write" {:name "core/write" :kind :verb
                  :doc "Write CONTENT to PATH whole, creating parents; success is silent."
                  :arglists '([path content])}
@@ -719,8 +722,17 @@
                 :doc "Replace the one occurrence of OLD-TEXT with NEW-TEXT in PATH; zero or several occurrences is an error."
                 :arglists '([path old-text new-text])}
    "core/bash" {:name "core/bash" :kind :verb
-                :doc "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result."
+                :doc "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result. The sandbox default timeout is 60s; pass {:timeout N} to change it."
                 :arglists '([command] [command opts])}
+   "core/bash-many" {:name "core/bash-many" :kind :verb
+                     :doc "Run several shell commands in one call; COMMANDS is a vector or a label->command map, OPTS may carry :timeout and :max-bytes. Returns a label->output map."
+                     :arglists '([commands] [commands opts])}
+   "core/project-files" {:name "core/project-files" :kind :verb
+                         :doc "List files under the cwd as {:files [relative...] :more n}; OPTS may carry :glob, :limit and :include-ignored?. Build and dependency directories are skipped."
+                         :arglists '([] [opts])}
+   "core/test-summary" {:name "core/test-summary" :kind :verb
+                        :doc "Run a test command and return a compact report: first lines, summary/failure lines and the tail. OPTS is passed to bash; the default timeout is 120s."
+                        :arglists '([command] [command opts])}
    "core/emit" {:name "core/emit" :kind :verb
                 :doc "Report VALUE as the call's result; without emit, a silent success reports its final value."
                 :arglists '([value])}
@@ -911,7 +923,7 @@
 
 (defn- source-help [env] (let [sources (clojure.core/deref (:source-info env))] (str "Eval sources:\n" (if (seq sources) (str/join "\n" (map (fn [source] (eval-format/source-line source :keyword)) sources)) "  (none)"))))
 
-(defn- scope-help [env] (str "Scope: cwd " (get-in env [:roots :cwd]) " (shadows the global layer)" "\n       global " (get-in env [:roots :global]) "\nNew definitions write to cwd; pass :scope :global for a new global " "name. A redefinition keeps the active layer."))
+(defn- scope-help [env] (str "Scope: cwd " (get-in env [:roots :cwd]) " (shadows the global layer)" "\n       global " (get-in env [:roots :global]) "\nNew definitions write to cwd; (eval/move 'name :global) moves a saved " "definition to the global layer. A redefinition keeps the active layer."))
 
 (defn- library-help
   [env]
@@ -925,7 +937,7 @@
            (str "\n" (str/join "\n" (map definition-line session-only))))
          "\n" (scope-help env))))
 
-(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate, or use (eval/keep 'name \"doc\"), to keep it; a defmethod is " "saved with its loaded multimethod. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. System namespaces (core, clj, eval) are read-only; " "ext.* definitions stay live-only. Drop/forget resolve unqualified names in the " "namespace the call ends in; a file that also defines other addresses " "must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed. A result line names the definition and scope; " "(eval/describe 'name :file) names its file."))
+(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate, or use (eval/keep 'name \"doc\"), to keep it; a defmethod is " "saved with its loaded multimethod. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. System namespaces (core, clj, eval) are read-only; " "ext.* definitions stay live-only. (eval/forget 'name) drops a saved definition " "and (eval/move 'name :global|:cwd) moves one; both resolve unqualified " "names in the namespace the call ends in, and a file that also defines " "other addresses must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed. A result line names the definition and scope; " "(eval/describe 'name :file) names its file."))
 
 (defn- results-help
   []
@@ -933,8 +945,9 @@
        "call reports its final value instead. stdout and stderr are discarded. "
        "The result is bounded at 16 KiB / 2,000 lines by default; "
        ":max-output-bytes raises it to 50 KiB. A truncated result keeps its "
-       "tail and names its result id. The session's recent-result ring keeps "
-       "each eval call's output/error body: (eval/result) lists "
+       "tail and names its result id. A multi-form call reports one bounded "
+       "line per form; use (emit value) for a full value. The session's "
+       "recent-result ring keeps each eval call's output/error body: (eval/result) lists "
        "them, (eval/result :last) reads the newest, (eval/result ID) reads the "
        "first 6,000 characters, and (eval/result ID {:offset N :limit M}) "
        "reads a slice. A call using eval/result is not stored back. The ring holds "
@@ -950,7 +963,9 @@
        "available. Read a long file in ranges with "
        "(read path {:offset N :limit N}) instead of slurping it whole."
        "\nShell: (bash \"cmd\") returns output; a nonzero exit is a normal "
-       "result."
+       "result; the sandbox default timeout is 60s. Batch shell commands with "
+       "(bash-many ...) and reads with (read-many ...); (project-files) lists "
+       "the tree and (test-summary \"cmd\") compacts a test log."
        "\nLocal let/fn bindings are scratch; the next call starts in the "
        "namespace the previous call ended in."
        "\nOwnership: define in user; core, clj and eval are read-only; "
