@@ -3,20 +3,34 @@
 Open tickets only: a ticket is dropped once its fix is verified on the Jolt
 build kmet runs — normally `main`, ahead of the tags, because the project
 builds and tests against the installed build. The `:jolt/min-version` floor is
-the last tagged release (`0.8.24`); `v0.8.23` is below what the tree needs,
+the last tagged release (`0.8.26`); older tags are below what the tree needs,
 since the workarounds for the dropped tickets went with their fixes.
 
-Status checked on 2026-11-07 against the installed `v0.8.24` (tagged
+Jolt tickets were last checked on 2026-11-07 against `v0.8.24` (tagged
 2026-11-05, `a9b24d4`). Every earlier ticket this project filed except #1031 is
 fixed and its entry dropped: #1433 (PR #1435, follow-up PR #1437), #1453/#1454
 (PR #1472), #1466/#1469 (PR #1478) and #1467/#1468 (PR #1477). The release
 also carries the `spit` in-place write (`83fe128e`, follow-up `3be07637`):
 mode, symlink and hard-link behaviour are verified on the installed build, so
-the floor item is closed. Also checked: `jolt-lang/http-client` `v0.1.6`
-(`e9e0a39`), now the version pinned by the project — its HTTP, crypto and MCP
-SSE suites pass on the installed build.
+the floor item is closed.
+
+`jolt-lang/http-client` `v0.1.7` (`dcc4822`) is now the version pinned by the
+project; its HTTP, crypto and MCP SSE suites pass on the installed build.
 
 ## Live issues
+
+### [jolt-lang/http-client#46](https://github.com/jolt-lang/http-client/issues/46) — `jolt.http.tls` shadows `clojure.core/chunk`
+
+Open (filed 2026-11-11). Requiring `jolt.http.tls` prints
+`WARNING: chunk already refers to: #'clojure.core/chunk in namespace:
+jolt.http.tls, being replaced by: #'jolt.http.tls/chunk`. The cause is
+`(def ^:private chunk 16384)` (`src/jolt/http/tls.clj:70`), which shadows the
+`clojure.core` refer. Every process that opens a TLS connection prints it,
+including `jolt run -m ... -p` output, where it mixes into the result; there is
+no functional failure. Renaming the private constant to `chunk-size` (or
+`(:refer-clojure :exclude [chunk])`) fixes it. Affects v0.1.7 (`dcc4822`, the
+current pin) and v0.1.6 (`e9e0a39`), so the pin bump does not clear the
+warning until the fix lands upstream.
 
 ### [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) — SCI host-protocol support on Jolt
 

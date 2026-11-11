@@ -1,4 +1,4 @@
-{:jolt/min-version "0.8.24"
+{:jolt/min-version "0.8.26"
  ;; Jolt's floor is the LATEST tagged release — the host is young and moves
  ;; fast, so kmet targets the newest release rather than the oldest one a
  ;; feature needs (jolt/README.md § Bundled-extension loader floor).
@@ -134,10 +134,13 @@
         ;; warning on every Jolt run. The v0.1.6 line (e9e0a39, PRs #37-#41)
         ;; streams HttpURLConnection bodies off the wire, sends a default
         ;; User-Agent, and moves jolt-crypto to v0.2.0 — the revision kmet's
-        ;; digest/HMAC classes ride on, still no root pin.
+        ;; digest/HMAC classes ride on, still no root pin. v0.1.7 (dcc4822,
+        ;; PRs #42-#43) passes babashka.http-client's request options through,
+        ;; adds multipart handling and uses the runtime's java.net.URI
+        ;; constructors; it raises the lib's own Jolt floor to 0.8.25.
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
-                                         :git/tag "v0.1.6"
-                                         :git/sha "e9e0a39581bd8d96f0a438359599fa49a500980c"}
+                                         :git/tag "v0.1.7"
+                                         :git/sha "dcc4822d723a56d92c47f9da030a67313908bab1"}
         ;; cljfmt / spec.alpha / rewrite-clj serve the format tasks
         ;; (kmet.tasks.format — one code path on both hosts) AND the fixed
         ;; bundled extension set (kmet.app.extensions.libs, src/kmet/extension.md §
