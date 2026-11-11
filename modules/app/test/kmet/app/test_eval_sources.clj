@@ -313,3 +313,16 @@
       (t/is (= :timeout (get-in r [:details :error]))))
     (t/is (true? @(deref seen))
           "the source saw the script timeout signal")))
+
+(t/deftest sources-are-reported-only-when-the-mounted-set-changes
+  (let [env (support/eval-ctx)]
+    (register! env :one (fn [_] {:ns {'ext.one {'x (fn [] 1)}}}))
+    (let [first (support/eval! env "1")
+          second (support/eval! env "1")]
+      (t/is (= #{:one} (set (map :id (get-in first [:details :sources])))))
+      (t/is (empty? (get-in second [:details :sources]))))
+    (register! env :two (fn [_] {:ns {'ext.two {'y (fn [] 2)}}}))
+    (let [third (support/eval! env "1")
+          fourth (support/eval! env "1")]
+      (t/is (= #{:one :two} (set (map :id (get-in third [:details :sources])))))
+      (t/is (empty? (get-in fourth [:details :sources]))))))

@@ -472,6 +472,20 @@
    :errors @(:source-errors env)
    :commands {}})
 
+(defn- source-result-details
+  "The source portion of an eval result's :details: the current source INFO
+   only when its id set differs from the last eval call's, plus any source
+   errors. Returns `[details ids]`; the caller records IDS with the result."
+  [env sources]
+  (let [info (:info sources)
+        ids (mapv :id info)]
+    [(cond-> (if (not= ids @(:reported-source-ids env))
+               {:sources info}
+               {})
+       (seq (:errors sources))
+       (assoc :source-errors (:errors sources)))
+     ids]))
+
 ;; ─── Library index ────────────────────────────────────────────────────────
 
 (defn- library-entry [record]
@@ -1398,6 +1412,9 @@
              :source-info (atom [])
              :source-errors (atom [])
              :source-ids (atom [])
+             ;; the ids the result renderer last reported; the eval-source
+             ;; line appears only when this set changes
+             :reported-source-ids (atom nil)
              :fresh-sources? (atom true)
              :change-lines (atom [])
              :unwritten (atom #{})
@@ -2066,29 +2083,30 @@
                                               (= @(:source-ids env)
                                                  (mapv :id (source-registrations service))))
                                        (current-source-seed env)
-                                       (refresh-sources! service env cwd source-signal))]
-                         (script/run {:tool "eval"
-                                      :code code
-                                      :timeout timeout
-                                      :limits limits
-                                      :signal signal
-                                      :abort abort
-                                      :ctx ctx
-                                      :cwd cwd
-                                      :on-update on-update
-                                      :sci-ctx (:sci-ctx env)
-                                      :interrupt (:interrupt env)
-                                      :ns-atom (:sticky-ns env)
-                                      :split-forms? true
-                                      :result-store (fn [result]
-                                                      (when-not @(:skip-result-store? env)
-                                                        (store-result! env result)))
-                                      :source-namespaces (:namespaces sources)
-                                      :session-recall session-recall
-                                      :extra-details (cond-> {:sources (:info sources)}
-                                                       (seq (:errors sources))
-                                                       (assoc :source-errors (:errors sources)))
-                                      :tools? false})))]
+                                       (refresh-sources! service env cwd source-signal))
+                             [extra-details ids] (source-result-details env sources)
+                             result (script/run {:tool "eval"
+                                                 :code code
+                                                 :timeout timeout
+                                                 :limits limits
+                                                 :signal signal
+                                                 :abort abort
+                                                 :ctx ctx
+                                                 :cwd cwd
+                                                 :on-update on-update
+                                                 :sci-ctx (:sci-ctx env)
+                                                 :interrupt (:interrupt env)
+                                                 :ns-atom (:sticky-ns env)
+                                                 :split-forms? true
+                                                 :result-store (fn [result]
+                                                                 (when-not @(:skip-result-store? env)
+                                                                   (store-result! env result)))
+                                                 :source-namespaces (:namespaces sources)
+                                                 :session-recall session-recall
+                                                 :extra-details extra-details
+                                                 :tools? false})]
+                         (reset! (:reported-source-ids env) ids)
+                         result))]
         (if error
           (error-result env (codemode) started)
           (if (str/blank? code)

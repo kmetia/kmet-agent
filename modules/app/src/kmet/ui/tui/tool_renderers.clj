@@ -1178,7 +1178,7 @@
     (if (keyword? id) (name id) (str id))))
 
 (defn- eval-source-nodes
-  "One muted line naming the eval sources a call loaded."
+  "One muted line naming the eval sources when a call's mounted set changed."
   [context theme]
   (when-let [sources (seq (get-in context [:details :sources]))]
     (let [n (count sources)
