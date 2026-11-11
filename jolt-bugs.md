@@ -14,23 +14,12 @@ also carries the `spit` in-place write (`83fe128e`, follow-up `3be07637`):
 mode, symlink and hard-link behaviour are verified on the installed build, so
 the floor item is closed.
 
-`jolt-lang/http-client` `v0.1.7` (`dcc4822`) is now the version pinned by the
-project; its HTTP, crypto and MCP SSE suites pass on the installed build.
+`jolt-lang/http-client` `main` (`b45e46f`) is now the version pinned by the
+project; its HTTP, crypto and MCP SSE suites pass on the installed build. The
+#46 entry is dropped: PR #47 (v0.1.8, `8405dc0`) renamed the shadowing TLS
+constant, and requiring `jolt.http.tls` is silent on the pinned commit.
 
 ## Live issues
-
-### [jolt-lang/http-client#46](https://github.com/jolt-lang/http-client/issues/46) — `jolt.http.tls` shadows `clojure.core/chunk`
-
-Open (filed 2026-11-11). Requiring `jolt.http.tls` prints
-`WARNING: chunk already refers to: #'clojure.core/chunk in namespace:
-jolt.http.tls, being replaced by: #'jolt.http.tls/chunk`. The cause is
-`(def ^:private chunk 16384)` (`src/jolt/http/tls.clj:70`), which shadows the
-`clojure.core` refer. Every process that opens a TLS connection prints it,
-including `jolt run -m ... -p` output, where it mixes into the result; there is
-no functional failure. Renaming the private constant to `chunk-size` (or
-`(:refer-clojure :exclude [chunk])`) fixes it. Affects v0.1.7 (`dcc4822`, the
-current pin) and v0.1.6 (`e9e0a39`), so the pin bump does not clear the
-warning until the fix lands upstream.
 
 ### [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) — SCI host-protocol support on Jolt
 

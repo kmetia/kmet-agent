@@ -137,10 +137,13 @@
         ;; digest/HMAC classes ride on, still no root pin. v0.1.7 (dcc4822,
         ;; PRs #42-#43) passes babashka.http-client's request options through,
         ;; adds multipart handling and uses the runtime's java.net.URI
-        ;; constructors; it raises the lib's own Jolt floor to 0.8.25.
+        ;; constructors; it raises the lib's own Jolt floor to 0.8.25. The
+        ;; pinned main commit (b45e46f) adds v0.1.8 (8405dc0, PR #47), which
+        ;; renames the private TLS chunk constant that tripped Jolt's
+        ;; shadowed-refer warning, plus PR #44's PKCS12 KeyStore and PR #48's
+        ;; load-warning test.
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
-                                         :git/tag "v0.1.7"
-                                         :git/sha "dcc4822d723a56d92c47f9da030a67313908bab1"}
+                                         :git/sha "b45e46f7ad9d41a8bc7902659751a2f366013cf7"}
         ;; cljfmt / spec.alpha / rewrite-clj serve the format tasks
         ;; (kmet.tasks.format — one code path on both hosts) AND the fixed
         ;; bundled extension set (kmet.app.extensions.libs, src/kmet/extension.md §
