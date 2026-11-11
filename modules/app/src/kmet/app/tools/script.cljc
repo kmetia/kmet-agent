@@ -108,8 +108,8 @@
    `(eval/help)`; the summary itself stays host-neutral."
   (str "aliases fs, str, set, edn, walk, json and p; cwd-resolving slurp, "
        "spit and file-seq; core verbs, also referred unqualified: read, write, "
-       "edit, bash, read-many, bash-many, project-files, test-summary, cwd, "
-       "env, now, sleep, emit, emit-image, spawn and session-recall "
+       "edit, bash, read-many, bash-many, project-files, cwd, env, now, "
+       "sleep, emit, emit-image, spawn and session-recall "
        "(core/<verb> stays available); the core, clj and eval "
        "namespaces; "
        "clojure.*, babashka.*, the bundled libs (rewrite-clj, "
@@ -120,7 +120,7 @@
   "The core verbs the sandbox also refers unqualified. They are the same
    functions the `core` namespace installs, so `(emit v)` and `(core/emit v)`
    are one call; `read` deliberately shadows `clojure.core/read`."
-  '[read read-many write edit bash bash-many project-files test-summary cwd env now sleep emit emit-image spawn session-recall])
+  '[read read-many write edit bash bash-many project-files cwd env now sleep emit emit-image spawn session-recall])
 
 (def alias-prelude
   "The aliases and core refers every script gets without its own require — the
@@ -1094,41 +1094,6 @@
     {:files (vec (take limit all))
      :more (max 0 (- (count all) limit))}))
 
-(def ^:private test-summary-limit-bytes 8000)
-(def ^:private test-summary-line-pattern
-  #"(?i)(tests?|assertions?|passed|failed|failure|error|expected|actual|traceback|FAIL|ERROR)")
-
-(defn test-summary
-  "Run a test command through bash and return a compact report: the first
-   lines, every summary/failure line, and the tail. OPTS is passed to bash and
-   may carry :timeout and :max-bytes; there is no default timeout. Use it
-   instead of dumping a whole test log into the call."
-  [command & [opts]]
-  (let [opts (or opts {})
-        signal (:cancelled *call-state*)
-        content (bash-text command (dissoc opts :max-bytes) signal)
-        lines (vec (str/split-lines (str content)))
-        n (count lines)
-        hits (keep-indexed (fn [i line]
-                             (when (re-find test-summary-line-pattern line) i))
-                           lines)
-        indexes (set (concat (range (min 8 n))
-                             hits
-                             (range (max 0 (- n 40)) n)))
-        selected (mapv second
-                       (filter (fn [[i _]] (contains? indexes i))
-                               (map-indexed vector lines)))
-        text (str/join "\n" selected)
-        max-bytes (long (or (:max-bytes opts) test-summary-limit-bytes))
-        out (if (<= (bash-out/byte-length text) max-bytes)
-              text
-              (clip-head text max-bytes))
-        omitted (- n (count selected))]
-    (str out
-         (when (pos? omitted)
-           (str "\n[test output: " n " lines; showing "
-                (count selected) " summary/tail lines]")))))
-
 (declare tools-namespace)
 
 (defn call-namespaces
@@ -1168,8 +1133,7 @@
                                                              (:cancelled *call-state*)))
                                           'read-many read-many
                                           'bash-many bash-many
-                                          'project-files project-files
-                                          'test-summary test-summary})
+                                          'project-files project-files})
                             'clj {'edit-form (fn [args]
                                                (clj-edit/edit-form
                                                 (assoc args :cwd (call-cwd))))

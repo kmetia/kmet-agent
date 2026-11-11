@@ -136,7 +136,7 @@
   (let [guidelines (str/join "\n" (:prompt-guidelines eval-tool/definition))]
     (t/is (str/includes? guidelines "Batch independent reads"))
     (t/is (str/includes? guidelines "not one call per file"))
-    (t/is (str/includes? guidelines "test-summary"))
+    (t/is (str/includes? guidelines "bash-many"))
     (t/is (str/includes? (:description eval-tool/definition) "define what recurs once"))
     (t/is (str/includes? guidelines "Return the final value"))))
 
@@ -301,10 +301,7 @@
     (let [r (:content (support/eval! env "(project-files)"))]
       (t/is (str/includes? r ":files") r)
       (t/is (str/includes? r "a.txt") r)
-      (t/is (not (str/includes? r "target/ignored.txt")) r))
-    (let [r (:content (support/eval! env "(test-summary \"printf 'Ran 3 tests\\nOK\\nFAILED case\\n'\")\n"))]
-      (t/is (str/includes? r "Ran 3 tests") r)
-      (t/is (str/includes? r "FAILED case") r))))
+      (t/is (not (str/includes? r "target/ignored.txt")) r))))
 
 (t/deftest test-the-sandbox-shell-has-no-default-timeout
   (let [env (support/eval-ctx)
