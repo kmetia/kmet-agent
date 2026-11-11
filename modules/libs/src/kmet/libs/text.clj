@@ -21,6 +21,15 @@
        (str (subs line 0 max-chars) "…")
        line))))
 
+(defn splits-surrogate-pair?
+  "True when cutting S before index CUT would split a surrogate pair: the
+   character before CUT is a high surrogate. Only bb/JVM strings are UTF-16;
+   a Jolt string holds code points, so a cut between them never splits a
+   pair."
+  [s cut]
+  (and (pos? cut)
+       (<= 0xD800 (int (nth s (dec cut))) 0xDBFF)))
+
 (defn trim-leading-blank-lines
   "S without its leading blank lines (lines that are empty or hold only
    spaces, tabs or carriage returns). The first non-blank line keeps its own

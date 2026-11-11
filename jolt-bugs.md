@@ -53,3 +53,21 @@ the in-progress conversion hit the 2,983,138,304-byte heap ceiling at live
 `read` sniffs images with `alength`/`aget` — but eval or extension code that
 seqs a large array is exposed. Workaround: use index access (`aget`, `nth`,
 `count`) rather than `take`/`first`/`map`/`vec` on large arrays.
+
+### [jolt#1611](https://github.com/jolt-lang/jolt/issues/1611) — Regex refuses lone surrogate code points
+
+Open (filed 2026-11-12; reproduces on the installed
+`v0.8.26-24-gd298e719`). A pattern naming a lone surrogate (`\uD800`–`\uDFFF`)
+throws `PatternSyntaxException` at compile time, and a regex literal compiles
+at read time, so one such literal keeps its whole namespace from loading. The
+refusal is a documented divergence (`test/conformance/known-divergences.edn`),
+but it is enforced only at escape endpoints: `[\uD800-\uDBFF]` and `[a\uD800]`
+throw while the spanning range `[\uD000-\uE000]` compiles. kmet hit it in
+`session-recall/cap-output` (`#"[\uD800-\uDBFF]$"`), which Jolt surfaced as a
+syntax error while loading `kmet.app.tools.eval` and blocked `jolt start`. The
+ticket proposes compiling a lone surrogate to a never-matching atom and
+dropping it from classes — exact for code-point strings, so no UTF-16 model is
+needed. Our side is fixed portably by the numeric check in
+`kmet.libs.text/splits-surrogate-pair?`, so no kmet path depends on the
+ticket. Workaround for ported code: test code points numerically instead of
+with a surrogate regex.

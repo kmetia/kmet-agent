@@ -20,6 +20,18 @@
     (is (= "abc…" (text/title-line "abcd" 3)))
     (is (nil? (text/title-line "\n \n")))))
 
+(deftest splits-surrogate-pair-test
+  (testing "a cut between characters or at the ends never splits a pair"
+    (is (not (text/splits-surrogate-pair? "abc" 0)))
+    (is (not (text/splits-surrogate-pair? "abc" 1)))
+    (is (not (text/splits-surrogate-pair? "abc" 3))))
+  (testing "the emoji boundary"
+    (is (not (text/splits-surrogate-pair? "a😀b" 1)))
+    (is (not (text/splits-surrogate-pair? "a😀b" 3)))
+    (if (= 2 (count "😀"))
+      (is (text/splits-surrogate-pair? "a😀b" 2))
+      (is (not (text/splits-surrogate-pair? "a😀b" 2))))))
+
 (deftest trim-leading-blank-lines-test
   (testing "leading blank lines go, indentation and inner blanks stay"
     (is (= "(+ 1 2)" (text/trim-leading-blank-lines "\n(+ 1 2)")))

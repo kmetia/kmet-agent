@@ -77,9 +77,8 @@
 
 (t/deftest output-cap-does-not-split-a-surrogate-pair
   (let [cap @#'recall/output-cap
-        text (str (apply str (repeat (dec cap) "x"))
-                  (char 0xD83D) (char 0xDE00))
-        clipped (#'recall/cap-output text)]
-    (t/is (not (re-find (re-pattern (str "[" (char 0xD800) "-"
-                                         (char 0xDBFF) "]\\n"))
-                        clipped)))))
+        text (str (apply str (repeat (dec cap) "x")) "😀")
+        clipped (#'recall/cap-output text)
+        kept (first (str/split clipped #"\n\.\.\.\[clipped at 50 KB\]"))
+        last-cp (int (last kept))]
+    (t/is (not (<= 0xD800 last-cp 0xDBFF)))))

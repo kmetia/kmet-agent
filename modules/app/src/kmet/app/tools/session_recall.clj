@@ -9,6 +9,7 @@
             [kmet.app.session.core :as session]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.tool :as tool]
+            [kmet.libs.text :as text]
             [kmet.srce.core :as srce]))
 
 (def ^:private search-page-size 5)
@@ -660,7 +661,7 @@
 (defn- cap-output [text]
   (if (<= (count text) output-cap)
     text
-    (let [end (if (re-find #"[\uD800-\uDBFF]$" (subs text 0 output-cap))
+    (let [end (if (text/splits-surrogate-pair? text output-cap)
                 (dec output-cap)
                 output-cap)]
       (str "Warning: output clipped at " end " of " (count text)
