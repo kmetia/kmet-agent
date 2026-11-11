@@ -35,6 +35,7 @@ numbers are the ones `/session` shows:
 | `tool-result-tokens` | estimated result tokens (characters/4), the amount re-sent on later turns |
 | `by-tool` | calls and result tokens per tool name |
 | `eval.actions` | how often eval code uses `read`, `slurp`, `bash`, `sh`, `emit`, `eval/help`, the tools bridge, etc. |
+| `eval.no-output` / `eval.object-leaks` | results that carried no diagnosis (`(no output)` or blank — a write with no receipt, a dropped `println`) or leaked a host object (`#object[...]`); each one is a turn the model paid for and learned nothing from |
 | `errors` / `error-kinds` | failed tool results, coarsely categorized |
 | `ok?` | the task's `check.sh` passed and the process exited 0 |
 

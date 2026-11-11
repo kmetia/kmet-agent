@@ -37,6 +37,8 @@
   (-> acc
       (update :calls + (:calls e 0))
       (update :code-chars + (:code-chars e 0))
+      (update :no-output + (:no-output e 0))
+      (update :object-leaks + (:object-leaks e 0))
       (update :actions #(merge-with + % (:actions e)))))
 
 (defn aggregate
@@ -64,7 +66,8 @@
                           {}
                           metrics)
      :eval (reduce add-eval
-                   {:calls 0 :code-chars 0 :actions {}}
+                   {:calls 0 :code-chars 0 :no-output 0 :object-leaks 0
+                    :actions {}}
                    (map :eval metrics))
      :declared-tools (->> runs
                           (mapcat #(get-in % [:metrics :declared-tools]))
@@ -424,7 +427,7 @@
 (defn- eval-profile-table [by-mode]
   (table
    ["mode" "eval calls" "code chars" "read" "slurp" "bash" "sh"
-    "emit" "eval/help" "tools bridge" "network"]
+    "emit" "eval/help" "tools bridge" "network" "no output" "#object"]
    (for [[mode a] by-mode
          :let [e (:eval a)
                actions (:actions e)]]
@@ -438,7 +441,9 @@
       (fmt-int (get actions :emit 0))
       (fmt-int (get actions :eval-help 0))
       (fmt-int (get actions :tool-call 0))
-      (fmt-int (get actions :network 0))])))
+      (fmt-int (get actions :network 0))
+      (fmt-int (:no-output e))
+      (fmt-int (:object-leaks e))])))
 
 (defn- errors-table [by-mode]
   (table

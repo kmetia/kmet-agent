@@ -92,9 +92,34 @@
    :eval-help #"\(eval/help\b"
    :network #"(?i)\((?:curl|http/get|http/post|http/request)"})
 
+(def ^:private no-diagnosis-pattern
+  "A result that tells the model nothing: the sandbox's own `(no output)`. A
+   blank result counts the same way."
+  #"\(no output\)")
+
+(def ^:private object-leak-pattern
+  "A host object printed into a result (`#object[...]`): unreadable, and a sign
+   the sandbox printed a Path, a Process or a test fixture instead of a value."
+  #"#object\[")
+
+(defn result-quality
+  "Count the results in ENTRIES that cost a turn and returned no diagnosis:
+   `:no-output` for a silent result (`(no output)` or blank, e.g. an edit that
+   reports nothing or a dropped `println`), `:object-leaks` for an unreadable
+   host object."
+  [entries]
+  (let [texts (->> entries
+                   (filter #(= :tool (:role %)))
+                   (map #(str (content-text (:content %)))))]
+    {:no-output (count (filter #(or (str/blank? (str/trim %))
+                                    (re-find no-diagnosis-pattern %))
+                               texts))
+     :object-leaks (count (filter #(re-find object-leak-pattern %) texts))}))
+
 (defn eval-profile
-  "The shape of the eval calls in ENTRIES: call count, code size, and how
-   often each verb or discovery helper appears."
+  "The shape of the eval calls in ENTRIES: call count, code size, how often
+   each verb or discovery helper appears, and how many results were silent or
+   unreadable."
   [entries]
   (let [code (->> entries
                   (mapcat :tool-calls)
@@ -105,10 +130,11 @@
                       (map (fn [[k re]]
                              [k (count (filter #(re-find re %) code))]))
                       eval-action-patterns)]
-    {:calls (count code)
-     :code-chars (reduce + 0 (map count code))
-     :max-code-chars (reduce max 0 (map count code))
-     :actions actions}))
+    (merge {:calls (count code)
+            :code-chars (reduce + 0 (map count code))
+            :max-code-chars (reduce max 0 (map count code))
+            :actions actions}
+           (result-quality entries))))
 
 (defn session-metrics
   "Metrics for a loaded Session. The caller adds wall time, exit status and

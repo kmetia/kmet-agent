@@ -65,6 +65,32 @@
       (is (= 1 (get-in m [:eval :actions :read])))
       (is (= 1 (get-in m [:eval :actions :emit]))))))
 
+(deftest test-result-quality
+  (let [entries [{:role :assistant
+                  :content []
+                  :tool-calls [{:name "eval" :arguments {:code "1"}}]}
+                 {:role :tool
+                  :tool-name "eval"
+                  :content [{:type :tool_result :content "(no output)"}]}
+                 {:role :tool
+                  :tool-name "eval"
+                  :content [{:type :tool_result :content ""}]}
+                 {:role :tool
+                  :tool-name "eval"
+                  :content [{:type :tool_result
+                             :content "[#object[sun.nio.fs.UnixPath 0x1 \"/a\"]]"}]}
+                 {:role :tool
+                  :tool-name "eval"
+                  :content [{:type :tool_result :content "12"}]}]
+        quality (metrics/result-quality entries)
+        m (metrics/session-metrics (session entries))]
+    (testing "silent and blank results are counted, readable ones are not"
+      (is (= 2 (:no-output quality)))
+      (is (= 1 (:object-leaks quality))))
+    (testing "the counters ride the eval profile so modes aggregate them"
+      (is (= 2 (get-in m [:eval :no-output])))
+      (is (= 1 (get-in m [:eval :object-leaks]))))))
+
 (deftest test-initial-declared-tools
   (is (= #{"a"}
          (set (keys (metrics/initial-declared-tools
