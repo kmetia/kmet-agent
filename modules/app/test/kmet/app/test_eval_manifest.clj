@@ -15,6 +15,12 @@
             [kmet.app.tools.registry :as tools]
             [kmet.test-tmp :as test-tmp]))
 
+(defn- text-of
+  [content]
+  (if (string? content)
+    content
+    (str/join "\n" (map :text content))))
+
 (defn- agent-for
   ([env] (agent-for env ["eval"]))
   ([env entries]
@@ -56,10 +62,10 @@
         manifest {:loaded? true :entries [entry]}
         text (session/eval-library-listing manifest)]
     (t/is (= text (session/eval-library-listing manifest)))
-    (t/is (str/includes? text "- user/report ([x]) (cwd) — Render x."))
+    (t/is (str/includes? text "- report ([x]) (cwd) — Render x."))
     (t/is (not (str/includes? text "More detail."))
           "only the first doc line is listed")
-    (t/is (not (str/includes? text "(eval/help)"))
+    (t/is (not (str/includes? text "(help)"))
           "an unbounded saved list needs no discovery pointer"))
   (let [saved (session/eval-library-listing
                {:loaded? false
@@ -68,25 +74,25 @@
     (t/is (str/includes? saved "1 saved definition"))
     (t/is (str/includes? saved "first eval loads them"))
     (t/is (not (str/includes? saved "loaded definition")))
-    (t/is (str/includes? saved "- user/a ([]) (global)"))
+    (t/is (str/includes? saved "- a ([]) (global)"))
     (t/is (str/includes?
            (session/eval-library-listing
             {:loaded? true
              :entries [{:name "user/plain" :scope :cwd :active true}]})
-           "- user/plain (cwd)")))
+           "- plain (cwd)")))
   (t/is (str/includes?
          (session/eval-library-listing
           {:loaded? true
            :entries [{:name "user/shadowed" :scope :global :active false
                       :arglists '([x]) :doc "Old."}]})
-         "- user/shadowed ([x]) (global, shadowed)"))
+         "- shadowed ([x]) (global, shadowed)"))
   (let [empty-text (session/eval-library-listing {:loaded? true :entries []})]
     (t/is (str/includes? empty-text "Library: empty.")))
   (let [live-text (session/eval-library-listing
                    {:loaded? true :entries []
                     :session-only [{:name "user/live" :scope :cwd :active true}]})]
     (t/is (str/includes? live-text "0 saved (0 loaded), 1 session-only"))
-    (t/is (str/includes? live-text "(eval/help :library)")))
+    (t/is (str/includes? live-text "(help :library)")))
   (let [entries (mapv (fn [i]
                         {:name (str "user/definition-" i)
                          :scope :cwd
@@ -96,7 +102,7 @@
                       (range 400))
         text (session/eval-library-listing {:loaded? true :entries entries})]
     (t/is (<= (count text) 4096))
-    (t/is (str/includes? text "more; (eval/library)"))
+    (t/is (str/includes? text "more; (library)"))
     (t/is (not (str/includes? text "user/definition-399"))))
   (let [text (session/eval-library-listing
               {:loaded? true
@@ -130,7 +136,7 @@
     (let [first (state/sync-eval-library-listing! agent)]
       (t/is (some? first))
       (t/is (str/includes? (:content first) "1 saved definition"))
-      (t/is (str/includes? (:content first) "user/a"))
+      (t/is (str/includes? (text-of (:content first)) "- a ([])"))
       (t/is (false? (:display first)))
       (t/is (false? (get-in first [:details :loaded?])))
       (t/is (= 1 (get-in first [:details :count]))))
@@ -141,7 +147,7 @@
     (let [second (state/sync-eval-library-listing! agent)]
       (t/is (some? second) "a changed set is announced again")
       (t/is (str/includes? (:content second) "2 saved definitions"))
-      (t/is (str/includes? (:content second) "user/b")))
+      (t/is (str/includes? (text-of (:content second)) "- b ([])")))
     (fs/delete (support/library-file env :cwd "user" "a.clj"))
     (fs/delete (support/library-file env :cwd "user" "b.clj"))
     (t/is (str/includes? (:content (state/sync-eval-library-listing! agent))
@@ -166,7 +172,7 @@
     (let [loaded (state/sync-eval-library-listing! agent)]
       (t/is (some? loaded))
       (t/is (str/includes? (:content loaded) "saved (1 loaded)"))
-      (t/is (str/includes? (:content loaded) "user/saved"))
+      (t/is (str/includes? (text-of (:content loaded)) "- saved ([x])"))
       (t/is (true? (get-in loaded [:details :loaded?]))))
     (t/is (nil? (state/sync-eval-library-listing! agent)))))
 
@@ -202,7 +208,7 @@
       (t/is (= 12 (count (get-in result [:details :loaded]))))
       (t/is (= 13 (get-in result [:details :loaded-count])))
       (t/is (str/includes? (:content result)
-                           "1 more; (eval/library) for all")))))
+                           "1 more; (library) for all")))))
 
 (t/deftest the-saved-manifest-cache-tracks-the-files
   (let [env (support/eval-ctx)
@@ -253,7 +259,7 @@
           saved (state/sync-eval-library-listing! other-agent)]
       (t/is (some? saved))
       (t/is (str/includes? (:content saved) "saved"))
-      (t/is (str/includes? (:content saved) "user/later")
+      (t/is (str/includes? (text-of (:content saved)) "- later ([])")
             "a session without an environment lists the disk as saved"))))
 
 (t/deftest the-manifest-requires-eval-to-be-selected
@@ -292,7 +298,7 @@
         (write-definition! env :cwd "user/saved" "(defn saved [] 1)")
         (let [message (without-building #(state/sync-eval-library-listing! other-agent))]
           (t/is (some? message) "the saved view reads the disk index")
-          (t/is (str/includes? (:content message) "user/saved"))
+          (t/is (str/includes? (text-of (:content message)) "- saved ([])"))
           (t/is (str/includes? (:content message) "- counted: Counted source.")))
         (t/is (zero? @calls)
               "the saved view never invokes a source"))

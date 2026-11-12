@@ -160,7 +160,7 @@
   "One manifest line: `- name [arglists] (scope[, shadowed]) — first doc
    line`, or `(no docstring)` for a legacy undocumented entry."
   [entry]
-  (str "- " (:name entry)
+  (str "- " (eval-format/display-name (:name entry))
        (eval-format/arglists-text (:arglists entry))
        " (" (name (or (:scope entry) :global))
        (when (false? (:active entry)) ", shadowed")
@@ -172,7 +172,7 @@
 
 (defn- eval-listing-text
   "INTRO plus LINES, dropping whole lines from the end until the text fits
-   `max-listing-chars`; a dropped count names `(eval/library)` so the omitted
+   `max-listing-chars`; a dropped count names `(library)` so the omitted
    lines can be read. Deterministic: the same entries render the same bytes."
   [intro lines]
   (let [total (count lines)]
@@ -183,7 +183,7 @@
                         (when (seq shown)
                           (str shown (when (pos? omitted) "\n"))))
                       (when (pos? omitted)
-                        (str "… " omitted " more; (eval/library)")))]
+                        (str "… " omitted " more; (library)")))]
         (if (or (<= (count text) max-listing-chars) (zero? kept))
           (str/trimr text)
           (recur (dec kept)))))))
@@ -192,7 +192,7 @@
   "The `:eval-library` manifest text for MANIFEST (`{:loaded? :entries
    :session-only :sources}`): one line per saved definition with its arglists
    and scope, or an empty-library correction; a session-only count says what
-   (eval/help :library) can show but the saved list cannot. Mounted eval
+   (help :library) can show but the saved list cannot. Mounted eval
    sources are listed first as one registration-description line each, so the
    model knows `ext.mcp` and its peers exist without calling help first.
    LOADED? distinguishes this session's built environment from the files a
@@ -208,16 +208,16 @@
         loaded (- n failed)
         live (count session-only)
         live-text (when (pos? live) (str ", " live " session-only"))
-        live-hint (when (pos? live) "; (eval/help :library)")
+        live-hint (when (pos? live) "; (help :library)")
         sources-text (when (seq sources)
                        (str "Sources: " (count sources)
-                            " mounted; (eval/help) lists their verbs.\n"))
+                            " mounted; (help) lists their verbs.\n"))
         intro (cond
                 (and (empty? entries) (zero? live))
                 (str "Library: empty.\n" sources-text)
                 (zero? n)
                 (str "Library: 0 saved (0 loaded), " live
-                     " session-only; (eval/help :library).\n" sources-text)
+                     " session-only; (help :library).\n" sources-text)
                 loaded?
                 (str "Library: " n " saved (" loaded " loaded"
                      (when (pos? failed) (str ", " failed " failed")) ")"

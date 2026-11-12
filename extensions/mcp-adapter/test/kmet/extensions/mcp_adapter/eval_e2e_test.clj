@@ -31,20 +31,20 @@
           (let [connect ((get-in @state [:tools "mcp" :execute]) {:connect "fake"})]
             (is (not (:is-error connect)) (:content connect)))
           (testing "call reaches a cached tool"
-            (let [r (support/eval! env "(ext.mcp/call \"fake_echo\" {:message \"hi\"})")]
+            (let [r (support/eval! env "(mcp/call \"fake_echo\" {:message \"hi\"})")]
               (is (not (:is-error r)) (:content r))
               (is (str/includes? (:content r) "echo: hi"))))
           (testing "call! returns the content string"
-            (let [r (support/eval! env "(ext.mcp/call! \"fake_echo\" {:message \"hi\"})")]
+            (let [r (support/eval! env "(mcp/call! \"fake_echo\" {:message \"hi\"})")]
               (is (= "echo: hi" (:content r)))))
           (testing "a direct tool is a listed eval verb"
-            (let [r (support/eval! env "(ext.mcp/fake_echo {:message \"direct\"})")]
+            (let [r (support/eval! env "(mcp/fake_echo {:message \"direct\"})")]
               (is (not (:is-error r)) (:content r))
               (is (str/includes? (:content r) "echo: direct"))))
           (testing "the rest of the catalog is searchable and describeable"
-            (is (str/includes? (:content (support/eval! env "(ext.mcp/search \"echo\")"))
+            (is (str/includes? (:content (support/eval! env "(mcp/search \"echo\")"))
                                "fake_echo"))
-            (is (str/includes? (:content (support/eval! env "(ext.mcp/describe \"fake_echo\")"))
+            (is (str/includes? (:content (support/eval! env "(mcp/describe \"fake_echo\")"))
                                "fake_echo")))
           (finally
             (mcp/shutdown api)

@@ -130,9 +130,9 @@
                    {})]
         (testing "the eval surface appends a copyable call line"
           (is (str/includes? (:content (status/describe-text state "echo" {:surface :eval}))
-                             "call: (ext.mcp/call \"a_echo\" {:query \"...\"})")))
+                             "call: (mcp/call \"a_echo\" {:query \"...\"})")))
         (testing "the not-found hint names the eval search verb"
-          (is (= {:content "Tool \"nope\" not found. Use (ext.mcp/search \"...\") to search."
+          (is (= {:content "Tool \"nope\" not found. Use (mcp/search \"...\") to search."
                   :is-error true}
                  (status/describe-text state "nope" {:surface :eval}))))))))
 

@@ -72,10 +72,20 @@
                          (fn [_]
                            {:ns {'ext.license {'add! (fn [] :added)}}}))]
     (t/is (= ":added" (:content (support/eval! env "(ext.license/add!)"))))
+    (t/is (= ":added" (:content (support/eval! env "(license/add!)")))
+          "the source id is the unqualified namespace alias")
     (support/eval! env "(ns ext.license) (def keep 5)")
     (dereg)
     (t/is (= "[false 5]"
              (:content (support/eval! env "(ns ext.license) [(some? (resolve 'add!)) keep]"))))))
+
+(t/deftest a-source-id-that-collides-with-a-standard-alias-keeps-its-namespace
+  (let [env (support/eval-ctx)]
+    (register! env :str
+               (fn [_] {:ns {'ext.str {'value (fn [] :ok)}}}))
+    (t/is (= ":ok" (:content (support/eval! env "(ext.str/value)"))))
+    (t/is (= "3" (:content (support/eval! env "(+ 1 2)")))
+          "the reserved alias is not installed and the prelude still runs")))
 
 (t/deftest a-source-may-contribute-only-to-its-extension-namespace (let [env (support/eval-ctx)] (register! env :license (fn [_] {:ns {(quote nope) {(quote value) 1}}})) (let [result (support/eval! env "(+ 1 2)") errors (source-errors (:service env))] (t/is (= "3" (:content result))) (t/is (some (fn [error] (str/includes? (:error error) "may contribute only to ext.license")) errors)))))
 
@@ -250,12 +260,12 @@
       (t/is (not (str/includes? sources ":core")))
       (t/is (str/includes? help "Eval sources"))
       (t/is (str/includes? help
-                           "- :license: License helpers — 1 verb; (eval/help :license)"))
+                           "- :license: License helpers — 1 verb; (help :license)"))
       (t/is (str/includes? help "Library:"))
       (t/is (str/includes? help "Built-in verbs:"))
       (t/is (str/includes? core "Core:"))
       (t/is (str/includes? core "(emit value)"))
-      (t/is (str/includes? core "(core/emit value)")))))
+      (t/is (str/includes? core "(emit value)")))))
 
 (t/deftest a-source-can-contribute-an-explicit-macro
   (let [env (support/eval-ctx)]

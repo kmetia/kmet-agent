@@ -15,10 +15,23 @@
   [doc]
   (some-> doc text/first-nonblank-line))
 
+(defn display-name
+  "The call-surface spelling of NAME: core and eval verbs are unqualified,
+   an extension drops its internal `ext.` prefix, and a user definition drops
+   `user/`. Other namespaces keep their prefix."
+  [name]
+  (let [s (str name)]
+    (cond
+      (str/starts-with? s "core/") (subs s 5)
+      (str/starts-with? s "eval/") (subs s 5)
+      (str/starts-with? s "ext.") (subs s 4)
+      (and (str/starts-with? s "user/") (not (str/includes? s " "))) (subs s 5)
+      :else s)))
+
 (defn verb-line
   "One indented source-verb line: name, arglists and doc (or `(no docstring)`)."
   [verb]
-  (str "    " (:name verb)
+  (str "    " (display-name (:name verb))
        (arglists-text (:arglists verb))
        " — "
        (or (doc-line (:doc verb)) "(no docstring)")))

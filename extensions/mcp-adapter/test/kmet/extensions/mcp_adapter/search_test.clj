@@ -68,9 +68,9 @@
     (fn [_]
       (testing "the eval surface appends a copyable call line per hit"
         (is (str/includes? (text "read" {:surface :eval})
-                           "  call: (ext.mcp/call \"fs_read_file\" {:path \"...\"})")))
+                           "  call: (mcp/call \"fs_read_file\" {:path \"...\"})")))
       (testing "the default (agent) rendering has no eval call line"
-        (is (not (str/includes? (text "read") "ext.mcp/call")))))))
+        (is (not (str/includes? (text "read") "mcp/call")))))))
 
 (deftest search-multiplicity-and-footer
   (tu/with-agent-dir

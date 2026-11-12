@@ -631,9 +631,12 @@ calls, so it can expose current state instead of a snapshot:
 ```
 
 The optional third argument is registration metadata:
-`{:description "License helpers: ext.license/add!."}` — one line the eval
+`{:description "License helpers: license/add!."}` — one line the eval
 manifest lists without invoking the source; the source id alone is listed when
-it is omitted.
+it is omitted. The source id is also the public call alias (`license/add!`);
+it must not collide with the sandbox's standard aliases or namespaces. Put the
+verbs meant as `<id>/verb` directly under `ext.<id>`; a verb in a subnamespace
+keeps its dotted path (`license.internal/verb`).
 
 - Values must live under `ext.<source-id>` or a subnamespace of it:
   `ext.license`, `ext.license.internal`. The model's `user`, the system
@@ -645,22 +648,22 @@ it is omitted.
   `kmet.libs.clj-edit` directly; `clj/nrepl-eval` calls
   `kmet.libs.clj-eval`, the same implementation as the clojure extension's
   `clojure_eval` tool. The eval sandbox has no `tools` namespace, so a source
-  verb cannot call a tool. Use `ext.license/add!`, not `add!` or
+  verb cannot call a tool. Use `license/add!`, not `add!` or
   `user/add!`.
 - `:verbs` carries the call's `:read-file`, `:edit` and `:write-file`
   operations. They read that call's cwd and cancel signal; use them within
   the call, never keep them.
 - A contributed value may carry `:doc`, `:arglists` and `:source` metadata
   (the keys a var uses, plus the implementation text, since a source verb has
-  no library file). `(eval/sources)` lists each verb with its doc and
-  arglists; `(eval/help)` keeps one summary line per source, and
-  `(eval/help :license)` (or `(eval/help "license")`) lists the source's
+  no library file). `(sources)` lists each verb with its doc and
+  arglists; `(help)` keeps one summary line per source, and
+  `(help :license)` (or `(help "license")`) lists the source's
   description and verbs;
-  `(eval/describe 'ext.license/add!)` returns its `:kind`,
+  `(describe 'license/add!)` returns its `:kind`,
   `:arglists`, `:source` and, when it has no source, `:doc` (a source-bearing
   entry omits the docstring; nil `:file` and `:scope` are omitted).
-  `(eval/describe 'ext.license/add! :doc)` and
-  `(eval/describe 'ext.license/add! :source)` return one field each. A value
+  `(describe 'license/add! :doc)` and
+  `(describe 'license/add! :source)` return one field each. A value
   without metadata is still valid and lists as `(no docstring)`.
 - `:commands` adds verbs to `/eval`; its built-in verbs (`list`, `search`,
   `describe`, `drop`, `move`, `reload`, `sources`, `help`) are reserved.

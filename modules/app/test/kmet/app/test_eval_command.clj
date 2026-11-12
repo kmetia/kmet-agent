@@ -219,7 +219,7 @@
             "a source match is a match"))
     (let [[_ _ content] (first (run env "search add!"))]
       (t/is (str/includes? content "### Eval sources"))
-      (t/is (str/includes? content "ext.license/add! ([path]) — Add a header.")))
+      (t/is (str/includes? content "license/add! ([path]) — Add a header.")))
     (let [[_ _ content] (first (run env "search absent-name"))]
       (t/is (str/includes? content "No eval definitions or sources match"))
       (t/is (not (str/includes? content "### Eval sources"))))))
@@ -395,8 +395,8 @@
         [[level _ content]] (run env "sources")]
     (t/is (= :info level))
     (t/is (str/includes? content "- license: License helpers"))
-    (t/is (str/includes? content "ext.license/add! ([path]) — Add a header."))
-    (t/is (str/includes? content "ext.license/bare — (no docstring)"))))
+    (t/is (str/includes? content "license/add! ([path]) — Add a header."))
+    (t/is (str/includes? content "license/bare — (no docstring)"))))
 
 (t/deftest sources-reports-definitions-and-failures
   (let [env (eval-env {:service-failures [{:file "/tmp/broken.clj"

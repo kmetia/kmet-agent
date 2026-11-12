@@ -85,7 +85,7 @@
       (str (str/join "\n" @lines)
            "\n\n"
            (if (= :eval (:surface opts))
-             "(ext.mcp/search \"...\") to search, (ext.mcp/call \"tool\" args) to call"
+             "(mcp/search \"...\") to search, (mcp/call \"tool\" args) to call"
              "mcp({ server: \"name\" }) to list tools, mcp({ search: \"...\" }) to search"))
       "No MCP servers configured.")))
 
@@ -95,7 +95,7 @@
   "§9.4 full listing: server, tool name, description, each param with
    type, required/optional, description, enum/default when present.
    Ambiguous (same tool name on multiple servers) → instruct to add
-   server. OPTS: `:surface :eval` appends a copyable `ext.mcp/call` line."
+   server. OPTS: `:surface :eval` appends a copyable `mcp/call` line."
   [state tool-name & [opts]]
   (let [match (catalog/find-tool state tool-name)]
     (cond
@@ -185,7 +185,7 @@
             {:content (str "Server \"" server "\" has no tools.") :is-error false}
             {:content (str "Server \"" server "\" is configured but not connected. Use "
                            (if (= :eval (:surface opts))
-                             (str "(ext.mcp/connect \"" server "\")")
+                             (str "(mcp/connect \"" server "\")")
                              (str "mcp({ connect: \"" server "\" })"))
                            " to retry.")
              :is-error false}))))))

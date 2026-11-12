@@ -90,7 +90,7 @@
     (t/is (= described (describe-map env "(eval/describe 'user/report nil)"))
           "a nil key returns the default view")
     (t/is (= described (describe-map env "(eval/describe 'report)"))
-          "an unqualified name resolves in the sticky namespace")
+          "an unqualified name resolves in the call's final namespace")
     (t/is (str/includes? (:content (support/eval! env "(eval/describe 'report :doc)"))
                          "Render a report."))
     (t/is (= "([x])"
@@ -180,8 +180,8 @@
           help (:content (support/eval! env "(eval/help :library)"))]
       (t/is (str/includes? library ":doc \"Doc line.\\nMore.\""))
       (t/is (str/includes? library ":arglists ([x])"))
-      (t/is (str/includes? help "user/documented defn ([x]) (cwd) — Doc line."))
-      (t/is (str/includes? help "user/undocumented defn ([x]) (cwd) — (no docstring)"))
+      (t/is (str/includes? help "documented defn ([x]) (cwd) — Doc line."))
+      (t/is (str/includes? help "undocumented defn ([x]) (cwd) — (no docstring)"))
       (t/is (= "true"
                (:content (support/eval! env
                                         "(core/emit (nil? (eval/describe 'undocumented :doc)))")))))
@@ -193,7 +193,7 @@
   (let [env (support/eval-ctx)]
     (support/eval! env "(def plain 1)")
     (let [help (:content (support/eval! env "(eval/help :library)"))]
-      (t/is (str/includes? help "user/plain def (cwd) — (no docstring)"))
+      (t/is (str/includes? help "plain def (cwd) — (no docstring)"))
       (t/is (not (str/includes? help "plain.clj"))))))
 
 (t/deftest test-help-index-topics-and-one-definition
@@ -206,7 +206,7 @@
           one (:content (support/eval! env "(eval/help 'user/documented)"))]
       (t/is (str/includes? index "Eval help:"))
       (t/is (str/includes? index "Library: 1 saved (1 loaded), 0 session-only"))
-      (t/is (str/includes? library "user/documented defn ([x]) (cwd) — Doc."))
+      (t/is (str/includes? library "documented defn ([x]) (cwd) — Doc."))
       (t/is (str/includes? library "Scope: cwd"))
       (t/is (not (str/includes? index "Scope: cwd")) "the index leaves roots to :library")
       (t/is (str/includes? core "Core:"))
@@ -216,32 +216,32 @@
       (t/is (str/includes? persistence
                            "A redefinition of a saved definition with a docstring is written automatically"))
       (t/is (str/includes? (:content (support/eval! env "(eval/help :core)"))
-                           "eval/forget"))
-      (t/is (str/includes? one "user/documented defn ([x]) (cwd)"))
+                           "forget"))
+      (t/is (str/includes? one "documented defn ([x]) (cwd)"))
       (t/is (str/includes? one "doc: Doc."))
-      (t/is (str/includes? one "inspect: (eval/describe 'user/documented :source)"))
-      (t/is (str/includes? one "(eval/describe 'user/documented :file)"))
+      (t/is (str/includes? one "inspect: (describe 'documented :source)"))
+      (t/is (str/includes? one "(describe 'documented :file)"))
       (t/is (not (str/includes? one "(defn documented"))
             "help points at :source instead of dumping it")
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'core/read)"))
-                           "core/read verb ([path] [path opts]) (built-in)"))
+                           "read verb ([path] [path opts]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/describe 'core/read :doc)"))
                            "Read PATH as text"))
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'read)"))
-                           "core/read verb ([path] [path opts]) (built-in)"))
+                           "read verb ([path] [path opts]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/describe 'emit :doc)"))
                            "Report VALUE"))
       (t/is (str/includes? core "also referred unqualified"))
-      (t/is (str/includes? index "  core/read ([path] [path opts]) - "))
+      (t/is (str/includes? index "  read ([path] [path opts]) - "))
       (t/is (<= (count index) 4096) "the index stays one bounded discovery call")
       (t/is (str/includes? index "Topics: :core"))
       (t/is (not (str/includes? index "core/sh")))
-      (t/is (str/includes? index "core/bash ([command] [command opts]) - "))
+      (t/is (str/includes? index "bash ([command] [command opts]) - "))
       (t/is (not (str/includes? index "tools/")))
       (t/is (not (str/includes? index "Active tools")))
-      (t/is (str/includes? index "  eval/library ([]) - "))
-      (t/is (str/includes? (:content (support/eval! env "(eval/help 'eval/library)"))
-                           "eval/library verb ([]) (built-in)"))
+      (t/is (str/includes? index "  library ([]) - "))
+      (t/is (str/includes? (:content (support/eval! env "(eval/help 'library)"))
+                           "library verb ([]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'clj/edit-form)"))
                            "clj/edit-form verb ([args]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/describe 'clj/edit-form :doc)"))
@@ -365,25 +365,25 @@
                                       "(core/emit (nil? (eval/describe 'ext.license/bare :source)))"))))
     (let [help (:content (support/eval! env "(eval/help)"))]
       (t/is (str/includes? help
-                           "- :license: License helpers — 4 verbs; (eval/help :license)"))
-      (t/is (not (str/includes? help "ext.license/add!"))
+                           "- :license: License helpers — 4 verbs; (help :license)"))
+      (t/is (not (str/includes? help "license/add!"))
             "the index leaves source verbs to the source topic")
       (t/is (str/includes? help "source topics :license")))
     (let [help (:content (support/eval! env "(eval/help :license)"))]
       (t/is (str/includes? help "Eval source license:"))
       (t/is (str/includes? help "License helpers"))
-      (t/is (str/includes? help "ext.license/add! ([path]) — Add a header."))
+      (t/is (str/includes? help "license/add! ([path]) — Add a header."))
       (t/is (= help (:content (support/eval! env "(eval/help \"license\")")))
             "a string names a source topic"))
-    (let [help (:content (support/eval! env "(eval/help 'ext.license/add!)"))]
-      (t/is (str/includes? help "ext.license/add! verb ([path]) (source)"))
+    (let [help (:content (support/eval! env "(eval/help 'license/add!)"))]
+      (t/is (str/includes? help "license/add! verb ([path]) (source)"))
       (t/is (str/includes? help "doc: Add a header."))
-      (t/is (str/includes? help "inspect: (eval/describe 'ext.license/add! :source)"))
+      (t/is (str/includes? help "inspect: (describe 'license/add! :source)"))
       (t/is (not (str/includes? help "(fn [path] ...)"))
             "help points at :source instead of dumping it"))
     (let [sources (:content (support/eval! env "(eval/sources)"))]
       (t/is (str/includes? sources ":license"))
-      (t/is (str/includes? sources "ext.license/add!"))
+      (t/is (str/includes? sources "license/add!"))
       (t/is (str/includes? sources "(no docstring)")))))
 
 (t/deftest test-an-undocumented-definition-stays-live-only
@@ -399,7 +399,7 @@
           "the definition stays live in the session")
     (let [help (:content (support/eval! env "(eval/help :library)"))]
       (t/is (str/includes? help "Session-only definitions (live, not saved): 1"))
-      (t/is (str/includes? help "user/undocumented defn ([]) (cwd) — (no docstring)")))
+      (t/is (str/includes? help "undocumented defn ([]) (cwd) — (no docstring)")))
     (t/is (= "true"
              (:content (support/eval! env
                                       "(core/emit (nil? (eval/describe 'undocumented :file)))"))))

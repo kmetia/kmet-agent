@@ -123,7 +123,7 @@
                                        (map (fn [[k v]] (str (pr-str k) " " (pr-str v)))
                                             args))
                          "}"))]
-    (str "(ext.mcp/call " (pr-str tool-name)
+    (str "(mcp/call " (pr-str tool-name)
          (when args-text (str " " args-text))
          ")")))
 
@@ -134,9 +134,9 @@
   [surface op]
   (if (= :eval surface)
     (case op
-      :search "(ext.mcp/search \"...\")"
-      :status "(ext.mcp/status)"
-      :server "(ext.mcp/call \"tool\" args {:server \"...\"})")
+      :search "(mcp/search \"...\")"
+      :status "(mcp/status)"
+      :server "(mcp/call \"tool\" args {:server \"...\"})")
     (case op
       :search "mcp({ search: \"...\" })"
       :status "mcp({})"

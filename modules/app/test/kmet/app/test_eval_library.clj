@@ -228,7 +228,7 @@
       (t/is (not (fs/exists? path))))
     (support/eval! env "(defn f \"F two.\" [] 2)")
     (support/eval! env "(eval/forget 'f)")
-    (t/is (not (fs/exists? path)) "an unqualified name resolves in the sticky ns")
+    (t/is (not (fs/exists? path)) "an unqualified name resolves in the call's final ns")
     (t/is (= "false"
              (:content (support/eval! env "(core/emit (some? (resolve 'f)))"))))))
 
@@ -331,8 +331,7 @@
 (t/deftest test-a-written-definition-in-another-namespace-replays-aliases
   (let [env (support/eval-ctx)
         cwd (:cwd env)]
-    (support/eval! env "(ns demo) (def x \"X.\" 1)")
-    (support/eval! env "(defn join \"Join with commas.\" [xs] (str/join \",\" xs))")
+    (support/eval! env "(ns demo) (require '[clojure.string :as str]) (def x \"X.\" 1) (defn join \"Join with commas.\" [xs] (str/join \",\" xs))")
     (let [restarted (support/restart-service env)]
       (t/is (= "a,b"
                (support/script-content
@@ -480,7 +479,7 @@
              (:content (support/eval! env "(core/emit (some? (resolve 'lost)))")))
           "a failed write is still forgettable")))
 
-(t/deftest test-an-unqualified-drop-qualifies-the-sticky-ns
+(t/deftest test-an-unqualified-drop-qualifies-the-call-s-final-ns
   (let [env (support/eval-ctx)
         path (library-file env "user" "x.clj")]
     (support/eval! env "(def x \"X.\" 1)")

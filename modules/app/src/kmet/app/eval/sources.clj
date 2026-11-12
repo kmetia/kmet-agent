@@ -120,7 +120,7 @@
                  [verb (select-keys command [:description :run])])))
         commands))
 
-(defn- source-id-name
+(defn source-id-name
   "The namespace segment for a source id: `:license` → `license`,
    `:foo/bar` → `foo.bar`."
   [id]

@@ -91,11 +91,11 @@
         (testing "the eval surface renders call examples and eval hints"
           (is (str/includes?
                (:content (proxy/execute st {:search "read_file"} nil {:surface :eval}))
-               "(ext.mcp/call \"fs_read_file\" {:path \"...\"})"))
+               "(mcp/call \"fs_read_file\" {:path \"...\"})"))
           (is (str/includes?
                (:content (proxy/execute st {:describe "read_file"} nil {:surface :eval}))
-               "(ext.mcp/call \"fs_read_file\" {:path \"...\"})"))
-          (is (= {:content "Tool \"nope\" not found. Use (ext.mcp/search \"...\") to search."
+               "(mcp/call \"fs_read_file\" {:path \"...\"})"))
+          (is (= {:content "Tool \"nope\" not found. Use (mcp/search \"...\") to search."
                   :is-error true}
                  (proxy/execute st {:tool "nope"} nil {:surface :eval}))))
         (testing "disconnect answers without a connection"

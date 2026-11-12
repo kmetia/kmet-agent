@@ -418,11 +418,15 @@ source with that call's signal.
 ```
 
 The optional third argument is registration metadata:
-`{:description "License helpers: ext.license/add!."}` — one line the eval
+`{:description "License helpers: license/add!."}` — one line the eval
 manifest lists without invoking the source. Without it the manifest names the
-source id alone. Keep it a summary, not a catalog; `(eval/sources)` lists the
-verbs, `(eval/help)` keeps one summary line, and `(eval/help :license)` lists
-them.
+source id alone. Keep it a summary, not a catalog; `(sources)` lists the
+verbs, `(help)` keeps one summary line, and `(help :license)` lists
+them. Eval calls run in `user`; the source is called as `<id>/verb`
+(`license/add!`) while the values keep the internal `ext.<id>` home. The
+alias points at `ext.<id>`, so put verbs meant as `<id>/verb` there; a verb in
+a subnamespace keeps its dotted path (`license.internal/verb`). The source id
+must not collide with the sandbox's standard aliases or namespaces.
 
 - `:ns` and `:macros` namespaces must be exactly `ext.<source-id>` or start
   with `ext.<source-id>.`; any other namespace is refused. The system
@@ -431,20 +435,19 @@ them.
 - The fn receives the call's `:cwd`, `:project-dir`, `:agent-dir`, the cancel
   `:signal`, and `:verbs` — keyword-keyed (`{:read-file f :edit g
   :write-file h}`) values of the same file operations the system exposes as
-  `read`/`core/read` (with opts), `edit`/`core/edit` and `write`/`core/write`,
-  built for that call.
+  `read` (with opts), `edit` and `write`, built for that call.
 - `:ns` and `:macros` contribute values to the environment. `:macros` entries
   are host macro fns (they receive SCI's form and environment before their
   arguments). A value may carry `:doc`, `:arglists` and `:source` metadata (the
   keys a var uses, plus the implementation text, since a source verb has no
-  library file). `normalize-source` keeps them; `(eval/sources)` lists each
-  verb with its doc and arglists, `(eval/help)` keeps one summary line per
-  source, and `(eval/help :license)` lists them all;
-  `(eval/describe 'ext.license/add!)` returns its `:kind`, `:arglists`, `:source`
+  library file). `normalize-source` keeps them; `(sources)` lists each
+  verb with its doc and arglists, `(help)` keeps one summary line per
+  source, and `(help :license)` lists them all;
+  `(describe 'license/add!)` returns its `:kind`, `:arglists`, `:source`
   and, when it has no source, `:doc` (a source-bearing entry omits the
   docstring; nil `:file` and `:scope` are omitted).
-  `(eval/describe 'ext.license/add! :doc)` and
-  `(eval/describe 'ext.license/add! :source)` return one field each. A value
+  `(describe 'license/add! :doc)` and
+  `(describe 'license/add! :source)` return one field each. A value
   without metadata is still valid and lists as `(no docstring)`. `:commands`
   entries add verbs to `/eval`; a command's `:run` receives
   `{:args :session :cwd :service}` and returns nil or a string, which `/eval`
@@ -457,12 +460,12 @@ them.
   `clj` (structure verbs), `eval` (library API), the model's `user`, and the
   fixed host namespaces (`clojure.core`, `clojure`, `babashka.process`,
   `kmet.libs.http`, `kmet.libs.json`, `kmet.libs.markdown`,
-  `kmet.libs.yaml`). Contribute under `ext.<id>`
-  (`ext.license/add!`); a source that uses another namespace, a built-in key,
-  or a built-in `/eval` verb is refused as a whole.
+  `kmet.libs.yaml`). Contribute under `ext.<id>`; the call surface is
+  `<id>/verb` (e.g. `license/add!`). A source that uses another namespace,
+  a built-in key, or a built-in `/eval` verb is refused as a whole.
 - A source-provided key is never written to the eval library. A model can
   redefine it live (the call line says `source; not stored`); `/eval drop` and
-  `(eval/forget …)` restore the source value while the source is mounted and
+  `(forget …)` restore the source value while the source is mounted and
   report `restored`. The key stays non-storable after the source unloads.
 - A source that throws or returns a bad shape contributes nothing and is
   reported; it never fails an eval call. Sources are removed automatically
@@ -471,11 +474,11 @@ them.
   cached prefix). The optional registration `:description` is listed in the
   eval manifest, so the model learns the source id and one line without a
   source call; the manifest never invokes the source. For a fuller manual
-  unprompted, register a skill. Discovery is `(eval/sources)` for the source
-  and verb listing, `(eval/describe 'name)` for one verb's interface and
-  implementation, `(eval/help)` for the index (one summary line per source,
-  and a mounted source id is also a topic, e.g. `(eval/help :license)` or
-  `(eval/help "license")`), and `(eval/help :library)` for the library.
+  unprompted, register a skill. Discovery is `(sources)` for the source
+  and verb listing, `(describe 'name)` for one verb's interface and
+  implementation, `(help)` for the index (one summary line per source,
+  and a mounted source id is also a topic, e.g. `(help :license)` or
+  `(help "license")`), and `(help :library)` for the library.
 
 ### Tool execute contract
 

@@ -1,7 +1,7 @@
 (ns kmet.app.test-eval
   "The `:eval` service and tool: one persistent environment per session,
    definitions written to the cwd or global library and reloaded, isolation
-   between agents, the sticky namespace, and disposal."
+   between agents, the per-call namespace starting in user, and disposal."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
@@ -28,35 +28,48 @@
   (let [env (support/eval-ctx)
         live (support/eval! env "(defn loose [] :ok)")]
     (t/is (str/includes? (:content live) "live-only"))
-    (t/is (str/includes? (:content live) "(eval/keep 'user/loose"))
-    (let [kept (support/eval! env "(eval/keep 'loose \"Loose doc.\")")]
+    (t/is (str/includes? (:content live) "(save 'user/loose"))
+    (let [kept (support/eval! env "(save 'loose \"Loose doc.\")")]
       (t/is (not (:is-error kept)) (:content kept))
       (t/is (str/includes? (:content kept) "[eval: defined user/loose")))
     (t/is (fs/exists? (support/library-file env :cwd "user" "loose.clj")))
     (t/is (str/includes?
            (slurp (support/library-file env :cwd "user" "loose.clj"))
            "Loose doc."))
-    (t/is (str/includes? (:content (support/eval! env "(eval/describe 'loose :doc)"))
+    (t/is (str/includes? (:content (support/eval! env "(describe 'loose :doc)"))
                          "Loose doc."))
     (t/is (= ":ok" (:content (support/eval! env "(loose)"))))
     (t/is (= "true"
              (:content
               (support/eval! env
-                             "(some #(= \"user/loose\" (:name %)) (eval/library))"))))))
+                             "(some #(= \"user/loose\" (:name %)) (library))"))))))
+
+(t/deftest test-the-eval-vocabulary-is-unqualified
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(defn loose [] :ok)")
+    (t/is (str/includes? (:content (support/eval! env "(save 'loose \"Doc.\")"))
+                         "[eval: defined user/loose"))
+    (t/is (str/includes? (:content (support/eval! env "(library)")) "loose"))
+    (t/is (str/includes? (:content (support/eval! env "(help)")) "save"))
+    (t/is (= "true" (:content (support/eval! env "(some? (resolve 'save))"))))
+    (t/is (= "true" (:content (support/eval! env "(some? (resolve 'library))"))))
+    (t/is (= "true" (:content (support/eval! env "(some? (resolve 'sources))"))))
+    (t/is (= "false" (:content (support/eval! env "(some? (resolve 'replace-sexp))")))
+          "clj verbs stay namespaced")))
 
 (t/deftest test-a-defmethod-follows-its-saved-multimethod
   (let [env (support/eval-ctx)]
     (support/eval! env "(defmulti pick identity)")
     (support/eval! env "(defmethod pick :x [_] :x)")
-    (let [kept-multi (support/eval! env "(eval/keep 'user/pick \"Pick.\")")
-          kept-method (support/eval! env "(eval/keep \"user/pick :x\")")]
+    (let [kept-multi (support/eval! env "(save 'user/pick \"Pick.\")")
+          kept-method (support/eval! env "(save \"user/pick :x\")")]
       (t/is (not (:is-error kept-multi)) (:content kept-multi))
       (t/is (not (:is-error kept-method)) (:content kept-method))
       (t/is (str/includes? (:content kept-method)
                            "[eval: defined user/pick :x")))
     (t/is (= ":x" (:content (support/eval! env "(pick :x)"))))
     (t/is (str/includes?
-           (:content (support/eval! env "(eval/describe \"user/pick :x\")"))
+           (:content (support/eval! env "(describe \"user/pick :x\")"))
            ":defmethod"))))
 
 (t/deftest test-an-error-names-the-failing-form
@@ -72,7 +85,7 @@
   (let [env (support/eval-ctx)
         result (support/eval! env "(apply str (repeat 20000 \"x\"))")]
     (t/is (str/includes? (:content result) "output truncated"))
-    (t/is (str/includes? (:content result) "(eval/result 1 :offset 0)"))
+    (t/is (str/includes? (:content result) "(result 1 :offset 0)"))
     (t/is (str/includes?
            (:content (support/eval! env "(eval/result 1 :offset 0 :limit 20)"))
            "content"))
@@ -86,7 +99,7 @@
 (t/deftest test-help-explains-results
   (let [env (support/eval-ctx)
         text (:content (support/eval! env "(eval/help :results)"))]
-    (t/is (str/includes? text "eval/result"))
+    (t/is (str/includes? text "(result)"))
     (t/is (str/includes? text ":last"))
     (t/is (str/includes? text "not stored"))))
 
@@ -138,12 +151,17 @@
     (t/is (str/includes? (:description eval-tool/definition) "(help)"))
     (t/is (str/includes? guidelines "Return the final value"))))
 
-(t/deftest test-the-sticky-namespace-is-re-entered
+(t/deftest test-eval-always-starts-in-user
   (let [env (support/eval-ctx)]
     (t/is (str/starts-with? (:content (support/eval! env "(ns demo) (def x \"X.\" 41) x"))
-                            "41"))
+                            "41")
+          "a namespace change holds inside the call")
+    (t/is (str/includes? (:content (support/eval! env "x"))
+                         "Unable to resolve symbol: x")
+          "the next call starts in user")
+    (support/eval! env "(def x \"X.\" 41)")
     (t/is (= "42" (:content (support/eval! env "(+ x 1)")))
-          "the next call starts in the namespace the previous call ended in")))
+          "user definitions persist")))
 
 (t/deftest test-the-tool-uses-the-agents-service
   (let [env (support/eval-ctx)]

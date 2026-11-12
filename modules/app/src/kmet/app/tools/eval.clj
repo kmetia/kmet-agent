@@ -36,8 +36,7 @@
    the run's ctx (`:srce-ctx`), so the tool is usable only inside a run; a
    direct extension call reports the missing service instead of starting a
    process-wide environment. Every call carries code; library definitions are
-   managed with the sandbox's `eval/keep`, `eval/forget` and `eval/move`
-   verbs."
+   managed with the sandbox's `save`, `forget` and `move` verbs."
   [{:keys [code timeout max-output-bytes]} on-update signal ctx]
   (let [code (some-> code str)]
     (if (str/blank? code)
@@ -71,7 +70,7 @@
                      "Shell: (bash \"cmd1 && cmd2\" {:timeout N}) -> output + status; a nonzero exit is normal.\n"
                      "Batch independent reads/tests in one call; (emit v) for full output. Multi-form calls report one line per form.\n"
                      "Example: (emit {:spec (read \"SPEC-v2.txt\") :tests (bash \"bash test-v1.sh; bash test-v2.sh\")}).\n"
-                     "Definitions and results persist; return the final value or (emit v); println is discarded. (help) for the eval library, persistence, results, and limits.")
+                     "Definitions and results persist; return the final value or (emit v); println is discarded. Extension verbs are called as <id>/verb, e.g. (mcp/search ...). (help) for the eval library, persistence, results, and limits.")
    :prompt-snippet "Persistent Clojure sandbox. Files: (read \"p\"), (write \"p\" text), (edit \"p\" old new); shell: (bash \"cmd\" {:timeout N}). Batch independent reads/tests in one call; (emit v) for full output; (help)."
    :prompt-guidelines
    ["Batch independent reads, commands, and tests into one eval call: compose shell commands with &&/; in one (bash ...), put several read/bash forms in one call, or emit a map of the values; not one call per file, command, or test suite."

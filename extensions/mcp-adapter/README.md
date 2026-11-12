@@ -192,7 +192,7 @@ registered as `server_toolname` (or bare name with
 cached metadata so no server spawns at startup. Names are lowercased with
 `[^a-z0-9_]` → `_`; collisions fall back to the server prefix. The
 same direct set is projected into the eval source as
-`ext.mcp/<assigned-name>` verbs.
+`mcp/<assigned-name>` verbs.
 
 ## Commands
 
@@ -240,17 +240,17 @@ same direct set is projected into the eval source as
   `skills/mcp/SKILL.md`.
 - **Eval source — `ext.mcp`** (`eval_source.clj`): an eval-only
   composition can call MCP without the `mcp` or `codemode` tool.
-  `(ext.mcp/call "server_tool" args)` reaches any cached tool;
-  `(ext.mcp/call "server_tool" args {:server "name"})` disambiguates or
+  `(mcp/call "server_tool" args)` reaches any cached tool;
+  `(mcp/call "server_tool" args {:server "name"})` disambiguates or
   lazy-connects an uncached tool. For a no-arg tool, pass the unambiguous
-  map form: `(ext.mcp/call {:tool "server_tool" :server "name"})`.
+  map form: `(mcp/call {:tool "server_tool" :server "name"})`.
   `call!` returns the content string and throws on failure. Settings
   `:eval-source false` drops the eval source. `search`, `describe`, `status`, `connect` and
   `disconnect` mirror the proxy's read modes; `search` and `describe`
-  print a copyable `(ext.mcp/call "assigned_name" {...})` example per tool.
+  print a copyable `(mcp/call "assigned_name" {...})` example per tool.
   Only tools enabled as
-  direct tools also appear as `ext.mcp/<assigned-name>` verbs in
-  `(eval/sources)`; the rest stay discoverable through `search` and
+  direct tools also appear as `mcp/<assigned-name>` verbs in
+  `(sources)`; the rest stay discoverable through `search` and
   `describe` and callable through `call`. Direct-tool names are the
   assigned, sanitized names (`server_toolname`, `-` → `_`). Every call
   carries the eval call's cancel signal, and the model-facing `mcp` and

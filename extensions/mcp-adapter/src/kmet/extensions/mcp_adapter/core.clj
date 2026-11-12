@@ -562,7 +562,7 @@
            (str "Servers: " (str/join ", " summaries) ". ")
            "No servers with cached tools. ")
          "Servers connect lazily on first use. "
-         "For several MCP calls in one request, use an enabled script tool: codemode's tools/call, or eval's `(ext.mcp/call \"tool\" args)` (direct tools are eval verbs). "
+         "For several MCP calls in one request, use an enabled script tool: codemode's tools/call, or eval's `(mcp/call \"tool\" args)` (direct tools are eval verbs). "
          "search: \"screenshot\" · tool: \"" (name prefix) "_tool\" args: {...}.")))
 
 (defn- register-proxy-tool!

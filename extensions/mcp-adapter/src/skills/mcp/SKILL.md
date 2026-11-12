@@ -103,21 +103,21 @@ adapter registers an eval source with a small gateway:
 
 ```clojure
 ;; any cached tool, by raw or assigned name
-(ext.mcp/call "chrome_devtools_take_screenshot" {:format "png"})
+(mcp/call "chrome_devtools_take_screenshot" {:format "png"})
 ;; → {:content "..." :is-error false :details ...}; branch on :is-error
-(ext.mcp/call! "chrome_devtools_take_screenshot" {:format "png"})
+(mcp/call! "chrome_devtools_take_screenshot" {:format "png"})
 ;; → the content string, throwing when the call fails
-(ext.mcp/call "server_tool" args {:server "name"}) ; disambiguate/lazy-connect
-(ext.mcp/call {:tool "server_tool" :server "name"}) ; unambiguous no-arg form
-(ext.mcp/search "screenshot")
-(ext.mcp/describe "chrome_devtools_take_screenshot")
-(ext.mcp/status)
+(mcp/call "server_tool" args {:server "name"}) ; disambiguate/lazy-connect
+(mcp/call {:tool "server_tool" :server "name"}) ; unambiguous no-arg form
+(mcp/search "screenshot")
+(mcp/describe "chrome_devtools_take_screenshot")
+(mcp/status)
 ```
 
 Only tools enabled as direct tools also appear as
-`ext.mcp/<assigned-name>` verbs in `(eval/sources)`; the rest stay
+`mcp/<assigned-name>` verbs in `(sources)`; the rest stay
 reachable through `search`/`describe` and `call`. In the eval source both
-print a copyable `(ext.mcp/call "assigned_name" {...})` example, so the
+print a copyable `(mcp/call "assigned_name" {...})` example, so the
 name a hit displays is exactly the name `call` accepts. The functions are
 synchronous — no promise and no `@` — and carry the eval call's cancel
 signal, unlike `codemode`'s promise-based `tools/call`.

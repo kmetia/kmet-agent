@@ -117,7 +117,7 @@
 (defn search-text
   "§9.3 output: one block per hit — name line, one-line description,
    indented param lines (omitted when include-schemas? is false). OPTS:
-   `:surface :eval` appends a copyable `ext.mcp/call` line per hit. Invalid
+   `:surface :eval` appends a copyable `mcp/call` line per hit. Invalid
    regex → error message."
   [state query regex? server include-schemas? limit offset & [opts]]
   (let [compiled (when regex?

@@ -1,6 +1,6 @@
 (ns kmet.extensions.mcp-adapter.eval-source
   "The adapter's eval source: an `ext.mcp` gateway plus one verb per
-   direct tool. Only direct tools appear in `(eval/sources)`; the rest of
+   direct tool. Only direct tools appear in `(sources)`; the rest of
    the catalog stays reachable through `search`/`describe` and `call`.
    Every call carries the eval call's cancel signal."
   (:require [kmet.extension :as ext]
@@ -13,10 +13,10 @@
   #{"call" "call!" "search" "describe" "status" "connect" "disconnect"})
 
 (def ^:private source-description
-  (str "MCP tools: (ext.mcp/search \"query\") ranks tools and prints a call "
-       "example per hit; (ext.mcp/describe \"tool\") shows parameters; "
-       "(ext.mcp/call \"tool\" args) calls one. Direct tools are also "
-       "ext.mcp/<name> verbs."))
+  (str "MCP tools: (mcp/search \"query\") ranks tools and prints a call "
+       "example per hit; (mcp/describe \"tool\") shows parameters; "
+       "(mcp/call \"tool\" args) calls one. Direct tools are also "
+       "mcp/<name> verbs."))
 
 (defn- verb-symbol
   "NAME as a readable Clojure symbol, or nil when it is not one (a bare
@@ -113,7 +113,7 @@
                       (fn
                         ([query] (search state query nil))
                         ([query opts] (search state query opts)))
-                      {:doc "Ranked MCP tool search; each hit prints its ext.mcp/call example. OPTS: :server :regex :include-schemas :limit :offset. Returns text."
+                      {:doc "Ranked MCP tool search; each hit prints its mcp/call example. OPTS: :server :regex :include-schemas :limit :offset. Returns text."
                        :arglists '([query] [query opts])})
             'describe (with-meta
                         (fn [tool]

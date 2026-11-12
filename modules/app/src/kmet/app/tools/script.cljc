@@ -1261,7 +1261,7 @@
        (bash-out/format-size (:total-bytes t))
        " total, showing the last " (:shown-lines t) " lines. "
        (if result-id
-         (str "Stored result: (eval/result " result-id " :offset 0).")
+         (str "Stored result: (result " result-id " :offset 0).")
          "Print less or return distilled data instead.")
        "]"))
 

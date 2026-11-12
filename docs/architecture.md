@@ -578,7 +578,7 @@ probe and no real use, and is gone;
   tool (`kmet.app.tools.registry/register-tool-source!`). Listing and dispatch
   therefore cannot drift.
 - **Output is `emit` (or a silent script's value).** `(emit v)`, also
-  `(core/emit v)`, is the curated text channel: strings print raw, other data
+  `(emit v)`, is the curated text channel: strings print raw, other data
   `pr-str`, and it returns nil. A script that emits nothing and finishes
   normally reports its final value instead (the REPL rule, bounded like
   emit); with several top-level forms, each non-definition value is reported
@@ -619,12 +619,12 @@ counterpart. It shares `kmet.app.tools.script` — capability namespaces, captur
 deadline/abort and result assembly — but not the tools bridge, and the state
 belongs to the session, not the call: `kmet.app.eval/value` owns one SCI
 context per session (built lazily on the first call), its interrupt holder,
-sticky namespace and call lock. `seed!` installs the call's namespaces into
+per-call namespace and call lock. `seed!` installs the call's namespaces into
 that context each time, while definitions stay. The sandbox has no `tools`
 namespace, so an eval call cannot invoke a tool.
-A definition from one call is visible to the next in the same session, and the
-last namespace a successful call ended in is re-entered at the start of the
-next. Because a call that defines a verb — persisted or live-only — makes
+A definition from one call is visible to the next in the same session. Every
+call starts in `user`; a namespace a call enters holds only for that call, so
+the next call starts in `user` again. Because a call that defines a verb — persisted or live-only — makes
 later calls order-dependent, the loop examines each eval call's code before
 execution and runs a batch containing a top-level definition in source order
 instead of letting the call futures race for the session's call lock;
@@ -638,9 +638,9 @@ immediately to one of two durable layers: the global
 `<agent-dir>/eval-scopes/<shared-cwd-key>/<ns>/<name>.clj` (one verbatim
 source slice per generated definition; a hand-written file can hold several;
 `kmet.app.eval.files`). A new definition without a docstring stays live in
-the session and is not written; `(eval/help :library)` lists it as
+the session and is not written; `(help :library)` lists it as
 session-only. A written definition's result line names its name and scope
-only; `(eval/describe 'name :file)` names its file. A `defmethod` is written
+only; `(describe 'name :file)` names its file. A `defmethod` is written
 with its loaded multimethod, since a method has no docstring slot. Existing
 `<agent-dir>/eval` files are the global layer; nothing is moved
 automatically. The key is the
@@ -650,7 +650,7 @@ call's `:cwd` still resolves file verbs and sources, but never moves the
 library root. Global loads first, then cwd; a name's stack is `[global cwd]`
 and the last record is live, so cwd shadows global. New names default to cwd;
 redefining an active name keeps its layer and its file. New names default to
-cwd; `(eval/move 'name :global|:cwd)` moves a saved definition between the
+cwd; `(move 'name :global|:cwd)` moves a saved definition between the
 layers. The model-facing eval tool has no `:scope` or `:drop` parameters; the
 sandbox verbs and `/eval` carry those operations. A session's first eval scans and evaluates both layers; a
 new session or a restarted process loads them, while an already-built
@@ -661,7 +661,7 @@ that parses but fails to evaluate is still indexed under its parsed addresses
 as a failed record in its layer; its error is reported on the first eval, the
 prompt and help show `N saved (L loaded, K failed)`, and redefining one of its
 names rewrites that file and clears the failure. Sessions
-share the files but not the environment. `(eval/forget 'name)` and `/eval
+share the files but not the environment. `(forget 'name)` and `/eval
 drop` target the active record by default; a scoped drop targets either layer.
 Drop/forget resolve an unqualified name in the namespace the call ends in.
 Dropping a record deletes its actual `:file`, unbinds the live name, and
@@ -674,7 +674,7 @@ reported as `restored`, not `forgot`. A rejected drop leaves the call's
 definitions live but unwritten, like any other change failure. A code-less
 `/eval drop` needs no environment: it reads the disk index and resolves cwd
 first, or an explicit scope.
-`(eval/move 'name :global|:cwd)` and `/eval move <name> global|cwd` move an
+`(move 'name :global|:cwd)` and `/eval move <name> global|cwd` move an
 active definition without
 re-evaluating; they refuse collisions with a loaded target, same-scope moves,
 and source-provided or unwritten targets, replace a failed target, take both
@@ -693,21 +693,26 @@ implementation as the `session_recall` tool.
 `bash` is the plain-output shell verb: its result carries the command output
 and a status footer, and a nonzero exit is a normal result. The namespaced
 `babashka.process/sh` remains available for callers that need the process map
-(`:out`, `:err`, `:exit`). `help` and `describe` are bare aliases of `eval/help` and
-`eval/describe` in `clojure.core`, so they resolve in the sticky namespace and
-a model definition can shadow them. The
-alias prelude refers those verbs unqualified, so `(read ...)` and
-`(core/read ...)` are one call. The clojure extension's tools wrap the shared
+(`:out`, `:err`, `:exit`). `help` and `describe` are installed in
+`clojure.core`, so they resolve unqualified and a model definition can shadow
+them. The alias prelude refers the core verbs unqualified, so `(read ...)` and
+`(core/read ...)` are one call. The same prelude refers the eval verbs
+(`library`, `save`, `forget`, `patch`, `edit-form`, `move`, `result`), so the
+sandbox has one unqualified call surface. `clj` verbs stay namespaced
+(`clj/edit-form`), and a mounted source whose values live under `ext.<id>` is
+called as `<id>/verb` (`mcp/search`) while its values keep their internal
+`ext.<id>` home. The
+clojure extension's tools wrap the shared
 `kmet.libs.clj-edit` engine; an eval script can use the direct `clj/edit-form`,
 `clj/replace-sexp` and `clj/paren-repair` verbs without the extension. The
 `clojure_eval` tool shares `kmet.libs.clj-eval` with the direct
 `clj/nrepl-eval` verb, so nREPL evaluation likewise needs no extension. The
-eval tool's description and `(eval/help)` name the shared script surface
+eval tool's description and `(help)` name the shared script surface
 (aliases, require-able namespaces and bundled libs) without depending on
 `codemode`, since either row can be selected alone; host-specific sandbox
 differences stay in this section, not in the model-facing text. A mounted eval
-source's id is also a help topic — `(eval/help :license)` lists that source's
-description and verbs, while `(eval/help)` gives it one summary/count line and
+source's id is also a help topic — `(help :license)` lists that source's
+description and verbs, while `(help)` gives it one summary/count line and
 derives the topic list from the mounted sources. `list` and
 `search` read the disk index across both roots (the built environment's pinned
 roots when the session has one, else the command cwd), so they show the
@@ -729,10 +734,10 @@ skipped. The pure parse and address rules live in
 `kmet.app.eval.definitions`.
 
 Eval keeps each call's output/error body in a bounded per-session ring,
-newest first. `(eval/result)` lists the recent ids with status, size and a
-clipped head; `(eval/result :last)` reads the newest, `(eval/result ID)`
-reads the first 6,000 characters and `(eval/result ID :offset N :limit M)`
-reads a slice. A call using `eval/result` is not stored back, so slicing a
+newest first. `(result)` lists the recent ids with status, size and a
+clipped head; `(result :last)` reads the newest, `(result ID)`
+reads the first 6,000 characters and `(result ID :offset N :limit M)`
+reads a slice. A call using `result` is not stored back, so slicing a
 large result cannot evict it. The ring holds the script body, not the final
 `[eval: …]` change report or error status. A truncated result keeps its tail
 and names the read form in its notice; an errored result carries its id
@@ -741,51 +746,51 @@ at a time, so an error begins `ERROR` (after the values of earlier forms) and,
 with several forms, names the failing form and what already ran; a successful
 multi-form call reports every form as one bounded line; use `(emit value)` for
 a full value. The result ring is eval-specific, since it is read back with the
-sandbox's `eval/result` verb.
-`(eval/help :results)` states the emission, cap, truncation and error
+sandbox's `result` verb.
+`(help :results)` states the emission, cap, truncation and error
 contract. The index is the one-call discovery path: every built-in verb with
 its arglists and one-line contract, one summary/count line per mounted
 source, then the topics, library counts and failures; a source's full
-description and verb catalog stay in `(eval/help :source-id)`, and the scope
-roots stay in `(eval/help :library)`, so the first `(eval/help)` stays
-bounded. A string names a topic case-insensitively (`(eval/help "library")`);
-a symbol names a definition (`(eval/help 'name)`), whose whole docstring is
-its help text. `(eval/describe 'name :source)` reads the defining form and
+description and verb catalog stay in `(help :source-id)`, and the scope
+roots stay in `(help :library)`, so the first `(help)` stays
+bounded. A string names a topic case-insensitively (`(help "library")`);
+a symbol names a definition (`(help 'name)`), whose whole docstring is
+its help text. `(describe 'name :source)` reads the defining form and
 `:file` names its file.
 
 Every library record carries its model-visible interface, parsed from the
 defining form without evaluation: `:doc` (the docstring, else an attr-map or
 symbol `:doc`) and `:arglists` (for `defn`/`defn-`/`defmacro`, and the
-parameter vector of a `defmethod`). `(eval/library)`, `(eval/help :library)`
+parameter vector of a `defmethod`). `(library)`, `(help :library)`
 and `/eval list` show them, so an existing file gains its interface when its
-source has one. `(eval/describe 'name)` resolves a library definition, a
+source has one. `(describe 'name)` resolves a library definition, a
 source-provided key, or a live definition that was never written (a failed
 write or an errored call) and returns `{:name :kind :arglists :file :scope
 :source}` by default: `:doc` is omitted from an entry with a `:source`, and
-nil-valued fields are omitted; `(eval/describe 'name key)` returns one field,
+nil-valued fields are omitted; `(describe 'name key)` returns one field,
 including `:doc`. `:source` is
 the stored defining form for a written definition (no generated `(ns …)`
 header) or the retained in-memory form for an unwritten one, and a source
 verb's `:source` metadata when the source supplies it. `:file` is nil for
 source-provided and unwritten entries; a written definition reports `:scope
 :global` or `:cwd`, and a shadowed global record is visible in
-`(eval/library)` and the disk listings with `:active false`. Load, write and
+`(library)` and the disk listings with `:active false`. Load, write and
 unbind failures carry `:scope` too. Source verbs carry the same keys as
 metadata on their values (`with-meta`), which `normalize-source` validates and
-`source-var` puts on the SCI var, so `(meta #'ext.license/add!)` works; the plural
-`(eval/sources)` stays the registered-source listing and includes each verb's
+`source-var` puts on the SCI var, so `(meta #'license/add!)` works; the plural
+`(sources)` stays the registered-source listing and includes each verb's
 doc and arglists. A non-blank docstring is the save contract: an undocumented new
 definition stays live for the session and is not written; its result line
-says `live only, not saved`, `(eval/help :library)` lists it under
-session-only definitions, and `(eval/describe 'name :doc)` is nil. A
+says `live only, not saved`, `(help :library)` lists it under
+session-only definitions, and `(describe 'name :doc)` is nil. A
 redefinition of a saved name without a docstring is not written; the saved
 file keeps its documented version. A redefinition of a saved definition with
 a docstring is written automatically to the file that defines it, keeping
 that file's layer; a failed file is still the file for its names, so
 redefining repairs it.
-`(eval/keep ...)` is only for a live-only definition. A `defmethod` is covered
+`(save ...)` is only for a live-only definition. A `defmethod` is covered
 by its multimethod.
-`(eval/keep 'name "doc")` saves a live-only definition without
+`(save 'name "doc")` saves a live-only definition without
 re-evaluating or resending it: it inserts the docstring into the retained
 source, writes the record, and the next prompt manifest shows it saved. A
 `defmethod` is saved with its already-saved multimethod. It refuses an already
@@ -799,20 +804,20 @@ message (`kmet.app.session.context/eval-library-listing`,
 since the branch's last one and only while the `eval` tool is selected. The
 message is a bounded, deterministic preview — `name [arglists] (scope[,
 shadowed]) — first doc line` (or `(no docstring)` for a legacy entry), with
-whole definitions dropped behind `… N more; (eval/library)`. The tool
-description owns the save rule and already names `(eval/help)` and
-`(eval/library)`, so an unbounded saved manifest carries no repeated rule or
+whole definitions dropped behind `… N more; (library)`. The tool
+description owns the save rule and already names `(help)` and
+`(library)`, so an unbounded saved manifest carries no repeated rule or
 help line. Never a source dump and never a system-prompt rebuild, so listing
 a definition costs no prefix miss. Loaded is not saved: a session with a
 built environment lists its loaded records with scope and
 active state, while one without lists the disk index as saved and says it
 loads on the first eval; when the session has live-only definitions, the same
-line adds `N session-only; (eval/help :library)`, so the saved list does not
+line adds `N session-only; (help :library)`, so the saved list does not
 hide them and names the way to list both. Mounted eval sources add one line
 each, from their registration-time `:description` — the sync never
 builds an environment and never invokes a source, so announcing one costs no
-source call. Source verbs stay out of the manifest; `(eval/help :license)`
-and `(eval/sources)` remain the detailed discovery paths. The first call that
+source call. Source verbs stay out of the manifest; `(help :license)`
+and `(sources)` remain the detailed discovery paths. The first call that
 builds an environment reports a non-empty loaded set and every load failure in its
 result: `:details :loaded` is a bounded preview with the full `:loaded-count`,
 `:failures` carries every failure, and the result lines bound long lists,
@@ -844,14 +849,14 @@ written. A definition without a docstring is live-only: it has no library
 file, so patch/edit-form/move refuse it, and drop/forget unbinds it as
 unwritten. A
 call that ends in a normal error writes nothing; definitions it evaluated
-before the error stay live and are forgettable. `(eval/patch 'name old new)`
+before the error stay live and are forgettable. `(patch 'name old new)`
 replaces the first structurally equal subform inside the named definition,
 re-evaluates the definition, and only then writes the file; the report line
 joins the call's result lines. An unknown old form, a changed definition name,
 a result without a docstring, or a failed re-evaluation leaves the file and
 the live definition untouched.
 A source-provided key or an unwritten live definition (whose file is not
-authoritative) is refused. `(eval/edit-form 'name new-source)` replaces the
+authoritative) is refused. `(edit-form 'name new-source)` replaces the
 whole definition through the same engine, re-evaluates it, and only then
 writes the file; a failed parse, changed name/namespace, result without a
 docstring, failed re-evaluation, or failed write leaves the file and the live
@@ -871,7 +876,7 @@ environment.
 A cwd scope is one layer per normalized cwd, shared by sessions with that
 cwd; worktrees and subdirectories are separate scopes by design, and
 symlinks are separate because the key uses the normalized path, not
-`realpath`. `(eval/library)`
+`realpath`. `(library)`
 lists every record the current environment loaded, active and shadowed.
 Build failures are reported once, on the next result, and then cleared;
 `/eval list` still shows them from the disk index.
