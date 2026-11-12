@@ -3,21 +3,22 @@
 Open tickets only: a ticket is dropped once its fix is verified on the Jolt
 build kmet runs — normally `main`, ahead of the tags, because the project
 builds and tests against the installed build. The `:jolt/min-version` floor is
-the last tagged release (`0.8.26`); older tags are below what the tree needs,
+the last tagged release (`0.8.27`); older tags are below what the tree needs,
 since the workarounds for the dropped tickets went with their fixes.
 
-Jolt tickets were last checked on 2026-11-07 against `v0.8.24` (tagged
-2026-11-05, `a9b24d4`). Every earlier ticket this project filed except #1031 is
+Jolt tickets were last checked on 2026-11-13 against the installed
+`v0.8.27-36-g829f1710`. Every earlier ticket this project filed except #1031 is
 fixed and its entry dropped: #1433 (PR #1435, follow-up PR #1437), #1453/#1454
-(PR #1472), #1466/#1469 (PR #1478) and #1467/#1468 (PR #1477). The release
-also carries the `spit` in-place write (`83fe128e`, follow-up `3be07637`):
-mode, symlink and hard-link behaviour are verified on the installed build, so
-the floor item is closed.
+(PR #1472), #1466/#1469 (PR #1478), #1467/#1468 (PR #1477), #1548 (PR #1550),
+#1611 (PR #1626, follow-up #1636) and #1628 (PR #1634). The `spit` in-place
+write (`83fe128e`, follow-up `3be07637`) is also closed: mode, symlink and
+hard-link behaviour are verified on the installed build.
 
-`jolt-lang/http-client` `main` (`b45e46f`) is now the version pinned by the
-project; its HTTP, crypto and MCP SSE suites pass on the installed build. The
-#46 entry is dropped: PR #47 (v0.1.8, `8405dc0`) renamed the shadowing TLS
-constant, and requiring `jolt.http.tls` is silent on the pinned commit.
+`jolt-lang/http-client` `main` (`b45e46f`, unchanged at this check) is the
+version pinned by the project and has no open tickets; its HTTP, crypto and MCP
+SSE suites pass on the installed build. The #46 entry is dropped: PR #47
+(v0.1.8, `8405dc0`) renamed the shadowing TLS constant, and requiring
+`jolt.http.tls` is silent on the pinned commit.
 
 ## Live issues
 
@@ -30,67 +31,7 @@ backend on Jolt and copy or implement host protocols; shipped extensions
 declaring `:jolt` use Jolt's native loader and are not blocked, which is why
 `test-shipped-extensions-load-from-src` runs on both hosts. `jolt/deps.edn` and
 `modules/app/deps.edn` pin yogthos/sci at `1295142` (the #1093 branch) for the
-`:sci` fallback. Keep the pin until the change is released by Jolt; v0.8.24
+`:sci` fallback. Keep the pin until the change is released by Jolt; v0.8.27
 vendors SCI at `32d62a5`, which the #1093 branch includes, so the pin still
 applies.
 
-### [jolt#1548](https://github.com/jolt-lang/jolt/issues/1548) — Array `seq` is eager
-
-Open (filed 2026-11-08; reproduces on the installed
-`v0.8.24-75-gac3934db`). `seq` on a Jolt array eagerly materializes the whole
-array through `ja->list` + `list->cseq/k`
-(`host/chez/java/natives-array.ss:820`) instead of wrapping it, at ~107 bytes
-per element, so `(take 4 huge-byte-array)` allocates in proportion to the
-entire array; a 94 MB array projects to ~10 GB. With the default ceiling this
-raises `OutOfMemoryError` rather than returning the four elements. Strings
-(`seq.ss:653`), vectors and maps are already lazy, so this is also a JVM-parity
-gap (`clojure.lang.ArraySeq` is O(1) at creation).
-
-This is what ended the 2026-11-08 jolt session: an eval did
-`(take 4 (fs/read-all-bytes "~/bin/kmet"))` on the 94,210,175-byte binary and
-the in-progress conversion hit the 2,983,138,304-byte heap ceiling at live
-2,987,243,856. It is not a kmet leak and no shipped kmet path is affected —
-`read` sniffs images with `alength`/`aget` — but eval or extension code that
-seqs a large array is exposed. Workaround: use index access (`aget`, `nth`,
-`count`) rather than `take`/`first`/`map`/`vec` on large arrays.
-
-### [jolt#1611](https://github.com/jolt-lang/jolt/issues/1611) — Regex refuses lone surrogate code points
-
-Open (filed 2026-11-12; reproduces on the installed
-`v0.8.26-24-gd298e719`). A pattern naming a lone surrogate (`\uD800`–`\uDFFF`)
-throws `PatternSyntaxException` at compile time, and a regex literal compiles
-at read time, so one such literal keeps its whole namespace from loading. The
-refusal is a documented divergence (`test/conformance/known-divergences.edn`),
-but it is enforced only at escape endpoints: `[\uD800-\uDBFF]` and `[a\uD800]`
-throw while the spanning range `[\uD000-\uE000]` compiles. kmet hit it in
-`session-recall/cap-output` (`#"[\uD800-\uDBFF]$"`), which Jolt surfaced as a
-syntax error while loading `kmet.app.tools.eval` and blocked `jolt start`. The
-ticket proposes compiling a lone surrogate to a never-matching atom and
-dropping it from classes — exact for code-point strings, so no UTF-16 model is
-needed. Our side is fixed portably by the numeric check in
-`kmet.libs.text/splits-surrogate-pair?`, so no kmet path depends on the
-ticket. Workaround for ported code: test code points numerically instead of
-with a surrogate regex.
-
-### [jolt#1628](https://github.com/jolt-lang/jolt/issues/1628) — Built binaries silently serve the bootstrap `clojure.core.async`
-
-Open (filed 2026-11-12; reproduces on the installed
-`v0.8.26-24-gd298e719`, `--opt` and `--dev`). In a built binary, a
-runtime `(require 'clojure.core.async)` marks the namespace loaded at
-its 36 boot primitives and never loads
-`stdlib/clojure/core/async.clj`, so `alts!`, `alts!!`, `mult`, `mix`,
-`pub`/`sub`, `pipeline` and the sequence operators are missing; a static
-ns require or `--include clojure.core.async` yields the complete 103
-publics. The loader deletes core.async from `loaded-ns`
-(`host/chez/loader.ss:533`) so a require pulls the overlay, but with no
-source roots in a built binary `ldr-load-body` takes its `ns-has-vars?`
-fallback (`host/chez/loader.ss:3155`) on the primitives and silently
-no-ops. `clojure.pprint` and `clojure.set` load complete in the same
-binary and `clojure.zip` fails loudly, so this is a silent partial
-namespace, the built-binary arm of #972. kmet hit it in its dist smoke:
-the extension host's `host-requires!` requires core.async at startup, so
-every bundled extension failed with `No such var: async/alts!!`. Our side
-declares `:jolt/build {:include [clojure.core.async]}` in `deps.edn` — the
-ticket asks for the overlay to ship with the primitives, or for the
-require to fail loudly instead of returning a partial namespace — and the
-include goes away when the fix is verified.

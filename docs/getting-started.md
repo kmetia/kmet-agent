@@ -55,7 +55,7 @@ resource locations.
 
 - [Babashka](https://babashka.org/) ≥ 1.13.229 (bundles JLine 4.4.7) — the
   primary host
-- [Jolt](https://github.com/jolt-lang/jolt) ≥ v0.8.26 — optional: the same
+- [Jolt](https://github.com/jolt-lang/jolt) ≥ v0.8.27 — optional: the same
   code runs natively on Jolt (`jolt start`, `jolt dist`). kmet targets the
   latest tagged Jolt release.
 - A provider API key or supported OAuth credential. See [Providers and

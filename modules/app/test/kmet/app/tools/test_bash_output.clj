@@ -31,8 +31,8 @@
       (t/is (:truncated result))
       ;; pi skips the incomplete UTF-8 char, so the cut lands on a whole
       ;; char boundary: only the 9 trailing y's survive (9 bytes ≤ 10).
-      ;; (No lone-surrogate regex: Jolt strings are codepoint-indexed and
-      ;; its regex engine rejects surrogate ranges at compile time.)
+      ;; (No lone-surrogate regex: Jolt strings are codepoint-indexed, so a
+      ;; surrogate code point there is not half of a UTF-16 pair.)
       (t/is (= "yyyyyyyyy" content))
       ;; pi skips the incomplete UTF-8 char, so emoji is dropped
       (t/is (not (str/includes? content "\uFFFD")) "no replacement char")

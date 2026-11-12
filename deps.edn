@@ -1,4 +1,4 @@
-{:jolt/min-version "0.8.26"
+{:jolt/min-version "0.8.27"
  ;; Jolt's floor is the LATEST tagged release — the host is young and moves
  ;; fast, so kmet targets the newest release rather than the oldest one a
  ;; feature needs (jolt/README.md § Bundled-extension loader floor).
@@ -40,9 +40,9 @@
  :jolt/build {:embed ["modules/reakt/src" "modules/hikap/src" "modules/libs/src" "modules/tui/src" "modules/ai/src" "modules/loader/src" "modules/srce/src" "modules/app/src" "modules/tk/src" "target/kmet-version" "target/kmet-bundled"]
                ;; clojure.core.async's overlay (alts!!, mult, …) arrives
                ;; only through a require, so the static scan cannot see it;
-               ;; without the include a built binary serves the native
-               ;; primitives alone and a runtime require silently no-ops
-               ;; (jolt#1628). Drop the include when that ticket is fixed.
+               ;; without the include a built binary has only the native
+               ;; primitives, and the extension host's runtime require needs
+               ;; the full API (jolt#1628 made that require fail loudly).
                :include [clojure.core.async]}
 
  ;; OpenSSL stays dynamically loaded for run/repl and for the default dist mode
