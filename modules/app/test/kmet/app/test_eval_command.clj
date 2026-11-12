@@ -1,6 +1,6 @@
 (ns kmet.app.test-eval-command
-  "The `/eval` command: list, search, describe, move, drop, sources, help,
-   source verbs and registration lifetime."
+  "The `/eval` command: list, index, describe, move, drop, sources, help,
+   inactive behaviour, source verbs and registration lifetime."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
@@ -9,8 +9,10 @@
             [kmet.app.commands.eval :as eval-command]
             [kmet.app.eval :as eval-service]
             [kmet.app.eval.files :as eval-files]
+            [kmet.app.registry :as registry]
             [kmet.app.session.core :as session]
             [kmet.app.test-eval-support :as support]
+            [kmet.app.tools.eval :as eval-tool]
             [kmet.app.tools.registry :as tools]
             [kmet.srce.core :as srce]
             [kmet.test-tmp :as test-tmp]
@@ -59,12 +61,18 @@
   (eval-files/write-definition! (:cwd-root env)
                                 (merge {:ns "user" :kind :defn} record)))
 
-(t/deftest list-with-an-empty-library
+(defn- engine-for [env]
+  {:agent-state (atom {:ctx (:ctx env)})
+   :session (atom (:session env))
+   :cwd (atom (:cwd env))})
+
+(t/deftest list-with-an-empty-library-inactive
   (let [env (eval-env)
         [[level label content]] (run env "")]
     (t/is (= :info level))
     (t/is (= "Eval" label))
-    (t/is (= "### Eval library\n\n*No eval definitions.*" content))))
+    (t/is (str/includes? content "**Eval inactive**"))
+    (t/is (str/includes? content "### Eval library\n\n*No eval definitions.*"))))
 
 (t/deftest list-shows-and-filters-definitions
   (let [env (eval-env)]
@@ -113,6 +121,7 @@
             #(run env "describe user/report"))]
       (t/is (= :info level))
       (t/is (= "Eval" label))
+      (t/is (str/includes? content "**Eval inactive**"))
       (t/is (str/includes? content "### `user/report`"))
       (t/is (str/includes? content "`defn` `([x])` · `(cwd)`"))
       (t/is (str/includes? content
@@ -188,41 +197,55 @@
           "a source-bearing entry does not repeat the docstring")
     (t/is (str/includes? content "(fn [path] ...)"))))
 
-(t/deftest search-matches-names-and-source
-  (let [env (eval-env)
-        _ (write-def! env {:name "user/report"
-                           :source "(defn report [x] (str \"R\" x))"})
-        _ (write-def! env {:name "user/other" :source "(defn other [] :ok)"})]
-    (let [[_ _ content] (first (run env "search report"))]
-      (t/is (str/includes? content "user/report"))
-      (t/is (not (str/includes? content "user/other"))))
-    (let [[_ _ content] (first (run env "search :ok"))]
-      (t/is (str/includes? content "user/other"))
-      (t/is (str/includes? content "(defn other [] :ok)")))
-    (let [[_ _ content] (first (run env "search absent-name"))]
-      (t/is (str/includes? content "No eval definitions or sources match")))
-    (let [[_ _ content] (first (run env "search"))]
-      (t/is (str/includes? content "/eval search <text>")))))
+(t/deftest index-needs-a-live-environment
+  (let [env (eval-env)]
+    (with-redefs-fn {#'eval-service/build-environment
+                     (fn [& _]
+                       (throw (ex-info "must not build" {:type :test})))}
+      #(let [[[level content]] (run env "index report")]
+         (t/is (= :warning level))
+         (t/is (str/includes? content "Eval inactive"))
+         (t/is (str/includes? content "/eval index"))))
+    (let [[[level content]] (run env "index")]
+      (t/is (= :warning level))
+      (t/is (str/includes? content "Usage: /eval index <text>")))))
 
-(t/deftest search-finds-eval-sources
-  (let [source {:id :license
-                :doc "License helpers"
-                :verbs [{:name "ext.license/add!"
-                         :kind :verb
-                         :doc "Add a header."
-                         :arglists '([path])}]}
-        env (eval-env {:service-sources [source]})]
-    (let [[_ _ content] (first (run env "search license"))]
-      (t/is (str/includes? content "### Eval sources"))
-      (t/is (str/includes? content "- license: License helpers"))
-      (t/is (not (str/includes? content "No eval definitions"))
-            "a source match is a match"))
-    (let [[_ _ content] (first (run env "search add!"))]
-      (t/is (str/includes? content "### Eval sources"))
-      (t/is (str/includes? content "license/add! ([path]) — Add a header.")))
-    (let [[_ _ content] (first (run env "search absent-name"))]
-      (t/is (str/includes? content "No eval definitions or sources match"))
-      (t/is (not (str/includes? content "### Eval sources"))))))
+(t/deftest index-searches-the-live-environment
+  (let [env (eval-env)]
+    (write-def! env {:name "user/report"
+                     :source "(defn report \"Render.\" [x] x)"})
+    (write-def! env {:name "user/other" :source "(defn other [] :ok)"})
+    (run env "reload")
+    (support/eval! env "(defn live-only \"Live.\" [] :ok)")
+    (let [[[level _ content]] (run env "index report")]
+      (t/is (= :info level))
+      (t/is (str/includes? content "report"))
+      (t/is (not (str/includes? content "other"))))
+    (let [[_ _ content] (first (run env "index Render"))]
+      (t/is (str/includes? content "report")))
+    (let [[_ _ content] (first (run env "index live-only"))]
+      (t/is (str/includes? content "live-only")))
+    (let [[_ _ content] (first (run env "index absent-name"))]
+      (t/is (str/includes? content "No eval definitions or sources match")))))
+
+(t/deftest index-finds-source-verbs-in-the-live-environment
+  (let [env (support/eval-ctx)
+        _ (tools/register-eval-source!
+           (:tools env) :license
+           (fn [_]
+             {:ns {'ext.license {'add! (with-meta
+                                         (fn [_] :added)
+                                         {:doc "Add a header."
+                                          :arglists '([path])
+                                          :source "(fn [path] ...)"})}}}))
+        _ (support/eval! env "(+ 1 2)")
+        env (assoc env :engine (engine-for env))]
+    (let [[[level _ content]] (run env "index license")]
+      (t/is (= :info level))
+      (t/is (str/includes? content "license")))
+    (let [[_ _ content] (first (run env "index Add a header"))]
+      (t/is (str/includes? content "license/add!"))
+      (t/is (str/includes? content "Add a header")))))
 
 (t/deftest drop-removes-the-file-and-reports
   (let [env (eval-env)
@@ -357,10 +380,11 @@
             "a failed reload uses the one-argument warning capability")
       (t/is (str/includes? content "load failed")))))
 
-(t/deftest sources-and-help
+(t/deftest sources-and-inactive-help
   (let [env (eval-env)]
     (let [[[level _ content]] (run env "sources")]
       (t/is (= :info level))
+      (t/is (str/includes? content "**Eval inactive**"))
       (t/is (str/includes? content "No registered eval sources"))
       (t/is (str/includes? content "No eval definitions")))
     (let [with-source (eval-env {:service-sources [{:id :license :doc "License verbs"}]})
@@ -368,18 +392,45 @@
       (t/is (str/includes? content "- license: License verbs"))
       (t/is (str/includes? content "No eval definitions")))
     (let [[_ _ help] (first (run env "help"))]
+      (t/is (str/includes? help "**Eval inactive**"))
       (t/is (str/includes? help "/eval list [pattern]"))
-      (t/is (str/includes? help "/eval search <text>"))
+      (t/is (str/includes? help "/eval index <text>"))
       (t/is (str/includes? help "/eval drop <name>"))
       (t/is (str/includes? help "/eval move <name> global|cwd"))
       (t/is (str/includes? help "/eval reload"))
       (t/is (str/includes? help "/eval describe <name>"))
       (t/is (str/includes? help "/eval <name>"))
       (t/is (str/includes? help "/eval sources"))
-      (t/is (str/includes? help "/eval help")))
+      (t/is (str/includes? help "/eval help [topic|name]"))
+      (t/is (not (str/includes? help "/eval search"))))
+    (let [[[level content]] (run env "help :core")]
+      (t/is (= :warning level))
+      (t/is (str/includes? content "Eval inactive")))
+    (let [[[level content]] (run env "search report")]
+      (t/is (= :warning level))
+      (t/is (str/includes? content "Unknown verb: search")))
     (let [[level content] (first (run env "nonsense"))]
       (t/is (= :warning level))
       (t/is (str/includes? content "Unknown verb: nonsense")))))
+
+(t/deftest help-topics-use-the-live-environment
+  (let [env (support/eval-ctx)
+        _ (support/eval! env "(defn saved \"Saved.\" [] :ok)")
+        env (assoc env :engine (engine-for env))]
+    (let [[[level _ content]] (run env "help")]
+      (t/is (= :info level))
+      (t/is (str/includes? content "### Sandbox help"))
+      (t/is (str/includes? content ":core"))
+      (t/is (str/includes? content "save"))
+      (t/is (not (str/includes? content "Eval inactive"))))
+    (let [[[_ _ content]] (run env "help :core")]
+      (t/is (str/includes? content "Core: Clojure/SCI")))
+    (let [[[_ _ content]] (run env "help \"surface\"")]
+      (t/is (str/includes? content "Surface (host:")))
+    (let [[[_ _ content]] (run env "help save")]
+      (t/is (str/includes? content "save")))
+    (let [[[_ _ content]] (run env "help library")]
+      (t/is (str/includes? content "Library definitions")))))
 
 (t/deftest sources-list-contributed-verbs
   (let [env (eval-env {:service-sources
@@ -459,7 +510,7 @@
     (t/is (= [[:info "Eval" "linted x"]] (run "license-lint x")))
     (let [[[_ _ content]] (run "sources")]
       (t/is (str/includes? content "- license: License helpers")))
-    (let [[[_ _ content]] (run "search license")]
+    (let [[[_ _ content]] (run "sources")]
       (t/is (str/includes? content "### Eval sources"))
       (t/is (str/includes? content "- license: License helpers")))
     (let [[[_ _ content]] (run "help")]
@@ -468,6 +519,24 @@
 
 (t/deftest a-built-in-verb-describes-without-a-source (let [env (support/eval-ctx) got (atom []) engine {:agent-state (atom {:ctx (:ctx env)}), :session (atom (:session env)), :cwd (atom (:cwd env))} run (fn [args] (reset! got []) ((:handler eval-command/command) {:runtime engine, :ui {:info (fn [label content] (swap! got conj [:info label content])), :warning (fn [text] (swap! got conj [:warning text]))}} args) (clojure.core/deref got)) [[level _ content]] (run "describe core/read")] (t/is (= :info level)) (t/is (str/includes? content "(built-in)")) (t/is (not (str/includes? content "source: (not recorded)"))) (t/is (str/includes? content "Read PATH"))))
 
-(t/deftest runtime-builtins-register-eval
+(t/deftest runtime-builtins-do-not-register-eval
   (builtins/register-runtime-commands! (constantly nil))
-  (t/is (some? (commands/find-command "eval"))))
+  (t/is (nil? (commands/find-command "eval"))
+        "the eval command belongs to the :tool/eval row, not the builtins"))
+
+(t/deftest the-eval-row-registers-command-and-tool
+  (let [root (srce/root {:name :test-eval-row})
+        tool-handle (tu/tools-service! root)
+        command-handle (registry/atom-registry)
+        _ (srce/provide! root :commands command-handle)
+        fiber (srce/plugin! root eval-tool/plugin nil)
+        command-entry #(registry/entry command-handle :kmet/command "eval")
+        tool-entry #(tools/get-tool tool-handle "eval")]
+    (srce/settle! root)
+    (try
+      (t/is (some? (command-entry)))
+      (t/is (some? (tool-entry)))
+      (finally
+        (srce/dispose! fiber)))
+    (t/is (nil? (command-entry)) "disposing the row removes the command")
+    (t/is (nil? (tool-entry)) "disposing the row removes the tool")))

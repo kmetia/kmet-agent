@@ -43,7 +43,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `commands`, `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -86,7 +86,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `commands`, `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -123,7 +123,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `commands`, `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -160,7 +160,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `commands`, `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -198,7 +198,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `commands`, `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -235,7 +235,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `commands`, `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -271,7 +271,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/codemode` | `kmet.app.tools.codemode/plugin` | `tools` |  |  | default-enabled?=false |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `commands`, `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:tool/session_recall` | `kmet.app.tools.session-recall/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
@@ -365,23 +365,6 @@ Return the final value or (emit v); println is discarded. Prefer (slurp path), (
 
 ---
 
-### `eval`
-
-**Label:** Eval
-
-**Parameters:** `code` (required), `timeout`, `max-output-bytes`
-
-**Description:**
-
-Persistent Clojure/SCI script sandbox (Babashka-style; no tools namespace).
-Files: (read "p") or (read "p" {:offset N :limit N :footer false :tail N}); (write "p" text); (edit "p" old new) or (edit "p" pairs).
-Shell: (bash "cmd" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.
-Batch independent reads/tests; (emit v) for full output.
-Example: (emit {:spec (read "SPEC-v2.txt") :tests (bash "bash test-v1.sh; bash test-v2.sh")}).
-Definitions/results persist; println is discarded. Mounted source verbs: <id>/verb. (help :surface) lists this host's require-able namespaces, classes and limits; (help) indexes verbs and topics.
-
----
-
 ### `tool_search`
 
 **Label:** Tool search
@@ -417,4 +400,21 @@ Pick one per call:
 Add to any of them: page: next page; scope: 'lineage' (default) or 'all'.
 #N is the number shown in summary refs like (#12) and in recall results.
 Only the current session is searchable. One result is capped at 50 KB.
+
+---
+
+### `eval`
+
+**Label:** Eval
+
+**Parameters:** `code` (required), `timeout`, `max-output-bytes`
+
+**Description:**
+
+Persistent Clojure/SCI script sandbox (Babashka-style; no tools namespace).
+Files: (read "p") or (read "p" {:offset N :limit N :footer false :tail N}); (write "p" text); (edit "p" old new) or (edit "p" pairs).
+Shell: (bash "cmd" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.
+Batch independent reads/tests; (emit v) for full output.
+Example: (emit {:spec (read "SPEC-v2.txt") :tests (bash "bash test-v1.sh; bash test-v2.sh")}).
+Definitions/results persist; println is discarded. Mounted source verbs: <id>/verb. (help :surface) lists this host's require-able namespaces, classes and limits; (help) indexes verbs and topics.
 

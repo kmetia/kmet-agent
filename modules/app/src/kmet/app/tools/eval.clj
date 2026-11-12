@@ -13,8 +13,12 @@
 
    The shared `read`, `write`, `edit` and `bash` verbs (also
    available as `core/...`) are the file and shell surface. The sandbox has no
-   `tools` namespace: an eval call cannot invoke any tool."
+   `tools` namespace: an eval call cannot invoke any tool. The same
+   `:tool/eval` row mounts the `/eval` slash command, so the tool and the
+   command are registered and disposed together."
   (:require [clojure.string :as str]
+            [kmet.app.commands :as commands]
+            [kmet.app.commands.eval :as eval-command]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
             [kmet.app.tools.session-recall :as session-recall]
@@ -61,7 +65,7 @@
          :is-error true}))))
 
 (def definition
-  "The `eval` tool's record — what the `:tool/eval` row mounts."
+  "The `eval` tool's record — one of the `:tool/eval` row's two effects."
   (tool/make-tool
    :name "eval"
    :label "Eval"
@@ -94,7 +98,8 @@
 
 (srce/defplugin plugin
   {:name :tool/eval
-   :inject [:tools]
+   :inject [:tools :commands]
    :apply (fn [ctx config]
             (registry/mount-tool! ctx definition config)
+            (commands/mount-command! ctx eval-command/command :tool/eval)
             nil)})

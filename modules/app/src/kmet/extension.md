@@ -1229,10 +1229,11 @@ bridges the methods the protocol can carry (pi: `rpc-extension-ui.md`):
 The engine-portable builtins (`/continue`, `/name`, `/export`, `/compact`)
 are dispatchable over `prompt`: a single-line `/<name>` runs through the
 command registry with the RPC command-UI value, whose output capabilities
-write the records above. The transport serves commands serially, so a
-command handler that blocks on a dialog parks the reader until the answer
-(or the request's `:timeout`) — answer dialogs asynchronously, or give the
-request a timeout.
+write the records above. `/eval` is dispatchable the same way when the
+`:tool/eval` row is mounted; that row also mounts the eval tool. The transport
+serves commands serially, so a command handler that blocks on a dialog parks
+the reader until the answer (or the request's `:timeout`) — answer dialogs
+asynchronously, or give the request a timeout.
 
 #### Tag aliases — named tag-level components
 

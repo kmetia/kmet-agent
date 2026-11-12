@@ -2650,9 +2650,33 @@
                          :error (ex-message t)})))
                   resolved))))))))
 
-(defn- current-environment [service]
-  (when-let [session (extensions/get-session)]
+(defn- environment-for
+  "The built environment for SESSION, or nil. Never builds one."
+  [service session]
+  (when-let [session (resolve-session session)]
     (get @(:envs service) (:id session))))
+
+(defn- current-environment [service]
+  (environment-for service (extensions/get-session)))
+
+(defn- live-environment!
+  "The built environment for SESSION, or throw :eval/inactive."
+  [service session]
+  (or (environment-for service session)
+      (throw (ex-info "eval is inactive; no live environment for this session"
+                      {:type :eval/inactive}))))
+
+(defn- service-help
+  "The live sandbox help for SESSION: an index, a topic, or one definition.
+   Never builds an environment; throws :eval/inactive when none exists."
+  [service {:keys [session what]}]
+  (environment-help (live-environment! service session) what))
+
+(defn- service-index-text
+  "The live `(index \"text\")` search for SESSION. Never builds an environment;
+   throws :eval/inactive when none exists."
+  [service {:keys [session text]}]
+  (index-text (live-environment! service session) text))
 
 (defn- service-library
   "The definitions the current environment loaded."
@@ -2680,10 +2704,10 @@
      [])))
 
 (defn- service-index
-  "The library on disk, read without evaluating anything — the saved half of
-   what `/eval` lists and `(index \"text\")` searches. OPTS may carry
-   `:session` (use its built environment's pinned roots) and `:cwd` (the
-   scope for a session without an environment)."
+  "The library on disk, read without evaluating anything — the saved list
+   behind `/eval list` and `/eval describe`. OPTS may carry `:session` (use
+   its built environment's pinned roots) and `:cwd` (the scope for a session
+   without an environment)."
   ([service] (service-index service nil))
   ([service opts]
    (let [env (when-let [session (:session opts)]
@@ -2896,6 +2920,9 @@
               ([] (service-live service))
               ([opts] (service-live service opts)))
       :describe #(describe-request service %)
+      :active? #(boolean (environment-for service (:session %)))
+      :help #(service-help service %)
+      :index-text #(service-index-text service %)
       :index (fn
                ([] (service-index service))
                ([opts] (service-index service opts)))

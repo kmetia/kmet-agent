@@ -2,18 +2,22 @@
   "The `/eval` slash command: the human-facing view of the eval library and
    the session's live-only definitions.
 
-   Verbs: `list [pattern]`, `search <text>` (definitions and eval sources),
-   `describe <name>`, `drop <name>…`, `move <name> global|cwd`, `reload`,
-   `sources` and `help`.
-   `reload` rebuilds the session's sandbox from both library roots. Entries
-   show their cwd/global scope (or `live`) and whether an entry is shadowed.
+   Verbs: `list [pattern]`, `index <text>`, `describe <name>`, `drop <name>…`,
+   `move <name> global|cwd`, `reload`, `sources` and `help [topic|name]`.
+   `list`, `describe`, `sources`, `drop` and `move` work from the disk and
+   source layer even when the session has no live environment; their
+   output then starts with an `Eval inactive` notice. `help` and `index` need
+   the live sandbox and report the inactive state instead of falling back to
+   the disk. `reload` rebuilds the session's sandbox from both library roots.
+   Entries show their cwd/global scope (or `live`) and whether an entry is
+   shadowed.
    Output is Markdown — headings, bullets and fenced code — rendered by the
    TUI's custom-message component.
    `/eval <name>` is a `describe` shorthand when the name is defined and is
    not a known verb. An eval source may contribute a verb through the
-   service's `:source-commands` map; built-in names are reserved. The command
-   is registered with the engine-portable builtins, independent of the
-   `:tool/eval` row."
+   service's `:source-commands` map; built-in names are reserved. The
+   `:tool/eval` plugin registers this command and the eval tool together, so
+   the row is the one switch for both."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [kmet.app.eval.files :as eval-files]
@@ -37,7 +41,7 @@
   (or (runtime/cwd engine) "."))
 
 (defn- split-verb
-  "`\"search defn\"` → `[\"search\" \"defn\"]`; no args means `list`."
+  "`\"index defn\"` → `[\"index\" \"defn\"]`; no args means `list`."
   [args]
   (let [args (str/trim (or args ""))]
     (if (str/blank? args)
@@ -162,58 +166,6 @@
         ["### Failures"
          (str/join "\n" (map failure-line failures))])))))
 
-(defn- source-line [file p]
-  (try
-    (some (fn [line]
-            (when (str/includes? (str/lower-case line) p)
-              (str/trim line)))
-          (str/split-lines (slurp file)))
-    (catch Throwable _ nil)))
-
-(defn- search-line [cwd p {:keys [name file] :as entry}]
-  (let [line (str "- " (inline-code name)
-                  " · " (inline-code (scope-tag entry))
-                  " · " (inline-code (entry-path cwd file)))
-        hit (when (and file (not (name-match? entry p)))
-              (source-line file p))]
-    (if hit
-      (str line "\n  " (inline-code hit))
-      line)))
-
-(defn- source-match?
-  "Does PATTERN match a source's id, description or one of its verbs?"
-  [p {:keys [id doc verbs]}]
-  (or (str/includes? (str/lower-case (eval-format/source-id id)) p)
-      (str/includes? (str/lower-case (str doc)) p)
-      (some (fn [verb]
-              (str/includes? (str/lower-case (str (:name verb))) p))
-            verbs)))
-
-(defn- sources-section
-  "The eval-sources half of a search result, or nil when none match."
-  [sources p]
-  (when-let [matches (seq (filter #(source-match? p %) sources))]
-    (str "### Eval sources\n\n"
-         (str/join "\n" (map eval-format/source-line matches)))))
-
-(defn- search-text [entries sources cwd pattern]
-  (if (str/blank? pattern)
-    (str "**Usage:** " (inline-code "/eval search <text>"))
-    (let [p (str/lower-case pattern)
-          matches (filter (fn [{:keys [file] :as entry}]
-                            (or (name-match? entry p)
-                                (some? (when file (source-line file p)))))
-                          entries)
-          source-text (sources-section sources p)]
-      (str "### Matches for " (inline-code pattern) "\n\n"
-           (cond
-             (seq matches) (str (str/join "\n" (map #(search-line cwd p %) matches))
-                                "\n\n")
-             source-text ""
-             :else (str "*No eval definitions or sources match "
-                        (inline-code pattern) ".*"))
-           source-text))))
-
 (defn- names-arg
   "Parse the names after `drop`: whitespace-separated, or EDN strings when a
    name contains spaces (a `defmethod` address, e.g. \"user/area :rect\")."
@@ -272,16 +224,42 @@
     (str (namespace verb) "/" (name verb))
     (name verb)))
 
-(defn- help-text [svc cwd]
+(defn- inactive-text [text]
+  (str "**Eval inactive** — no live environment for this session. "
+       "Saved definitions are read from disk; run an eval or "
+       "`/eval reload` to build the sandbox.\n\n"
+       text))
+
+(defn- active? [svc sess]
+  (if-let [active-fn (:active? svc)]
+    (boolean (active-fn {:session sess}))
+    false))
+
+(defn- help-arg
+  "Normalize a help target: `:core`, `\"core\"` and `core` all name the topic."
+  [arg]
+  (let [arg (str/trim arg)]
+    (cond
+      (str/starts-with? arg ":") (subs arg 1)
+      (and (str/starts-with? arg "\"") (str/ends-with? arg "\""))
+      (subs arg 1 (dec (count arg)))
+      :else arg)))
+
+(defn- command-lines [verbs]
+  (str/join "\n" (map (fn [[cmd desc]]
+                        (str "- " (inline-code cmd) " — " desc))
+                      verbs)))
+
+(defn- command-help-text [svc cwd]
   (let [verbs [["/eval list [pattern]" "List global, cwd, then live definitions"]
-               ["/eval search <text>" "Search names, source and eval sources"]
+               ["/eval index <text>" "Search the live sandbox by name, docstring or source"]
                ["/eval describe <name>" "Describe one definition or source verb"]
                ["/eval <name>" "Describe a definition (describe shorthand)"]
                ["/eval drop <name>…" "Delete actual files and unbind the live names"]
                ["/eval move <name> global|cwd" "Move a definition to the other scope"]
                ["/eval reload" "Rebuild the sandbox from the library files"]
                ["/eval sources" "List eval sources and saved definitions"]
-               ["/eval help" "This help"]]
+               ["/eval help [topic|name]" "Index, sandbox topic, or one definition"]]
         contributed (map (fn [[verb {:keys [description]}]]
                            [(str "/eval " (display-verb verb))
                             (or description "")])
@@ -290,15 +268,167 @@
      "\n\n"
      (concat
       ["### /eval"
-       (str/join "\n" (map (fn [[cmd desc]]
-                             (str "- " (inline-code cmd) " — " desc))
-                           verbs))
+       (command-lines verbs)
        "> A file shared by several definitions must be dropped together; a partial file is refused."]
       (when (seq contributed)
         ["**Source verbs**"
-         (str/join "\n" (map (fn [[cmd desc]]
-                               (str "- " (inline-code cmd) " — " desc))
-                             contributed))])))))
+         (command-lines contributed)])))))
+
+(defn- status-text [live? text]
+  (if live? text (inactive-text text)))
+
+(defn- list-command
+  [{:keys [svc sess cwd live? arg ui]}]
+  (let [{:keys [entries failures]} ((:index svc) {:cwd cwd :session sess})
+        live-defs (if-let [live-fn (:live svc)]
+                    (live-fn {:cwd cwd :session sess})
+                    [])]
+    (out ui :info "Eval"
+         (status-text live?
+                      (list-text (filter-entries (list-order entries live-defs) arg)
+                                 failures)))))
+
+(defn- help-command
+  [{:keys [svc sess cwd live? arg ui]}]
+  (let [help-fn (:help svc)]
+    (cond
+      (not (str/blank? arg))
+      (cond
+        (not live?)
+        (out ui :warning
+             (str "Eval inactive — sandbox help needs a live environment. "
+                  "Run an eval or `/eval reload` first."))
+
+        help-fn
+        (try
+          (out ui :info "Eval" (help-fn {:session sess
+                                         :what (help-arg arg)}))
+          (catch Exception e
+            (out ui :warning (or (ex-message e) (str e)))))
+
+        :else
+        (out ui :warning "This eval service cannot show sandbox help."))
+
+      (not live?)
+      (out ui :info "Eval" (inactive-text (command-help-text svc cwd)))
+
+      help-fn
+      (try
+        (out ui :info "Eval" (str (command-help-text svc cwd)
+                                  "\n\n### Sandbox help\n\n"
+                                  (help-fn {:session sess})))
+        (catch Exception e
+          (out ui :warning (or (ex-message e) (str e)))))
+
+      :else
+      (out ui :warning "This eval service cannot show sandbox help."))))
+
+(defn- index-command
+  [{:keys [svc sess live? arg ui]}]
+  (cond
+    (str/blank? arg)
+    (out ui :warning "Usage: /eval index <text>")
+
+    (not live?)
+    (out ui :warning
+         (str "Eval inactive — `/eval index` searches the live environment. "
+              "Run an eval or `/eval reload` first."))
+
+    (nil? (:index-text svc))
+    (out ui :warning "This eval service cannot index the sandbox.")
+
+    :else
+    (try
+      (out ui :info "Eval" ((:index-text svc) {:session sess :text arg}))
+      (catch Exception e
+        (out ui :warning (or (ex-message e) (str e)))))))
+
+(defn- describe-command
+  [{:keys [svc sess cwd live? arg ui]}]
+  (if (str/blank? arg)
+    (out ui :warning "Usage: /eval describe <name>")
+    (let [{:keys [text not-found error unavailable]}
+          (describe-outcome svc sess cwd arg)]
+      (cond
+        text (out ui :info "Eval" (status-text live? text))
+        unavailable (out ui :warning
+                         "This eval service cannot describe definitions.")
+        error (out ui :warning error)
+        not-found (out ui :warning not-found)))))
+
+(defn- drop-command
+  [{:keys [svc sess cwd live? arg ui]}]
+  (let [names (names-arg arg)]
+    (cond
+      (empty? names)
+      (out ui :warning "Usage: /eval drop <name>…")
+
+      (nil? sess)
+      (out ui :warning "No active session.")
+
+      :else
+      (let [{:keys [is-error content]} (drop! svc sess names cwd)]
+        (if is-error
+          (out ui :warning content)
+          (out ui :info "Eval" (status-text live? content)))))))
+
+(defn- move-command
+  [{:keys [svc sess cwd live? arg ui]}]
+  (if-let [[name scope] (move-args arg)]
+    (try
+      (let [result ((:move! svc) {:session sess :name name :scope scope
+                                  :cwd cwd})]
+        (out ui :info "Eval" (status-text live? (:content result))))
+      (catch Exception e
+        (out ui :warning (or (ex-message e) (str e)))))
+    (out ui :warning "Usage: /eval move <name> global|cwd")))
+
+(defn- reload-command
+  [{:keys [svc sess cwd ui]}]
+  (if-let [reload (:reload! svc)]
+    (let [{:keys [is-error content]}
+          (try
+            (reload {:session sess :cwd cwd})
+            (catch Exception e
+              {:is-error true :content (or (ex-message e) (str e))}))]
+      (if is-error
+        (out ui :warning content)
+        (out ui :info "Eval" content)))
+    (out ui :warning "This eval service cannot reload.")))
+
+(defn- sources-command
+  [{:keys [svc sess cwd live? ui]}]
+  (out ui :info "Eval" (status-text live? (sources-text svc cwd sess))))
+
+(defn- fallback-command
+  [{:keys [svc sess cwd live? verb arg ui]}]
+  (if-let [cmd (get (source-commands svc cwd) (keyword verb))]
+    (try
+      (let [output ((:run cmd) {:args arg :session sess :cwd cwd :service svc})]
+        (when-not (str/blank? (str output))
+          (out ui :info "Eval" (str output))))
+      (catch Throwable t
+        (out ui :warning (str "eval verb failed: "
+                              (or (ex-message t) (str t))))))
+    (let [name (str/trim (str verb (when (seq arg) (str " " arg))))
+          {:keys [text error]} (describe-outcome svc sess cwd name)]
+      (cond
+        text (out ui :info "Eval" (status-text live? text))
+        error (out ui :warning error)
+        :else (out ui :warning
+                   (str "Unknown verb: " verb ". Try /eval help."))))))
+
+(def ^:private command-handlers
+  {"list" list-command
+   "index" index-command
+   "describe" describe-command
+   "drop" drop-command
+   "move" move-command
+   "reload" reload-command
+   "sources" sources-command
+   "help" help-command
+   "--help" help-command
+   "-h" help-command})
 
 (defn handle
   "The `/eval` handler: `ctx` is the command context (`:runtime` engine and
@@ -306,101 +436,24 @@
   [{:keys [ui] engine :runtime} args]
   (let [svc (service engine)
         sess (session engine)
-        cwd (cwd engine)
-        [verb arg] (split-verb args)]
-    (cond
-      (nil? svc)
+        [verb arg] (split-verb args)
+        ctx {:svc svc
+             :sess sess
+             :cwd (cwd engine)
+             :live? (active? svc sess)
+             :verb verb
+             :arg arg
+             :ui ui}]
+    (if (nil? svc)
       (out ui :warning "The eval service is not available.")
-
-      (= verb "list")
-      (let [{:keys [entries failures]} ((:index svc) {:cwd cwd :session sess})
-            live (if-let [live-fn (:live svc)]
-                   (live-fn {:cwd cwd :session sess})
-                   [])]
-        (out ui :info "Eval" (list-text (filter-entries (list-order entries live) arg)
-                                        failures)))
-
-      (= verb "search")
-      (let [sources (when-not (str/blank? arg)
-                      (if-let [f (:sources svc)] (f {:cwd cwd}) []))]
-        (out ui :info "Eval" (search-text (:entries ((:index svc) {:cwd cwd :session sess}))
-                                          sources cwd arg)))
-
-      (= verb "describe")
-      (if (str/blank? arg)
-        (out ui :warning "Usage: /eval describe <name>")
-        (let [{:keys [text not-found error unavailable]}
-              (describe-outcome svc sess cwd arg)]
-          (cond
-            text (out ui :info "Eval" text)
-            unavailable (out ui :warning
-                             "This eval service cannot describe definitions.")
-            error (out ui :warning error)
-            not-found (out ui :warning not-found))))
-
-      (= verb "drop")
-      (let [names (names-arg arg)]
-        (cond
-          (empty? names)
-          (out ui :warning "Usage: /eval drop <name>…")
-
-          (nil? sess)
-          (out ui :warning "No active session.")
-
-          :else
-          (let [{:keys [is-error content]} (drop! svc sess names cwd)]
-            (if is-error
-              (out ui :warning content)
-              (out ui :info "Eval" content)))))
-
-      (= verb "move")
-      (if-let [[name scope] (move-args arg)]
-        (try
-          (let [result ((:move! svc) {:session sess :name name :scope scope
-                                      :cwd cwd})]
-            (out ui :info "Eval" (:content result)))
-          (catch Exception e
-            (out ui :warning (or (ex-message e) (str e)))))
-        (out ui :warning "Usage: /eval move <name> global|cwd"))
-
-      (= verb "reload")
-      (if-let [reload (:reload! svc)]
-        (let [{:keys [is-error content]}
-              (try
-                (reload {:session sess :cwd cwd})
-                (catch Exception e
-                  {:is-error true :content (or (ex-message e) (str e))}))]
-          (if is-error
-            (out ui :warning content)
-            (out ui :info "Eval" content)))
-        (out ui :warning "This eval service cannot reload."))
-
-      (= verb "sources")
-      (out ui :info "Eval" (sources-text svc cwd sess))
-
-      (contains? #{"help" "--help" "-h"} verb)
-      (out ui :info "Eval" (help-text svc cwd))
-
-      :else
-      (if-let [cmd (get (source-commands svc cwd) (keyword verb))]
-        (try
-          (let [output ((:run cmd) {:args arg :session sess :cwd cwd :service svc})]
-            (when-not (str/blank? (str output))
-              (out ui :info "Eval" (str output))))
-          (catch Throwable t
-            (out ui :warning (str "eval verb failed: "
-                                  (or (ex-message t) (str t))))))
-        (let [name (str/trim (str verb (when (seq arg) (str " " arg))))
-              {:keys [text error]} (describe-outcome svc sess cwd name)]
-          (cond
-            text (out ui :info "Eval" text)
-            error (out ui :warning error)
-            :else (out ui :warning
-                       (str "Unknown verb: " verb ". Try /eval help."))))))))
+      (if-let [handler (get command-handlers verb)]
+        (handler ctx)
+        (fallback-command ctx)))))
 
 (def command
-  "The `/eval` command record, registered with the engine-portable builtins."
+  "The `/eval` command record, mounted by the `:tool/eval` plugin with the
+   eval tool."
   {:name "eval"
-   :description "List, search, describe, move, drop or reload eval definitions"
-   :argument-hint "<list|search|describe|move|drop|reload|sources|help> [args], or <name>"
+   :description "List, index, describe, move, drop or reload eval definitions"
+   :argument-hint "<list|index|describe|move|drop|reload|sources|help> [args], or <name>"
    :handler handle})

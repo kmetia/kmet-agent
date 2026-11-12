@@ -23,7 +23,8 @@
    rather than reset by hand. The extension ABI registers
    under its own owner path, so unload disposes what an extension added."
   (:require [clojure.string :as str]
-            [kmet.app.registry :as registry]))
+            [kmet.app.registry :as registry]
+            [kmet.srce.core :as srce]))
 
 (def commands-owner
   "The app's command registry owner — the registry's address; unloading it
@@ -52,24 +53,40 @@
   (mapv first (registry/effective-entries (registry/current) :kmet/command)))
 
 (defn register-command!
-  "Register (or replace by :name) a slash command, owned by OWNER — the app's
-   registry by default; an extension passes its own owner path
-   (`kmet.app.extensions.core/extension-owner`) so unloading it takes the
-   command with the owner. The registration is addressed by
-   :name, so a command is always its own key. A name in
+  "Register (or replace by :name) a slash command in HANDLE — the process
+   registry by default; a plugin passes the :commands service handle so the
+   registration is a row effect. OWNER is the registration owner; an extension
+   passes its own owner path (`kmet.app.extensions.core/extension-owner`) so
+   unloading it takes the command with the owner. The registration is addressed
+   by :name, so a command is always its own key. A name in
    `reserved-command-names` belongs to the app: registering it under another
    owner throws `:kmet.app.commands/reserved-command-name`. Returns the
    registry's deregister fn."
-  ([cmd] (register-command! cmd commands-owner))
-  ([cmd owner]
+  ([cmd] (register-command! (registry/current) cmd commands-owner))
+  ([cmd owner] (register-command! (registry/current) cmd owner))
+  ([handle cmd owner]
    (when (and (contains? reserved-command-names (:name cmd))
               (not= owner commands-owner))
      (throw (ex-info (str "command /" (:name cmd) " is reserved for a builtin")
                      {:type ::reserved-command-name
                       :name (:name cmd)
                       :owner owner})))
-   (registry/register! (registry/current)
-                       :kmet/command (:name cmd) cmd owner)))
+   (registry/register! handle :kmet/command (:name cmd) cmd owner)))
+
+(defn mount-command!
+  "Mount CMD into CTX's :commands handle as this row's effect. OWNER is the
+   registration owner; unmounting the row removes the command. Returns nil."
+  [ctx cmd owner]
+  (let [handle (srce/get ctx :commands)]
+    (when-not handle
+      (throw (ex-info (str "a command row needs the :commands service: "
+                           (:name cmd))
+                      {:type :kmet/no-command-service
+                       :command (:name cmd)})))
+    (srce/effect ctx
+                 #(register-command! handle cmd owner)
+                 (keyword "command" (:name cmd)))
+    nil))
 
 (defn unregister-command!
   "Remove a slash command by :name, whichever owner registered it,

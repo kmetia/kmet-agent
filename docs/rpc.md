@@ -193,6 +193,7 @@ registry the TUI uses, with the command context
 `{:runtime engine :ui rpc-command-ui :frontend :rpc}`:
 
 - `/continue`, `/name`, `/export`, `/compact`, `/units` — the engine-portable builtins
+- `/eval` — when the `:tool/eval` row is mounted; the same row mounts the eval tool
 - extension commands registered for any front end
 
 The response is `{:disposition :handled}`; nothing reaches the model. Unknown

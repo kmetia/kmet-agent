@@ -669,7 +669,7 @@ a subnamespace keeps its dotted path (`license.internal/verb`).
   `(describe 'license/add! :doc)` and
   `(describe 'license/add! :source)` return one field each. A value
   without metadata is still valid and lists as `(no docstring)`.
-- `:commands` adds verbs to `/eval`; its built-in verbs (`list`, `search`,
+- `:commands` adds verbs to `/eval`; its built-in verbs (`list`, `index`,
   `describe`, `drop`, `move`, `reload`, `sources`, `help`) are reserved.
 - A source key is never written to the eval library. A model redefinition
   shadows it live, and dropping the name restores the source value while the

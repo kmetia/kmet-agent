@@ -99,8 +99,11 @@
    than restated here. A test that reads a tool table without booting the app (a
    chat display's `:tool-fn`, a loop's table) gets the built-ins the way a run
    does — a row each, registered into the handle — instead of a second, static
-   table beside them."
+   table beside them. A command registry is provided when absent because the
+   eval row registers its `/eval` command beside the eval tool."
   [ctx]
+  (when-not (srce/get ctx :commands)
+    (srce/provide! ctx :commands (registry/atom-registry)))
   (let [rows (->> (:rows (profile/bundle (profile/builtin) :bundle/minimal))
                   (filter #(tools/tool-row-name (:id %))))]
     (runtime/mount-rows! ctx rows)

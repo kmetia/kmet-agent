@@ -37,7 +37,9 @@
           ;; whose id is the name the model calls, and a patch targets it
           ;; (`{:id :tool/bash :remove true}`). Each row injects :tools and
           ;; registers its record as its fiber's effect, so what is mounted is
-          ;; what the model sees (kmet.app.tools.registry/mount-tool!). The set
+          ;; what the model sees (kmet.app.tools.registry/mount-tool!). The
+          ;; eval row also injects :commands and mounts its `/eval` command, so
+          ;; the tool and command are two effects of the same row. The set
           ;; of rows here is also the settings layer's built-in name list
           ;; (`registry/builtin-tool-names` reads it back), and a row's :config
           ;; sets the model-facing presentation — `{:id :tool/bash :config

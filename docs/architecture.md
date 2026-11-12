@@ -679,11 +679,13 @@ active definition without
 re-evaluating; they refuse collisions with a loaded target, same-scope moves,
 and source-provided or unwritten targets, replace a failed target, take both
 root locks in the fixed global-then-cwd order,
-and roll back the target if the source delete fails. The engine-portable
-builtins register `/eval` (`list`, `search`, `describe`, `drop`, `move`,
-`reload`, `sources`, `help`, plus verbs an eval source contributes),
-independent of the `:tool/eval` row, so removing the row leaves the command
-and its service. An unknown leading
+and roll back the target if the source delete fails. The `:tool/eval` row
+registers the eval tool and `/eval` (`list`, `index`, `describe`, `drop`,
+`move`, `reload`, `sources`, `help`, plus verbs an eval source contributes)
+as its two effects, so removing the row removes both. The command keeps no
+front-end tag and stays engine-portable. `/eval help` and `/eval index` need
+a live environment; `list`, `describe`, `sources`, `drop` and `move` also work
+from disk and prefix `Eval inactive` to their output. An unknown leading
 name that resolves to a definition or source verb is a `describe` shorthand;
 an unresolvable one keeps the unknown-verb hint. The system already provides
 `read`, `write`, `edit`, `bash` and `session-recall` (also `core/...`);
@@ -723,13 +725,14 @@ categories (kmet-owned, not loaded at build, outside the roots), so a failed
 manual, not in the model-facing text. A mounted eval
 source's id is also a help topic — `(help :license)` lists that source's
 description and verbs, while `(help)` gives it one summary/count line and
-derives the topic list from the mounted sources. `list` and
-`search` read the disk index across both roots (the built environment's pinned
-roots when the session has one, else the command cwd), so they show the
-library rather than one session's cache and mark each entry `(cwd)` or
-`(global)` and shadowed. `list` then appends the session's live-only
-definitions after the saved entries, in the order global, cwd, live, when that
-session already has a built environment. `drop` deletes the files directly
+derives the topic list from the mounted sources. `list` reads the disk index
+across both roots (the built environment's pinned roots when the session has
+one, else the command cwd), so it shows the library rather than one session's
+cache and marks each entry `(cwd)` or `(global)` and shadowed. `index` instead
+searches the live environment and reports `Eval inactive` when the session has
+none. `list` then appends the session's live-only definitions after the saved
+entries, in the order global, cwd, live, when that session already has a built
+environment. `drop` deletes the files directly
 and unbinds the live name only when that session already has an environment,
 so a drop never builds one. The environment build
 seeds the call vocabulary and the standard aliases and core refers before
@@ -769,7 +772,7 @@ whole docstring and any `;;` prose immediately after it are its help text.
 `(describe 'name :source)` reads the defining form and `:file` names its
 file. `(index "text")` searches loaded and live definitions and mounted
 source verbs by name, docstring and source text; it is the model-facing
-counterpart of `/eval search`.
+counterpart of `/eval index`.
 
 Every library record carries its model-visible interface, parsed from the
 defining form without evaluation: `:doc` (the docstring, else an attr-map or
