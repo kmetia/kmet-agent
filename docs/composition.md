@@ -356,8 +356,8 @@ Execute a bash command in the current working directory. Returns stdout and stde
 **Description:**
 
 Fresh Clojure SCI sandbox with the active tools bridged in; definitions do not persist.
-Files: (read "p") or (read "p" {:offset N :limit N}); (write "p" text); (edit "p" old new).
-Shell: (bash "cmd1 && cmd2" {:timeout N}) -> output + status; a nonzero exit is normal.
+Files: (read "p") or (read "p" {:offset N :limit N :footer false :tail N}); (write "p" text); (edit "p" old new) or (edit "p" pairs).
+Shell: (bash "cmd" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.
 Tools: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; @(tools/read {…}) is the per-tool shorthand, while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) lists the callable tools with their descriptions and parameters; (tools/describe "name") returns one declaration. Inner results never enter the conversation.
 Batch independent reads, commands, and tests into one call; (emit v) for full output. Multi-form calls report one line per form.
 Example: (emit {:spec (read "SPEC-v2.txt") :tests (bash "bash test-v1.sh; bash test-v2.sh")}).
@@ -373,12 +373,12 @@ Return the final value or (emit v); println is discarded. Prefer (slurp path), (
 
 **Description:**
 
-Persistent Clojure/SCI script sandbox (Babashka-style namespaces; no tools namespace).
-Files: (read "p") or (read "p" {:offset N :limit N}); (write "p" text); (edit "p" old new).
-Shell: (bash "cmd1 && cmd2" {:timeout N}) -> output + status; a nonzero exit is normal.
-Batch independent reads/tests in one call; (emit v) for full output. Multi-form calls report one line per form.
+Persistent Clojure/SCI script sandbox (Babashka-style; no tools namespace).
+Files: (read "p") or (read "p" {:offset N :limit N :footer false :tail N}); (write "p" text); (edit "p" old new) or (edit "p" pairs).
+Shell: (bash "cmd" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.
+Batch independent reads/tests; (emit v) for full output.
 Example: (emit {:spec (read "SPEC-v2.txt") :tests (bash "bash test-v1.sh; bash test-v2.sh")}).
-Definitions and results persist; println is discarded. Mounted source verbs: <id>/verb. (help :surface) lists this host's require-able namespaces, class surface and limits; (help) indexes verbs and topics.
+Definitions/results persist; println is discarded. Mounted source verbs: <id>/verb. (help :surface) lists this host's require-able namespaces, classes and limits; (help) indexes verbs and topics.
 
 ---
 

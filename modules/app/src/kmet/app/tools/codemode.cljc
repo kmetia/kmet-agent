@@ -22,8 +22,8 @@
 
 (def ^:private description
   (str "Fresh Clojure SCI sandbox with the active tools bridged in; definitions do not persist.\n"
-       "Files: (read \"p\") or (read \"p\" {:offset N :limit N}); (write \"p\" text); (edit \"p\" old new).\n"
-       "Shell: (bash \"cmd1 && cmd2\" {:timeout N}) -> output + status; a nonzero exit is normal.\n"
+       "Files: (read \"p\") or (read \"p\" {:offset N :limit N :footer false :tail N}); (write \"p\" text); (edit \"p\" old new) or (edit \"p\" pairs).\n"
+       "Shell: (bash \"cmd\" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.\n"
        "Tools: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; @(tools/read {…}) is the per-tool shorthand, while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) lists the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one declaration. Inner results never enter the conversation.\n"
        "Batch independent reads, commands, and tests into one call; (emit v) for full output. Multi-form calls report one line per form.\n"
        "Example: (emit {:spec (read \"SPEC-v2.txt\") :tests (bash \"bash test-v1.sh; bash test-v2.sh\")}).\n"
@@ -53,7 +53,7 @@
    :name "codemode"
    :label "Codemode"
    :description description
-   :prompt-snippet "Fresh Clojure sandbox with tools; one script per phase. Files: (read \"p\"), (write \"p\" text), (edit \"p\" old new); shell: (bash \"cmd\" {:timeout N}); tools: @(tools/call \"name\" args). Batch independent reads/tests in one call; (emit v) for full output; (tools/list)."
+   :prompt-snippet "Fresh Clojure sandbox with tools; one script per phase. Files: (read \"p\"), (write \"p\" text), (edit \"p\" old new) or (edit \"p\" pairs); shell: (bash \"cmd\" {:timeout N}); tools: @(tools/call \"name\" args). Batch independent reads/tests in one call; (emit v) for full output; (tools/list)."
    :prompt-guidelines
    ["Use codemode for Clojure — including one-liners — instead of writing bb -e/bb -f scripts through bash, unless the code needs the project classpath or its tests."
     "Use codemode when a fresh context matters: definitions do not persist between calls."

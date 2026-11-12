@@ -65,16 +65,16 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description (str "Persistent Clojure/SCI script sandbox (Babashka-style namespaces; no tools namespace).\n"
-                     "Files: (read \"p\") or (read \"p\" {:offset N :limit N}); (write \"p\" text); (edit \"p\" old new).\n"
-                     "Shell: (bash \"cmd1 && cmd2\" {:timeout N}) -> output + status; a nonzero exit is normal.\n"
-                     "Batch independent reads/tests in one call; (emit v) for full output. Multi-form calls report one line per form.\n"
+   :description (str "Persistent Clojure/SCI script sandbox (Babashka-style; no tools namespace).\n"
+                     "Files: (read \"p\") or (read \"p\" {:offset N :limit N :footer false :tail N}); (write \"p\" text); (edit \"p\" old new) or (edit \"p\" pairs).\n"
+                     "Shell: (bash \"cmd\" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.\n"
+                     "Batch independent reads/tests; (emit v) for full output.\n"
                      "Example: (emit {:spec (read \"SPEC-v2.txt\") :tests (bash \"bash test-v1.sh; bash test-v2.sh\")}).\n"
-                     "Definitions and results persist; println is discarded. Mounted source verbs: <id>/verb. (help :surface) lists this host's require-able namespaces, class surface and limits; (help) indexes verbs and topics.")
+                     "Definitions/results persist; println is discarded. Mounted source verbs: <id>/verb. (help :surface) lists this host's require-able namespaces, classes and limits; (help) indexes verbs and topics.")
    :prompt-snippet "Files: (read \"p\"), (write \"p\" text), (edit \"p\" old new); shell: (bash \"cmd\" {:timeout N}). Batch independent reads/tests in one call; (emit v) for full output; (help)."
    :prompt-guidelines
    ["Batch independent reads, commands, and tests into one eval call: compose shell commands with &&/; in one (bash ...), put several read/bash forms in one call, or emit a map of the values; not one call per file, command, or test suite."
-    "A multi-form call reports one line per form; use (emit value) for a full result. Return the final value or (emit value); println is discarded."
+    "Return the final value or (emit value); a multi-form call reports one line per form; println is discarded."
     "Don't assume host classes or libraries; (help :surface) lists this host's."]
    :parameters {:type "object"
                 :properties
