@@ -267,6 +267,14 @@
       (t/is (str/includes? core "(emit value)"))
       (t/is (str/includes? core "(emit value)")))))
 
+(t/deftest help-first-sentence-keeps-dotted-pairs
+  (let [env (support/eval-ctx)]
+    (register! env :dotted
+               (fn [_] {:doc "Use a.b (a . b) here. More detail."}))
+    (let [help (:content (support/eval! env "(eval/help)"))]
+      (t/is (str/includes? help "Use a.b (a . b) here. — "))
+      (t/is (not (str/includes? help "Use a.b (a . b) here. More detail."))))))
+
 (t/deftest a-source-can-contribute-an-explicit-macro
   (let [env (support/eval-ctx)]
     (register! env :license

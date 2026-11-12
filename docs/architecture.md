@@ -697,11 +697,11 @@ and a status footer, and a nonzero exit is a normal result. The namespaced
 `clojure.core`, so they resolve unqualified and a model definition can shadow
 them. The alias prelude refers the core verbs unqualified, so `(read ...)` and
 `(core/read ...)` are one call. The same prelude refers the eval verbs
-(`library`, `save`, `forget`, `patch`, `edit-form`, `move`, `result`), so the
-sandbox has one unqualified call surface. `clj` verbs stay namespaced
-(`clj/edit-form`), and a mounted source whose values live under `ext.<id>` is
-called as `<id>/verb` (`mcp/search`) while its values keep their internal
-`ext.<id>` home. The
+(`library`, `sources`, `index`, `save`, `forget`, `patch`, `edit-form`,
+`move`, `result`), so the sandbox has one unqualified call surface. `clj`
+verbs stay namespaced (`clj/edit-form`), and a mounted source whose values live
+under `ext.<id>` is called as `<id>/verb` (`mcp/search`) while its values keep
+their internal `ext.<id>` home. The
 clojure extension's tools wrap the shared
 `kmet.libs.clj-edit` engine; an eval script can use the direct `clj/edit-form`,
 `clj/replace-sexp` and `clj/paren-repair` verbs without the extension. The
@@ -748,15 +748,18 @@ multi-form call reports every form as one bounded line; use `(emit value)` for
 a full value. The result ring is eval-specific, since it is read back with the
 sandbox's `result` verb.
 `(help :results)` states the emission, cap, truncation and error
-contract. The index is the one-call discovery path: every built-in verb with
-its arglists and one-line contract, one summary/count line per mounted
-source, then the topics, library counts and failures; a source's full
-description and verb catalog stay in `(help :source-id)`, and the scope
-roots stay in `(help :library)`, so the first `(help)` stays
-bounded. A string names a topic case-insensitively (`(help "library")`);
-a symbol names a definition (`(help 'name)`), whose whole docstring is
-its help text. `(describe 'name :source)` reads the defining form and
-`:file` names its file.
+contract. `(help)` is the one-call discovery path: one summary line per
+built-in help topic, one summary/count line per mounted source, every
+built-in verb with its arglists and one-line contract, then the library
+counts and failures. A source's full description and verb catalog stay in
+`(help :source-id)`, and the scope roots stay in `(help :library)`, so the
+first `(help)` stays bounded. A string names a topic case-insensitively
+(`(help "library")`); a symbol names a definition (`(help 'name)`), whose
+whole docstring and any `;;` prose immediately after it are its help text.
+`(describe 'name :source)` reads the defining form and `:file` names its
+file. `(index "text")` searches loaded and live definitions and mounted
+source verbs by name, docstring and source text; it is the model-facing
+counterpart of `/eval search`.
 
 Every library record carries its model-visible interface, parsed from the
 defining form without evaluation: `:doc` (the docstring, else an attr-map or
@@ -802,28 +805,30 @@ Prompt discovery. Prompt start appends one hidden `:eval-library` custom
 message (`kmet.app.session.context/eval-library-listing`,
 `kmet.app.loop.state/sync-eval-library-listing!`) only when its text changed
 since the branch's last one and only while the `eval` tool is selected. The
-message is a bounded, deterministic preview — `name [arglists] (scope[,
-shadowed]) — first doc line` (or `(no docstring)` for a legacy entry), with
-whole definitions dropped behind `… N more; (library)`. The tool
-description owns the save rule and already names `(help)` and
-`(library)`, so an unbounded saved manifest carries no repeated rule or
-help line. Never a source dump and never a system-prompt rebuild, so listing
-a definition costs no prefix miss. Loaded is not saved: a session with a
-built environment lists its loaded records with scope and
-active state, while one without lists the disk index as saved and says it
-loads on the first eval; when the session has live-only definitions, the same
-line adds `N session-only; (help :library)`, so the saved list does not
-hide them and names the way to list both. Mounted eval sources add one line
-each, from their registration-time `:description` — the sync never
-builds an environment and never invokes a source, so announcing one costs no
-source call. Source verbs stay out of the manifest; `(help :license)`
-and `(sources)` remain the detailed discovery paths. The first call that
-builds an environment reports a non-empty loaded set and every load failure in its
-result: `:details :loaded` is a bounded preview with the full `:loaded-count`,
-`:failures` carries every failure, and the result lines bound long lists,
-correcting any drift. A library that has always been empty and has no mounted
-source is silent; when a previously listed set empties, the next prompt gets
-one correction.
+message is a bounded, deterministic preview: the built-in help topics as one
+summary line each, mounted source descriptions, then `name [arglists]
+(scope[, shadowed]) — first doc line` (or `(no docstring)` for a legacy
+entry), with whole definitions dropped behind `… N more; (library)`. The
+help topics are always worth the one message, so an eval-selected session
+learns the topics even when its library is empty. Never a source dump and
+never a system-prompt rebuild, so listing a definition costs no prefix miss.
+Loaded is not saved: a session with a built environment lists its loaded
+records with scope and active state, while one without lists the disk index
+as saved and says it loads on the first eval; when the session has live-only
+definitions, the same line adds `N session-only; (help :library)`, so the
+saved list does not hide them and names the way to list both. Mounted eval
+sources add one line each, from their registration-time `:description` — the
+sync never builds an environment and never invokes a source, so announcing
+one costs no source call. Source verbs stay out of the manifest;
+`(help :license)` and `(sources)` remain the detailed discovery paths. The
+first call that builds an environment reports a non-empty loaded set and
+every load failure in its result: `:details :loaded` is a bounded preview with
+the full `:loaded-count`, `:failures` carries every failure, and the result
+lines bound long lists, correcting any drift. A library that has always been
+empty and has no mounted source is silent only when the manifest carries no
+help topics; the eval service always supplies them, so an eval-selected
+session learns the topics on its first prompt. When a previously listed set
+empties, the next prompt gets one correction.
 
 Limits: a definition file is the defining form only — its `(ns …)` requires are
 not stored, so the standard aliases and core refers are replayed and anything

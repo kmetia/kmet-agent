@@ -20,6 +20,20 @@
 (defn- interface-of [code name]
   (select-keys (record-for code name) [:doc :arglists]))
 
+(t/deftest test-definition-prose
+  (t/is (= "why\nhow"
+           (defs/definition-prose
+             "(defn f \"Doc.\"\n  ;; why\n  ;; how\n  [x] x)")))
+  (t/is (= "why"
+           (defs/definition-prose
+             "(defn f \"Line one.\nLine two.\"\n  ;; why\n  [x] x)"))
+        "a multi-line docstring does not shift the scan")
+  (t/is (nil? (defs/definition-prose
+                "(defn f \"Doc.\"\n\n  ;; why\n  [x] x)"))
+        "a blank line ends the prose")
+  (t/is (nil? (defs/definition-prose "(defn f [x] x)")))
+  (t/is (nil? (defs/definition-prose "(def f \"Doc.\" 1)"))))
+
 (defn- describe-map [env form]
   (edn/read-string (:content (support/eval! env (str "(core/emit " form ")")))))
 
@@ -189,6 +203,39 @@
       (t/is (str/includes? help "doc:\n    Doc line.\n    More.")
             "help shows the whole docstring"))))
 
+(t/deftest test-help-shows-definition-prose
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(defn documented \"Doc.\"\n  ;; Why it exists.\n  ;; How to use it.\n  [x] x)")
+    (let [help (:content (support/eval! env "(eval/help 'documented)"))]
+      (t/is (str/includes? help
+                           "prose:\n    Why it exists.\n    How to use it."))
+      (t/is (not (str/includes? help "(defn documented"))
+            "help still points at the source instead of dumping it"))))
+
+(t/deftest test-index-searches-definitions-and-sources
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(defn report \"Render report.\" [x] (str x \"needle\"))")
+    (tools/register-eval-source!
+     (:tools env) :license
+     (fn [_]
+       {:doc "License helpers"
+        :ns {'ext.license
+             {'add! (with-meta (fn [_] :added)
+                      {:doc "Add a header."
+                       :arglists '([path])
+                       :source "(fn [path] (str path \"header\"))"})}}}))
+    (let [by-name (:content (support/eval! env "(index \"report\")"))
+          by-source (:content (support/eval! env "(index \"needle\")"))
+          by-source-name (:content (support/eval! env "(index \"add!\")"))
+          by-source-doc (:content (support/eval! env "(index \"License helpers\")"))
+          missing (:content (support/eval! env "(index \"absent\")"))]
+      (t/is (str/includes? by-name "report defn ([x]) (cwd) — Render report."))
+      (t/is (str/includes? by-source "needle"))
+      (t/is (str/includes? by-source-name "license/add! (source) — Add a header."))
+      (t/is (str/includes? by-source-doc
+                           "- :license: License helpers — 1 verb; (help :license)"))
+      (t/is (= "No eval definitions or sources match \"absent\"." missing)))))
+
 (t/deftest test-help-omits-the-definition-file
   (let [env (support/eval-ctx)]
     (support/eval! env "(def plain 1)")
@@ -234,12 +281,13 @@
       (t/is (str/includes? core "also referred unqualified"))
       (t/is (str/includes? index "  read ([path] [path opts]) - "))
       (t/is (<= (count index) 4096) "the index stays one bounded discovery call")
-      (t/is (str/includes? index "Topics: :core"))
+      (t/is (str/includes? index "Topics:\n  :core — sandbox verbs"))
       (t/is (not (str/includes? index "core/sh")))
       (t/is (str/includes? index "bash ([command] [command opts]) - "))
       (t/is (not (str/includes? index "tools/")))
       (t/is (not (str/includes? index "Active tools")))
       (t/is (str/includes? index "  library ([]) - "))
+      (t/is (str/includes? index "  index ([text]) - Search"))
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'library)"))
                            "library verb ([]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'clj/edit-form)"))
@@ -367,8 +415,7 @@
       (t/is (str/includes? help
                            "- :license: License helpers — 4 verbs; (help :license)"))
       (t/is (not (str/includes? help "license/add!"))
-            "the index leaves source verbs to the source topic")
-      (t/is (str/includes? help "source topics :license")))
+            "the index leaves source verbs to the source topic"))
     (let [help (:content (support/eval! env "(eval/help :license)"))]
       (t/is (str/includes? help "Eval source license:"))
       (t/is (str/includes? help "License helpers"))

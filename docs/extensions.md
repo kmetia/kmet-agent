@@ -634,9 +634,9 @@ The optional third argument is registration metadata:
 `{:description "License helpers: license/add!."}` — one line the eval
 manifest lists without invoking the source; the source id alone is listed when
 it is omitted. The source id is also the public call alias (`license/add!`);
-it must not collide with the sandbox's standard aliases or namespaces. Put the
-verbs meant as `<id>/verb` directly under `ext.<id>`; a verb in a subnamespace
-keeps its dotted path (`license.internal/verb`).
+it must not collide with the sandbox's standard aliases, namespaces, or eval
+verbs. Put the verbs meant as `<id>/verb` directly under `ext.<id>`; a verb in
+a subnamespace keeps its dotted path (`license.internal/verb`).
 
 - Values must live under `ext.<source-id>` or a subnamespace of it:
   `ext.license`, `ext.license.internal`. The model's `user`, the system
@@ -658,7 +658,11 @@ keeps its dotted path (`license.internal/verb`).
   no library file). `(sources)` lists each verb with its doc and
   arglists; `(help)` keeps one summary line per source, and
   `(help :license)` (or `(help "license")`) lists the source's
-  description and verbs;
+  description and verbs. The eval manifest announces the built-in help
+  topics one line each and the source's registration description at prompt
+  start, without building an evaluator or invoking the source;
+  `(index "text")` searches loaded and live definitions and source verbs by
+  name, docstring and source text.
   `(describe 'license/add!)` returns its `:kind`,
   `:arglists`, `:source` and, when it has no source, `:doc` (a source-bearing
   entry omits the docstring; nil `:file` and `:scope` are omitted).

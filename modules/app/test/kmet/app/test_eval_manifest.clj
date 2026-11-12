@@ -121,6 +121,25 @@
     (t/is (<= (count text) 4096))
     (t/is (str/includes? text "Sources: 20 mounted"))))
 
+(t/deftest the-listing-carries-help-topics
+  (let [text (session/eval-library-listing
+              {:loaded? true
+               :entries []
+               :help-topics [{:key :core :summary "sandbox verbs"}]})]
+    (t/is (str/includes? text "Library: empty."))
+    (t/is (str/includes? text "Help topics:\n- :core — sandbox verbs"))))
+
+(t/deftest an-empty-library-still-announces-help-topics
+  (let [env (support/eval-ctx)
+        agent (agent-for env)
+        message (state/sync-eval-library-listing! agent)]
+    (t/is (some? message))
+    (t/is (str/includes? (text-of (:content message)) "Help topics:"))
+    (t/is (str/includes? (text-of (:content message))
+                         "- :library — saved and session-only definitions"))
+    (t/is (= 4 (get-in message [:details :topics])))
+    (t/is (nil? (state/sync-eval-library-listing! agent)))))
+
 (t/deftest a-live-only-definition-is-counted
   (let [env (support/eval-ctx)
         agent (agent-for env)]
@@ -231,7 +250,9 @@
     (fs/create-dirs (support/cwd-root env))
     (with-redefs [fs/glob (fn [& _]
                             (throw (ex-info "unreadable" {:type :test})))]
-      (t/is (nil? (state/sync-eval-library-listing! (agent-for env)))))))
+      (let [message (state/sync-eval-library-listing! (agent-for env))]
+        (t/is (some? message) "help topics are announced without a library")
+        (t/is (str/includes? (text-of (:content message)) "Help topics:"))))))
 
 (t/deftest an-errored-first-eval-still-reports-the-loaded-set
   (let [env (support/eval-ctx)]
@@ -246,10 +267,12 @@
   (let [env (support/eval-ctx)
         built (agent-for env)]
     (support/eval! env "(+ 1 2)")
+    (t/is (some? (state/sync-eval-library-listing! built))
+          "the help topics are announced once")
     (write-definition! env :cwd "user/later" "(defn later [] 1)")
     (t/is (nil? (state/sync-eval-library-listing! built))
           "the loaded environment does not pick up another session's file")
-    (t/is (empty? (listings (:session env))))
+    (t/is (= 1 (count (listings (:session env)))))
     (let [other (session/create-session (test-tmp/temp-dir! "eval-manifest-")
                                         {:cwd (:cwd env)})
           other-agent (loop-support/make-agent-state

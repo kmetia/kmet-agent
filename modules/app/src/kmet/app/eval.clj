@@ -789,6 +789,9 @@
    "eval/library" {:name "eval/library" :kind :verb
                    :doc "List every loaded library definition with its scope; (help :library) also lists session-only definitions."
                    :arglists '([])}
+   "eval/index" {:name "eval/index" :kind :verb
+                 :doc "Search loaded and live definitions and mounted source verbs by text in their names, docstrings or source."
+                 :arglists '([text])}
    "eval/save" {:name "eval/save" :kind :verb
                 :doc "Save a session-only definition, adding DOC when the live form has none; a defmethod uses its address string and saved multimethod."
                 :arglists '([name] [name doc])}
@@ -940,13 +943,24 @@
 
 (defn- first-sentence
   [text]
-  (let [s (-> (str text) (str/replace #"\s+" " ") str/trim)
-        i (str/index-of s ". ")]
-    (if i (subs s 0 (inc i)) s)))
+  (let [s (-> (str text) (str/replace #"\s+" " ") str/trim)]
+    (if-let [[_ sentence] (re-find #"^(.*?[^ ]\.)(?: |$)" s)]
+      sentence
+      s)))
+
+(def ^:private help-topics
+  "The built-in help topics, in the order the index names them."
+  [{:key :core
+    :summary "sandbox verbs, shell, ownership, discovery"}
+   {:key :library
+    :summary "saved and session-only definitions, scope roots"}
+   {:key :persistence
+    :summary "save/drop, redefinition, failure behavior"}
+   {:key :results
+    :summary "emit, result ring, output limits"}])
 
 (def ^:private help-topic-keys
-  "The built-in topics, in the order the index names them."
-  [:core :library :persistence :results])
+  (mapv :key help-topics))
 
 (defn- builtin-verb-lines
   []
@@ -985,14 +999,112 @@
            (str/join "\n" (map source-summary-line sources))
            "  (none)"))))
 
+(def ^:private index-result-limit
+  "How many index matches one call prints before naming the omitted count."
+  40)
+
+(def ^:private index-line-chars
+  "The longest line one index hit repeats."
+  240)
+
+(defn- text-match?
+  [pattern text]
+  (str/includes? (str/lower-case (str text)) pattern))
+
+(defn- clip-line
+  [line]
+  (let [line (str/trim (str line))]
+    (if (> (count line) index-line-chars)
+      (str (subs line 0 index-line-chars) "…")
+      line)))
+
+(defn- source-match-line
+  "The first line of SOURCE containing PATTERN, trimmed and clipped, or nil."
+  [source pattern]
+  (some (fn [line]
+          (when (text-match? pattern line)
+            (clip-line line)))
+        (str/split-lines (str source))))
+
+(defn- index-scope-label
+  [{:keys [scope active load-status]}]
+  (str "(" (name (or scope :global))
+       (when (false? active) ", shadowed")
+       (when (= :failed load-status) ", failed")
+       ")"))
+
+(defn- index-line
+  "One index hit for NAME; nil when PATTERN matches neither its name,
+   docstring nor source text. LABEL is the displayed call surface, SCOPE-LABEL
+   its scope tag."
+  [pattern name label scope-label doc source]
+  (let [name-hit (text-match? pattern name)
+        doc-hit (text-match? pattern doc)
+        source-hit (when-not (or name-hit doc-hit)
+                     (source-match-line source pattern))]
+    (when (or name-hit doc-hit source-hit)
+      (str "- " label " " scope-label
+           " — " (clip-line (or (eval-format/doc-line doc) "(no docstring)"))
+           (when source-hit (str "\n  " source-hit))))))
+
+(defn- index-entry-line
+  "The index hit for one active loaded or session-only ENTRY."
+  [env pattern {:keys [name kind doc arglists] :as entry}]
+  (index-line pattern name
+              (str (eval-format/display-name name)
+                   (when kind (str " " (clojure.core/name kind)))
+                   (or (eval-format/arglists-text arglists) ""))
+              (index-scope-label entry)
+              doc (:source (describe-entry env name))))
+
+(defn- index-source-lines
+  "Index hits for a mounted source: its summary when the source id or
+   description matches, else the matching verbs."
+  [pattern {:keys [id doc verbs] :as source}]
+  (let [source-hit (or (text-match? pattern (eval-format/source-id id))
+                       (text-match? pattern doc))]
+    (if source-hit
+      [(clip-line (source-summary-line source))]
+      (keep (fn [{:keys [name doc source]}]
+              (index-line pattern name
+                          (eval-format/display-name name)
+                          (index-scope-label {:scope :source})
+                          doc source))
+            verbs))))
+
+(defn- index-text
+  "The model-facing `(index \"text\")` result: loaded and live definitions
+   first, then mounted sources. Bounded; source text is searched but never
+   dumped whole."
+  [env text]
+  (let [pattern (some-> text str str/trim str/lower-case)]
+    (if (str/blank? pattern)
+      "(index \"text\") searches loaded and live definitions and mounted source verbs by name, docstring or source."
+      (let [entries (concat (filter :active (library-entries env))
+                            (session-only-entries env))
+            lines (vec (concat
+                        (keep #(index-entry-line env pattern %) entries)
+                        (mapcat #(index-source-lines pattern %)
+                                (remove :error @(:source-info env)))))
+            shown (take index-result-limit lines)
+            omitted (- (count lines) (count shown))]
+        (if (seq lines)
+          (str "Matches for " (pr-str (str text)) ":\n"
+               (str/join "\n" shown)
+               (when (pos? omitted)
+                 (str "\n… " omitted " more; narrow the text")))
+          (str "No eval definitions or sources match " (pr-str (str text)) "."))))))
+
 (def ^:private eval-refer-prelude
   "The eval verbs referred unqualified into the working namespace."
-  "(require '[eval :refer [library sources save forget patch edit-form move result]])")
+  "(require '[eval :refer [library sources index save forget patch edit-form move result]])")
 
 (def ^:private reserved-source-aliases
-  "Names the standard sandbox aliases and namespace roots already use."
+  "Names the standard sandbox aliases, namespace roots and eval verbs."
   #{"fs" "str" "set" "edn" "walk" "json" "p" "tools"
-    "clojure" "babashka" "kmet.libs" "core" "clj" "eval" "user"})
+    "clojure" "babashka" "kmet.libs" "core" "clj" "eval" "user"
+    "help" "describe" "library" "sources" "index" "save" "forget"
+    "patch" "edit-form" "move" "result"})
 
 (defn- reserved-source-alias?
   "Does ALIAS name a standard sandbox alias, namespace or bundled library?"
@@ -1102,10 +1214,11 @@
        "\nLocal let/fn bindings are scratch; every call starts in user."
        "\nOwnership: define in user; core, clj and eval are read-only; "
        "ext.* is live-only."
-       "\nEval verbs: (library), (sources), (describe 'name), "
-       "(describe 'name key), (forget 'name), (save 'name [doc]), "
-       "(patch 'name old new), (edit-form 'name new-source), "
-       "(move 'name :global|:cwd), (result [id opts])."
+       "\nEval verbs: (library), (sources), (index \"text\"), "
+       "(describe 'name), (describe 'name key), (forget 'name), "
+       "(save 'name [doc]), (patch 'name old new), "
+       "(edit-form 'name new-source), (move 'name :global|:cwd), "
+       "(result [id opts])."
        "\nDiscovery: (all-ns) lists namespaces; (ns-publics 'ns) lists a "
        "namespace's vars, including session-only definitions. A patch or "
        "edit-form result must keep a docstring."
@@ -1139,12 +1252,14 @@
                               (not= "user" (env-ns env)))
                        entry-name
                        display-name)
+        prose (when (seq (str source)) (defs/definition-prose source))
         scope-label (cond
                       scope (str "(" (name scope) ")")
                       (str/blank? (str source)) "(built-in)"
                       :else "(source)")]
     (str display-name " " (when kind (name kind)) (or arg "") " " scope-label
          "\n" (doc-field doc)
+         (when (seq prose) (str "\n  prose:\n" (indent-text prose)))
          (when (= :failed load-status)
            (str "\n  status: failed"
                 (when load-error (str ": " (truncate-report-error load-error)))))
@@ -1188,15 +1303,13 @@
 (defn- help-index
   [env]
   (let [entries (library-entries env)
-        session-only (session-only-entries env)
-        topics (source-topics env)]
+        session-only (session-only-entries env)]
     (str "Eval help: (help) index, (help :topic) or (help \"topic\") a topic, "
          "or (help 'name) one verb or definition."
-         "\nTopics: :core sandbox, :library definitions and scopes, "
-         ":persistence save/drop, :results output"
-         (when (seq topics)
-           (str ", source topics " (str/join ", " (map str topics))))
-         "."
+         "\nTopics:"
+         "\n" (str/join "\n" (map (fn [{:keys [key summary]}]
+                                    (str "  " key " — " summary))
+                                  help-topics))
          "\n" (source-help env)
          "\nBuilt-in verbs:\n" (str/join "\n" (builtin-verb-lines))
          "\nLibrary: " (:text (library-counts entries))
@@ -1635,6 +1748,7 @@
         interrupt (script/interrupt-holder)
         env-ref (atom nil)
         library-fn (fn [] (library-entries @env-ref))
+        index-fn (fn [text] (index-text @env-ref text))
         forget-fn (fn [name] (request-forget! @env-ref name))
         sources-fn (fn [] @(:source-info @env-ref))
         help-fn (fn [& [what]] (environment-help @env-ref what))
@@ -1653,6 +1767,7 @@
                                                        cwd))
                                   (:cancelled script/*call-state*)))}
                          'eval {'library library-fn
+                                'index index-fn
                                 'forget forget-fn
                                 'save save-fn
                                 'result result-fn
@@ -2480,9 +2595,9 @@
 
 (defn- service-index
   "The library on disk, read without evaluating anything — the saved half of
-   what `/eval` lists and searches. OPTS may carry `:session` (use its built
-   environment's pinned roots) and `:cwd` (the scope for a session without an
-   environment)."
+   what `/eval` lists and `(index \"text\")` searches. OPTS may carry
+   `:session` (use its built environment's pinned roots) and `:cwd` (the
+   scope for a session without an environment)."
   ([service] (service-index service nil))
   ([service opts]
    (let [env (when-let [session (:session opts)]
@@ -2552,12 +2667,14 @@
   (let [session (or session (extensions/get-session))
         env (when session (get @(:envs service) (:id session)))
         sources (mapv #(select-keys % [:id :description])
-                      (source-registrations service))]
+                      (source-registrations service))
+        topics (mapv #(select-keys % [:key :summary]) help-topics)]
     (if env
       {:loaded? true
        :entries (library-entries env)
        :session-only (session-only-entries env)
-       :sources sources}
+       :sources sources
+       :help-topics topics}
       (let [cwd (or cwd (tool-util/cwd))
             roots (roots-for service cwd)
             fingerprint (eval-files/fingerprint roots)
@@ -2569,7 +2686,7 @@
                          (swap! (:manifest-cache service) assoc cwd
                                 {:fingerprint fingerprint :manifest manifest})
                          manifest))]
-        (assoc manifest :sources sources)))))
+        (assoc manifest :sources sources :help-topics topics)))))
 
 (defn- move-indexed-record!
   "Move NAME in the disk index when SESSION has no built environment. No

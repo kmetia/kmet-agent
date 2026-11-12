@@ -426,7 +426,8 @@ them. Eval calls run in `user`; the source is called as `<id>/verb`
 (`license/add!`) while the values keep the internal `ext.<id>` home. The
 alias points at `ext.<id>`, so put verbs meant as `<id>/verb` there; a verb in
 a subnamespace keeps its dotted path (`license.internal/verb`). The source id
-must not collide with the sandbox's standard aliases or namespaces.
+must not collide with the sandbox's standard aliases, namespaces, or eval
+verbs.
 
 - `:ns` and `:macros` namespaces must be exactly `ext.<source-id>` or start
   with `ext.<source-id>.`; any other namespace is refused. The system
@@ -471,14 +472,18 @@ must not collide with the sandbox's standard aliases or namespaces.
   reported; it never fails an eval call. Sources are removed automatically
   when the extension unloads.
 - There is no system-prompt section for eval sources (it would vary inside the
-  cached prefix). The optional registration `:description` is listed in the
-  eval manifest, so the model learns the source id and one line without a
-  source call; the manifest never invokes the source. For a fuller manual
-  unprompted, register a skill. Discovery is `(sources)` for the source
-  and verb listing, `(describe 'name)` for one verb's interface and
-  implementation, `(help)` for the index (one summary line per source,
-  and a mounted source id is also a topic, e.g. `(help :license)` or
-  `(help "license")`), and `(help :library)` for the library.
+  cached prefix). The eval manifest is appended whenever its text changes
+  while the eval tool is selected: it lists the built-in help topics one
+  summary line each and each source's registration `:description`, so the
+  model learns the topics and source id without a source call; the manifest
+  never invokes the source. For a fuller manual unprompted, register a skill.
+  Discovery is `(sources)` for the source and verb listing,
+  `(index "text")` for loaded and live definitions and source verbs by
+  name, docstring and source text,
+  `(describe 'name)` for one verb's interface and implementation, `(help)`
+  for the index (one summary line per source, and a mounted source id is also
+  a topic, e.g. `(help :license)` or `(help "license")`), and
+  `(help :library)` for the library.
 
 ### Tool execute contract
 

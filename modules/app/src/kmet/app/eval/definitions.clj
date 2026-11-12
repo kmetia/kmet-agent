@@ -109,6 +109,44 @@
   "Forms whose source can gain a docstring without changing its meaning."
   (disj docstring-heads "defonce"))
 
+(defn- doc-node-index
+  "The index of SOURCE form's docstring node in CHILDREN, or nil when the
+   form has no docstring. Mirrors `split-docstring` without evaluating."
+  [children]
+  (let [indexes (keep-indexed (fn [i node]
+                                (when-not (n/whitespace-or-comment? node) i))
+                              children)
+        nodes (mapv #(nth children %) indexes)
+        form (mapv n/sexpr nodes)
+        head (some-> (first form) name)
+        doc? (and (contains? docstring-heads head)
+                  (string? (nth form 2 nil))
+                  (or (not (#{"def" "defonce"} head))
+                      (>= (count nodes) 4)))]
+    (when doc? (nth indexes 2))))
+
+(defn definition-prose
+  "The comment lines immediately after SOURCE's docstring, with the leading
+   `;;` and one optional space removed. Returns nil when the form has no
+   docstring, when the first line after it is not a `;;` comment, or when a
+   blank line intervenes. The scan starts after the docstring node, so a
+   multi-line docstring cannot confuse it."
+  [source]
+  (try
+    (let [node (p/parse-string (str source))
+          children (when (= :list (n/tag node)) (vec (n/children node)))
+          doc-index (when children (doc-node-index children))]
+      (when (some? doc-index)
+        (let [before (apply str (map n/string (take (inc doc-index) children)))
+              remainder (subs (n/string node) (count before))
+              prose (->> (rest (str/split-lines remainder))
+                         (take-while (fn [line]
+                                       (and (re-find #"^ *;;" line)
+                                            (not (re-find #"^ *;;;" line)))))
+                         (map #(str/replace % #"^ *;; ?" "")))]
+          (when (seq prose) (str/join "\n" prose)))))
+    (catch Exception _ nil)))
+
 (defn docstring-kind?
   "True when a definition of KIND can carry a docstring."
   [kind]

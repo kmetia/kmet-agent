@@ -170,6 +170,15 @@
          (truncate line max-eval-doc-chars)
          "(no docstring)")))
 
+(defn- help-topic-lines
+  "The prompt's one-line-per-topic help index, or nil when TOPICS is empty."
+  [topics]
+  (when (seq topics)
+    (str "Help topics:\n"
+         (str/join "\n" (map (fn [{:keys [key summary]}]
+                               (str "- " key " — " summary))
+                             topics)))))
+
 (defn- eval-listing-text
   "INTRO plus LINES, dropping whole lines from the end until the text fits
    `max-listing-chars`; a dropped count names `(library)` so the omitted
@@ -190,19 +199,22 @@
 
 (defn eval-library-listing
   "The `:eval-library` manifest text for MANIFEST (`{:loaded? :entries
-   :session-only :sources}`): one line per saved definition with its arglists
+   :session-only :sources :help-topics}`): one line per saved definition with its arglists
    and scope, or an empty-library correction; a session-only count says what
-   (help :library) can show but the saved list cannot. Mounted eval
-   sources are listed first as one registration-description line each, so the
-   model knows `ext.mcp` and its peers exist without calling help first.
+   (help :library) can show but the saved list cannot. The built-in help
+   topics are one summary line each, so the model can pick a topic without
+   calling help first. Mounted eval sources are listed as one
+   registration-description line each, so the model knows `ext.mcp` and its
+   peers exist without calling help first.
    LOADED? distinguishes this session's built environment from the files a
    first eval will load; the text says which. Bounded and deterministic, so
    `sync-eval-library-listing!` can compare it with the branch's previous
    manifest byte for byte."
-  [{:keys [loaded? entries session-only sources]}]
+  [{:keys [loaded? entries session-only sources help-topics]}]
   (let [entries (vec entries)
         session-only (vec session-only)
         sources (vec sources)
+        topics-text (help-topic-lines help-topics)
         n (count entries)
         failed (count (filter #(= :failed (:load-status %)) entries))
         loaded (- n failed)
@@ -212,20 +224,22 @@
         sources-text (when (seq sources)
                        (str "Sources: " (count sources)
                             " mounted; (help) lists their verbs.\n"))
-        intro (cond
-                (and (empty? entries) (zero? live))
-                (str "Library: empty.\n" sources-text)
-                (zero? n)
-                (str "Library: 0 saved (0 loaded), " live
-                     " session-only; (help :library).\n" sources-text)
-                loaded?
-                (str "Library: " n " saved (" loaded " loaded"
-                     (when (pos? failed) (str ", " failed " failed")) ")"
-                     live-text live-hint ".\n" sources-text)
-                :else
-                (str "Library: " n " saved definition"
-                     (when (not= 1 n) "s") live-text
-                     "; the first eval loads them" live-hint ".\n" sources-text))]
+        intro (str (cond
+                     (and (empty? entries) (zero? live))
+                     "Library: empty.\n"
+                     (zero? n)
+                     (str "Library: 0 saved (0 loaded), " live
+                          " session-only; (help :library).\n")
+                     loaded?
+                     (str "Library: " n " saved (" loaded " loaded"
+                          (when (pos? failed) (str ", " failed " failed")) ")"
+                          live-text live-hint ".\n")
+                     :else
+                     (str "Library: " n " saved definition"
+                          (when (not= 1 n) "s") live-text
+                          "; the first eval loads them" live-hint ".\n"))
+                   (when topics-text (str topics-text "\n"))
+                   sources-text)]
     (eval-listing-text
      intro
      (concat (map #(source-line % max-eval-doc-chars) sources)
