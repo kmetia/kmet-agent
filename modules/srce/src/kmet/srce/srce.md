@@ -1,12 +1,16 @@
 # srce — a light Cordis kernel in Clojure
 
-Implementation note for the `kmet.srce.*` module, beside its code. kmet2's
-application architecture — composition, services, agents, sessions — is in
+Implementation note for the `kmet.srce.*` module, beside its code. The kmet
+application's architecture — composition, services, agents, sessions — is in
 `docs/architecture.md`; this file is the kernel only: its
 ctx model, the lifecycle, the plugin contract, the contracts the tests pin, and
 what was deliberately left out. User-facing usage (what srce is for, the five
 principles and a how-to) is [`modules/srce/README.md`](../../../README.md); this
 file is the reference its contracts and internal decisions live in.
+
+The kernel is self-contained: it requires no kmet application namespace and no
+third-party library, so another Clojure application can use it without the rest
+of kmet. The kmet application is its first consumer.
 
 The name is **`srce`** (Cyrillic **срце**, IPA /sr̩̂t͡se/) — heart (Serbian).
 Cordis is Latin for the same thing (`cor`, `cordis`), which is what the kernel
@@ -33,10 +37,10 @@ mapping is the light kernel's whole justification:
 | 1 | a plugin is an object that implements `Service` — a function with optional `inject` and `apply(ctx)` | a **validated map** with `:inject`/`:apply`; the Service-subclass half is cut (§10) | §6 |
 | 2 | a context is a repository of services; a service claims a stable `ctx.x` key, others find it by key instead of importing an implementation | `provide!`/`get` by keyword over the ctx tree, realms via `isolate` | §2–§3 |
 | 3 | declare dependencies via `inject`; a plugin waits until those services exist, so load order is requirements, not boot sequencing | required + `:optional` inject, the refresh pass — **boot order stops mattering** | §3 |
-| 4 | typed events; dispatch as `emit`/`waterfall`/`parallel`/`serial`/`bail` | **one listener table** plus six modes over the resolved list (`emit`, `bail`, `waterfall`, `collect-last`, `collect-all`, `boundary`), all in the kernel; `serial`/`parallel` wait for an awaitable. The **declaration** half is the app's — a plugin declares its own events (`:events` on `defplugin`, checked by `plugin!` and carried on the fiber), because a kernel must not name an app event; the three `:srce/*` names are documented, not catalogued | §5 |
+| 4 | typed events; dispatch as `emit`/`waterfall`/`parallel`/`serial`/`bail` | **one listener table** plus six modes over the resolved list (`emit`, `bail`, `waterfall`, `collect-last`, `collect-all`, `boundary`), all in the kernel; the awaited `serial`/`parallel` stay out because awaiting blocks the owner (§5). The **declaration** half is the app's — a plugin declares its own events (`:events` on `defplugin`, checked by `plugin!` and carried on the fiber), because a kernel must not name an app event; the three `:srce/*` names are documented, not catalogued | §5 |
 | 5 | registrations are reversible **effects**, so reload and teardown unwind predictably | the fiber's effect list, LIFO, owning the `provide!` and the listener | §4 |
 
-Idea 3 is the load-bearing one for kmet2: extensions, profile rows and UI
+Idea 3 is the load-bearing one for kmet: extensions, profile rows and UI
 providers mount in arbitrary order (a preset bundle, an extension directory, a
 `--mode` flag), and "the plugin waits for its services" is what makes that
 safe. Idea 5 is what makes the wait reversible: every registration a fiber made
@@ -50,23 +54,24 @@ decision, tagged `keep` / `deferred` / `never`.
 
 | | full port (retired) | light |
 |---|---|---|
-| namespaces | 10 (`ctx` `reflect` `service` `fiber` `registry` `event` `logger` `awaitable` `utils` `config`) | 4 (`ctx` `fiber` `event` + the public `srce`) |
-| kernel lines | ~4k | ~930 |
-| conformance | 74 tests generated from 82 matrix rows | 41 contract tests (164 assertions) + the 3 guard tests (§12) |
+| namespaces | 10 (`ctx` `reflect` `service` `fiber` `registry` `event` `logger` `awaitable` `utils` `config`) | 4 (`ctx` `fiber` `event` + the public `core`) |
+| kernel lines | ~4k | ~1,480 |
+| conformance | 74 tests generated from 82 matrix rows | 70 contract tests (270 assertions) + the 3 guard tests (§12) |
 | definition of done | Cordis parity | the contracts in §3–§8 |
 | async | awaitables, `inertia`, epochs, drain owner | synchronous kernel, thread rule (§8) |
 
 The cut is ordered so the light surface is a **subset** of the full one:
 `isolate` labels, `intercept`, the logger service, internal events and config
-transforms all attach to an existing seam. The one exception is §13's
-synchronous `apply`.
+transforms all attach to an existing seam. `apply` is the one exception in
+shape: it stays a synchronous call, with `{:srce/setup p}` as the additive seam
+for a body that has asynchronous setup (§13).
 
 ## 1. The kernel
 
 ```
 modules/srce/
-├── deps.edn           — rank 1: third-party code today; add the kmet.libs.* /
-│                        kmet.loader.* :local/root edges when a namespace needs one
+├── deps.edn           — rank 1, no dependencies today; add rank-0 :local/root
+│                        edges when a namespace needs one
 ├── test/kmet/srce/    — the contract tests (§12)
 └── src/kmet/
     └── srce/
@@ -75,16 +80,16 @@ modules/srce/
         ├── ctx.clj    — the ctx value, the tree, the service store, isolate, the effect list
         ├── fiber.clj  — mount/unmount, states, the refresh pass, plugin runtimes
         └── event.clj  — on/once, the listener table, the resolved list, and
-                          the three non-awaiting dispatch strategies
+                          the six non-awaiting dispatch modes
 ```
 
-`kmet.srce.*` is rank 1 — it may require rank-0 code (`kmet.libs.*`, and
-`kmet.loader.*` when it resolves sources), nothing at its own rank or above;
+`kmet.srce.*` is rank 1 — it may require rank-0 code (`kmet.libs.*`,
+`kmet.loader.*` and `kmet.reakt.*`), nothing at its own rank or above;
 the subnamespaces are internal and nothing above the kernel requires them.
 The module's `modules.edn` row — `:name "srce"`, the source/test paths,
 `:rank 1` — is also its classpath and embed entry: the manifest is the classpath
 order *and* the rank source `test/kmet/test_module_deps.clj` reads, and the
-three extension `bb.edn`s list the module sources too.
+five extension `bb.edn`s list the module sources too.
 Consumers require exactly one namespace — the kernel's surface is one contract,
 not a set of modules whose callers each pick their own:
 
@@ -93,16 +98,20 @@ not a set of modules whose callers each pick their own:
   (:require [kmet.srce.core :as srce]))
 
 (srce/root)                              ; a root ctx — boot holds one, tests build their own
-(srce/root {:base-url "…"})              ; same, with ctx keys merged in (nothing is read by the kernel)
+(srce/root {:base-url "…"})              ; same, with ctx keys merged in (:resolver is read, §6)
 (srce/extend ctx {:name :agent/7f3a})    ; a child ctx with metadata
 (srce/isolate ctx :tools :llm)           ; a child ctx that is a realm for those names
 (srce/inside? child ctx)                 ; is child in ctx's subtree? (inclusive)
 (srce/get ctx :tools)                    ; the provider value, or nil
 (srce/provider ctx :tools)               ; {:name :fiber :value :check}, or nil
 (srce/services ctx)                      ; {name {:name :fiber :value :check}}, realm-aware
+(srce/attr ctx :resolver)                ; nearest non-nil key up the ctx chain
 (srce/children ctx)                      ; this ctx's child ctxs, creation order
+(srce/active? fiber)                     ; is the fiber :active?
+(srce/fiber-info fiber)                  ; the fiber record as a plain map
+(srce/fibers ctx)                        ; every mounted fiber, mount order
 (srce/mount-fiber ctx)                   ; the fiber whose mount created ctx, or nil (a plain child, the root)
-(srce/detach! child)                     ; drop a plain child ctx from the tree (refuses while mounts remain)
+(srce/detach! child)                     ; drop a plain child ctx from the tree (child ctxs must be gone)
 (srce/provide! ctx :tools table)         ; → disposer; a second visible provider throws
 (srce/provide! ctx :events bus {:in app}) ; → the app's scope, this fiber's effect
 (srce/on ctx :srce/status f)             ; → disposer
@@ -110,11 +119,15 @@ not a set of modules whose callers each pick their own:
 (srce/emit! ctx :my/event ev {:filter f}); sync, filtered, results ignored
 (srce/bail! ctx :my/event ev)            ; the first non-nil answer, then stop
 (srce/waterfall! ctx :my/event ev)       ; (f ev next); not calling next vetoes
-(srce/listeners ctx :my/event {:filter f}) ; [{:ctx c :f f} …] resolved up the chain, dispatch order
+(srce/listeners ctx :my/event {:filter f}) ; [{:ctx c :f f :data d} …] resolved up the chain, dispatch order
+(srce/event-names ctx)                   ; registered names on the chain, sorted
+(srce/dispatch-modes)                    ; #{:emit :bail :waterfall :collect-last :collect-all :boundary}
+(srce/invoke! ctx :my/event f ev)        ; call one listener; a throw reads as nil
 (srce/plugin-source src resolver)        ; a var as-is, or the resolver's value for a keyword
 (srce/plugin! ctx #'web-search {:max-results 5})   ; a var, a keyword, or a plugin map → fiber
 (srce/inject! ctx :ui/terminal {:ui :optional} h) ; plugin! sugar; the name is required
 (srce/normalize-inject deps)             ; → {name nil|:optional}; throws :srce/bad-inject
+(srce/validate-plugin! plugin)           ; shape check → the plugin, or :srce/bad-plugin
 (srce/runtime ctx web-search)            ; the runtime, or nil
 (srce/runtime? ctx web-search)           ; is a runtime mounted for this source?
 (srce/runtimes ctx)                      ; [runtime …], mount order
@@ -130,7 +143,7 @@ not a set of modules whose callers each pick their own:
 ```
 
 `defplugin` and `ctx?` round it out. There is no `defservice`, `accessor`,
-`mixin`, `set-service!`, `notify!`, `intercept`, `update!`, `fiber-await` or
+`mixin`, `set-service!`, `notify!`, `intercept`, `fiber-await` or
 `drain-await` — see §10.
 
 `root` builds a root ctx; it is a value, not a process singleton. Boot holds one
@@ -207,17 +220,17 @@ unaffected.
 - this ctx isolates the name → nil (the realm boundary blocks the outside);
 - else the parent.
 
-A provider whose fiber is not `:active` reads as `nil` — the light kernel has
-one `get`, no `strict` flag. There is no `fiber.store` snapshot: inspection is
+`get` reads a provider whose fiber is not `:active` as `nil` — the light kernel
+has one `get`, no `strict` flag. There is no `fiber.store` snapshot: inspection is
 `(srce/provider ctx :name)`, which says who provides it now.
 
 **A child ctx has a lifetime, and only a mount gets one for free.** A fiber's
 `dispose!` removes its own mount ctx from the parent's `:children`. A plain
 child — `extend`, `isolate`, a run's own ctx — has no fiber, so nothing ended
 it, and the tree grew a line per `extend` for the life of the process. So
-`(detach! child)` removes it, refusing with `:srce/ctx-busy` while anything is
-still mounted under it: a listing that hides a live unit is worse than one that
-lingers. The detach keeps `:parent`, so a value that still holds the ctx
+`(detach! child)` removes it, refusing with `:srce/ctx-busy` while child ctxs
+remain (mounts included): a listing that hides a live unit is worse than one
+that lingers. The detach keeps `:parent`, so a value that still holds the ctx
 resolves services exactly as before; what changes is the tree, which is what
 the unit listing renders (`docs/architecture.md`, "Inspection").
 
@@ -294,7 +307,7 @@ anything but `nil` or `:optional` throws `ex-info` — `{:type :srce/bad-inject}
 plus `:problems` — rather than silently configuring. That keeps the door
 open: intercept comes back as the meaning of those values, not as a new
 spelling. One shape, thrown — `normalize-inject` is not total, and
-`plugin-schema` (§6) lets the throw surface as the plugin's own
+`validate-plugin!` (§6) lets the throw surface as the plugin's own
 `:srce/bad-plugin`.
 
 An optional dependency participates in the **provider set** like a required
@@ -334,9 +347,9 @@ That replaces `notify!`, the epoch and the drain queue with one loop. The
 observable rule the app depends on survives: a dependent sees the new
 provider, and never a half-provided one.
 
-**The pass owns the pass.** §8 says mutations run on the owner thread, but
-kmet1 does not hold that rule today: the TUI input handler and tool threads
-call the registries while the loop runs, and the registry's atom makes each call
+**The pass owns the pass.** §8 says mutations run on the owner thread, and the
+app marshals the structural ones. Append-only registrations (`provide!`, `on`,
+`effect`) can still arrive from another thread while the owner runs, and each is
 safe per operation. A fixpoint pass is not per-operation safe — two threads
 entering one would remount a fiber twice. So the kernel's single concurrency
 primitive is an optimistic pass flag:
@@ -364,9 +377,9 @@ and `docs/architecture.md`'s "the boundary is also the drain" would be false. Th
 invariant now is: **when `settle!` returns and no other thread owns the pass,
 `:changes` is empty.** A change that lands while another thread owns the flag
 is that owner's, which is the "late, never corrupting" rule below.
-`compare-and-set!` on an atom is available on both hosts (checked on bb and
-Jolt), so the primitive is portable, and it is still eight lines rather than a
-queue and an awaitable.
+`compare-and-set!` on an atom is available on all three hosts (checked on bb
+and Jolt), so the primitive is portable, and it is still eight lines rather
+than a queue and an awaitable.
 
 ## 4. Fibers and effects
 
@@ -380,20 +393,23 @@ The record is an **atom holding a plain map** — one `swap!` per transition, so
 a reader never sees a half-updated record. **App code reads it through
 `srce/fiber-info` (one fiber) and `srce/fibers` (the root's mount list, mount
 order)**: `:uid :name :source :config :state :error :inject :events :provides
-:waiting-for :effects :ctx` as a map, so a field the kernel adds stays the
-kernel's, and `/units`, `--dump-state` and a reconciliation read one shape
+:waiting-for :effects :ctx :setup` as a map, so a field the kernel adds stays
+the kernel's, and `/units`, `--dump-state` and a reconciliation read one shape
 instead of destructuring the atom. `@fiber` remains the record itself, for
 tests and the kernel's own code. There is no `fiber.store`; the map's own keys
 are the accessor:
 
 | key | meaning |
 |---|---|
-| `:uid` `:name` `:config` `:state` `:parent` `:runtime` | identity, raw config, lifecycle (the cordis fields, kept) |
+| `:uid` `:name` `:source` `:config` `:state` `:parent` `:runtime` | identity, raw config, lifecycle (the cordis fields, kept) |
 | `:resolved` | the config `:config` validated to on the last activation — what the current mount received, and the old value `update!` hands its hook |
 | `:ctx` | the child ctx it mounted |
+| `:events` | the plugin's declared event map, carried for inspection (§5) |
 | `:inject` | the **normalized** deps (each name maps to `nil` or `:optional`) — what the listing prints as `inject=[…]` |
 | `:provides` | the names this fiber has provided and not released — the listing's `provides=[…]`, maintained by `provide!`'s disposer, so a shadowed realm's provider is still attributable |
 | `:waiting-for` | the names of `:inject` the provider set cannot satisfy, recomputed by the pass — the listing's `waiting-for=[…]`; empty when `:active` |
+| `:effects` | `[{:label l :undo f} …]`, creation order; `(effects fiber)` projects the labels |
+| `:setup` | the promise an asynchronous `:apply` handed back, nil for a synchronous one; a caller may await it, the kernel never does |
 | `:error` | the thrown value when `:failed`, nil otherwise |
 
 - **The root fiber exists**, `:uid 0`, `:active`. It is the owner of anything
@@ -402,16 +418,19 @@ are the accessor:
 - `plugin!` creates the fiber, its child ctx (named from the plugin's `:name`,
   which is what gives the unit listing a readable path), registers it on the
   source's runtime, adds it to `:mounted`, then activates: unsatisfied →
-  `:pending`; satisfied → `:active` and `apply` runs with `(ctx config)`.
+  `:pending`; satisfied → `:starting`, `apply` runs with `(ctx config)`, then
+  `:active` unless the body returned the asynchronous-setup marker.
 - **`apply` is synchronous** and its return value is its first effect: a
-  disposer, a seq of them, or nil (see §13 — the one cut that is not
-  additive). It is registered last, so it unwinds first.
-- **Effects.** `(effect ctx f)` requires an `:active` fiber (`:srce/inactive-effect`
-  otherwise) and returns a single-shot disposer. Within an effect the returned
-  disposers unwind LIFO; across the fiber's effects, unwinding is LIFO by
+  disposer, a seq of them, nil, or `{:srce/setup p}` for the asynchronous
+  case (see §13). A synchronous return is registered last, so it unwinds first.
+- **Effects.** `(effect ctx f)` requires an `:active` or `:starting` fiber
+  (`:srce/inactive-effect` otherwise) and returns a single-shot disposer.
+  Within an effect the returned disposers unwind LIFO; across the fiber's
+  effects, unwinding is LIFO by
   creation order — one effect at a time, last created first, so a service that
   must release before another effect does is expressible by effect order. A
-  lazy seq is collected as produced. `(effects fiber)` returns the labels of
+  sequential return is collected into the effect's disposer list.
+  `(effects fiber)` returns the labels of
   the effects still installed, in creation order (the reverse of unwinding); a
   disposer run early drops its entry, so the list never reports a registration
   that is gone. The label is an **inspection contract** (`:tool/read`,
@@ -422,11 +441,11 @@ are the accessor:
   change, unwind the effects LIFO (where a service entry is removed and its
   dependents are re-evaluated), then
   `settle!` once at the end. Flipping **before** unwinding is what makes the
-  closed-store guard real without a sixth state: a registration from inside a
-  disposer (an effect, a `provide!`, an `on`) throws `:srce/inactive-effect` instead
-  of arming cleanup that will never run, and dependents are never remounted
-  against a half-torn-down service. `:disposing` stays internal to those four
-  steps; it is never a value of `:state`.
+  closed-store guard real: a registration from inside a disposer (an effect, a
+  `provide!`, an `on`) throws `:srce/inactive-effect` instead of arming cleanup
+  that will never run, and dependents are never remounted against a
+  half-torn-down service. There is no `:disposing` state; the flip before
+  unwinding is the guard.
 - **Disposal runs everything and never skips.** A throwing disposer is reported
   through `:logger` at `:error` and the remaining disposers still run. The
   unwind also *collects* them: `dispose!` answers `{:disposed n :failed [{:label
@@ -479,8 +498,8 @@ are the accessor:
   no longer register), and activates again on the same fiber — same uid, same
   cfg re-validated. `dispose!` is the terminal one (state `:disposed`, that uid
   never returns); `restart!` is `dispose!` + `plugin!`, so it allocates a new
-  uid. `:pending` doubles as the unloading state, because only `:active` may
-  register.
+  uid. `:pending` doubles as the unloading state, because only `:active` or
+  `:starting` may register, and a reload's `:pending` is neither.
 - **`:mounted` in reverse is children-first.** Mount order is topological (a
   child always mounts after its parent), so `dispose-subtree!` is the reverse
   mount list filtered by `inside?` — no tree sort.
@@ -524,25 +543,24 @@ The kernel needs a notification path, not an event framework:
   A listener is `(fn [event])`; its own ctx is visible to the `:filter` and in
   the resolved list, never as a call argument — one shape for every mode but
   `waterfall`, whose whole point is the `next` continuation (`(f event next)`).
-- `(names ctx)` enumerates what is registered on the chain, sorted: the kernel
-  owns the table, so reporting a subscription list is the kernel's read, not a
-  second atom anything can drift from.
+- `(event-names ctx)` enumerates what is registered on the chain, sorted: the
+  kernel owns the table, so reporting a subscription list is the kernel's read,
+  not a second atom anything can drift from.
 - A ctx's listeners run for emits on that ctx **and its descendants**, so a
   subtree scopes naturally; `:filter` receives each listener's own ctx (a
   listener cannot opt out), which is the shape the node-scoped bus needs.
 - Registration order, `once` disposes before invoking, and the disposer reports
   whether it removed something.
 - A throwing listener is reported through `:logger` and reads as nil for its own
-  rung; the dispatch carries on. `invoke!` is that one rule, and every mode —
-  the kernel's three and the app's protocols — calls it instead of its own
-  try/catch.
+  rung; the fold carries on (`waterfall!` stops unless the listener had already
+  called `next`). `invoke!` is that one rule, and every mode — the kernel's
+  three and the app's protocols — calls it instead of its own try/catch.
 
 **One listener table, two layers.** Registration is `on`/`once` on the ctx and
 nothing else; the *modes* are different walks over one resolved list, and the
 seam between the layers is that list, not the table. Cordis splits it the same
 way in `events.ts` (`dispatch` returns the filtered, bound list; each mode walks
-it); the difference is only where the layer line falls — see "strategy vs.
-protocol" below.
+it); the difference is only where the layer line falls.
 
 **A mode is a fold over the resolved list, so the kernel owns all six.** Once
 a registration may carry `{:data x}` (below), no mode needs a name or an app
@@ -624,7 +642,7 @@ work goes through the app's queue (§8), not through an event mode.
 | `collect-last` | `srce/collect-last!` | the last non-nil answer (kmet1's `emit-event!`: a later `:cancel`/`:summary` wins) |
 | `collect-all` | `srce/collect-all!` | every non-nil result as `[data result]` — the registration's `:data` beside what it returned |
 | `boundary` | `srce/boundary!` | the accumulated map: each listener sees the previous results merged into its event and returns the keys to replace (pi: emitBoundary — `waterfall`'s data-shaped sibling) |
-| `parallel` / `serial` | — | awaited: they need an awaitable the kernel does not have (§8); the app's submission queue is a drain, not an awaitable, so they stay deferred (§10) |
+| `parallel` / `serial` | — | awaiting would block the owner thread (§5); an app-side scheduler could add them over `srce/listeners` (§10) |
 
 `(srce/dispatch-modes)` is that table as a set, and it is the authority an app
 reads when it declares which mode dispatch an event wants: a declaration naming
@@ -667,14 +685,15 @@ a name only identically (a boot-time check), and the vocabulary accessors read
 the declaring namespace's own map — so nothing may dispatch through a
 projection. The kernel's own event names are three —
 `:srce/status` (fiber state transition, `{:fiber f :from s :to s}`, emitted on
-the mounting ctx — every mount passes through `:starting`, so a listener sees
-that pair before `:active`), `:srce/service` (a provider installed/removed,
+the mounting ctx — every satisfied mount passes through `:starting`, so a
+listener sees that pair before `:active`), `:srce/service` (a provider installed/removed,
 `{:name n :value v}`, emitted on the providing ctx), `:srce/failure` (`apply`
 threw, `{:fiber f :error e}`) — Cordis's nine `internal/*` events collapsed to
-the three with a consumer. `kmet.app.events/event-types` is rank 2, so it can never
-list `:srce/*`: the kernel's vocabulary is documented here and pinned by its
-emit sites, while the app's events get the catalog. That asymmetry is the price
-of the rank cut, and it is cheaper than a rank-3 require in the kernel.
+the three with a consumer. `kmet.app.events/event-types` lists the app's
+built-in vocabulary and never `:srce/*`: the kernel's vocabulary is documented
+here and pinned by its emit sites, while the app's events get the catalog. The
+kernel cannot require the app's namespace (it is above the kernel), and that
+asymmetry is cheaper than a second catalog in the kernel.
 
 ## 6. Plugins
 
@@ -688,11 +707,13 @@ as a map, shape-checked at compile time by `defplugin` and once at mount by
  :config  (fn [cfg] …)         ; optional, default identity — validator, cfg or throw
  :provide #{:web-search}       ; optional, default #{} — declared, checked after apply
  :update  (fn [ctx old new] …) ; optional — absorb a config change in place (`update!`)
+ :events  {:my/event {…}}      ; optional — declared events, carried for inspection
  :apply   (fn [ctx cfg] …)}    ; required — the effect body
 ```
 
-`:name` and `:apply` are the only required keys. `plugin-schema` runs once, in
-`plugin!` (and at compile time in `defplugin`); a bad map throws `ex-info`
+`:name` and `:apply` are the only required keys. `validate-plugin!` runs on
+every mount in `plugin!`; `defplugin` checks the literal shape at expansion and
+validates the map when the def loads. A bad map throws `ex-info`
 `{:type :srce/bad-plugin :problems […]}` — a caller bug, not a `:failed` fiber,
 which means the plugin *ran* and threw. `:config` runs on **every** mount and
 remount, from the raw config, and its return is what `apply` receives;
@@ -711,19 +732,19 @@ the hook is what a plugin declares when its service can absorb one.
 | `Plugin.Constructor` | not ported — a record is built inside `:apply` |
 | `Plugin.Base` (`name`/`Config`/`inject`/`provide`) | the map's keys |
 | `Plugin.Transform` (`{schema, Config}`) | `:config` is a validator fn, so `(m/compiled …)` is just a fn |
-| `IPlugin` type | `plugin-schema`, checked once (`{:type :srce/bad-plugin :problems …}`) |
+| `IPlugin` type | `validate-plugin!` (`{:type :srce/bad-plugin :problems …}`) |
 | `registry.resolve` | `srce/plugin-source` — a var as-is; a keyword looked up by the caller's resolver |
 | `registry.get`/`.has`/`.delete` | `srce/runtime` / `srce/runtime?` / `srce/dispose-plugin!` |
 | `registry.keys`/`.size` | `srce/runtimes` (the inspection surface `--dump-config` reads) |
 | `registry.counter` | the root's uid allocator, internal |
 | `Inject.resolve` | `srce/normalize-inject` (`:optional` sentinel) |
-| plugin *source* polymorphism | the caller's resolver — `kmet.loader.core/Loader` (SCI / Jolt native / classpath) is the one kmet2 passes |
+| plugin *source* polymorphism | the caller's resolver — `kmet.loader.core/Loader` (SCI / Jolt native / classpath) is the one kmet passes |
 
 **Source resolution is a seam, not a dependency.** `plugin-source` normalizes
 what the caller hands `plugin!`: a var passes through, a keyword is looked up by
 the resolver, a miss is `{:type :srce/bad-source}`. `srce.*` may require
 `kmet.loader.*` (rank 0, below the kernel) and `kmet.loader.core/Loader` is the
-resolver kmet2 passes, but the kernel never requires it and never decides what
+resolver kmet passes, but the kernel never requires it and never decides what
 a keyword means — how an extension source is resolved is the extension host's
 implementation detail, not a kernel contract.
 
@@ -759,9 +780,10 @@ writes the diagnostics error log (`logs/kmet-error.log` under the process cwd
 unless `KMET_LOG_DIR` names another directory), the other levels follow
 `--debug`.
 
-`kmet.srce.*` may require only rank-0 code — in practice `kmet.libs.*` and, for
-source resolution, `kmet.loader.*` — plus third-party code, so the kernel
-cannot call `kmet.app.debug` directly — which is also why the full port's
+`kmet.srce.*` may require only rank-0 code — `kmet.libs.*`, `kmet.loader.*`,
+`kmet.reakt.*` and third-party code — and currently requires none of them, so
+the kernel cannot call `kmet.app.debug` directly — which is also why the full
+port's
 logger service (exporters, formatters, ANSI palette, ring buffer, `:logger`
 intercept config) is deferred in whole: kmet already has `kmet.app.debug`,
 and a second logger is a copy.
@@ -769,19 +791,20 @@ and a second logger is a copy.
 ## 8. Scheduling: one thread, no queue
 
 Cordis runs every transition inline on the caller's stack, which is safe in JS
-because there is one thread and a microtask queue. kmet2 has neither: a
+because there is one thread and a microtask queue. kmet has neither: a
 transition can be entered from the TUI thread, a `spawn`ed tool thread, the
 loop, or a socket reader. The full port answered with a drain-owner thread and
 an awaitable queue. The light kernel answers with a rule:
 
 - **The kernel has no lock; the pass has a flag.** Every mutation runs on the
   thread that owns the root ctx. The exception is the class of mutations that
-  only *append*: `provide!`, `on`/`once` and `effect` on an already-active
-  fiber touch an atom or the effect vector, so a foreign-thread call is *safe
-  but late*, never corrupting — it records and returns, and the owner's next
+  only *append*: `provide!`, `on`/`once` and `effect` on an `:active` or
+  `:starting` fiber touch an atom or the effect vector, so a foreign-thread
+  call is *safe but late*, never corrupting — it records and returns, and the
+  owner's next
   `settle!` (or the turn boundary) applies it. Everything that runs plugin code
-  — `plugin!`, `restart!`, `dispose!`, `dispose-plugin!`, `dispose-subtree!` —
-  stays on the owner thread: a disposer may re-enter the kernel, and a
+  — `plugin!`, `restart!`, `update!`, `dispose!`, `dispose-plugin!`,
+  `dispose-subtree!` — stays on the owner thread: a disposer may re-enter the kernel, and a
   concurrent pass could otherwise remount a dependent mid-teardown. That is the
   whole distinction; "safe but late" is not a licence for `dispose!`.
 - **The app marshals.** Plugin work, reloads and approvals are submitted to the
@@ -875,11 +898,11 @@ grows a keyword or a key, not a new shape.
 | `accessor`, `mixin`, `set-service!` | `reflect.ts` | no proxy to feed; a service re-provides, which is one effect | new keys on `provide!` |
 | isolate **labels** | `ctx.isolate(name, label)` | siblings sharing one realm nest under a common isolating ctx | a label argument on `isolate` |
 | 9 `internal/*` events, `internal/listener` claiming | `events.ts` | 3 have a consumer (§5); the rest are debug/inspection plumbing with none | new names on the existing emit |
-| `parallel` / `serial` | `events.ts` | awaited, so they need the app's awaitable — the kernel has none (§8), and the app's submission queue is a drain, not an awaitable | `kmet.app.events` over `srce/listeners` once something needs them (`bail` and `waterfall` landed there: §5) |
+| `parallel` / `serial` | `events.ts` | awaiting would block the owner thread (§5); the app's submission queue is a drain, not an awaitable | `kmet.app.events` over `srce/listeners` once something needs them (`bail` and `waterfall` landed there: §5) |
 | Lazy config resolution, `{:schema :transform}` | `config.ts` | `apply` validates its own map; a validator fn composes | `:config` accepting a schema map |
 | Fiber lifecycle beyond 5 states (`:unloading`, `inertia`, epoch drop-rule) | `fiber.ts` | one thread makes the race unrepresentable | `:starting` landed (§4) — the state, not `:unloading`/`inertia`; the epoch stays the provider set |
 | `fiber.store` snapshot, `fiber.await`, `assert-active!` | `fiber.ts` | sync: there is nothing to await; the per-fiber facts the listing needs are `:provides`/`:inject`/`:waiting-for` on the record (§4), not a store snapshot | derived from `:state` and the record's own keys |
-| awaitable, drain owner, `drain-await` | (kmet2 addition) | a queue and a thread to serialize what the app already serializes | the optimistic pass flag + `settle!` (§3) are the replacement; an awaitable, if ever needed, is the app's |
+| awaitable, drain owner, `drain-await` | (kmet addition) | a queue and a thread to serialize what the app already serializes | the optimistic pass flag + `settle!` (§3) are the replacement; an awaitable, if ever needed, is the app's |
 | `DisposableList`, `EffectMeta` labels, `utils.ts` traceable | `utils.ts` | a vector and a map cover it | `:label` on `effect` is already accepted |
 | JS syntax: `Proxy`, decorators, `instanceof`, prototype splicing | — | not semantics | never |
 
@@ -936,7 +959,7 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
 | Cordis | srce | light |
 |---|---|---|
 | `FiberState` (6 states) | `:pending :starting :active :failed :disposed` | keep (reduced) |
-| `fiber.uid` / `.name` / `.config` / `.state` / `.error` | same, plus `:inject` / `:provides` / `:waiting-for` (§4) | keep |
+| `fiber.uid` / `.name` / `.config` / `.state` / `.error` | same, plus `:source` / `:inject` / `:provides` / `:waiting-for` / `:events` / `:setup` (§4) | keep |
 | `fiber.store` / `.inertia` | `:provides` (§4) / — | deferred (the listing fields are on the record instead) |
 | `fiber.ctx` / `.parent` / `.runtime` | `:ctx` / `:parent` / `:runtime` | keep |
 | `fiber.effect(body, label)` | `srce/effect` | keep |
@@ -944,9 +967,9 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
 | `fiber.getEffects()` | `srce/effects` | keep |
 | `fiber.await()` | — | deferred |
 | `fiber.restart()` | `srce/restart!` (dispose + mount) | keep |
-| `fiber.update(config, noSave)` | — (`restart!`) | deferred |
+| `fiber.update(config, noSave)` | `srce/update!` (needs an `:update` hook) | keep (reduced) |
 | `fiber.dispose()` | `srce/dispose!` (sync) | keep |
-| `fiber.assertActive()` | `:srce/inactive-effect` on `effect` | keep |
+| `fiber.assertActive()` | `:srce/inactive-effect` unless `:active` or `:starting` | keep |
 | `{effect: …}` metadata on a disposer | `:label` on `srce/effect` | keep |
 | `rootFiber.dispose()` (restarts) | `dispose!` on the root fiber; the app remounts, no implicit restart | keep (differs) |
 | `ValidationError` (config/plugin shape) | the plugin's `:config` throw, or `:srce/bad-plugin` for the map itself | keep (shape differs) |
@@ -979,7 +1002,7 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
 |---|---|---|
 | `ctx.emit` | `srce/emit!` | keep |
 | `EventsService.dispatch` (resolve + filter) | `srce/listeners` | keep |
-| `ctx.parallel` / `.serial` | — (they need an awaitable) | deferred |
+| `ctx.parallel` / `.serial` | — (awaiting would block the owner) | deferred |
 | `ctx.bail` | `srce/bail!` | keep |
 | `ctx.waterfall` | `srce/waterfall!` (`(f event next)`) | keep |
 | `ctx.on` / `.once` | `srce/on` / `srce/once` (a `once` registration keeps the listener's metadata) | keep |
@@ -1040,10 +1063,9 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
   listener reading as nil in every mode, `event-names` over the chain, and
   `listeners` returning the resolved list every mode walks; `inside?`; `log!`
   with no `:logger`; a plain child ctx detaching (and `:srce/ctx-busy` while
-  anything is still mounted under it, with a fiber's disposal making it
-  detachable); the fiber record's
-  `:inject`/`:provides`/`:waiting-for` matching the store after a mount, a
-  provide and a dispose; the pass flag — two threads entering `provide!` at
+  child ctxs remain, with a fiber's disposal making it detachable); the fiber
+  record's `:inject`/`:provides`/`:waiting-for` matching the store after a
+  mount, a provide and a dispose; the pass flag — two threads entering `provide!` at
   once run one pass owner, both changes land, and `settle!` returning with no
   other owner means `:changes` empty, answering `{:rounds 1}` for an empty
   pass; `update!` refusing a plugin without `:update` (`:srce/no-update`) and a
@@ -1062,7 +1084,7 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
   non-fn `:update` rejected as `:srce/bad-plugin`.
 - srce self-containment: `kmet.srce.*` may require only rank-0 code
   (`kmet.libs.*`, `kmet.loader.*`, `kmet.reakt.*`) and third-party code — no
-  `kmet.agent.*`, no `tui`/`tk`, nothing at its own rank or above.
+  `kmet.app.*`, `kmet.tui.*`, `kmet.tk.*`, nothing at its own rank or above.
 - **No `kmet.libs.scope` require in `kmet.srce.*`** (§9), and after 4e no
   `kmet.agent.*` require either — the deletion gate.
 - No leak: `scope`-free equivalent — a test disposes a 3-plugin tree and
@@ -1098,10 +1120,10 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
   HMR is deferred until the kernel settles, and the console exporter is
   `kmet.app.debug`.
 - The Koishi plugin market / `package.json` service manifest.
-- Re-deriving a mechanism kmet already owns: the event modes (`agent/event-bus`
-  is the *dispatcher layer* over `srce/listeners`, not a second registry), the
-  logger (`agent/debug`), the loader (`loader/core`). The kernel composes them,
-  it does not reimplement them.
+- Re-deriving a mechanism kmet already owns: the event modes
+  (`kmet.app.events` is the *dispatcher layer* over `srce/listeners`, not a
+  second registry), the logger (`kmet.app.debug`), the loader
+  (`kmet.loader.core`). The kernel composes them, it does not reimplement them.
 - Chasing parity with the vendored tree. §11 is the record; §10 is the
   justification; `keep` rows are the contract.
 
@@ -1113,10 +1135,10 @@ the numbers the "light" claim rests on.
 
 | namespace | lines | what it owns |
 |---|---|---|
-| `ctx.clj` | 240 | ctx tree, store, isolate, `get`/`services`, the effect list, `log!` |
-| `event.clj` | 170 | listener table, `listeners`, `on`/`once`, `names`, `invoke!`, and the six modes `emit!`/`bail!`/`waterfall!`/`collect-last!`/`collect-all!`/`boundary!` |
-| `fiber.clj` | 474 | inject, the refresh pass, mount/unmount, dispose axes, runtimes |
-| `core.clj` | 161 | the public aliases and `defplugin` |
+| `ctx.clj` | 382 | ctx tree, store, isolate, `get`/`services`, the effect list, `log!` |
+| `event.clj` | 183 | listener table, `listeners`, `on`/`once`, `names`, `invoke!`, and the six modes `emit!`/`bail!`/`waterfall!`/`collect-last!`/`collect-all!`/`boundary!` |
+| `fiber.clj` | 668 | inject, the refresh pass, mount/unmount, dispose axes, runtimes |
+| `core.clj` | 250 | the public aliases and `defplugin` |
 
 `ctx.clj` requires no sibling; `event.clj` requires `ctx`, `fiber.clj` requires
 both, `kmet.srce.core` aliases the three. The effect primitive lives in `ctx.clj`,
@@ -1144,28 +1166,40 @@ require cycle.
       (or (clojure.core/get @(:store c) name)
           (when-not (contains? (:isolate c) name) (recur (:parent c)))))))
 
-;; 5 — one effect = one entry; LIFO; single-shot; the state gate is the
-;; closed-store guard
+;; 5 — one effect = one entry; LIFO; single-shot; the gate admits :active and
+;; :starting, and a disposer run early removes its entry
 (defn effect [ctx f & [label]]
-  (let [fiber (:fiber ctx) state (:state @fiber)]
-    (when-not (= :active state)
-      (throw (ex-info "inactive fiber" {:type :srce/inactive-effect :state state})))
+  (let [fiber (:fiber ctx)]
+    (assert-active! fiber)
     (let [undos (atom []) live? (atom true)
+          check! (fn [d]
+                   (when-not (fn? d)
+                     (throw (ex-info "invalid effect disposer"
+                                     {:type :srce/bad-effect
+                                      :label (or label :effect) :value d}))))
           undo (fn []
                  (when (compare-and-set! live? true false)
+                   (swap! fiber update :effects
+                          (fn [effects]
+                            (into [] (remove #(identical? undo (:undo %))) effects)))
                    (reduce (fn [_ d]
-                             (try (d) (catch Throwable t (log! ctx :error "disposer threw" t))))
+                             (try (d)
+                                  (catch Throwable t
+                                    (dispose-failed! ctx (or label :effect) t))))
                            nil (rseq @undos))))]
+      ;; the entry goes in before F runs, so a throwing body still has cleanup
       (swap! fiber update :effects conj {:label (or label :effect) :undo undo})
-      (let [r (f)]
-        (swap! undos into (cond (nil? r) [] (sequential? r) r :else [r])))
+      (let [r (f)
+            ds (cond (nil? r) [] (sequential? r) r :else [r])]
+        (doseq [d ds] (check! d))
+        (swap! undos into ds))
       undo)))
 
 ;; 1+3 — the epoch is the provider set; a change reloads the same fiber.
 ;; An unchanged set is a no-op, so a failed fiber is never retried by the pass.
 (defn- refresh! [fiber]
   (let [{:keys [ctx inject state epoch]} @fiber]
-    (when-not (= :disposed state)
+    (when-not (contains? #{:disposed :starting} state)
       (let [next-epoch (providers ctx inject)]
         (when (not= next-epoch epoch)
           (reload! fiber next-epoch))))))
@@ -1183,9 +1217,9 @@ require cycle.
   (loop [c ctx acc []]
     (if-not c acc
       (recur (:parent c)
-             (into acc (for [f (get @(:listeners c) name)
+             (into acc (for [{:keys [f data]} (get @(:listeners c) name)
                              :when (or (nil? filter) (filter c))]
-                         {:ctx c :f f}))))))
+                         {:ctx c :f f :data data}))))))
 ```
 
 - A **listener** is `(fn [event])`; the listener's own ctx is visible only to
@@ -1193,21 +1227,23 @@ require cycle.
   `waterfall` (`(f event next)`, where the extra argument is the mechanism).
 - **`:srce/*` keywords are explicit** (`:srce/inactive-effect`,
   `:srce/duplicate-service`, `:srce/bad-plugin`, `:srce/bad-inject`,
-  `:srce/bad-source`, `:srce/churn`) — a public error keyword should not move
-  when a namespace does.
+  `:srce/bad-source`, `:srce/inactive-update`, `:srce/no-update`, and the
+  `:srce/churn` pass warning) — a public keyword should not move when a
+  namespace does.
 - **`provide!`** is a `provider` duplicate check plus one effect; the effect's
   body inserts the entry and adds to the fiber's `:provides`, its disposer
   removes both and records the change. `:check` is stored with the entry.
-- **`activate!`** sets `:active` *before* `apply` runs (so `apply` may register),
-  and a throw sets `:failed` + `:error` *before* unwinding the partial effects,
-  then emits `:srce/failure`.
+- **`activate!`** sets `:starting` *before* `apply` runs (so `apply` may
+  register), then `:active` once a synchronous body returns or the async setup
+  settles; a throw sets `:failed` + `:error` *before* unwinding the partial
+  effects, then emits `:srce/failure`.
 - **`dispose!`** flips to `:disposed` first, unwinds, detaches from `:mounted`,
   drops the runtime when its last fiber is gone, and settles.
 - **No protocols, records, multimethods or user-facing dynamic bindings.** Two
   dynamic vars collect an unwind's report — `*dispose-failures*` and
   `*dispose-undoing*` — and are bound only inside `unwind-effects!`. One macro
   (`defplugin`), three `compare-and-set!`s (the pass flag, each effect's
-  single-shot flag, the change-set drain), no Java interop, no awaitable, no
-  clock, no queue.
+  single-shot flag, the change-set drain), no Java interop, no awaitable
+  abstraction, no clock, no work queue.
 - **Not built**: a `:root` pointer, a `:disposing` state, a realm-key table,
   a schema library, a logger, HMR. Each is a §10 row, not an omission.

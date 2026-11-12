@@ -1,20 +1,21 @@
 # srce (❤️)
 
 **srce** (Cyrillic **срце**, IPA /sr̩̂t͡se/, roughly "SIR-tseh") is "heart" in
-Serbian — the thing every other part is wired through. It is the kernel kmet
-mounts itself on: a context tree, services claimed by keyword, plugins as data,
-one listener table, and registrations that unwind.
+Serbian — the thing every other part is wired through. It is a standalone
+Clojure kernel: a context tree, services claimed by keyword, plugins as data,
+one listener table, and registrations that unwind. kmet mounts its application
+on it; any other Clojure application can mount its own tree the same way.
 
 It has no third-party dependencies and one public namespace,
-`kmet.srce.core`.
+`kmet.srce.core`; nothing in it depends on the kmet application.
 
 ## Why a kernel
 
-kmet runs the same process in many shapes. A profile picks the rows, a mode
+A long-lived application runs in many shapes: a profile picks the rows, a mode
 adds its own, extensions load at runtime, and every agent gets a child context
-of its own. Those parts do not arrive in one order and they do not live
-forever: a row may mount before the service it needs, an extension unloads, a
-run ends, `/reload` replaces a configuration.
+of its own. kmet is one such application. Those parts do not arrive in one
+order and they do not live forever: a row may mount before the service it
+needs, an extension unloads, a run ends, `/reload` replaces a configuration.
 
 Three rules make that survivable, and they are what srce is:
 
@@ -65,6 +66,8 @@ A plugin is a validated map, not an object with a lifecycle protocol:
 {:name    :tool/web-search     ; required — the runtime name and the mount's ctx name
  :inject  {:tools nil}         ; required deps; nil = required, :optional = upgrade when present
  :config  (fn [cfg] cfg)       ; optional validator; runs on every mount and remount
+ :update  (fn [ctx old new] …) ; optional in-place config change (`srce/update!`)
+ :events  {…}                  ; optional declared events, inspection only
  :provide #{:web-search}       ; optional claim, checked after apply
  :apply   (fn [ctx config] …)} ; required — the effect body
 ```
@@ -108,20 +111,40 @@ the thing that registered something is the thing that removes it.
 
 ## Install
 
-srce is a workspace module, not a published library. In this checkout it is
-already on every host's classpath: the workspace manifest lists it, `bb.edn`
-puts it on the babashka path, and the module graph carries it to the JVM and
-Jolt. Elsewhere, put `modules/srce/src` on the classpath and require one
-namespace:
+srce is not published to Maven, so consume it from this repository as a path
+or git dependency. It is self-contained: the only namespace you require is
+`kmet.srce.core`, and the kernel depends on no kmet application code, no other
+kmet module, and no third-party library.
+
+```clojure
+;; deps.edn — a checkout on disk
+{:deps {kmet/srce {:local/root "/path/to/kmet-agent/modules/srce"}}}
+
+;; deps.edn — a git checkout; :deps/root selects the module in the repository
+{:deps {kmet/srce {:git/url "https://github.com/kmetia/kmet-agent.git"
+                   :git/sha "<full-commit-sha>"
+                   :deps/root "modules/srce"}}}
+```
+
+`:local/root` points at the directory holding `modules/srce/deps.edn`. For a
+git dependency, `:deps/root` selects the module inside the repository and
+`:git/sha` pins a full commit. The same `:deps` entry works in `bb.edn`; the
+sources are host-portable across babashka, JVM Clojure and Jolt.
+
+Then require the one public namespace:
 
 ```clojure
 (:require [kmet.srce.core :as srce])
 ```
 
-There is nothing else to add: the kernel requires no sibling module and no
-third-party library.
+Inside the kmet checkout itself there is nothing to add: the workspace manifest
+lists the module, `bb.edn` puts it on the babashka path, and the module graph
+carries it to the JVM and Jolt.
 
 ## Quick start
+
+The example is complete on its own: a fresh `(srce/root)` is all it needs, and
+no kmet application code is involved.
 
 ```clojure
 (ns my.greeter
@@ -249,10 +272,10 @@ fiber unloads:
 - A throwing disposer is logged through `:logger` and the remaining disposers
   still run.
 
-Registrations require an `:active` fiber (`:srce/inactive-effect` otherwise),
-including a registration attempted from inside a disposer — a `:starting` fiber
-may register too, because its body is what is running. Register from
-`:apply`, not from teardown.
+Registrations require an `:active` or `:starting` fiber
+(`:srce/inactive-effect` otherwise) — `:starting` is allowed because its body is
+what is running. A fiber in teardown is neither, so a registration attempted
+from inside a disposer throws. Register from `:apply`, not from teardown.
 
 A body that answers `{:srce/setup p}` is an **asynchronous setup**: the fiber
 stays `:starting`, nothing it provides is visible (`available?` requires
@@ -288,15 +311,16 @@ body that starts a thread and returns the future — fails the mount with
 | `bail!` | a veto or the first answer: a later listener cannot change it |
 | `waterfall!` | around-middleware: each listener wraps the rest via `next` |
 | `collect-last!` | a later answer overrides an earlier one |
-| `collect-all!` | every contribution, paired with its registration's `:data` |
+| `collect-all!` | every non-nil contribution, paired with its registration's `:data` |
 | `boundary!` | data accumulation: listeners merge returned maps into the event |
 
 A listener hears emits on its own ctx **and its descendants**, so registering
 on a subtree scopes it naturally. `{:filter (fn [listener-ctx] …)}` on a dispatch
 receives each listener's own ctx. A listener that throws is logged and reads as
-nil for its own rung; the dispatch carries on. `(srce/listeners ctx name
-opts)` is the resolved list every mode walks (`opts` is nil or `{:filter f}`),
-and `(srce/event-names ctx)` is what is registered on the chain.
+nil for its own rung; the fold carries on (`waterfall!` stops unless the
+listener had already called `next`). `(srce/listeners ctx name opts)` is the
+resolved list every mode walks (`opts` is nil or `{:filter f}`), and
+`(srce/event-names ctx)` is what is registered on the chain.
 
 A registration may carry opaque data:
 
@@ -335,17 +359,21 @@ plugin's `apply` threw).
 
 The source may be a var, a plugin map, or a keyword for the ctx's `:resolver`
 (`(srce/root {:resolver f})`); `(srce/plugin-source source resolver)` is the
-normalization on its own.
+normalization on its own. `(srce/inject! ctx :ui/terminal {:ui :optional} f)` is
+the sugar for an anonymous plugin — `plugin!` with `{:name name :inject deps
+:apply f}`; the name is explicit because a fn carries none.
 
 A fiber is an atom holding a plain map. Its state is one of **`:pending`**
-(waiting for inject), **`:active`**, **`:failed`** (a throwing `apply` or
-config) or **`:disposed`**. Code reads it through the kernel's projection:
+(waiting for inject), **`:starting`** (the body is running, or its asynchronous
+setup is in flight), **`:active`**, **`:failed`** (a throwing `apply`, config or
+effect) or **`:disposed`**. Code reads it through the kernel's projection:
 `(srce/fiber-info fiber)` returns a map — `:uid :name :source :config :state
-:error :inject :events :provides :waiting-for :effects :ctx` — and
+:error :inject :events :provides :waiting-for :effects :ctx :setup` — and
 `(srce/fibers ctx)` does the same for the root's mount list, in mount order,
 which is what an inspection, a front end or a reconciliation walks.
 `(srce/active? fiber)` is the one-state question. The record itself (`@fiber`)
-is the kernel's: it also carries `:parent`, `:runtime`, `:plugin` and `:epoch`.
+is the kernel's: it also carries `:parent`, `:runtime`, `:plugin`, `:epoch` and
+`:resolved` (the config `:config` last validated).
 
 - A throwing `apply` does **not** throw out of `plugin!`: the fiber becomes
   `:failed`, its partial effects unwind, the names it provided are freed, and
@@ -387,8 +415,8 @@ every root registration, and the app remounts the tree to restart.
 `(srce/extend ctx {:name :scratch})` makes a child ctx with metadata; it is not
 a mount and has no fiber of its own (it uses the nearest one). Such a child has
 no automatic lifetime, so `(srce/detach! child)` removes it from the tree when
-you are done — it refuses with `:srce/ctx-busy` while anything is still mounted
-under it. The ctx keeps its `:parent` chain, so a value that still holds it
+you are done — it refuses with `:srce/ctx-busy` while child ctxs remain (mounts
+included). The ctx keeps its `:parent` chain, so a value that still holds it
 resolves services as before.
 
 - `(srce/children ctx)` — children in creation order.
@@ -420,12 +448,12 @@ in a closure when a service needs one.
 ## Threading rule
 
 - The kernel has no lock. Every mutation that runs plugin code — `plugin!`,
-  `restart!`, `dispose!`, `dispose-plugin!`, `dispose-subtree!` — stays on the
-  thread that owns the root ctx. A disposer may re-enter the kernel, and a
-  concurrent pass could otherwise remount a dependent mid-teardown.
+  `restart!`, `update!`, `dispose!`, `dispose-plugin!`, `dispose-subtree!` —
+  stays on the thread that owns the root ctx. A disposer may re-enter the
+  kernel, and a concurrent pass could otherwise remount a dependent mid-teardown.
 - Registrations that only append — `provide!`, `on`/`once`, `effect` on an
-  already-active fiber — are safe from any thread, but **late**: they record
-  and return, and the owner's next `(srce/settle! ctx)` applies them.
+  `:active` or `:starting` fiber — are safe from any thread, but **late**: they
+  record and return, and the owner's next `(srce/settle! ctx)` applies them.
 - The app marshals: plugin work, reloads and approvals are submitted to its
   loop, which settles at the turn boundary. `(srce/settle! ctx)` is the call.
 
@@ -438,11 +466,13 @@ additive — see [`srce.md`](src/kmet/srce/srce.md) §13.
 | `:type` | thrown when | fix |
 |---|---|---|
 | `:srce/duplicate-service` | `provide!` for a name already held on the way up from the target scope | provide in a child ctx or `isolate`; dispose the old provider first |
-| `:srce/inactive-effect` | a registration on a fiber that is not `:active` | register from `:apply`, not from a disposer or after dispose |
-| `:srce/bad-plugin` | the plugin map fails its shape check (`:problems` says which keys) | fix `:name` (keyword), `:apply` (fn), `:inject`, `:config` or `:provide` |
+| `:srce/inactive-effect` | a registration on a fiber that is neither `:active` nor `:starting` | register from `:apply`, not from a disposer or after dispose |
+| `:srce/bad-plugin` | the plugin map fails its shape check (`:problems` says which keys) | fix `:name` (keyword), `:apply` (fn), `:inject`, `:config`, `:update`, `:events` or `:provide` |
 | `:srce/bad-inject` | an inject value other than `nil` or `:optional` (thrown by `normalize-inject`; `plugin!` reports it as `:srce/bad-plugin` with the offending keys in `:problems`) | use the two supported values; other values are reserved |
 | `:srce/bad-source` | a keyword source with no `:resolver`, or an unsupported source value | pass a resolver to `root`, or mount a var/map |
-| `:srce/bad-effect` | a plugin body returned something that is not nil, a disposer, a seq of disposers or `{:srce/setup p}`; or the marker's value is not a promise | answer `nil` after starting work, or return the marker with a promise |
+| `:srce/bad-effect` | an effect or plugin body returned something that is not nil, a disposer, a seq of disposers or `{:srce/setup p}`; or the marker's value is not a promise | answer `nil` after starting work, or return the marker with a promise |
+| `:srce/inactive-update` | `update!` on a fiber that is not `:active` | let it become active, or `restart!` it |
+| `:srce/no-update` | `update!` on a plugin that declares no `:update` hook | declare `:update`, or `restart!` with the new config |
 | `:srce/ctx-busy` | `detach!` while child ctxs remain | dispose the mounts under it first |
 
 A pass that cannot reach a fixpoint within 8 rounds logs `:srce/churn` through
@@ -451,15 +481,18 @@ remounts wait for the next change.
 
 ## What srce deliberately does not do
 
-No async dispatch modes (`parallel` and `serial` need an awaitable the kernel
-does not have), no interception chain, no `Service` base class or accessors, no
-isolate labels, no logger subsystem, no HMR, no update-in-place (`restart!` is
-the config change), no drain thread. Each is a row in
+No async dispatch modes (`parallel` and `serial` would await listeners and
+block the owner thread), no interception chain, no `Service` base class or
+accessors, no isolate labels, no logger subsystem, no HMR, no drain thread.
+Each is a row in
 [`srce.md`](src/kmet/srce/srce.md) §10 rather than an omission, with the
 mechanism it came from and how it would come back additively. The parity matrix
 in §11 records the rest.
 
 ## Read next
+
+Only the implementation note belongs to the kernel; the other links describe
+kmet as one application built on it.
 
 | Document | What it covers |
 |---|---|
