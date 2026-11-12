@@ -1003,8 +1003,9 @@
                   {:type :script/verb-failed :verb verb :result result})))
 
 (defn read-text
-  "Read PATH through the read tool's implementation; OPTS may carry :offset
-   and :limit. Throws on a read error; use emit-image for images."
+  "Read PATH through the read tool's implementation; OPTS may carry :offset,
+   :limit, :tail (not with offset/limit) and :footer. Throws on a read error;
+   use emit-image for images."
   [path opts signal]
   (let [{:keys [content is-error images]}
         (read-tool/execute (merge {:path (str path)} opts) nil signal nil)]
@@ -1018,45 +1019,96 @@
       :else content)))
 
 (defn write-result
-  "Write CONTENT to PATH through the write tool's implementation; returns its
-   result map."
+  "Write CONTENT to PATH through the write tool's implementation; returns the
+   character count the write tool reports as bytes."
   [path content signal]
   (write-tool/write-file path (str content) signal))
 
+(defn- edit-pair->map
+  "Normalize one multi-edit entry: a {:old-text ... :new-text ...} map or an
+   [old new] pair; both keys must be present, and both values are stringified."
+  [edit]
+  (let [map-edit? (map? edit)
+        pair-edit? (and (sequential? edit) (= 2 (count edit)))
+        old-text (cond map-edit? (or (:old-text edit) (:oldText edit))
+                       pair-edit? (first edit))
+        new-text (cond map-edit? (or (:new-text edit) (:newText edit))
+                       pair-edit? (second edit))]
+    (if (and (some? old-text) (some? new-text))
+      {:old-text (str old-text)
+       :new-text (str new-text)}
+      (throw (ex-info "edit expects [old new] pairs or {:old-text ... :new-text ...} maps"
+                      {:type :edit-error :edit edit})))))
+
 (defn edit-result
   "Replace OLD-TEXT with NEW-TEXT in PATH through the edit tool's
-   implementation; returns its result map."
-  [path old-text new-text signal]
-  (edit-tool/edit-file path [{:old-text (str old-text)
-                              :new-text (str new-text)}] signal))
+   implementation, or apply a collection of EDITS against the original text
+   in one write; returns {:edits N :diff ...}."
+  ([path old-text new-text signal]
+   (edit-result path [{:old-text (str old-text)
+                       :new-text (str new-text)}] signal))
+  ([path edits signal]
+   (let [edits (cond
+                 (and (map? edits) (contains? edits :edits)) (:edits edits)
+                 (map? edits) [edits]
+                 :else edits)]
+     (edit-tool/edit-file path (mapv edit-pair->map edits) signal))))
 
 (defn write-text
-  "Write CONTENT to PATH and return the result content, throwing on error."
+  "Write CONTENT to PATH and return the write tool's success message; throws
+   on error."
   [path content signal]
-  (let [result (write-result path content signal)]
-    (if (:is-error result) (verb-failed! "write" result) (:content result))))
+  (let [characters (write-result path content signal)]
+    (str "wrote " characters " " (if (= 1 characters) "byte" "bytes")
+         " to " path)))
 
 (defn edit-text
-  "Replace OLD-TEXT with NEW-TEXT in PATH and return the result content,
-   throwing on error."
-  [path old-text new-text signal]
-  (let [result (edit-result path old-text new-text signal)]
-    (if (:is-error result) (verb-failed! "edit" result) (:content result))))
+  "Replace OLD-TEXT with NEW-TEXT in PATH, or apply a collection of EDITS,
+   and return the edit tool's success message. EDITS are [old new] pairs or
+   {:old-text ... :new-text ...} maps; all are matched against the original
+   text and written together."
+  ([path old-text new-text signal]
+   (edit-text path [{:old-text (str old-text)
+                     :new-text (str new-text)}] signal))
+  ([path edits signal]
+   (let [result (edit-result path edits signal)
+         replaced (:edits result)]
+     (str "replaced " replaced " " (if (= 1 replaced) "block" "blocks")
+          " in " path))))
+
+(defn- validate-bash-options!
+  "Reject :max-lines and :max-bytes values that are not positive integers."
+  [opts]
+  (doseq [k [:max-lines :max-bytes]]
+    (let [v (get opts k)]
+      (when (and (some? v) (not (tool-util/positive-integer? v)))
+        (throw (ex-info (str k " must be a positive integer")
+                        {:type :script/bad-argument :option k :value v})))))
+  opts)
 
 (defn bash-text
   "Run COMMAND through the bash tool's implementation and return its
-   rendered output. A nonzero exit is reported in that output, not thrown;
-   a timeout, abort or spawn failure stays an error. No default timeout:
-   pass :timeout when the caller wants a deadline."
+   rendered output. OPTS may carry :timeout (seconds), :cwd, :max-lines,
+   :max-bytes (positive integers) and :as (:map for a structured result).
+   Without :as :map a nonzero exit is reported in the string output, not
+   thrown; timeout, abort and spawn failures throw. With :as :map every
+   outcome returns a map, including failures and truncation details. No
+   default timeout."
   [command opts signal]
   (binding [bash-tool/*cancel-signal* signal]
-    (let [result (bash-tool/run-bash (merge {:command (str command)} opts)
-                                     nil {})
-          content (or (:content result) "")]
-      (if (and (:is-error result)
-               (not (str/includes? content "Command exited with code ")))
-        (verb-failed! "bash" result)
-        content))))
+    (let [opts (validate-bash-options! (or opts {}))
+          result (bash-tool/run-bash (merge {:command (str command)}
+                                            (dissoc opts :as))
+                                     nil {:structured? (= :map (:as opts))})]
+      (if (= :map (:as opts))
+        (select-keys result [:exit-code :output :truncated? :truncation
+                             :full-output-path :is-error :cancelled
+                             :timed-out :failed])
+        (let [content (or (:content result) "")]
+          (if (and (:is-error result)
+                   (not (str/includes? content "Command exited with code ")))
+            (verb-failed! "bash" result)
+            content))))))
 
 (declare tools-namespace)
 
@@ -1089,9 +1141,13 @@
                                           'write (fn [path content]
                                                    (write-text path content
                                                                (:cancelled *call-state*)))
-                                          'edit (fn [path old-text new-text]
-                                                  (edit-text path old-text new-text
-                                                             (:cancelled *call-state*)))
+                                          'edit (fn
+                                                  ([path old-text new-text]
+                                                   (edit-text path old-text new-text
+                                                              (:cancelled *call-state*)))
+                                                  ([path edits]
+                                                   (edit-text path edits
+                                                              (:cancelled *call-state*))))
                                           'bash (fn [command & [opts]]
                                                   (bash-text command opts
                                                              (:cancelled *call-state*)))})

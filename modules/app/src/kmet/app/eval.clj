@@ -739,16 +739,16 @@
 
 (def ^:private builtin-verb-help
   {"core/read" {:name "core/read" :kind :verb
-                :doc "Read PATH as text; OPTS may carry :offset and :limit (lines) — read a long file in ranges rather than slurping it whole."
+                :doc "Read PATH as text; OPTS may carry :offset, :limit, :tail (last N lines, not with :offset or :limit) and :footer. A :footer false drops the continuation hint when a limit stops before EOF."
                 :arglists '([path] [path opts])}
    "core/write" {:name "core/write" :kind :verb
-                 :doc "Write CONTENT to PATH whole, creating parents; success is silent."
+                 :doc "Write CONTENT to PATH whole, creating parents; returns the written-byte message."
                  :arglists '([path content])}
    "core/edit" {:name "core/edit" :kind :verb
-                :doc "Replace the one occurrence of OLD-TEXT with NEW-TEXT in PATH; zero or several occurrences is an error."
-                :arglists '([path old-text new-text])}
+                :doc "Replace one or more exact occurrences of OLD-TEXT in PATH; a vector of [old new] pairs matches all against the original text and writes once. Each OLD must occur exactly once; zero or several occurrences is an error."
+                :arglists '([path old-text new-text] [path edits])}
    "core/bash" {:name "core/bash" :kind :verb
-                :doc "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result. Batch independent commands with && or ; in one command. Pass {:timeout N} when a deadline is wanted."
+                :doc "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result. OPTS may carry :timeout (seconds), :cwd, :max-lines N, :max-bytes N (positive integers) and :as :map (a map for every outcome, including failures). stdout and stderr are combined."
                 :arglists '([command] [command opts])}
    "core/emit" {:name "core/emit" :kind :verb
                 :doc "Report VALUE as the call's result; without emit, a silent success reports its final value."
@@ -1282,10 +1282,14 @@
        "\n" (builtin-help-line)
        "\nUnqualified read is the file reader; clojure.core/read remains "
        "available. Read a long file in ranges with "
-       "(read path {:offset N :limit N}) instead of slurping it whole."
+       "(read path {:offset N :limit N :footer false}) or the last lines with "
+       "(read path {:tail N}); :footer false keeps an exact range free of the "
+       "continuation hint."
        "\nShell: (bash \"cmd\") returns output; a nonzero exit is a normal "
-       "result. Batch shell work in one command: (bash \"cat r.txt && cd /tmp "
-       "&& bb run st\"). Batch reads with several forms in one call."
+       "result. OPTS may carry :timeout (seconds), :cwd, :max-lines, "
+       ":max-bytes and :as :map. Batch shell work in one command: "
+       "(bash \"cat r.txt && bb run st\"). Batch reads with several forms in "
+       "one call; stdout and stderr are combined."
        "\nLocal let/fn bindings are scratch; every call starts in user."
        "\nOwnership: define in user; core, clj and eval are read-only; "
        "ext.* is live-only."

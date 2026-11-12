@@ -240,4 +240,81 @@
                                        {:content (str "Unknown tool: " name)
                                         :is-error true})))))
 
+(t/deftest test-core-file-verbs-report-their-result
+  (t/testing "write and edit return the tool's success message; edit accepts a
+            collection of replacements"
+    (let [s (kept-context)
+          path (str "target/test-core-file-verbs-" (random-uuid) ".txt")]
+      (try
+        (let [result (run-in s {}
+                             (str "(core/emit (core/write " (pr-str path) " "
+                                  (pr-str "alpha\nbeta\n") "))"))]
+          (t/is (str/includes? (:content result) "wrote")))
+        (let [result (run-in s {}
+                             (str "(core/emit (core/edit " (pr-str path)
+                                  " \"alpha\" \"gamma\"))"))]
+          (t/is (str/includes? (:content result) "replaced 1 block")))
+        (let [result (run-in s {}
+                             (str "(core/emit (core/edit " (pr-str path)
+                                  " [[\"gamma\" \"delta\"] [\"beta\" \"epsilon\"]]))"))]
+          (t/is (str/includes? (:content result) "replaced 2 blocks"))
+          (t/is (= "delta\nepsilon\n" (slurp path))))
+        (let [result (run-in s {}
+                             (str "(core/emit (core/edit " (pr-str path)
+                                  " {:edits [[\"delta\" \"one\"] [\"epsilon\" \"two\"]]}))"))]
+          (t/is (str/includes? (:content result) "replaced 2 blocks"))
+          (t/is (= "one\ntwo\n" (slurp path))))
+        (finally (fs/delete-if-exists path))))))
+
+(t/deftest test-edit-map-values-are-normalized
+  (t/testing "map-form edits stringify old/new like pair-form edits"
+    (let [s (kept-context)
+          path (str "target/test-edit-map-values-" (random-uuid) ".txt")]
+      (try
+        (run-in s {} (str "(core/write " (pr-str path) " \"1\")"))
+        (let [result (run-in s {}
+                             (str "(core/emit (core/edit " (pr-str path)
+                                  " {:edits [{:old-text 1 :new-text 2}]}))"))]
+          (t/is (str/includes? (:content result) "replaced 1 block"))
+          (t/is (= "2" (slurp path))))
+        (finally (fs/delete-if-exists path))))))
+
+(t/deftest test-edit-map-requires-both-keys
+  (t/testing "a map edit without old or new text is rejected, not stringified"
+    (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"edit expects"
+                            (script/edit-text "unused.txt" [{:old-text "a"}] nil)))
+    (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"edit expects"
+                            (script/edit-text "unused.txt" [{:new-text "b"}] nil)))))
+
+(t/deftest test-bash-options-must-be-positive-integers
+  (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"positive integer"
+                          (script/bash-text "echo hi" {:max-lines 0} nil)))
+  (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"positive integer"
+                          (script/bash-text "echo hi" {:max-bytes 1.5} nil))))
+
+(t/deftest ^:slow test-core-bash-options
+  (t/testing "bash accepts :cwd, :max-lines and :as :map"
+    (let [s (kept-context)
+          dir (test-tmp/temp-dir! "test-core-bash-")
+          marker-name (str "cwd-marker-" (random-uuid) ".txt")
+          marker (str (fs/path dir marker-name))]
+      (try
+        (run-in s {}
+                (str "(core/bash "
+                     (pr-str (str "echo cwd-ok > " marker-name))
+                     " {:cwd " (pr-str dir) "})"))
+        (t/is (fs/exists? marker))
+        (t/is (str/includes? (slurp marker) "cwd-ok"))
+        (let [result (run-in s {}
+                             "(core/emit (core/bash \"echo alpha && echo beta && echo gamma\" {:max-lines 2}))")]
+          (t/is (str/includes? (:content result) "gamma"))
+          (t/is (not (str/includes? (:content result) "alpha"))))
+        (let [result (run-in s {}
+                             "(core/emit (core/bash \"echo hi && exit 3\" {:as :map}))")]
+          (t/is (str/includes? (:content result) ":exit-code 3"))
+          (t/is (str/includes? (:content result) "hi")))
+        (finally
+          (fs/delete-tree dir)
+          (fs/delete-if-exists marker-name))))))
+
 (t/deftest test-core-verbs-use-the-implementations-not-the-tool-bridge (let [s (kept-context) read-tools {"read" (tool-def "read")} bash-tools {"bash" (tool-def "bash")} path (str "target/test-core-verbs-" (random-uuid) ".txt")] (t/is (str/includes? (:content (run-with-dispatch s read-tools "(core/emit (core/read \"no-such-file\"))")) "File not found") "core/read calls the read implementation, not the tool stub") (t/is (= "hi\n" (:content (run-with-dispatch s bash-tools "(core/emit (core/bash \"echo hi\"))"))) "core/bash calls the bash implementation, not the tool stub") (try (run-with-dispatch s {"write" (tool-def "write")} (str "(core/write " (pr-str path) " \"old\")")) (t/is (= "old" (slurp path))) (run-with-dispatch s {"edit" (tool-def "edit")} (str "(core/edit " (pr-str path) " \"old\" \"new\")")) (t/is (= "new" (slurp path))) (finally (fs/delete-if-exists path)))))
