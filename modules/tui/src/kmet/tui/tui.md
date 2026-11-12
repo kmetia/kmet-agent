@@ -2114,6 +2114,65 @@ the analysis is not redone:
   the primitive would forbid restart; teardown belongs to the mode owners
   (§5.1).
 
+### 15.4 Evaluated from glimmer-datastar — deferred and not borrowed
+
+Recorded from [Rendering in batches with glimmer and Datastar](https://yogthos.net/posts/2026-11-10-glimmer-datastar.html)
+(2026-11-10), the datastar/SSE follow-up to the glimmer study in §15.2. The
+server-rendering layers (SSE streams, per-client buffers, element patches)
+have no inline-terminal analogue; the reactive ideas were checked
+individually:
+
+- **Ticks — already at render time; producer-side batching deferred.**
+  `tui-request-render` sets an idempotent flag and the loop renders at its
+  16 ms pace (§6), while `reakt/flush!` runs each dirty reaction once per
+  pass (§3.1). What the post adds is batching *writes*. kmet's per-delta path
+  (`kmet.app.loop.completion` appends to `text-buf`, builds a cumulative
+  `:message-update`, dispatches it, and the UI appends the delta again) is
+  app-layer streaming policy, not a TUI/reakt gap. Deferred: revisit if
+  delta-rate CPU/GC on a long response becomes a measured problem; the shape
+  would be accumulate chunks, flush on a timer and before
+  tool-call/signature/end.
+- **Sliding buffer of one — not applicable.** There is one local terminal and
+  no per-client queue; the 16 ms frame pace already bounds intermediate
+  paints.
+- **`tx!` — deferred.** The post's case is a render observing half of a
+  multi-write handler. kmet has the same window: agent events run on the
+  agent-loop thread and write UI atoms outside `dispatch-lock` (§6
+  serializes input and rendering only), so a frame can land between two
+  writes in one handler. Not adopted: the first fix is to fold related
+  writes into one swap/atom; a transaction queue in reakt would need drain
+  order (before `reakt/flush!`, under the lock), error and lifecycle rules.
+  Revisit only on an observed partial frame, not pre-emptively.
+- **Component cache — per-instance already; cross-client sharing does not
+  apply.** `track!` caches each component per width and `cached-lines`
+  reuses unchanged assemblies (§3.2); the post's win is sharing one render
+  across many server clients, which a single terminal does not have. The
+  parent-level probe (skip a child's `render` call) was measured and
+  declined in `perf.md` §23.
+- **Patches — already the frame writer's job, in a different shape.**
+  `kmet.tui.frame/render-frame!` emits only the line diff, and
+  `concat-cached` returns the previous vector for an unchanged assembly.
+  Patch-by-element-id needs an owned DOM; inline scrollback is
+  line-addressed and cannot patch history.
+- **Tables/aggregates (DBSP) — deferred, no consumer.** The post's keyed
+  table + view + inverse aggregate makes a derived count/sum follow the
+  changed row. kmet's nearest derived state (footer usage totals and context
+  tokens in `kmet.ui.tui.footer-data-provider`) is O(entries) on entry
+  append, not per delta, and a keyed view would not shrink the transcript
+  lines the frame still has to emit. Revisit for a concrete live
+  filtered/counting view over a keyed collection; do not add a second
+  derivation model to reakt speculatively.
+- **`capture` — already internal; do not expose as a second tracking path.**
+  `kmet.reakt.core`'s `*tracking-scope*` + `*on-tracked-read*` is the post's
+  capture, consumed by `track-render`, including watch-at-read and the
+  watched-set release. The post's cache re-reads captured values on a hit;
+  kmet deliberately trusts its invalidation edges instead (`perf.md` §23),
+  so adopting that policy would be a regression.
+- **Release on close — already done.** `track-render` unwatches refs the
+  last pass stopped reading, `dispose`/`with-let` clean up deterministically,
+  and the weak registry sweeps the rest (§3.2/§5), covering the post's
+  stream-close cleanup without a per-stream subscription set.
+
 ## 16. Jolt backends — FFI and concurrency notes
 
 The two `.jolt` backends (`terminal-native-unix`, `terminal-native-win`)
