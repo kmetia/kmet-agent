@@ -95,6 +95,24 @@
       (t/is (true? (:is-error result)))
       (t/is (= "Command aborted" (:content result))))))
 
+(t/deftest test-bash-result-map-exposes-exit-and-tail
+  (t/testing "result-map keeps the exit code, shown output and truncation flag"
+    (let [result (bash/run-bash {:command "seq" :max-lines 2}
+                                nil
+                                {:operations (output-ops "1\n2\n3\n4\n5\n" 0)
+                                 :structured? true})]
+      (t/is (= 0 (:exit-code result)))
+      (t/is (= "4\n5" (:output result)))
+      (t/is (true? (:truncated? result)))
+      (t/is (= 2 (get-in result [:truncation :max-lines])))
+      (t/is (str/includes? (:content result) "4\n5"))
+      (t/is (not (str/includes? (:content result) "1\n2")))))
+  (t/testing "the model-facing result keeps its original shape"
+    (let [result (run (output-ops "ok\n" 0) {:command "true"})]
+      (t/is (not (contains? result :exit-code)))
+      (t/is (not (contains? result :output)))
+      (t/is (not (contains? result :truncated?))))))
+
 (t/deftest test-bash-truncation-footer
   (t/testing "the line-cut footer names the shown range and the full-output file"
     (let [text (str/join "\n" (map #(str "line " %) (range 1 2002)))

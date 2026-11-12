@@ -691,8 +691,10 @@ the row does not mount a separate eval source for them, and there is no
 `tools` namespace. `session-recall` calls the same `run-recall`
 implementation as the `session_recall` tool.
 `bash` is the plain-output shell verb: its result carries the command output
-and a status footer, and a nonzero exit is a normal result. The namespaced
-`babashka.process/sh` remains available for callers that need the process map
+and a status footer, and a nonzero exit is a normal result. Its options add
+`:cwd`, `:max-lines`, `:max-bytes` and `:as :map` (exit code, shown output,
+truncation and spill path; failures also return the map). The namespaced
+`babashka.process/sh` remains for callers that need the process map
 (`:out`, `:err`, `:exit`). `help` and `describe` are installed in
 `clojure.core`, so they resolve unqualified and a model definition can shadow
 them. The alias prelude refers the core verbs unqualified, so `(read ...)` and

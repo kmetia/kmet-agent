@@ -110,20 +110,47 @@
              " (" (bash-out/format-size bash-out/DEFAULT-MAX-BYTES) " limit)"
              ". Full output: " full-output-path "]")))))
 
+(defn- truncation-details
+  "The structured truncation details used by the eval :as :map result."
+  [truncation full-output-path]
+  {:total-lines (:total-lines truncation)
+   :total-bytes (:total-bytes truncation)
+   :shown-lines (:output-lines truncation)
+   :output-bytes (:output-bytes truncation)
+   :truncated-by (:truncated-by truncation)
+   :last-line-partial (:last-line-partial truncation)
+   :last-line-bytes (:last-line-bytes truncation)
+   :max-bytes (:max-bytes truncation)
+   :max-lines (:max-lines truncation)
+   :full-output-path full-output-path})
+
 (defn- result-map
   "The model-facing result of an executor RESULT (pi: formatOutput +
    appendStatus): empty command output shows \"(no output)\", a throw keeps its
    status (and partial output for abort/timeout), and truncation details
-   survive when the tool returns rather than throws."
-  [result timeout]
+   survive when the tool returns rather than throws. STRUCTURED? adds the
+   eval-only fields (:exit-code, :output, flags, and truncation details when
+   truncated); the model-facing tool keeps its original shape."
+  [result timeout structured?]
   (let [{:keys [output exit-code cancelled truncated truncation full-output-path
                 timed-out failed timeout-seconds]} result
-        footer (truncation-footer truncation full-output-path)]
+        footer (truncation-footer truncation full-output-path)
+        common (when structured?
+                 {:exit-code exit-code
+                  :output (or output "")
+                  :truncated? (boolean truncated)
+                  :full-output-path full-output-path
+                  :cancelled (boolean cancelled)
+                  :timed-out (boolean timed-out)
+                  :failed (boolean failed)})]
     (if cancelled
       ;; Pi: appendStatus — only adds \n\n separator when there is output
-      {:content (str (when (seq (str output footer)) (str output footer "\n\n"))
-                     "Command aborted")
-       :is-error true}
+      (cond-> (merge common
+                     {:content (str (when (seq (str output footer)) (str output footer "\n\n"))
+                                    "Command aborted")
+                      :is-error true})
+        (and structured? truncated)
+        (assoc :truncation (truncation-details truncation full-output-path)))
       (let [is-error (boolean (or timed-out failed (not= exit-code 0)))
             base (if (and (not (or timed-out failed)) (empty? output))
                    "(no output)"
@@ -141,32 +168,21 @@
                              (str base footer "\n\n"))
                            status)
                       (str base footer))]
-        (if truncated
-          (cond-> {:content content
-                   :is-error is-error}
-            (not (or timed-out failed))
-            (assoc :truncation {:total-lines (:total-lines truncation)
-                                :total-bytes (:total-bytes truncation)
-                                :shown-lines (:output-lines truncation)
-                                :output-bytes (:output-bytes truncation)
-                                :truncated-by (:truncated-by truncation)
-                                :last-line-partial (:last-line-partial truncation)
-                                :last-line-bytes (:last-line-bytes truncation)
-                                :max-bytes (:max-bytes truncation)
-                                :max-lines (:max-lines truncation)
-                                :full-output-path full-output-path}))
-          {:content content
-           :is-error is-error})))))
+        (cond-> (merge common {:content content :is-error is-error})
+          (and truncated (or structured? (not (or timed-out failed))))
+          (assoc :truncation (truncation-details truncation full-output-path)))))))
 
 (defn run-bash
   "Execute through the shared executor with the tool's spawn options (pi: the
-   BashToolOptions an execute closure closes over)."
+   BashToolOptions an execute closure closes over). ARGS may carry :cwd,
+   :max-lines and :max-bytes in addition to the tool's :command and :timeout."
   [args on-update {:keys [shell-args temp-file-prefix spawn-hook
-                          expose-session-env? operations shell-path command-prefix]}]
+                          expose-session-env? operations shell-path command-prefix
+                          structured?]}]
   (let [;; an explicit tool option wins; otherwise the run's :shell service
         shell-path (or shell-path (:shell-path *shell*))
         command-prefix (or command-prefix (:command-prefix *shell*))
-        {:keys [command timeout]} args
+        {:keys [command timeout cwd max-lines max-bytes]} args
         live-chunks (atom [])  ;; whole decoded chunks — no mid-string truncation
         live-bytes (atom 0)
         last-update (atom 0)
@@ -189,7 +205,8 @@
     (try
       (let [result (bash-exec/execute-bash
                     {:command command
-                     :cwd (tool-util/cwd)
+                     :cwd (tool-util/resolve-tool-path
+                           (or (some-> cwd str) (tool-util/cwd)))
                      :timeout timeout  ;; nil = no timeout (pi: optional, no default)
                      :signal *cancel-signal*  ;; agent-loop cancel (pi: AbortSignal)
                      :env (when (and expose-session-env? *session-env-fn*)
@@ -205,11 +222,19 @@
                                  (swap! live-bytes + (bash-out/byte-length chunk))
                                  (trim-live!)
                                  (send-update))
-                     :max-lines bash-out/DEFAULT-MAX-LINES
-                     :max-bytes bash-out/DEFAULT-MAX-BYTES})]
-        (result-map result timeout))
+                     :max-lines (or max-lines bash-out/DEFAULT-MAX-LINES)
+                     :max-bytes (or max-bytes bash-out/DEFAULT-MAX-BYTES)})]
+        (result-map result timeout structured?))
       (catch Exception e
-        {:content (str (ex-message e)) :is-error true}))))
+        (let [message (str (ex-message e))]
+          (cond-> {:content message :is-error true}
+            structured?
+            (merge {:output message
+                    :exit-code nil
+                    :truncated? false
+                    :cancelled false
+                    :timed-out false
+                    :failed true})))))))
 
 (defn create-tool
   "Build a bash Tool record (pi: createBashTool/createShellToolDefinition —
