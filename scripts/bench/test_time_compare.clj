@@ -16,6 +16,10 @@
 ;;       --only HOST     run only HOST (bb|jolt); logs already on disk still join
 ;;       --reuse         don't run anything — render the table from the logs
 ;;       --quiet         capture without echoing the runs' output
+;;       --warmup N      unmeasured warmup rounds per host (default 2; 0 =
+;;                       measure cold). Jolt's first pass compiles AOT misses;
+;;                       the second keys on the sidecars the first wrote, so
+;;                       one pass can still leave the measured run compiling.
 ;;       --log-dir DIR   logs + run metadata (default: target/test-time)
 ;;       --bb PATH       bb executable (default: bb from PATH)
 ;;       --jolt PATH     jolt executable (default: jolt from PATH)
@@ -25,6 +29,8 @@
 ;; Filters are passed through to both runners verbatim (a plain test var
 ;; name, an ns/var pair, or a whole namespace). Logs and run metadata stay
 ;; under --log-dir, so `--reuse` re-renders the table without re-running.
+;; Measured hosts run bb then jolt in one invocation; `--only HOST` with the
+;; same --log-dir runs one host per invocation, so the order can be flipped.
 ;; On the ^:slow suite ratios mislead where a test sleeps — the wall-clock
 ;; wait dominates; read those columns as absolute per-namespace times.
 
@@ -171,14 +177,16 @@
 (defn- meta-file [log-dir] (fs/file log-dir "run.edn"))
 
 (defn- run-host!
-  "Run CMD, echo (unless QUIET?) and tee its combined output to LOG-FILE.
+  "Run CMD with ENV vars, echo (unless QUIET?) and tee its combined output to LOG-FILE.
    Lines are timestamped (nanoTime, µs) as they arrive, which yields each
    namespace's externally measured wall time (the gap between its Testing
    header and its summary — both engines print the header before running the
    namespace). Returns {:cmd :exit :wall-us :wall-ns-us {ns us}}."
-  [cmd log-file quiet?]
+  [cmd log-file quiet? env]
   (let [t0 (System/nanoTime)
-        proc (p/process cmd {:in :inherit :out :pipe :err :out})
+        opts (cond-> {:in :inherit :out :pipe :err :out}
+               (seq env) (assoc :env env))
+        proc (p/process cmd opts)
         pairs (with-open [w (io/writer log-file)]
                 (into []
                       (keep (fn [line]
@@ -202,6 +210,23 @@
   [run]
   (or (:wall-us run)
       (when-let [ms (:wall-ms run)] (* 1000 ms))))
+
+(defn- warmup-log-file [log-dir host round]
+  (fs/file log-dir (str (name host) "-warmup-" round ".log")))
+
+(defn- warmup-host!
+  "Run CMD once, unmeasured, to warm HOST before the measured run. Jolt
+   compiles AOT cache misses; JOLT_AOT_ASYNC=0 keeps that compilation
+   in-process so the warmup process cannot exit while its compile worker is
+   still filling the cache. Output is captured to LOG-FILE and not echoed."
+  [host cmd log-file round rounds]
+  (let [env (when (= :jolt host) {"JOLT_AOT_ASYNC" "0"})
+        {:keys [exit] :as run} (run-host! cmd log-file true env)]
+    (println (format "    warmup %d/%d %-4s wall %s, exit %s"
+                     round rounds (name host) (fmt-us (run-wall-us run)) exit))
+    (flush)
+    (when-not (zero? exit)
+      (println "    warning: warmup exited nonzero — the measured run will likely fail too"))))
 
 (defn- run-wall-ns
   "RUN's per-namespace wall microseconds, accepting pre-µs metadata."
@@ -354,7 +379,8 @@
    "--quiet" :quiet? "-h" :help "--help" :help})
 
 (def ^:private value-opts
-  {"--only" :only "--log-dir" :log-dir "--bb" :bb "--jolt" :jolt "--sort" :sort})
+  {"--only" :only "--log-dir" :log-dir "--bb" :bb "--jolt" :jolt
+   "--sort" :sort "--warmup" :warmup})
 
 (defn- usage []
   (println
@@ -370,6 +396,9 @@
      "      --only HOST     run only HOST (bb|jolt); logs already on disk still join"
      "      --reuse         don't run anything — render the table from the logs"
      "      --quiet         capture without echoing the runs' output"
+     "      --warmup N      unmeasured warmup rounds per host (default 2,"
+     "                      0 = measure cold); Jolt needs a second pass to key"
+     "                      on the AOT sidecars its first pass writes"
      "      --log-dir DIR   logs + run metadata (default: target/test-time)"
      "      --bb PATH       bb executable (default: bb from PATH)"
      "      --jolt PATH     jolt executable (default: jolt from PATH)"
@@ -381,7 +410,7 @@
   [args]
   (loop [args (vec args)
          opts {:slow? false :only nil :reuse? false :quiet? false
-               :log-dir "target/test-time" :bb "bb" :jolt "jolt"
+               :warmup "2" :log-dir "target/test-time" :bb "bb" :jolt "jolt"
                :sort :jolt :filters []}]
     (if (empty? args)
       opts
@@ -410,11 +439,15 @@
   (when (and only (not (#{"bb" "jolt"} only)))
     (println (str "--only expects bb or jolt, got: " only))
     (System/exit 2))
-  (let [sort-k (keyword sort)]
+  (let [sort-k (keyword sort)
+        warmup (parse-long (str (:warmup opts)))]
     (when-not (#{:jolt :bb :ratio :name} sort-k)
       (println (str "--sort expects jolt, bb, ratio or name, got: " sort))
       (System/exit 2))
-    (assoc opts :only (some-> only keyword) :sort sort-k)))
+    (when-not (and warmup (not (neg? warmup)))
+      (println (str "--warmup expects a non-negative integer, got: " (:warmup opts)))
+      (System/exit 2))
+    (assoc opts :only (some-> only keyword) :sort sort-k :warmup warmup)))
 
 (defn -main [& args]
   (let [{:keys [slow? only reuse? quiet? filters] :as opts} (normalize-opts (parse-args args))
@@ -425,6 +458,19 @@
                         only [only]
                         :else [:bb :jolt])
         _ (fs/create-dirs log-dir)
+        _ (when (pos? (:warmup opts))
+            (println (str "\n==> warmup — " (:warmup opts)
+                          " unmeasured round(s) per host (fills Jolt's AOT cache)"))
+            (dotimes [i (:warmup opts)]
+              (doseq [host run-hosts]
+                (let [exe (exe-for host)]
+                  (when (fs/which exe)
+                    (let [cmd (into [exe task] filters)]
+                      (println (str "    " (str/join " " cmd)))
+                      (flush)
+                      (warmup-host! host cmd
+                                    (warmup-log-file log-dir host (inc i))
+                                    (inc i) (:warmup opts))))))))
         runs (into {}
                    (keep (fn [host]
                            (let [exe (exe-for host)]
@@ -435,7 +481,7 @@
                                      lf (log-file log-dir host)]
                                  (println (str "\n==> " (str/join " " cmd) "\n    log: " lf))
                                  (flush)
-                                 [host (run-host! cmd lf quiet?)])))))
+                                 [host (run-host! cmd lf quiet? nil)])))))
                    run-hosts)
         mf (meta-file log-dir)
         old (read-meta mf)
