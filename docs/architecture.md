@@ -709,8 +709,16 @@ clojure extension's tools wrap the shared
 `clj/nrepl-eval` verb, so nREPL evaluation likewise needs no extension. The
 eval tool's description and `(help)` name the shared script surface
 (aliases, require-able namespaces and bundled libs) without depending on
-`codemode`, since either row can be selected alone; host-specific sandbox
-differences stay in this section, not in the model-facing text. A mounted eval
+`codemode`, since either row can be selected alone. The host-specific half is
+`(help :surface)`: the environment records the base namespace map and the
+host's class-table shape when it builds, and the topic renders the aliases,
+every copied `clojure.*`/`babashka.*` namespace, the bundled roots, the four
+`kmet.libs` ports, the class surface and the limits from that record — so the
+manual names what the sandbox actually copied, not what the host claims, and
+`(all-ns)` stays the live authority. The require boundary error names the same
+categories (kmet-owned, not loaded at build, outside the roots), so a failed
+`require` is a discovery step. Host-specific sandbox differences stay in the
+manual, not in the model-facing text. A mounted eval
 source's id is also a help topic — `(help :license)` lists that source's
 description and verbs, while `(help)` gives it one summary/count line and
 derives the topic list from the mounted sources. `list` and

@@ -786,11 +786,21 @@
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "kmet.app.loop"))
     (t/is (str/includes? (:content r) "cannot load namespace")
-          "the sandbox's own boundary error, not SCI's generic one"))
+          "the sandbox's own boundary error, not SCI's generic one")
+    (t/is (str/includes? (:content r) "kmet's own namespaces are excluded")))
   (let [r (run "(require 'kmet.libs.edn-store)")]
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "kmet.libs.edn-store")
-          "the kmet.libs allow-list is the portable ports, not every lib")))
+          "the kmet.libs allow-list is the portable ports, not every lib"))
+  (let [r (run "(require 'cheshire.core)")]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "outside the sandbox's namespace roots"))
+    (t/is (not (str/includes? (:content r) "kmet's own namespaces"))
+          "a library outside the roots is not blamed on kmet"))
+  (let [r (run "(require 'clojure.java.jdbc)")]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "had not loaded")
+          "a host namespace absent at build is named as not copied")))
 
 (t/deftest test-codemode-namespace-discovery
   ;; the sandbox is self-describing: all-ns lists its surface, ns-publics its vars

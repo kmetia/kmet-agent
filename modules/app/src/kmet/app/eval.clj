@@ -952,6 +952,8 @@
   "The built-in help topics, in the order the index names them."
   [{:key :core
     :summary "sandbox verbs, shell, ownership, discovery"}
+   {:key :surface
+    :summary "host, aliases, namespaces, classes, limits"}
    {:key :library
     :summary "saved and session-only definitions, scope roots"}
    {:key :persistence
@@ -1201,6 +1203,79 @@
        "with ERROR and, in a multi-form call, name the failing form and what "
        "ran. (emit-image path) attaches an image."))
 
+(defn- internal-namespace?
+  "Is NAMESPACE an implementation subnamespace help collapses under its parent?"
+  [namespace]
+  (boolean (some #{"impl" "internal" "nrepl"}
+                 (str/split (str namespace) #"\."))))
+
+(defn- namespace-line
+  "One require-able root line for NAMES, with implementation subnamespaces
+   counted rather than named. NIL when NAMES is empty."
+  [label names]
+  (when (seq names)
+    (let [shown (remove internal-namespace? names)
+          hidden (- (count names) (count shown))]
+      (str "  " label " (" (count names) " copied"
+           (when (pos? hidden) (str ", " hidden " internal"))
+           "): " (str/join ", " shown)))))
+
+(defn- bundled-line
+  "The fixed bundled set as `root.* (count)` pairs."
+  [groups]
+  (let [lines (keep (fn [[root names]]
+                      (when (seq names) (str root ".* (" (count names) ")")))
+                    groups)]
+    (when (seq lines) (str "  bundled: " (str/join ", " lines)))))
+
+(def ^:private class-surface-texts
+  "The class-table paragraph per `script/class-surface` shape."
+  {:none (str "none — this host's SCI exposes no Java class table, so there "
+              "is no Java interop: java.util.Date, java.time.Instant, "
+              "StringBuilder, static methods and constructors all fail. Use "
+              "babashka.fs, babashka.process, clojure.string and the "
+              "kmet.libs ports.")
+   :subset (str "an explicit subset — java.lang core, java.io and java.util "
+                "types; other JDK classes fail. Use the portable libraries "
+                "for anything outside it.")
+   :full (str "the host's full class table (System, Thread, java.io.*, "
+              "java.util.*); SCI's own core still differs from the host's, "
+              "but a host class name resolves.")})
+
+(defn- surface-help
+  "The `(help :surface)` text: the host, aliases, the grouped namespaces the
+   base context copied, the class surface and the limits. Built from the map
+   `script/surface` recorded when this session's environment was built, so it
+   names what the sandbox actually has rather than what the host claims."
+  [surface]
+  (let [{:keys [host classes aliases namespaces]} surface
+        {:keys [clojure babashka bundled libs]} (or namespaces {})]
+    (str "Surface (host: " host ")\n"
+         "Aliases: " (str/join ", " (map (fn [[alias ns-sym]]
+                                           (str alias " -> " ns-sym))
+                                         aliases))
+         "\nRequire-able namespaces (copied when this session's sandbox was built; "
+         "(all-ns) lists the live set):\n"
+         (namespace-line "clojure.*" clojure) "\n"
+         (namespace-line "babashka.*" babashka) "\n"
+         (bundled-line bundled) "\n"
+         (namespace-line "kmet.libs" libs) "\n"
+         "  clojure.core: SCI's own core (not the host's), with (help) and "
+         "(describe) added.\n"
+         "Not require-able: other kmet.* namespaces; tools; babashka.nrepl; "
+         "libraries outside those roots (e.g. cheshire.core, jsonista.core).\n"
+         "Sandbox namespaces: core (file/shell verbs), clj (structured "
+         "edits, nREPL), eval (library/discovery); user is each call's "
+         "namespace; ext.<id> is live-only.\n"
+         "Classes: " (get class-surface-texts classes) "\n"
+         "Limits: 16 KiB / 2,000 lines per result by default (50 KiB with "
+         ":max-output-bytes); timeout capped at 24 h (omit or 0 = no deadline); "
+         "bash has no default timeout; stdout/stderr are discarded unless "
+         "emitted; up to 8 images per call, 4 MiB base64 each; (help :results) "
+         "has the result ring.\n"
+         "Discovery: (all-ns), (ns-publics 'ns), (resolve 'name), "
+         "(describe 'name), (index \"text\").")))
+
 (defn- core-help
   []
   (str "Core: Clojure/SCI — " script/core-summary
@@ -1219,9 +1294,10 @@
        "(save 'name [doc]), (patch 'name old new), "
        "(edit-form 'name new-source), (move 'name :global|:cwd), "
        "(result [id opts])."
-       "\nDiscovery: (all-ns) lists namespaces; (ns-publics 'ns) lists a "
-       "namespace's vars, including session-only definitions. A patch or "
-       "edit-form result must keep a docstring."
+       "\nDiscovery: (all-ns) lists the live namespaces — the copied set plus "
+       "session-created ones; (ns-publics 'ns) lists a namespace's vars, including session-only "
+       "definitions; (help :surface) names the host's aliases, classes and "
+       "exact surface. A patch or edit-form result must keep a docstring."
        "\nReporting: (emit value) or end on the final value; stdout and stderr "
        "are discarded; (help :results) has the result contract."))
 
@@ -1289,6 +1365,7 @@
   [env topic]
   (case topic
     :library (library-help env)
+    :surface (surface-help (:surface env))
     :persistence (persistence-help)
     :results (results-help)
     :core (core-help)
@@ -1303,9 +1380,11 @@
 (defn- help-index
   [env]
   (let [entries (library-entries env)
-        session-only (session-only-entries env)]
+        session-only (session-only-entries env)
+        host (or (get-in env [:surface :host]) (script/host-label))]
     (str "Eval help: (help) index, (help :topic) or (help \"topic\") a topic, "
          "or (help 'name) one verb or definition."
+         "\nHost: " host " — (help :surface) for this host's exact surface."
          "\nTopics:"
          "\n" (str/join "\n" (map (fn [{:keys [key summary]}]
                                     (str "  " key " — " summary))
@@ -1330,7 +1409,8 @@
 
 (defn- environment-help
   "The `(eval/help)` text: an index, a topic, or one definition's interface.
-   A keyword or string names a topic; a symbol names a definition. `help` and
+   A keyword or string names a topic first; an unmatched string falls back to
+   a definition or verb name, and a symbol names a definition. `help` and
    `describe` are the bare aliases."
   ([env] (help-index env))
   ([env what]
@@ -1342,8 +1422,8 @@
      (string? what)
      (if-let [topic (topic-for env what)]
        (help-topic-text env topic)
-       (str "No help for topic " (pr-str what) "; the index:\n"
-            (help-index env)))
+       (help-or-index env (str "No help for topic or name " (pr-str what))
+                      #(help-entry-text env (describe-entry env (symbol what)))))
      (symbol? what)
      (help-or-index env (str "No help for " (pr-str what))
                     #(help-entry-text env (describe-entry env what)))
@@ -1757,8 +1837,9 @@
                       ([name key] (describe @env-ref name key)))
         save-fn (fn [name & [doc]] (save-definition! @env-ref name doc))
         result-fn (fn [& args] (apply result-command @env-ref args))
+        base (script/base-namespaces)
         sci-ctx (script/context
-                  (assoc (update (script/base-namespaces) 'clojure.core merge
+                  (assoc (update base 'clojure.core merge
                                  {'help help-fn 'describe describe-fn})
                          'clj {'nrepl-eval
                                (fn [args]
@@ -1787,7 +1868,8 @@
                                 'help help-fn})
                   (script/interrupt-fn interrupt "eval")
                   "eval")
-        env (assoc env :sci-ctx sci-ctx :interrupt interrupt)
+        env (assoc env :sci-ctx sci-ctx :interrupt interrupt
+                   :surface (script/surface base))
         _ (reset! env-ref env)
         sources (refresh-sources! service env cwd signal)
         deadline (+ (concurrent/monotonic-ms) build-budget-ms)]

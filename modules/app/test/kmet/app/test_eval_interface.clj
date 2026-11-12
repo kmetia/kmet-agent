@@ -9,7 +9,8 @@
             [kmet.app.eval.definitions :as defs]
             [kmet.app.eval.files :as eval-files]
             [kmet.app.test-eval-support :as support]
-            [kmet.app.tools.registry :as tools]))
+            [kmet.app.tools.registry :as tools]
+            [kmet.app.tools.script :as script]))
 
 (defn- records [code]
   (:defs (defs/parse code "user")))
@@ -132,12 +133,12 @@
           "a string names the same topic as its keyword")
     (let [miss (support/eval! env "(eval/help \"nope\")")]
       (t/is (not (:is-error miss)) (:content miss))
-      (t/is (str/includes? (:content miss) "No help for topic \"nope\""))
+      (t/is (str/includes? (:content miss) "No help for topic or name \"nope\""))
       (t/is (str/includes? (:content miss) "Built-in verbs:")))
-    (let [miss (support/eval! env "(help \"read\")")]
-      (t/is (not (:is-error miss)) (:content miss))
-      (t/is (str/includes? (:content miss) "No help for topic \"read\""))
-      (t/is (str/includes? (:content miss) "Built-in verbs:")))))
+    (let [named (support/eval! env "(help \"read\")")]
+      (t/is (not (:is-error named)) (:content named))
+      (t/is (str/includes? (:content named) "read verb"))
+      (t/is (str/includes? (:content named) "Read PATH as text")))))
 
 (t/deftest test-an-existing-library-file-gains-its-interface
   (let [env (support/eval-ctx)
@@ -282,6 +283,7 @@
       (t/is (str/includes? index "  read ([path] [path opts]) - "))
       (t/is (<= (count index) 4096) "the index stays one bounded discovery call")
       (t/is (str/includes? index "Topics:\n  :core — sandbox verbs"))
+      (t/is (str/includes? index "  :surface — host, aliases"))
       (t/is (not (str/includes? index "core/sh")))
       (t/is (str/includes? index "bash ([command] [command opts]) - "))
       (t/is (not (str/includes? index "tools/")))
@@ -298,6 +300,28 @@
                            "clj/nrepl-eval verb ([args]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/describe 'clj/nrepl-eval :doc)"))
                            "running nREPL server")))))
+
+(t/deftest test-surface-help-names-the-copied-babashka-namespaces
+  (let [env (support/eval-ctx)
+        text (:content (support/eval! env "(help :surface)"))
+        base (script/base-namespaces)
+        babashka-names (->> (keys base)
+                            (map str)
+                            (filter #(str/starts-with? % "babashka."))
+                            (remove (fn [n]
+                                      (some #{"impl" "internal" "nrepl"}
+                                            (str/split n #"\."))))
+                            sort)]
+    (t/is (str/includes? text (str "Surface (host: " (script/host-label) ")")))
+    (t/is (str/includes? text "Aliases: fs -> babashka.fs"))
+    (t/is (str/includes? text "kmet.libs.json"))
+    (t/is (str/includes? text "clojure.core: SCI's own core"))
+    (doseq [n babashka-names]
+      (t/is (str/includes? text n) n))
+    (t/is (str/includes? text (case (script/class-surface)
+                                :none "Classes: none"
+                                :subset "Classes: an explicit subset"
+                                :full "Classes: the host's full class table")))))
 
 (t/deftest test-bare-help-and-describe-aliases
   (let [env (support/eval-ctx)]

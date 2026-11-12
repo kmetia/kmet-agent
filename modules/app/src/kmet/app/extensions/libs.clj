@@ -12,9 +12,10 @@
    the bb-bundled ports there), so both SCI contexts inject the set
    identically.
 
-   `bundled-library-namespace?` is the set's one piece of code: the
-   membership rule shared by the extension context filter and the codemode
-   sandbox's namespace copy, so the surface cannot drift from the set.
+   `bundled-library-roots` and `bundled-library-namespace?` are the set's
+   one piece of code: the roots and the membership rule shared by the
+   extension context filter and the sandbox's namespace copy, so the surface
+   cannot drift from the set.
 
    clojure.* (core.async and rrb-vector included) and babashka.fs /
    babashka.process are shared by the host clauses in kmet.app.extensions.core,
@@ -28,7 +29,7 @@
             [parinferish.core]
             [rewrite-clj.zip]))
 
-(def ^:private bundled-library-prefixes
+(def bundled-library-roots
   "The third-party roots of the fixed bundled set that the host's
    clojure.*/babashka.* clauses do not already cover. A namespace is a set
    member when it is a root or lives under one."
@@ -38,7 +39,7 @@
   "Is namespace name N part of the fixed bundled extension set? (The set's
    clojure.* members — spec.alpha, tools.reader, core.async, rrb-vector —
    are admitted by the hosts' clojure.*/babashka.* clauses instead; the
-   prefixes above cover the rest.)"
+   roots above cover the rest.)"
   [n]
   (boolean (some #(or (= n %) (str/starts-with? n (str % ".")))
-                 bundled-library-prefixes)))
+                 bundled-library-roots)))

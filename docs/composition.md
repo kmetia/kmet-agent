@@ -373,12 +373,12 @@ Return the final value or (emit v); println is discarded. Prefer (slurp path), (
 
 **Description:**
 
-Persistent Clojure SCI sandbox; no registered tools.
+Persistent Clojure/SCI script sandbox (Babashka-style namespaces; no tools namespace).
 Files: (read "p") or (read "p" {:offset N :limit N}); (write "p" text); (edit "p" old new).
 Shell: (bash "cmd1 && cmd2" {:timeout N}) -> output + status; a nonzero exit is normal.
 Batch independent reads/tests in one call; (emit v) for full output. Multi-form calls report one line per form.
 Example: (emit {:spec (read "SPEC-v2.txt") :tests (bash "bash test-v1.sh; bash test-v2.sh")}).
-Definitions and results persist; return the final value or (emit v); println is discarded. Extension verbs are called as <id>/verb, e.g. (mcp/search ...). (help) for the eval library, persistence, results, and limits.
+Definitions and results persist; println is discarded. Mounted source verbs: <id>/verb. (help :surface) lists this host's require-able namespaces, class surface and limits; (help) indexes verbs and topics.
 
 ---
 

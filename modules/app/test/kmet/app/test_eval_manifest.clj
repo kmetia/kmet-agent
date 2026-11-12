@@ -137,7 +137,9 @@
     (t/is (str/includes? (text-of (:content message)) "Help topics:"))
     (t/is (str/includes? (text-of (:content message))
                          "- :library — saved and session-only definitions"))
-    (t/is (= 4 (get-in message [:details :topics])))
+    (t/is (= 5 (get-in message [:details :topics])))
+    (t/is (str/includes? (text-of (:content message))
+                         "- :surface — host, aliases"))
     (t/is (nil? (state/sync-eval-library-listing! agent)))))
 
 (t/deftest a-live-only-definition-is-counted
