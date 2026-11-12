@@ -191,7 +191,7 @@
           persistence (:content (support/eval! env "(eval/help :persistence)"))
           one (:content (support/eval! env "(eval/help 'user/documented)"))]
       (t/is (str/includes? index "Eval help:"))
-      (t/is (str/includes? index "Library: 1 saved, 0 session-only"))
+      (t/is (str/includes? index "Library: 1 saved (1 loaded), 0 session-only"))
       (t/is (str/includes? library "user/documented defn ([x]) (cwd) — Doc."))
       (t/is (str/includes? library "Scope: cwd"))
       (t/is (not (str/includes? index "Scope: cwd")) "the index leaves roots to :library")

@@ -518,6 +518,8 @@ Be precise and concise in your responses."}}]
           (append-listing! agent session/eval-library-custom-type text
                            {:loaded? (:loaded? manifest)
                             :count (count entries)
+                            :failed (count (filter #(= :failed (:load-status %))
+                                                   entries))
                             :session-only (count live)
                             :sources (count sources)}))))))
 

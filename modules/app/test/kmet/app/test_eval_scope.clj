@@ -393,6 +393,23 @@
     (t/is (fs/exists? (support/library-file env :cwd "user" "f.clj")))
     (t/is (fs/exists? global))))
 
+(t/deftest move-replaces-a-failed-target
+  (let [env (support/eval-ctx)
+        global (support/library-file env :global "user" "f.clj")
+        cwd (support/library-file env :cwd "user" "f.clj")]
+    (write-scoped! env :cwd "user/f" "(defn f \"Cwd.\" [] :cwd)")
+    (fs/create-dirs (fs/parent global))
+    (spit global "(ns user)\n(defn f \"Broken.\" [] (missing-symbol))\n")
+    (let [result (support/eval! env "(eval/move 'user/f :global)")]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result)
+                           "[eval: moved user/f (cwd → global)]")))
+    (t/is (not (fs/exists? cwd)))
+    (t/is (str/includes? (slurp global) "Cwd."))
+    (t/is (= [{:name "user/f" :ns "user" :kind :defn :doc "Cwd."
+               :arglists '([]) :file global :scope :global :active true}]
+             (support/eval-library env)))))
+
 (t/deftest patch-writes-the-active-global-layer
   (let [env (support/eval-ctx)
         global (support/library-file env :global "user" "f.clj")]

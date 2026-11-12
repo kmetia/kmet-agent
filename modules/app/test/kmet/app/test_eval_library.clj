@@ -371,6 +371,50 @@
       (t/is (seq (get-in result [:details :failures]))
             "a saved definition that names the removed tools namespace fails to load"))))
 
+(t/deftest test-a-failed-definition-repairs-its-own-file
+  (let [env (support/eval-ctx)
+        path (support/library-file env :global "user" "broken.clj")]
+    (fs/create-dirs (fs/parent path))
+    (spit path (str "(ns user)\n"
+                    "(defn broken \"Broken.\" [] (missing-symbol))\n"))
+    (let [result (support/eval! env "(core/emit :ok)")
+          entry (first (support/eval-library env))]
+      (t/is (str/includes? (:content result) "[eval: load failed global"))
+      (t/is (str/includes? (:content result) "broken.clj"))
+      (t/is (= "user/broken" (:name entry)))
+      (t/is (= :failed (:load-status entry)))
+      (t/is (= :global (:scope entry)))
+      (t/is (str/includes? (:load-error entry) "missing-symbol"))
+      (t/is (str/includes? (:content (support/eval! env "(eval/help)"))
+                           "Library: 1 saved (0 loaded, 1 failed), 0 session-only")))
+    (let [result (support/eval! env "(defn broken \"Fixed.\" [] 1)")]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result)
+                           "[eval: defined user/broken (global)]"))
+      (t/is (str/includes? (slurp path) "Fixed."))
+      (t/is (not (fs/exists? (support/library-file env :cwd "user" "broken.clj"))))
+      (t/is (= [{:name "user/broken" :ns "user" :kind :defn
+                 :doc "Fixed." :arglists '([]) :file path
+                 :scope :global :active true}]
+               (support/eval-library env))))
+    (let [index (:content (support/eval! env "(eval/help)"))]
+      (t/is (str/includes? index "Library: 1 saved (1 loaded), 0 session-only")))))
+
+(t/deftest test-forget-drops-a-failed-definition
+  (let [env (support/eval-ctx)
+        path (support/library-file env :global "user" "broken.clj")]
+    (fs/create-dirs (fs/parent path))
+    (spit path (str "(ns user)\n"
+                    "(defn broken \"Broken.\" [] (missing-symbol))\n"))
+    (support/eval! env "(core/emit :ok)")
+    (t/is (= :failed (:load-status (first (support/eval-library env)))))
+    (let [result (support/eval! env "(eval/forget 'broken)")]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (str/includes? (:content result)
+                           "[eval: forgot user/broken (global)]")))
+    (t/is (not (fs/exists? path)))
+    (t/is (empty? (support/eval-library env)))))
+
 (t/deftest test-a-namespace-cannot-escape-the-library-root
   (let [env (support/eval-ctx)
         safe (library-file env "_" "x.clj")

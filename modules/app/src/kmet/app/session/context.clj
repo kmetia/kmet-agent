@@ -163,7 +163,8 @@
   (str "- " (:name entry)
        (eval-format/arglists-text (:arglists entry))
        " (" (name (or (:scope entry) :global))
-       (when (false? (:active entry)) ", shadowed") ")"
+       (when (false? (:active entry)) ", shadowed")
+       (when (= :failed (:load-status entry)) ", failed") ")"
        " — "
        (if-let [line (eval-format/doc-line (:doc entry))]
          (truncate line max-eval-doc-chars)
@@ -203,6 +204,8 @@
         session-only (vec session-only)
         sources (vec sources)
         n (count entries)
+        failed (count (filter #(= :failed (:load-status %)) entries))
+        loaded (- n failed)
         live (count session-only)
         live-text (when (pos? live) (str ", " live " session-only"))
         live-hint (when (pos? live) "; (eval/help :library)")
@@ -213,16 +216,16 @@
                 (and (empty? entries) (zero? live))
                 (str "Library: empty.\n" sources-text)
                 (zero? n)
-                (str "Library: 0 saved, " live
+                (str "Library: 0 saved (0 loaded), " live
                      " session-only; (eval/help :library).\n" sources-text)
                 loaded?
-                (str "Library: " n " loaded definition"
-                     (when (not= 1 n) "s") live-text live-hint ".\n"
-                     sources-text)
+                (str "Library: " n " saved (" loaded " loaded"
+                     (when (pos? failed) (str ", " failed " failed")) ")"
+                     live-text live-hint ".\n" sources-text)
                 :else
                 (str "Library: " n " saved definition"
                      (when (not= 1 n) "s") live-text
-                     "; loads on first eval" live-hint ".\n" sources-text))]
+                     "; the first eval loads them" live-hint ".\n" sources-text))]
     (eval-listing-text
      intro
      (concat (map #(source-line % max-eval-doc-chars) sources)

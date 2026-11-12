@@ -656,7 +656,11 @@ sandbox verbs and `/eval` carry those operations. A session's first eval scans a
 new session or a restarted process loads them, while an already-built
 environment is a runtime cache that refreshes only on an explicit
 `/eval reload`. The reload builds a fresh sandbox, replays the session-only
-definitions, and keeps the old environment when a file fails to load. Sessions
+definitions, and keeps the old environment when a file fails to load. A file
+that parses but fails to evaluate is still indexed under its parsed addresses
+as a failed record in its layer; its error is reported on the first eval, the
+prompt and help show `N saved (L loaded, K failed)`, and redefining one of its
+names rewrites that file and clears the failure. Sessions
 share the files but not the environment. `(eval/forget 'name)` and `/eval
 drop` target the active record by default; a scoped drop targets either layer.
 Drop/forget resolve an unqualified name in the namespace the call ends in.
@@ -672,8 +676,9 @@ definitions live but unwritten, like any other change failure. A code-less
 first, or an explicit scope.
 `(eval/move 'name :global|:cwd)` and `/eval move <name> global|cwd` move an
 active definition without
-re-evaluating; they refuse collisions, same-scope moves, and source-provided
-or unwritten targets, take both root locks in the fixed global-then-cwd order,
+re-evaluating; they refuse collisions with a loaded target, same-scope moves,
+and source-provided or unwritten targets, replace a failed target, take both
+root locks in the fixed global-then-cwd order,
 and roll back the target if the source delete fails. The engine-portable
 builtins register `/eval` (`list`, `search`, `describe`, `drop`, `move`,
 `reload`, `sources`, `help`, plus verbs an eval source contributes),
@@ -770,8 +775,10 @@ says `live only, not saved`, `(eval/help)` lists it under session-only
 definitions, and `(eval/describe 'name :doc)` is nil. A redefinition of a
 saved name without a docstring is not written; the saved file keeps its
 documented version. A redefinition of a saved definition with a docstring is written
-automatically in its active scope; `(eval/keep ...)` is only for a live-only
-definition. A `defmethod` is covered by its multimethod.
+automatically to the file that defines it, keeping that file's layer; a failed
+file is still the file for its names, so redefining repairs it.
+`(eval/keep ...)` is only for a live-only definition. A `defmethod` is covered
+by its multimethod.
 `(eval/keep 'name "doc")` saves a live-only definition without
 re-evaluating or resending it: it inserts the docstring into the retained
 source, writes the record, and the next prompt manifest shows it saved. A

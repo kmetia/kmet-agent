@@ -489,7 +489,9 @@
 ;; ─── Library index ────────────────────────────────────────────────────────
 
 (defn- library-entry [record]
-  (select-keys record [:name :ns :kind :doc :arglists :file :scope]))
+  (cond-> (select-keys record [:name :ns :kind :doc :arglists :file :scope])
+    (= :failed (:load-status record))
+    (assoc :load-status :failed :load-error (:load-error record))))
 
 (defn- library-entries
   "The service's `(eval/library)` value: every loaded record, with `:scope`
@@ -504,6 +506,23 @@
                               stack)))
        (sort-by (juxt :name #(if (= :cwd (:scope %)) 0 1)))
        vec))
+
+(defn- failed-entry?
+  "True when ENTRY is a saved definition whose file failed to load."
+  [entry]
+  (= :failed (:load-status entry)))
+
+(defn- library-counts
+  "The saved/loaded/failed split for library ENTRIES, plus the
+   `N saved (L loaded, K failed)` text."
+  [entries]
+  (let [saved (count entries)
+        failed (count (filter failed-entry? entries))
+        loaded (- saved failed)]
+    {:loaded loaded
+     :failed failed
+     :text (str saved " saved (" loaded " loaded"
+                (when (pos? failed) (str ", " failed " failed")) ")")}))
 
 (def ^:private result-ring-size
   "How many recent eval results a session keeps for (eval/result)."
@@ -691,10 +710,11 @@
   [{:keys [kind doc arglists] :as entry}]
   (let [doc-line (eval-format/doc-line doc)
         scope (or (:scope entry) :global)
-        shadow (when (false? (:active entry)) ", shadowed")]
+        shadow (when (false? (:active entry)) ", shadowed")
+        failed (when (failed-entry? entry) ", failed")]
     (str "  - " (:name entry) " " (when kind (name kind))
          (eval-format/arglists-text arglists)
-         " (" (scope-label scope) shadow ") — "
+         " (" (scope-label scope) shadow failed ") — "
          (or doc-line "(no docstring)"))))
 
 (defn- session-only-entries
@@ -843,13 +863,15 @@
          :source (:source unwritten-record)}
 
         library-record
-        {:name name
-         :kind (:kind library-record)
-         :doc (:doc library-record)
-         :arglists (:arglists library-record)
-         :file (:file library-record)
-         :scope (record-scope library-record)
-         :source (:source library-record)}
+        (cond-> {:name name
+                 :kind (:kind library-record)
+                 :doc (:doc library-record)
+                 :arglists (:arglists library-record)
+                 :file (:file library-record)
+                 :scope (record-scope library-record)
+                 :source (:source library-record)}
+          (failed-entry? library-record)
+          (assoc :load-status :failed :load-error (:load-error library-record)))
 
         (contains? @(:active-source-keys env) name)
         {:name name
@@ -911,13 +933,16 @@
 
 (defn- source-help [env] (let [sources (clojure.core/deref (:source-info env))] (str "Eval sources:\n" (if (seq sources) (str/join "\n" (map (fn [source] (eval-format/source-line source :keyword)) sources)) "  (none)"))))
 
-(defn- scope-help [env] (str "Scope: cwd " (get-in env [:roots :cwd]) " (shadows the global layer)" "\n       global " (get-in env [:roots :global]) "\nNew definitions write to cwd; (eval/move 'name :global) moves a saved " "definition to the global layer. A redefinition keeps the active layer."))
+(defn- scope-help [env] (str "Scope: cwd " (get-in env [:roots :cwd]) " (shadows the global layer)" "\n       global " (get-in env [:roots :global]) "\nNew definitions write to cwd; (eval/move 'name :global) moves a saved " "definition to the global layer. A redefinition keeps the active layer; a failed file is repaired in place."))
 
 (defn- library-help
   [env]
   (let [entries (library-entries env)
-        session-only (session-only-entries env)]
+        session-only (session-only-entries env)
+        {:keys [loaded failed]} (library-counts entries)]
     (str "Library definitions: " (count entries)
+         " (" loaded " loaded"
+         (when (pos? failed) (str ", " failed " failed")) ")"
          (when (seq entries)
            (str "\n" (str/join "\n" (map definition-line entries))))
          "\nSession-only definitions (live, not saved): " (count session-only)
@@ -925,9 +950,26 @@
            (str "\n" (str/join "\n" (map definition-line session-only))))
          "\n" (scope-help env))))
 
-(defn- persistence-help [] (str "Persistence: eval creates verbs. A top-level definition with a " "non-blank docstring is written to the library and loads in later sessions; a " "new definition without one stays live for this session only and is " "not saved. Add a docstring and re-evaluate, or use (eval/keep 'name \"doc\"), to keep it; a defmethod is " "saved with its loaded multimethod. A redefinition of a saved definition "
-                                "with a docstring is written automatically in its active scope; eval/keep is "
-                                "only for a live-only definition. A saved " "definition redefined without a docstring is not written; the saved " "file is unchanged. A call that " "ends in a normal error writes nothing; its definitions stay live and " "can be forgotten. System namespaces (core, clj, eval) are read-only; " "ext.* definitions stay live-only. (eval/forget 'name) drops a saved definition " "and (eval/move 'name :global|:cwd) moves one; both resolve unqualified " "names in the namespace the call ends in, and a file that also defines " "other addresses must be dropped with all of them. The prompt previews the saved or " "loaded definitions; the first eval reports any loaded definitions " "and files that failed. A result line names the definition and scope; " "(eval/describe 'name :file) names its file."))
+(defn- persistence-help
+  []
+  (str "Persistence: eval creates verbs. A top-level definition with a non-blank "
+       "docstring is written to the library and loads in later sessions; a new "
+       "definition without one stays live for this session only and is not saved. "
+       "Add a docstring and re-evaluate, or use (eval/keep 'name \"doc\"), to keep it; "
+       "a defmethod is saved with its loaded multimethod. A redefinition of a saved "
+       "definition with a docstring is written automatically to the file that "
+       "defines it, keeping that file's scope; a failed file is still the file for "
+       "its names, so redefining repairs it. A saved definition redefined without a "
+       "docstring is not written; the saved file is unchanged. A call that ends in a "
+       "normal error writes nothing; its definitions stay live and can be forgotten. "
+       "System namespaces (core, clj, eval) are read-only; ext.* definitions stay "
+       "live-only. (eval/forget 'name) drops a saved definition (including a failed "
+       "one) and (eval/move 'name :global|:cwd) moves one, replacing a failed target; "
+       "both resolve unqualified names in the namespace the call ends in, and a file "
+       "that also defines other addresses must be dropped with all of them. The "
+       "prompt previews saved definitions with loaded and failed counts; the first "
+       "eval reports any loaded definitions and files that failed. A result line "
+       "names the definition and scope; (eval/describe 'name :file) names its file."))
 
 (defn- results-help
   []
@@ -972,7 +1014,8 @@
 
 (defn- help-entry-text
   [entry]
-  (let [{:keys [kind doc arglists file scope source] entry-name :name} entry
+  (let [{:keys [kind doc arglists file scope source load-status load-error]
+         entry-name :name} entry
         arg (eval-format/arglists-text arglists)
         scope-label (cond
                       scope (str "(" (name scope) ")")
@@ -982,6 +1025,9 @@
     (str entry-name " " (when kind (name kind)) (or arg "") " " scope-label
          "\n  doc: " doc-line
          (when file (str "\n  file: " file))
+         (when (= :failed load-status)
+           (str "\n  status: failed"
+                (when load-error (str ": " (truncate-report-error load-error)))))
          (when-not (str/blank? (str source))
            (str "\n  source:\n" (indent-text source))))))
 
@@ -1030,10 +1076,9 @@
          "."
          "\n" (source-help env)
          "\nBuilt-in verbs:\n" (str/join "\n" (builtin-verb-lines))
-         "\nLibrary: " (count entries) " saved, "
-         (count session-only) " session-only; (eval/help :library) lists both "
-         "and the scope roots."
-         "\nFailures: " (count @(:failures env))
+         "\nLibrary: " (:text (library-counts entries))
+         ", " (count session-only) " session-only"
+         "; (eval/help :library) lists both and the scope roots."
          "\n(help 'name) describes one definition or verb.")))
 
 (defn- help-or-index
@@ -1102,7 +1147,7 @@
       (rearm-build! env deadline)
       (let [result (script/eval-source! (:sci-ctx env) source (atom nil))]
         (if (:error result)
-          {:error (:error result)}
+          {:error (:error result) :parsed parsed}
           {:parsed parsed})))
     (catch Throwable t
       {:error (ex-message t)})))
@@ -1122,17 +1167,21 @@
   (put-record! env (:name record) (record-scope record) record))
 
 (defn- load-library-file!
-  "Read, parse and evaluate one library file into ENV at SCOPE. A read, parse
-   or eval failure is recorded and skipped."
+  "Read, parse and evaluate one library file into ENV at SCOPE. A read or parse
+   failure has no address and is recorded and skipped; an evaluation failure is
+   also indexed under the file's parsed addresses with `:load-status :failed`,
+   so a redefinition keeps the file's scope and repairs it."
   [env scope deadline {:keys [file content error]}]
   (if error
     (record-failure! (:failures env) {:file file :error error :scope scope})
-    (let [{:keys [parsed error]} (eval-content! env content deadline)]
-      (if error
-        (record-failure! (:failures env) {:file file :error error :scope scope})
-        (doseq [record (:defs parsed)]
-          (add-record! env (assoc record :file file :scope scope
-                                  :root (root-for env scope))))))))
+    (let [{:keys [parsed error]} (eval-content! env content deadline)
+          base {:file file :scope scope :root (root-for env scope)}]
+      (when error
+        (record-failure! (:failures env) {:file file :error error :scope scope}))
+      (doseq [record (:defs parsed)]
+        (add-record! env (cond-> (merge record base)
+                           error (assoc :load-status :failed
+                                        :load-error error)))))))
 
 (defn- read-library!
   "Read and evaluate every definition file in ROOT into ENV at SCOPE, sorted
@@ -1329,12 +1378,36 @@
     (bad-request! (str "the " (scope-label target) " scope already has " name)
                   {:name name :scope target})))
 
+(defn- remove-record!
+  "Remove RECORD's scope from NAME's stack, dissociating the name when the
+   stack is empty."
+  [env name record]
+  (let [scope (record-scope record)]
+    (swap! (:library env)
+           (fn [library]
+             (let [stack (vec (remove #(= scope (record-scope %))
+                                      (get library name)))]
+               (if (seq stack)
+                 (assoc library name stack)
+                 (dissoc library name)))))))
+
+(defn- drop-failed-target!
+  "Delete TARGET-RECORD's file and library entry so a move can replace it.
+   Refuses when the file also defines other addresses."
+  [env name record]
+  (ensure-no-siblings! name (file-siblings env record))
+  (let [root (root-for env (record-scope record))
+        path (or (:file record) (eval-files/definition-path root record))]
+    (eval-files/delete-file! root path)
+    (remove-record! env name record)))
+
 (defn- move-record-line!
   "Move RAW-NAME's active definition to TARGET scope without re-evaluating.
    The live name stays; only the file and the library record move. Refuses a
    source key, an unwritten definition, a file that also defines another
-   address, a same-scope move, and a target layer that already has the name.
-   Returns the report line."
+   address, a same-scope move, and a target layer that already has the name
+   unless that target is a failed record, which is replaced. Returns the
+   report line."
   [env raw-name target]
   (let [raw-name (->name raw-name)
         name (when raw-name (qualify-name (env-ns env) raw-name))
@@ -1356,9 +1429,14 @@
       (when-not record
         (bad-request! (str "no loaded eval library definition named " name)
                       {:name name}))
-      (let [current (record-scope record)]
+      (let [current (record-scope record)
+            target-record (some #(when (= target (record-scope %)) %)
+                                (stack-for env name))
+            replace? (and target-record (failed-entry? target-record))]
         (check-move! name current target (file-siblings env record)
-                     (some #(= target (record-scope %)) (stack-for env name)))
+                     (and target-record (not replace?)))
+        (when replace?
+          (drop-failed-target! env name target-record))
         (let [path (eval-files/move-definition! (:roots env) record target)]
           (put-record! env name current
                        (assoc record :file path :scope target
@@ -1481,10 +1559,13 @@
           (read-library! env (:cwd roots) :cwd deadline)
           (swap! (:model-shadows env)
                  into
-                 (filter #(contains? @(:source-keys env) %)
-                         (keys @(:library env))))
+                 (->> (library-entries env)
+                      (remove failed-entry?)
+                      (map :name)
+                      (filter #(contains? @(:source-keys env) %))))
           (reset! (:build-report env)
-                  {:entries (library-entries env)
+                  {:entries (filterv #(not (failed-entry? %))
+                                     (library-entries env))
                    :failures (vec @(:failures env))}))))
     env))
 
@@ -1617,19 +1698,6 @@
   [env name]
   (when (active-source-value? env name)
     (seed-source-value! env name (get @(:source-values env) name))))
-
-(defn- remove-record!
-  "Remove RECORD's scope from NAME's stack, dissociating the name when the
-   stack is empty."
-  [env name record]
-  (let [scope (record-scope record)]
-    (swap! (:library env)
-           (fn [library]
-             (let [stack (vec (remove #(= scope (record-scope %))
-                                      (get library name)))]
-               (if (seq stack)
-                 (assoc library name stack)
-                 (dissoc library name)))))))
 
 (defn- clear-unwritten!
   "Forget NAME's unwritten live-definition record."

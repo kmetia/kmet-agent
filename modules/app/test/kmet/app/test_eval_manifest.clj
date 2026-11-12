@@ -66,7 +66,7 @@
                 :entries [{:name "user/a" :scope :global :active true
                            :arglists '([]) :doc "Saved."}]})]
     (t/is (str/includes? saved "1 saved definition"))
-    (t/is (str/includes? saved "loads on first eval"))
+    (t/is (str/includes? saved "first eval loads them"))
     (t/is (not (str/includes? saved "loaded definition")))
     (t/is (str/includes? saved "- user/a ([]) (global)"))
     (t/is (str/includes?
@@ -85,7 +85,7 @@
   (let [live-text (session/eval-library-listing
                    {:loaded? true :entries []
                     :session-only [{:name "user/live" :scope :cwd :active true}]})]
-    (t/is (str/includes? live-text "0 saved, 1 session-only"))
+    (t/is (str/includes? live-text "0 saved (0 loaded), 1 session-only"))
     (t/is (str/includes? live-text "(eval/help :library)")))
   (let [entries (mapv (fn [i]
                         {:name (str "user/definition-" i)
@@ -165,7 +165,7 @@
       (t/is (= ["user/saved"] (mapv :name (get-in result [:details :loaded])))))
     (let [loaded (state/sync-eval-library-listing! agent)]
       (t/is (some? loaded))
-      (t/is (str/includes? (:content loaded) "loaded definition"))
+      (t/is (str/includes? (:content loaded) "saved (1 loaded)"))
       (t/is (str/includes? (:content loaded) "user/saved"))
       (t/is (true? (get-in loaded [:details :loaded?]))))
     (t/is (nil? (state/sync-eval-library-listing! agent)))))
