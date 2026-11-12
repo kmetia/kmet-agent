@@ -202,13 +202,6 @@
 
 ;; ─── Small helpers ────────────────────────────────────────────────────────
 
-(defn- text-lines
-  ;; String.split is the fast path on purpose: this runs per reader block on
-  ;; the babashka interpreter, where a per-char predicate scan costs ~2ms per
-  ;; 8KiB block and makes the readers fall behind a fast writer.
-  [s]
-  (dec (alength (.split (str s) "\n" -1))))
-
 (defn- preview
   "A short rendering of a failing tool result's content for the call trace."
   [content]
@@ -1257,9 +1250,8 @@
 ;; ─── Result assembly ──────────────────────────────────────────────────────
 
 (defn- truncation-notice [tool t result-id]
-  (str "[" tool " output truncated: " (:total-lines t) " lines / "
-       (bash-out/format-size (:total-bytes t))
-       " total, showing the last " (:shown-lines t) " lines. "
+  (str "[" tool " output truncated: "
+       (bash-out/truncation-summary t true) ". "
        (if result-id
          (str "Stored result: (result " result-id " :offset 0).")
          "Print less or return distilled data instead.")
@@ -1267,30 +1259,21 @@
 
 (defn- bound-content
   "Cap BODY at the per-call byte/line budget (bash-output's tail truncation
-   — the end holds the return value). TOTALS carries the capture's full
-   byte/line counts, which the retained tail no longer knows. RESULT-ID,
-   when present, turns the truncation notice into a read form."
-  [tool body totals max-bytes max-lines result-id]
+   — the end holds the return value). The notice is added by the caller, once
+   the stored-result id is known."
+  [body max-bytes max-lines]
   (let [t (bash-out/truncate-tail body
                                   :max-bytes max-bytes
-                                  :max-lines max-lines)
-        total-bytes (max (:total-bytes t) (:bytes totals))
-        total-lines (max (:total-lines t) (:lines totals))
-        truncated? (or (:truncated t)
-                       (> total-bytes max-bytes)
-                       (> total-lines max-lines))]
-    (if truncated?
-      {:content (str (:content t) "\n\n"
-                     (truncation-notice tool {:total-lines total-lines
-                                              :total-bytes total-bytes
-                                              :shown-lines (:output-lines t)}
-                                        result-id))
-       :truncation {:total-lines total-lines
-                    :total-bytes total-bytes
+                                  :max-lines max-lines)]
+    (if (:truncated t)
+      {:content (:content t)
+       :truncation {:total-lines (:total-lines t)
+                    :total-bytes (:total-bytes t)
                     :shown-lines (:output-lines t)
-                    ;; :capture — the body fits, the capture tail dropped the
-                    ;; rest (the totals above are the whole output)
-                    :truncated-by (or (:truncated-by t) :capture)
+                    :output-bytes (:output-bytes t)
+                    :last-line-partial (:last-line-partial t)
+                    :last-line-bytes (:last-line-bytes t)
+                    :truncated-by (:truncated-by t)
                     :max-bytes max-bytes
                     :max-lines max-lines}}
       {:content body :truncation nil})))
@@ -1583,8 +1566,8 @@
    catch that rethrows) cannot outlive its deadline. TIMEOUT-MS nil = no
    deadline (bash parity) and the result's :timeout is nil; ELAPSED-MS is the
    measured wall clock. A multi-form call reports every non-definition
-   form as one bounded line, before an error. RESULT-STORE,
-   when given, keeps the full body and returns the id the truncation notice
+   form as one bounded line, before an error. RESULT-STORE, when given,
+   keeps the full body and returns the id the truncation notice, TUI warning
    and error tail name."
   [{:keys [tool res emitted images timeout-ms trace abort-reason elapsed-ms
            output-bytes output-lines capture-bytes extra-details result-store]}]
@@ -1614,9 +1597,7 @@
                (seq parts) (str/join "\n" parts)
                value-text value-text
                :else "(no output)")
-        totals {:bytes (bash-out/byte-length body) :lines (text-lines body)}
-        {:keys [content truncation]} (bound-content tool body totals output-bytes
-                                                    output-lines nil)
+        {:keys [content truncation]} (bound-content body output-bytes output-lines)
         result-id (when result-store
                     (try
                       (result-store {:content body
@@ -1624,14 +1605,17 @@
                                      :error? (not= :ok status)
                                      :elapsed-ms elapsed-ms
                                      :chars (count body)
-                                     :lines (:lines totals)
+                                     :lines (count (str/split-lines body))
                                      :truncated? (boolean truncation)})
                       (catch Throwable t
                         (debug/log "script: result store failed: " t)
                         nil)))
-        content (if (and result-id truncation)
-                  (:content (bound-content tool body totals output-bytes output-lines
-                                           result-id))
+        ;; the TUI warning names the stored result beside the cut
+        truncation (if (and result-id truncation)
+                     (assoc truncation :result-id result-id)
+                     truncation)
+        content (if truncation
+                  (str content "\n\n" (truncation-notice tool truncation result-id))
                   content)
         content (if (and result-id (not truncation) (not= :ok status))
                   (str content "\n[result " result-id "]")

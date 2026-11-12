@@ -339,6 +339,8 @@
     (t/is (some? (:truncation r)))
     (t/is (= :lines (get-in r [:truncation :truncated-by])))
     (t/is (> (get-in r [:truncation :total-lines]) 2000))
+    (t/is (str/includes? (:content r)
+                         "showing the last 2000 of 3000 lines (2000 line limit)"))
     (t/is (str/includes? (:content r) "truncated"))))
 
 (t/deftest test-codemode-output-budget
@@ -362,6 +364,18 @@
     (t/is (= (* 16 1024) (get-in r [:truncation :max-bytes])))
     (t/is (= 2000 (get-in r [:truncation :max-lines]))
           "invalid limits fall back to the defaults")))
+
+(t/deftest test-codemode-single-line-truncation
+  (let [r (run "(core/emit (apply str (repeat 20000 \"x\")))"
+               {:max-output-bytes 1024})]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (= :bytes (get-in r [:truncation :truncated-by])))
+    (t/is (true? (get-in r [:truncation :last-line-partial])))
+    (t/is (= 1 (get-in r [:truncation :shown-lines])))
+    (t/is (= 1024 (get-in r [:truncation :output-bytes])))
+    (t/is (= 20000 (get-in r [:truncation :last-line-bytes])))
+    (t/is (str/includes? (:content r)
+                         "showing last 1.0KB of line 1 (line is 19.5KB)"))))
 
 (t/deftest test-codemode-streaming
   (let [updates (atom [])

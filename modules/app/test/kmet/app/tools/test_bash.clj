@@ -111,6 +111,8 @@
           result (run (output-ops text 0) {:command "one line"})
           path (get-in result [:truncation :full-output-path])]
       (t/is (true? (get-in result [:truncation :last-line-partial])))
+      (t/is (= 60000 (get-in result [:truncation :last-line-bytes])))
+      (t/is (= 51200 (get-in result [:truncation :output-bytes])))
       (t/is (str/includes?
              (:content result)
              (str "[Showing last 50.0KB of line 1 (line is 58.6KB). Full output: "

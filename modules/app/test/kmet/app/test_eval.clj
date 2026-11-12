@@ -22,6 +22,7 @@
         result (support/eval! env "(def kept \"Kept.\" 42) kept")]
     (t/is (str/starts-with? (:content result) "42"))
     (t/is (str/includes? (:content result) "[eval: defined user/kept"))
+    (t/is (nil? (:truncation result)) "an untruncated result carries no warning")
     (t/is (= "43" (:content (support/eval! env "(+ kept 1)"))))))
 
 (t/deftest test-a-session-only-definition-is-kept
@@ -91,6 +92,8 @@
            "content"))
     (let [listed (:content (support/eval! env "(eval/result)"))]
       (t/is (str/includes? listed ":id 1"))
+      (t/is (str/includes? listed ":lines 1")
+            "the one-line result is counted as one line")
       (t/is (not (str/includes? listed ":id 2"))
             "result reads do not enter the ring"))
     (t/is (str/includes? (:content (support/eval! env "(eval/result :last)"))
@@ -360,7 +363,12 @@
                               :max-output-bytes 20})]
     (t/is (not (:is-error r)) (:content r))
     (t/is (= :bytes (get-in r [:truncation :truncated-by])))
-    (t/is (= 20 (get-in r [:truncation :max-bytes])))))
+    (t/is (= 20 (get-in r [:truncation :max-bytes])))
+    (t/is (true? (get-in r [:truncation :last-line-partial])))
+    (t/is (= 20 (get-in r [:truncation :output-bytes])))
+    (t/is (= 100 (get-in r [:truncation :last-line-bytes])))
+    (t/is (str/includes? (:content r)
+                         "showing last 20B of line 1 (line is 100B)"))))
 
 (t/deftest ^:slow test-the-tool-passes-the-timeout
   (let [env (support/eval-ctx)

@@ -157,3 +157,32 @@
          :last-line-bytes (if (seq lines) (byte-length (peek lines)) 0)
          :first-line-exceeds-limit false
          :max-lines max-lines :max-bytes max-bytes}))))
+
+(defn truncation-summary
+  "The quantity clause shared by tool footers and the TUI warning: a
+   partially cut last line is named by its byte slice, a whole-line cut by
+   the kept count, the total and the limit that fired. TAIL? adds 'the last'
+   for tail truncation; head callers read the clause without a direction.
+   T may name the kept count :output-lines (a truncate result) or
+   :shown-lines (a tool result)."
+  [t & [tail?]]
+  (let [{:keys [truncated-by total-lines output-bytes last-line-partial
+                last-line-bytes max-lines max-bytes]} t
+        shown (or (:output-lines t) (:shown-lines t))
+        tail (when tail? "the last ")]
+    (cond
+      last-line-partial
+      (str "showing last " (format-size (or output-bytes last-line-bytes 0))
+           " of line " total-lines
+           (when last-line-bytes
+             (str " (line is " (format-size last-line-bytes) ")")))
+
+      (= truncated-by :lines)
+      (str "showing " tail shown " of " total-lines " lines ("
+           (or max-lines DEFAULT-MAX-LINES) " line limit)")
+
+      (= truncated-by :bytes)
+      (str "showing " tail shown " of " total-lines " lines ("
+           (format-size (or max-bytes DEFAULT-MAX-BYTES)) " limit)")
+
+      :else "output exceeds its limit")))

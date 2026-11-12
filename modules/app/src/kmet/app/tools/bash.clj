@@ -151,6 +151,7 @@
                                 :output-bytes (:output-bytes truncation)
                                 :truncated-by (:truncated-by truncation)
                                 :last-line-partial (:last-line-partial truncation)
+                                :last-line-bytes (:last-line-bytes truncation)
                                 :max-bytes (:max-bytes truncation)
                                 :max-lines (:max-lines truncation)
                                 :full-output-path full-output-path}))

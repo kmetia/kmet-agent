@@ -607,19 +607,14 @@
           remaining (- total consumed)
           truncation-warn
           (when (seq lines)
-            (let [{:keys [first-line-exceeds-limit truncated-by output-lines
-                          total-lines max-lines max-bytes]} truncation]
+            (let [{:keys [first-line-exceeds-limit max-bytes]} truncation]
               (cond
                 first-line-exceeds-limit
                 (str "[First line exceeds "
                      (bash-out/format-size (or max-bytes bash-out/DEFAULT-MAX-BYTES))
                      " limit]")
-                (= truncated-by :lines)
-                (str "[Truncated: showing " output-lines " of " total-lines
-                     " lines (" (or max-lines bash-out/DEFAULT-MAX-LINES) " line limit)]")
-                (= truncated-by :bytes)
-                (str "[Truncated: " output-lines " lines shown ("
-                     (bash-out/format-size (or max-bytes bash-out/DEFAULT-MAX-BYTES)) " limit)]"))))
+                truncation
+                (str "[Truncated: " (bash-out/truncation-summary truncation) "]"))))
           kids (concat
                 (when (seq lines)
                   (concat
@@ -914,13 +909,33 @@
    shell-call renderer with bash's prompt."
   (shell-call-renderer "$"))
 
+(defn- truncation-warn
+  "The rebuilt truncation footer. LIVE? gates the full-output and stored-result
+   pointers: a replayed result cannot resolve them."
+  [truncation live?]
+  (let [full-output-path (when live? (:full-output-path truncation))
+        result-id (when live? (:result-id truncation))
+        truncated-part (str "Truncated: "
+                            (bash-out/truncation-summary truncation true))]
+    (str "["
+         (str/join ". "
+                   (cond-> []
+                     full-output-path
+                     (conj (str "Full output: " full-output-path))
+                     result-id
+                     (conj (str "Stored result: (result " result-id
+                                " :offset 0)"))
+                     :always
+                     (conj truncated-part)))
+         "]")))
+
 (defn- output-result-nodes
   "The output body (collapsed to a visual-line window with an expand hint,
    verbatim when expanded) and the truncation warning, as hiccup nodes. The
-   runtime appends its own truncation footer naming the full-output file; the
-   renderer strips it and rebuilds the information as its own warn line (pi:
-   strip the trailing [...] block)."
-  [content theme width expanded? ended-at truncation]
+   runtime appends its own truncation footer naming the full-output file or
+   stored result; the renderer strips it and rebuilds the information as its
+   own warn line (pi: strip the trailing [...] block)."
+  [content theme width expanded? ended-at truncation live?]
   (let [full-output-path (:full-output-path truncation)
         output (let [trimmed (str/trim (sanitize-display-text (or content "")))]
                  (if (and truncation
@@ -964,25 +979,8 @@
                    width
                    "..."))]))))))
      (when truncation
-       (let [{:keys [total-lines shown-lines truncated-by max-bytes]} truncation
-             size-str (when (= truncated-by :bytes)
-                        (bash-out/format-size
-                         (or max-bytes bash-out/DEFAULT-MAX-BYTES)))
-             truncated-part (if (= truncated-by :bytes)
-                              (str "Truncated: " shown-lines " lines shown ("
-                                   size-str " limit)")
-                              (str "Truncated: showing " shown-lines " of "
-                                   total-lines " lines"))
-             warn (str "["
-                       (str/join ". "
-                                 (cond-> []
-                                   full-output-path
-                                   (conj (str "Full output: " full-output-path))
-                                   :always
-                                   (conj truncated-part)))
-                       "]")]
-         [[:spacer {:lines 1}]
-          (tool-text (theme/fg theme :warning warn))])))))
+       [[:spacer {:lines 1}]
+        (tool-text (theme/fg theme :warning (truncation-warn truncation live?)))]))))
 
 (defn state-result-nodes
   "The tool block's tail state line — the ONLY line of a block that may
@@ -1024,10 +1022,11 @@
    window with an expand hint, verbatim when expanded) and the truncation
    warning. The elapsed/took state line is the tool component's tail line
    (state-result-nodes), not the renderer's — see tool-execution."
-  [content _is-error theme width expanded? _started-at ended-at truncation _context]
+  [content _is-error theme width expanded? _started-at ended-at truncation context]
   (h/compile-tree
    (into [:container {}]
-         (output-result-nodes content theme width expanded? ended-at truncation))))
+         (output-result-nodes content theme width expanded? ended-at truncation
+                              (:execution-started context)))))
 
 (defn- code-highlight-cache
   "The growing-code cache for LANG under THEME, kept in the tool's renderer
@@ -1142,7 +1141,8 @@
    summary and the attached-image count. Eval's kept-definition and source
    lines attach by composing this, not by copying it."
   [content theme width expanded? ended-at truncation context]
-  (concat (output-result-nodes content theme width expanded? ended-at truncation)
+  (concat (output-result-nodes content theme width expanded? ended-at truncation
+                               (:execution-started context))
           (tool-call-nodes context theme)
           (image-nodes context theme)))
 

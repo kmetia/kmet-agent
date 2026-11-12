@@ -102,7 +102,16 @@
     (let [content (str/join "\n" (mapv #(str "l" %) (range 5)))
           truncation {:truncated-by :lines :output-lines 5 :total-lines 99 :max-lines 5}
           lines (plain (r/render-read-result content true th 60 false nil nil truncation {}) 60)]
-      (is (some #(str/includes? % "[Truncated: showing 5 of 99") lines)))))
+      (is (some #(str/includes? % "[Truncated: showing 5 of 99") lines))))
+  (testing "a byte-cut read reports the kept line count and byte limit"
+    (let [truncation {:truncated-by :bytes :output-lines 2 :total-lines 100
+                      :output-bytes 50000 :total-bytes 60000 :max-bytes 51200}
+          lines (plain (r/render-read-result "a\nb" true th 60 true nil nil truncation {}) 60)]
+      (is (some #(str/includes? % "[Truncated: showing 2 of 100 lines (50.0KB limit)]")
+                lines))))
+  (testing "a minimal truncation map gets a generic warning"
+    (let [lines (plain (r/render-read-result "a" false th 60 true nil nil {:truncated true} {}) 60)]
+      (is (some #(str/includes? % "[Truncated: output exceeds its limit]") lines)))))
 
 (deftest test-read-result-highlight
   (testing "expanded read highlights by path language (pi: highlightCode)"
@@ -224,8 +233,9 @@
     (let [trunc {:truncated-by :lines :shown-lines 2 :total-lines 99
                  :full-output-path "/tmp/full.txt"}
           content "a\nb\n\n[Full output: /tmp/full.txt. Truncated: showing 2 of 99 lines]"
-          lines (plain (r/render-bash-result content false th 100 true 1000 2000 trunc {}) 100)
-          warn "[Full output: /tmp/full.txt. Truncated: showing 2 of 99 lines]"]
+          lines (plain (r/render-bash-result content false th 100 true 1000 2000 trunc
+                                             {:execution-started true}) 100)
+          warn "[Full output: /tmp/full.txt. Truncated: showing the last 2 of 99 lines (2000 line limit)]"]
       (is (= ["a" "b"] (mapv str/trim (subvec lines 1 3)))
           "the footer copy inside the body is gone — the warn line is rebuilt")
       (is (some #(= warn (str/trimr %)) lines) "it is rebuilt from the truncation data")
@@ -534,15 +544,35 @@
   (testing "truncation warns like bash"
     (let [trunc {:truncated-by :lines :shown-lines 2 :total-lines 99}
           lines (plain (r/render-codemode-result "a\nb" false th 80 true 1000 2000 trunc {}) 80)]
-      (is (some #(str/includes? % "Truncated: showing 2 of 99 lines") lines))))
+      (is (some #(str/includes? % "Truncated: showing the last 2 of 99 lines (2000 line limit)")
+                lines))))
+  (testing "a partial last line warns by bytes, not a one-line count"
+    (let [trunc {:truncated-by :bytes :shown-lines 1 :total-lines 1
+                 :output-bytes 16384 :last-line-partial true :last-line-bytes 20000
+                 :max-bytes 16384}
+          lines (plain (r/render-codemode-result "xxx" false th 100 true 1000 2000 trunc {}) 100)]
+      (is (some #(str/includes? % "Truncated: showing last 16.0KB of line 1 (line is 19.5KB)")
+                lines))))
+  (testing "a stored result is named in a live warning"
+    (let [trunc {:truncated-by :lines :shown-lines 2 :total-lines 99 :result-id 7}
+          lines (plain (r/render-codemode-result "a\nb" false th 100 true 1000 2000 trunc
+                                                 {:execution-started true}) 100)]
+      (is (some #(str/includes? % "Stored result: (result 7 :offset 0)") lines))))
+  (testing "a replayed result omits ephemeral output pointers"
+    (let [trunc {:truncated-by :lines :shown-lines 2 :total-lines 99
+                 :result-id 7 :full-output-path "/tmp/full.txt"}
+          lines (plain (r/render-bash-result "a\nb" false th 100 true 1000 2000 trunc {}) 100)]
+      (is (not-any? #(str/includes? % "Stored result") lines))
+      (is (not-any? #(str/includes? % "Full output") lines))))
   (testing "the script's own truncation notice is stripped from the body"
     (let [trunc {:truncated-by :lines :shown-lines 2 :total-lines 99}
-          content (str "a\nb\n\n[codemode output truncated: 99 lines / 1.0 KiB total, "
-                       "showing the last 2 lines. Print less or return distilled data instead.]")
+          content (str "a\nb\n\n[codemode output truncated: showing the last 2 of 99 "
+                       "lines (2000 line limit). Print less or return distilled data instead.]")
           lines (plain (r/render-codemode-result content false th 100 true 1000 2000 trunc {}) 100)]
       (is (not-any? #(str/includes? % "Print less") lines)
           "the model-facing notice does not render twice")
-      (is (some #(str/includes? % "Truncated: showing 2 of 99 lines") lines))))
+      (is (some #(str/includes? % "Truncated: showing the last 2 of 99 lines (2000 line limit)")
+                lines))))
   (testing "timestamps/details no longer render a state line here"
     (let [context {:details {:elapsed-ms 3400}}
           lines (plain (r/render-codemode-result "a" false th 60 true 1000 2000 nil context) 60)]
@@ -564,7 +594,16 @@
     (let [lines (plain (r/render-eval-result "x" false th 60 true 1000 2000 nil {}) 60)]
       (is (not-any? #(str/includes? % "definition") lines))
       (is (not-any? #(str/includes? % "eval source") lines))
-      (is (not-any? #(str/includes? % "eval failure") lines)))))
+      (is (not-any? #(str/includes? % "eval failure") lines))))
+  (testing "a live truncated eval names the byte slice and stored result"
+    (let [trunc {:truncated-by :bytes :shown-lines 1 :total-lines 1
+                 :output-bytes 16384 :last-line-partial true :last-line-bytes 20000
+                 :max-bytes 16384 :result-id 3}
+          lines (plain (r/render-eval-result "xxx" false th 100 true 1000 2000 trunc
+                                             {:execution-started true}) 100)]
+      (is (some #(str/includes? % "Truncated: showing last 16.0KB of line 1 (line is 19.5KB)")
+                lines))
+      (is (some #(str/includes? % "Stored result: (result 3 :offset 0)") lines)))))
 
 (deftest test-state-result-nodes
   (testing "running shows Elapsed in the muted foreground, with no background"
