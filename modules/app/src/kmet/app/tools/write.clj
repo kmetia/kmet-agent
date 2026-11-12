@@ -45,7 +45,9 @@
   [{:keys [path content]} _on-update signal _ctx]
   (try
     (let [characters (write-file path content signal)]
-      {:content (str "Successfully wrote " characters " bytes to " path)})
+      {:content (str "wrote " characters " "
+                     (if (= 1 characters) "byte" "bytes")
+                     " to " path)})
     (catch Exception e
       {:content (str "Error writing to " path ": " (ex-message e)) :is-error true})))
 

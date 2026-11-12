@@ -490,7 +490,7 @@
         ;; that differs from the previewed one
         (spit f "alpha\nbeta\ngamma\ndelta")
         (reset! (:content-atom c)
-                (str "Successfully replaced 1 block(s) in " f "."))
+                (str "replaced 1 block in " f))
         (te/tool-execution-set-error! c false)
         (reset! (:details-atom c)
                 {:diff " 1 alpha\n-2 beta\n+2 BETA\n 3 gamma\n 4 delta"})
@@ -510,7 +510,7 @@
                :name "edit"
                :args {:path f
                       :old-text "beta" :new-text "BETA"}
-               :content (str "Successfully replaced 1 block(s) in " f ".")
+               :content (str "replaced 1 block in " f)
                :details {:diff " 1 alpha\n-2 beta\n+2 BETA\n 3 gamma"})]
         (te/tool-execution-set-error! c false)
         ;; first pass: render-result corrects the preview from details
@@ -531,7 +531,7 @@
         (te/tool-execution-set-args-complete! c)
         (let [before (mapv strip-ansi (core/render c 60))]
           (reset! (:content-atom c)
-                  (str "Successfully replaced 1 block(s) in " f "."))
+                  (str "replaced 1 block in " f))
           (te/tool-execution-set-error! c false)
           (reset! (:details-atom c)
                   {:diff " 1 alpha\n-2 beta\n+2 BETA\n 3 gamma"})

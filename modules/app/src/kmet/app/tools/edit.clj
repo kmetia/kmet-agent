@@ -114,8 +114,11 @@
   [{:keys [path] :as args} _on-update signal _ctx]
   (let [{:keys [edits]} (normalize-edits args)]
     (try
-      (let [result (edit-file path edits signal)]
-        {:content (str "Successfully replaced " (:edits result) " block(s) in " path ".")
+      (let [result (edit-file path edits signal)
+            replaced (:edits result)]
+        {:content (str "replaced " replaced " "
+                       (if (= 1 replaced) "block" "blocks")
+                       " in " path)
          :details (when-let [diff (:diff result)] {:diff diff})})
       (catch Exception e
         (if (= :edit-error (:type (ex-data e)))
