@@ -273,12 +273,13 @@
                (str ":" start (when end (str "-" end)))))))))
 
 (defn execute
-  "Read file contents with optional offset/limit (1-indexed, pi: read.ts).
-   For image files, returns the image data in :images and a text
-   description in :content. Truncated text reads return :truncation. The
-   filesystem read takes the file's mutation lock, so it cannot observe a
-   concurrent write's truncated half."
-  [{:keys [path file_path offset limit]} _on-update signal _ctx]
+  "Read file contents with optional offset/limit (1-indexed, pi: read.ts),
+   tail (the last N lines, not with offset/limit), or footer suppression.
+   For image files, returns the image data in :images and a text description
+   in :content. Truncated text reads return :truncation. The filesystem read
+   takes the file's mutation lock, so it cannot observe a concurrent write's
+   truncated half."
+  [{:keys [path file_path offset limit tail footer]} _on-update signal _ctx]
   (let [raw-path (or path file_path)]
     (try
       (if (or (nil? raw-path) (and (string? raw-path) (str/blank? raw-path)))
@@ -312,11 +313,39 @@
                       ;; Pi: allLines = textContent.split("\n") — keeps trailing empty
                       all-lines (vec (str/split text-content #"\n" -1))
                       total-file-lines (count all-lines)
-                      start-line (if offset (max 0 (dec offset)) 0)
-                      start-line-display (inc start-line)]
-                  (if (>= start-line total-file-lines)
+                      input-error (cond
+                                    (and (some? offset) (some? tail))
+                                    "Use :offset or :tail, not both."
+                                    (and (some? tail) (some? limit))
+                                    "Use :tail without :limit."
+                                    (and (some? tail)
+                                         (not (tool-util/positive-integer? tail)))
+                                    ":tail must be a positive integer."
+                                    (and (some? offset)
+                                         (not (tool-util/positive-integer? offset)))
+                                    ":offset must be a positive integer."
+                                    (and (some? limit)
+                                         (not (tool-util/positive-integer? limit)))
+                                    ":limit must be a positive integer."
+                                    :else nil)
+                      tail-total (if (str/ends-with? text-content "\n")
+                                   (max 1 (dec total-file-lines))
+                                   total-file-lines)
+                      start-line (when-not input-error
+                                   (cond
+                                     (some? tail) (max 0 (- tail-total (long tail)))
+                                     (some? offset) (dec offset)
+                                     :else 0))
+                      start-line-display (when (some? start-line) (inc start-line))]
+                  (cond
+                    input-error
+                    {:content input-error :is-error true}
+
+                    (>= start-line total-file-lines)
                     {:content (str "Offset " offset " is beyond end of file (" total-file-lines " lines total)")
                      :is-error true}
+
+                    :else
                     (let [selected-content (if (some? limit)
                                              (let [end (min (+ start-line limit) total-file-lines)]
                                                (str/join "\n" (subvec all-lines start-line end)))
@@ -345,7 +374,9 @@
                                                       total-file-lines " (" (bash-out/format-size bash-out/DEFAULT-MAX-BYTES)
                                                       " limit). Use offset=" next-offset " to continue.]"))))
 
-                                        (and user-limited-lines (< (+ start-line user-limited-lines) total-file-lines))
+                                        (and user-limited-lines
+                                             (< (+ start-line user-limited-lines) total-file-lines)
+                                             (not (false? footer)))
                                         (let [remaining (- total-file-lines (+ start-line user-limited-lines))
                                               next-offset (+ start-line user-limited-lines 1)]
                                           (str (:content truncation) "\n\n[" remaining " more lines in file. Use offset="
@@ -372,12 +403,14 @@
   (tool/make-tool
    :name "read"
    :label "Read file"
-   :description "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete."
+   :description "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files, tail for the last N lines, or footer false to omit the continuation hint. When you need the full file, continue with offset until complete."
    :prompt-snippet "Read file contents"
    :prompt-guidelines ["Use read to examine files instead of cat or sed."]
    :params {:path   {:type :string :description "Path to the file to read (relative or absolute)"}
             :offset {:type :number :description "Line number to start reading from (1-indexed)" :optional? true}
-            :limit  {:type :number :description "Maximum number of lines to read" :optional? true}}
+            :limit  {:type :number :description "Maximum number of lines to read" :optional? true}
+            :tail   {:type :number :description "Read the last N lines (cannot combine with :offset or :limit)" :optional? true}
+            :footer {:type :boolean :description "Include the continuation hint when :limit stops before the end of the file (default true)" :optional? true}}
    :execute execute
    ;; the cancel signal is the third execute argument (see execute)
    :contextual? true

@@ -303,11 +303,11 @@ model reads (`:tools` registration order).
 
 **Label:** Read file
 
-**Parameters:** `path` (required), `offset`, `limit`
+**Parameters:** `path` (required), `offset`, `limit`, `tail`, `footer`
 
 **Description:**
 
-Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.
+Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files, tail for the last N lines, or footer false to omit the continuation hint. When you need the full file, continue with offset until complete.
 
 ---
 

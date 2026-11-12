@@ -42,6 +42,53 @@
       (is (:is-error result))
       (is (str/includes? (:content result) "File not found")))))
 
+(deftest read-tail-and-footer
+  (testing "tail reads the last N lines; :footer false keeps an exact range
+            free of the continuation hint"
+    (let [dir (test-tmp/temp-dir! "test-read-tail-")
+          f (str (fs/path dir "lines.txt"))]
+      (fs/create-dirs dir)
+      (spit f "one\ntwo\nthree\nfour")
+      (try
+        (let [result (read-call {:path f :tail 2})]
+          (is (not (:is-error result)))
+          (is (= "three\nfour" (:content result))))
+        (let [result (read-call {:path f :offset 1 :limit 2})]
+          (is (str/includes? (:content result) "one\ntwo"))
+          (is (str/includes? (:content result) "[2 more lines")))
+        (let [result (read-call {:path f :offset 1 :limit 2 :footer false})]
+          (is (= "one\ntwo" (:content result))))
+        (let [result (read-call {:path f :offset 1 :tail 2})]
+          (is (:is-error result))
+          (is (str/includes? (:content result) "not both")))
+        (let [result (read-call {:path f :tail 2 :limit 1})]
+          (is (:is-error result))
+          (is (str/includes? (:content result) "without :limit")))
+        (let [result (read-call {:path f :tail 1.5})]
+          (is (:is-error result))
+          (is (str/includes? (:content result) "positive integer")))
+        (let [result (read-call {:path f :tail 0})]
+          (is (:is-error result))
+          (is (str/includes? (:content result) "positive")))
+        (let [result (read-call {:path f :offset 0})]
+          (is (:is-error result))
+          (is (str/includes? (:content result) ":offset must be a positive integer")))
+        (let [result (read-call {:path f :limit 1.5})]
+          (is (:is-error result))
+          (is (str/includes? (:content result) ":limit must be a positive integer")))
+        (finally (fs/delete-tree dir))))))
+
+(deftest read-tail-drops-the-trailing-line-terminator
+  (testing "a trailing newline does not count as an extra tail line"
+    (let [dir (test-tmp/temp-dir! "test-read-tail-newline-")
+          f (str (fs/path dir "lines.txt"))]
+      (fs/create-dirs dir)
+      (spit f "one\ntwo\n")
+      (try
+        (is (= "two\n" (:content (read-call {:path f :tail 1}))))
+        (is (= "one\ntwo\n" (:content (read-call {:path f :tail 2}))))
+        (finally (fs/delete-tree dir))))))
+
 (deftest a-real-file-does-not-consult-the-resolver
   (testing "an on-disk read is the filesystem's; the resolver is only asked when
             nothing exists at the path"

@@ -12,6 +12,11 @@
   [dir-path]
   (path/safe-file-seq dir-path))
 
+(defn positive-integer?
+  "True when X is an integer greater than zero."
+  [x]
+  (and (integer? x) (pos? x)))
+
 ;; ─── Tool-selection vocabulary ────────────────────────────────────────────
 
 (defn tool-selection-modifier?
