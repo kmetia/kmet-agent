@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-09T15:41:34Z"
+ :generated-at "2026-11-12T19:53:32Z"
  :provider {:id :opencode-go
             :name "OpenCode Go"
             :env-vars ["OPENCODE_API_KEY"]
@@ -134,7 +134,7 @@
              :supports-strict-mode true}}
    "deepseek-v4.1-flash"
    {:id "deepseek-v4.1-flash"
-    :name "DeepSeek V4.1 Flash"
+    :name "DeepSeek V4.1 Flash 1017"
     :provider :opencode-go
     :api :openai-completions
     :base-url "https://opencode.ai/zen/go/v1"
@@ -502,26 +502,7 @@
              :max-tokens-field :max-tokens
              :supports-strict-mode true}}}
   :openai-responses
-  {"crouton-alpha-free"
-   {:id "crouton-alpha-free"
-    :name "Crouton Alpha Free"
-    :provider :opencode-go
-    :api :openai-responses
-    :base-url "https://opencode.ai/zen/go/v1"
-    :reasoning true
-    :thinking-level-map {:high "high"
-                         :low "low"
-                         :max "max"
-                         :medium "medium"
-                         :minimal "minimal"
-                         :off nil
-                         :xhigh "xhigh"}
-    :input [:text :image]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 270000
-    :compat {:session-affinity-format :openai-nosession}}
-   "gpt-5.6-luna"
+  {"gpt-5.6-luna"
    {:id "gpt-5.6-luna"
     :name "GPT-5.6 Luna"
     :provider :opencode-go

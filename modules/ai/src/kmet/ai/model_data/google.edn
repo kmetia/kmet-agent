@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-21T10:11:51Z"
+ :generated-at "2026-11-12T19:53:32Z"
  :provider {:id :google
             :name "Google"
             :env-vars ["GEMINI_API_KEY"]
@@ -19,7 +19,7 @@
            :output 12
            :cache-read 0.2
            :cache-write 0}
-    :context-window 131072
+    :context-window 1048576
     :max-tokens 65536}
    "deep-research-preview-04-2026"
    {:id "deep-research-preview-04-2026"
@@ -34,7 +34,7 @@
            :output 12
            :cache-read 0.2
            :cache-write 0}
-    :context-window 131072
+    :context-window 1048576
     :max-tokens 65536}
    "gemini-2.5-computer-use-preview-10-2025"
    {:id "gemini-2.5-computer-use-preview-10-2025"
@@ -259,6 +259,28 @@
     :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 0}
     :context-window 1048576
     :max-tokens 32768}
+   "gemini-4-carbon"
+   {:id "gemini-4-carbon"
+    :name "Gemini 4 Carbon"
+    :provider :google
+    :api :google-generative-ai
+    :base-url "https://generativelanguage.googleapis.com/v1beta"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 32768}
+   "gemini-4-hydrogen"
+   {:id "gemini-4-hydrogen"
+    :name "Gemini 4 Hydrogen"
+    :provider :google
+    :api :google-generative-ai
+    :base-url "https://generativelanguage.googleapis.com/v1beta"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 1.5 :output 7.5 :cache-read 0.075 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 65536}
    "gemini-flash-latest"
    {:id "gemini-flash-latest"
     :name "Gemini Flash Latest"

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-14T10:10:31Z"
+ :generated-at "2026-11-12T19:53:32Z"
  :provider {:id :google-vertex
             :name "Google Vertex AI"
             :env-vars ["GOOGLE_CLOUD_API_KEY"]
@@ -188,5 +188,27 @@
     :reasoning true
     :input [:text :image]
     :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 65536}
+   "gemini-4-carbon"
+   {:id "gemini-4-carbon"
+    :name "Gemini 4 Carbon"
+    :provider :google-vertex
+    :api :google-vertex
+    :base-url "https://{location}-aiplatform.googleapis.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 65536}
+   "gemini-4-hydrogen"
+   {:id "gemini-4-hydrogen"
+    :name "Gemini 4 Hydrogen"
+    :provider :google-vertex
+    :api :google-vertex
+    :base-url "https://{location}-aiplatform.googleapis.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 1.5 :output 7.5 :cache-read 0.075 :cache-write 0}
     :context-window 1048576
     :max-tokens 65536}}}}

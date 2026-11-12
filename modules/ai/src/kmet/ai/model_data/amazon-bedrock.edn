@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-02T16:00:51Z"
+ :generated-at "2026-11-12T19:53:32Z"
  :provider {:id :amazon-bedrock
             :name "Amazon Bedrock"
             :env-vars []
@@ -73,6 +73,19 @@
     :thinking-level-map {:max "max" :off nil :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 10 :output 50 :cache-read 0.25 :cache-write 12.5}
+    :context-window 1000000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
+   "anthropic.claude-fable-5-2"
+   {:id "anthropic.claude-fable-5-2"
+    :name "Claude Fable 5.2"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:max "max" :off nil :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 8 :output 40 :cache-read 0.2 :cache-write 10}
     :context-window 1000000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
@@ -725,6 +738,19 @@
     :context-window 1000000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
+   "global.anthropic.claude-fable-5-2"
+   {:id "global.anthropic.claude-fable-5-2"
+    :name "Claude Fable 5.2 (Global)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:max "max" :off nil :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 8 :output 40 :cache-read 0.2 :cache-write 10}
+    :context-window 1000000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
    "global.anthropic.claude-haiku-4-5-20251001-v1:0"
    {:id "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     :name "Claude Haiku 4.5 (Global)"
@@ -903,6 +929,18 @@
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
     :context-window 1048576
     :max-tokens 128000
+    :compat {:supports-strict-mode true}}
+   "global.moonshotai.kimi-k3.1"
+   {:id "global.moonshotai.kimi-k3.1"
+    :name "Kimi K3.1 Pro Highspeed (Global)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 4 :output 20 :cache-read 0.2 :cache-write 5}
+    :context-window 1048576
+    :max-tokens 1048576
     :compat {:supports-strict-mode true}}
    "global.openai.gpt-5.6-luna"
    {:id "global.openai.gpt-5.6-luna"
@@ -2017,6 +2055,19 @@
     :context-window 1000000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
+   "us.anthropic.claude-fable-5-2"
+   {:id "us.anthropic.claude-fable-5-2"
+    :name "Claude Fable 5.2 (US)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:max "max" :off nil :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 8.8 :output 44 :cache-read 0.22 :cache-write 11}
+    :context-window 1000000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
    "us.anthropic.claude-haiku-4-5-20251001-v1:0"
    {:id "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     :name "Claude Haiku 4.5 (US)"
@@ -2272,6 +2323,18 @@
     :cost {:input 3.3 :output 16.5 :cache-read 0.33 :cache-write 4.125}
     :context-window 1048576
     :max-tokens 128000
+    :compat {:supports-strict-mode true}}
+   "us.moonshotai.kimi-k3.1"
+   {:id "us.moonshotai.kimi-k3.1"
+    :name "Kimi K3.1 Pro Highspeed (US)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 4.4 :output 22 :cache-read 0.22 :cache-write 5.5}
+    :context-window 1048576
+    :max-tokens 1048576
     :compat {:supports-strict-mode true}}
    "us.openai.gpt-5.6-luna"
    {:id "us.openai.gpt-5.6-luna"

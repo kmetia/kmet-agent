@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-09T15:41:34Z"
+ :generated-at "2026-11-12T19:53:34Z"
  :provider {:id :openrouter :name "OpenRouter"}
  :models
  {"black-forest-labs/flux-3-image"
@@ -235,6 +235,24 @@
    :base-url "https://openrouter.ai/api/v1"
    :input [:text :image]
    :cost {:input 1.75 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
+  "minimax/minimax-h3-image"
+  {:id "minimax/minimax-h3-image"
+   :name "MiniMax: MiniMax H3 Image"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
+   :cost {:input 2.3 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
+  "minimax/minimax-h3-image-highspeed"
+  {:id "minimax/minimax-h3-image-highspeed"
+   :name "MiniMax: MiniMax H3 Image Highspeed"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
+   :cost {:input 2.3 :output 0 :cache-read 0 :cache-write 0}
    :output [:image]}
   "openai/gpt-5-image"
   {:id "openai/gpt-5-image"
