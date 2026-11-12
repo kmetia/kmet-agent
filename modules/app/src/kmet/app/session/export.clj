@@ -347,6 +347,6 @@
       (throw (ex-info "Nothing to export yet - start a conversation first"
                       {:type :export-error :path file})))
     (let [out (or path (default-export-path session (or cwd (str (fs/cwd)))))]
-      (fs/create-dirs (fs/parent out))
+      (some-> (fs/parent out) fs/create-dirs)
       (spit out (session->html session {:system-prompt system-prompt :tools tools}))
       (str out))))
