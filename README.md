@@ -27,9 +27,12 @@ the native clipboard backend; older JDKs still run the app).
 
 - Interactive terminal UI with differential rendering, overlays, and a
   multi-line editor.
-- Built-in `read`, `write`, `edit`, `bash`, and `codemode` tools — the last
-  runs sandboxed Clojure scripts that return only the output they emit.
-- Headless RPC mode over EDN stdin/stdout for editors and scripts.
+- Built-in `read`, `write`, `edit`, and `bash` tools, plus tool search and
+  session recall; opt-in `codemode` and `eval` add a sandboxed Clojure tool
+  environment.
+- Profiles and `--patch` layers that compose the plugin rows a run mounts.
+- Headless print, RPC, and socket-server modes for one-shot runs, editors,
+  and scripts.
 - Provider, authentication, model-catalog, OAuth, and custom-model support.
 - Local extensions, skills, prompt templates, themes, and packages (local
   or git).
@@ -59,19 +62,20 @@ bb start --print "summarize the project"
 The same checkout runs on the optional hosts: `jolt start` on
 [Jolt](https://github.com/jolt-lang/jolt) and `bb start-jvm` on JVM Clojure,
 which needs the [Clojure CLI](https://clojure.org/guides/install_clojure) (and
-Java 22+ for the clipboard's native backend). Each host carries its own test
+Java 22+ for the clipboard's native backend). The JVM host mirrors the test
 and packaging tasks (`bb test-jvm`, `bb dist-jvm`).
 
 Self-contained release binaries skip the Babashka install: download the zip
 for your platform from
 [GitHub Releases](https://github.com/kmetia/kmet-agent/releases) — releases
-ship `kmet-<version>-<platform>.zip` (currently `v0.1.3`), with `<platform>`
-one of `linux-amd64`, `linux-aarch64`, `macos-amd64`, `macos-aarch64`, and
-`windows-amd64`. Unzip it and run the executable inside the extracted folder:
+ship `kmet-<version>-<platform>.zip` (the latest release is `v0.3.1`), with
+`<platform>` one of `linux-amd64`, `linux-aarch64`, `macos-amd64`,
+`macos-aarch64`, and `windows-amd64`. Unzip it and run the executable inside
+the extracted folder, which is named after the zip:
 
 ```sh
-unzip kmet-0.1.3-linux-amd64.zip
-./kmet-0.1.3-linux-amd64/kmet --list-models
+unzip kmet-0.3.1-linux-amd64.zip
+./kmet-0.3.1-linux-amd64/kmet --list-models
 ```
 
 On Windows run `kmet.exe`; on Termux run the bundled `kmet.sh` launcher. The
@@ -88,12 +92,22 @@ and installation details.
 
 Start with the [user documentation](docs/README.md):
 
-- [Getting started](docs/getting-started.md) — requirements, setup, and first run.
-- [Usage](docs/usage.md) — command-line options, slash commands, shortcuts, and sessions.
-- [RPC mode](docs/rpc.md) — drive a session over EDN stdin/stdout.
-- [Configuration](docs/configuration.md) — settings, prompts, compaction, and resource paths.
-- [Providers and authentication](docs/providers.md) — API keys, OAuth, and custom models.
-- [Customization](docs/customization.md) — themes, skills, prompts, packages, and extensions.
+- [Getting started](docs/getting-started.md) — requirements, setup, and first
+  run.
+- [Usage](docs/usage.md) — command-line options, slash commands, shortcuts,
+  and sessions.
+- [Profiles and composition](docs/profiles.md) — profiles, `--patch` layers,
+  and the generated [composition catalog](docs/composition.md).
+- [RPC](docs/rpc.md) and [server](docs/serve.md) modes — drive a session over
+  EDN stdin/stdout or a socket.
+- [Configuration](docs/configuration.md) — settings, prompts, compaction, and
+  resource paths.
+- [Providers and authentication](docs/providers.md) — API keys, OAuth, and
+  custom models.
+- [Customization](docs/customization.md) — themes, skills, prompts, packages,
+  and extensions.
+- [Writing extensions](docs/extensions.md) — the authoring guide for extension
+  packages.
 - [Building](docs/building.md) — Babashka, Jolt, and JVM distributions.
 - [Examples](docs/examples/README.md) — copyable settings and theme files.
 
@@ -108,18 +122,18 @@ to the code and people who own it. The longer etymology is in
 ## Project layout
 
 ```text
-modules/        — application modules and libraries (agent, ai, libs, tui,
+modules/        — application modules and libraries (app, ai, libs, srce, tui,
                   loader, tk, reakt, hikap); each is a standalone classpath root
-extensions/     — opt-in shipped extensions
+extensions/     — bundled opt-in extensions and single-file tools
 jolt/           — Jolt provider scaffolding
-docs/           — user-facing documentation
-test/           — test suites
+docs/           — user guides and references
+test/           — cross-cutting tests (module tests sit beside each module)
 tasks/          — development and packaging tasks
-scripts/        — repo tooling (git hooks, repros)
+scripts/        — repo tooling (git hooks, repros, capture and benchmark helpers)
 ```
 
-Implementation and development references are kept close to their packages —
-each module's `README.md` or design note sits beside its source — and
+Implementation and development references sit beside the source they describe
+— for example, the kernel and TUI design notes — and
 [`docs/architecture.md`](docs/architecture.md) is the contributor's map.
 
 ## License
