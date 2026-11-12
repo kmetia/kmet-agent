@@ -6,6 +6,7 @@
    hook (pi: config.getApiKey) over the provider key."
   (:require [clojure.string :as str]
             [kmet.libs.json :as json]
+            [kmet.ai.message :as ai-message]
             [kmet.app.llm :as llm]
             [kmet.app.loop-guard :as loop-guard]
             [kmet.app.retry :as retry]
@@ -15,28 +16,39 @@
             [kmet.app.extensions.core :as extensions]
             [kmet.app.config :as cfg]))
 
+(defn- append-tool-arguments
+  "OLD plus DELTA. Anthropic content_block_start seeds the tool's input as
+   a map ({}); input_json_delta then streams the partial JSON as strings.
+   pi keeps partialJson separate from arguments and re-parses at
+   content_block_stop — the deltas REPLACE the map, never concat to it (pi:
+   block.arguments = parseStreamingJson(partialJson)). A map OLD must
+   therefore start the string accumulator fresh."
+  [old delta]
+  (if (map? old) delta (str (or old "") delta)))
+
+(defn- add-tool-delta!
+  "Merge one streamed tool-call delta into PENDING by index. A named delta
+   fills a missing name; a repeated name keeps the first and appends
+   arguments (pi: ensureToolCallBlock sets block.name only when empty and
+   always appends). A blank name is a continuation, like pi's falsy
+   `!block.name` guard."
+  [pending {:keys [index id name arguments]}]
+  (let [delta (or arguments "")
+        named? (ai-message/tool-name? name)]
+    (swap! pending
+           (fn [calls]
+             (let [call (or (get calls index)
+                            {:id nil :name nil :arguments nil})
+                   call (assoc call :id (or (:id call) id))
+                   call (if (and named? (nil? (:name call)))
+                          (assoc call :name name)
+                          call)]
+               (assoc calls index
+                      (update call :arguments append-tool-arguments delta)))))))
+
 (defn- make-tc-accumulator []
   (let [pending (atom {})]
-    [(fn [tc]
-       (let [idx (:index tc)
-             name (:name tc)]
-         (if name
-           (swap! pending assoc idx
-                  {:id (:id tc) :name name :arguments (or (:arguments tc) "")})
-           (swap! pending update-in [idx :arguments]
-                  (fn [old]
-                    (let [delta (or (:arguments tc) "")]
-                      (cond
-                        ;; Anthropic content_block_start seeds the tool's input as a
-                        ;; map ({}); input_json_delta then streams the partial JSON as
-                        ;; strings. pi keeps partialJson separate from arguments and
-                        ;; re-parses at content_block_stop — the deltas REPLACE the
-                        ;; map, never concat to it (pi: block.arguments =
-                        ;; parseStreamingJson(partialJson)). A map old must therefore
-                        ;; start the string accumulator fresh.
-                        (map? old) delta
-                        (nil? old) delta
-                        :else (str old delta))))))))
+    [(fn [tc] (add-tool-delta! pending tc))
      (fn []
        (let [result (into []
                           (for [[_idx {:keys [id name arguments]}] @pending]

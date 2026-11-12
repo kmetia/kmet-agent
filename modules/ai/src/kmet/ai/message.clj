@@ -75,6 +75,13 @@
   [m]
   (me/humanize (m/explain Message m)))
 
+(defn tool-name?
+  "True when NAME is a usable tool-call name: a non-blank string. Some
+   OpenAI-compatible providers repeat an empty name on argument chunks; it
+   continues the open call and must not open a nameless sibling."
+  [name]
+  (and (string? name) (not (str/blank? name))))
+
 ;; ─── Block readers ─────────────────────────────────────────────────────────
 
 (defn content-text

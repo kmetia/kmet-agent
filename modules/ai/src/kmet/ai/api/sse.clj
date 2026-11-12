@@ -8,6 +8,7 @@
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
             [kmet.ai.hash :as hash]
+            [kmet.ai.message :as message]
             [kmet.libs.json :as json]
             [kmet.libs.sse :as sse-lib]))
 
@@ -35,14 +36,6 @@
   [data]
   (or (nil? data) (= data "[DONE]")))
 
-(defn- named-tool-delta?
-  "True when NAME opens a tool call. Some OpenAI-compatible providers
-   (opencode-go) repeat an empty name on every argument chunk instead of
-   omitting it; an empty name continues the open call, so it must not open a
-   nameless sibling."
-  [name]
-  (and (string? name) (not (str/blank? name))))
-
 (defn parse-openai-event
   "Parse an OpenAI chat-completions SSE data payload into a vector of kmet
    events: :text, :thinking, :tool-call, :tool-call-args, :done (with
@@ -69,7 +62,7 @@
           (let [fname (get-in tc [:function :name])
                 fargs (get-in tc [:function :arguments])]
             (cond
-              (named-tool-delta? fname)
+              (message/tool-name? fname)
               (vswap! events conj {:type :tool-call :id (:id tc)
                                    :name fname
                                    :arguments (or fargs "")
@@ -653,7 +646,7 @@
         fargs (get-in tc [:function :arguments])
         raw-id (:id tc)]
     (cond
-      (named-tool-delta? fname)
+      (message/tool-name? fname)
       {:type :tool-call
        :id (if (and raw-id (not= "null" raw-id))
              raw-id

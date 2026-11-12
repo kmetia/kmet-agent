@@ -9,6 +9,7 @@
             [kmet.ai.models :as models]
             [kmet.app.events :as events]
             [kmet.app.session.core :as session]
+            [kmet.app.loop.completion :as completion]
             [kmet.app.loop.state :as state]
             [kmet.app.loop :as loop]
             [kmet.app.retry :as retry]
@@ -888,3 +889,21 @@
       (t/is (= [true] @own) "the run's own ctx hears its boundary")
       (t/is (= [] @sib) "a sibling under the same app scope does not")
       (finally (dispose-own) (dispose-sib)))))
+
+(t/deftest test-tool-call-accumulator-keeps-open-call
+  (let [run (fn [deltas]
+              (let [[add flush] (@#'completion/make-tc-accumulator)]
+                (doseq [d deltas] (add d))
+                (flush)))]
+    (t/is (= [{:id "call_1" :name "eval" :arguments {:code "x"}}]
+             (run [{:index 0 :id "call_1" :name "eval" :arguments ""}
+                   {:index 0 :name "" :arguments "{\"code\":\"x\"}"}]))
+          "an empty name continues the open call")
+    (t/is (= [{:id "call_1" :name "eval" :arguments {:code "x"}}]
+             (run [{:index 0 :id "call_1" :name "eval" :arguments ""}
+                   {:index 0 :name "eval" :arguments "{\"code\":\"x\"}"}]))
+          "a repeated name appends to the same call")
+    (t/is (= [{:id "call_1" :name "eval" :arguments {:code "x"}}]
+             (run [{:index 0 :arguments "{\"code\":\"x\"}"}
+                   {:index 0 :id "call_1" :name "eval" :arguments ""}]))
+          "a late name fills the call without losing arguments")))
