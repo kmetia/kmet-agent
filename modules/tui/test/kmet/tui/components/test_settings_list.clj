@@ -155,6 +155,15 @@
     (core/handle-input s K-ESC)
     (t/is @escaped)))
 
+(t/deftest test-settings-list-escape-hint
+  (t/testing "Esc closes the list after live changes are applied: the hint
+              says close, not cancel"
+    (doseq [s [(sl/make-settings-list sample-items)
+               (sl/make-settings-list sample-items :enable-search true)]]
+      (let [lines (core/render s 80)]
+        (t/is (some #(str/includes? % "Esc to close") lines))
+        (t/is (not-any? #(str/includes? % "Esc to cancel") lines))))))
+
 ;; ─── get-item / set-value ─────────────────────────────────────────────────
 
 (t/deftest test-settings-list-get-item

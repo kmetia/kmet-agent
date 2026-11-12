@@ -64,8 +64,8 @@
   (vswap! lines conj
           (u/truncate-to-width
            ((:hint theme) (if search?
-                            "  Type to search · Enter/Space to change · Esc to cancel"
-                            "  Enter/Space to change · Esc to cancel"))
+                            "  Type to search · Enter/Space to change · Esc to close"
+                            "  Enter/Space to change · Esc to close"))
            width)))
 
 (defn- cycle-value!
