@@ -355,17 +355,13 @@ Execute a bash command in the current working directory. Returns stdout and stde
 
 **Description:**
 
-Run a Clojure script to work over the environment and report a digest. Use it when the intermediate output would flood the context — scan or transform many files, run a search→read→verify chain, compute counts, matches or a summary — instead of chaining bash cat/head/rg. Use bash for one small command and read for one file.
-
-Every codemode call starts from a fresh context; definitions do not persist.
-
-Inside the script the local primitives return values, not rendered text; prefer them over bash/read for local work. Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. A plain name is also a var — @(tools/read {:path "x"}) — while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe "name") returns one tool's declaration.
-
-Callable tools include read(path, offset?, limit?), write(path, content), edit(path, edits), and bash(command, timeout?); the bare read, write, edit and bash forms (also core/read, core/write, core/edit and core/bash) call the matching implementations. Prefer (slurp path), (spit path text), fs/*, and (p/sh ...) for whole-file and shell work.
-
-Report with (emit value) (also (core/emit value)), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image "shot.png") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.
-
-Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) namespaces. :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB.
+Fresh Clojure SCI sandbox with the active tools bridged in; definitions do not persist.
+Files: (read "p") or (read "p" {:offset N :limit N}); (write "p" text); (edit "p" old new).
+Shell: (bash "cmd1 && cmd2" {:timeout N}) -> output + status; a nonzero exit is normal.
+Tools: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; @(tools/read {…}) is the per-tool shorthand, while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) lists the callable tools with their descriptions and parameters; (tools/describe "name") returns one declaration. Inner results never enter the conversation.
+Batch independent reads, commands, and tests into one call; (emit v) for full output. Multi-form calls report one line per form.
+Example: (emit {:spec (read "SPEC-v2.txt") :tests (bash "bash test-v1.sh; bash test-v2.sh")}).
+Return the final value or (emit v); println is discarded. Prefer (slurp path), (spit path text), fs/*, and (p/sh ...) for whole-file and shell work. (emit-image path) attaches an image. Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB.
 
 ---
 
@@ -377,12 +373,12 @@ Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) na
 
 **Description:**
 
-Persistent Clojure SCI sandbox (babashka surface: fs, slurp, spit, require; no registered tools).
-Use read, write, edit and bash (also core/<verb>); batch shell work in one command, reads with several forms in one call.
-Shell: (bash "cat r.txt && cd /tmp && bb run st") -> output + status; nonzero normal.
-Put independent forms in one call. Multi-form reports one line per form; (emit value) for full output.
-Define in user; a top-level docstring saves to the eval library, else session-only. Reuse saved definitions; (eval/library) lists them; (eval/keep ...), (eval/forget ...), (eval/move ...).
-let/fn bindings are scratch; define what recurs once. Report the final value or (emit value); stdout/stderr are discarded; println is discarded. (help), (describe 'name), (eval/sources), (emit-image path).
+Persistent Clojure SCI sandbox; no registered tools.
+Files: (read "p") or (read "p" {:offset N :limit N}); (write "p" text); (edit "p" old new).
+Shell: (bash "cmd1 && cmd2" {:timeout N}) -> output + status; a nonzero exit is normal.
+Batch independent reads/tests in one call; (emit v) for full output. Multi-form calls report one line per form.
+Example: (emit {:spec (read "SPEC-v2.txt") :tests (bash "bash test-v1.sh; bash test-v2.sh")}).
+Definitions and results persist; return the final value or (emit v); println is discarded. (help) for the eval library, persistence, results, and limits.
 
 ---
 

@@ -153,6 +153,41 @@
     (t/is (= :bytes (get-in r [:truncation :truncated-by]))
           "a large value meets the same output budget as emit")))
 
+(t/deftest test-codemode-multi-form-call-reports-each-form-value
+  (t/is (= "1 => 3\n7"
+           (:content (run "(+ 1 2)\n(+ 3 4)"))))
+  (t/is (= "3" (:content (run "(+ 1 2)")))
+        "a single form keeps the final-value rule")
+  (t/is (= ":a" (:content (run "(core/emit :a)\n(+ 1 2)")))
+        "emit stays the curated channel")
+  (let [r (run "(+ 1 2)\n(throw (ex-info \"boom\" {}))\n(+ 3 4)")]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "1 => 3"))
+    (t/is (str/includes? (:content r) "ERROR in form 2 of 3"))
+    (t/is (str/includes? (:content r) "form 1 evaluated and stands"))))
+
+(t/deftest test-codemode-forms-share-a-call-local-namespace
+  (let [r (run "(ns demo)\n(def x 1)\n(ns-name *ns*)")]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (= "demo" (:content r)))
+
+    (t/is (= "false"
+             (:content (run "(some? (resolve 'demo/x))")))
+          "the namespace does not survive the call")))
+
+(t/deftest test-the-codemode-prompt-steers-batching
+  (let [tool (tools/get-tool reg "codemode")]
+    (t/is (str/includes? (:description tool)
+                         "Batch independent reads, commands, and tests"))
+    (t/is (str/includes? (:description tool)
+                         "Multi-form calls report one line per form"))
+    (t/is (str/includes? (:prompt-snippet tool)
+                         "Batch independent reads/tests")))
+  (let [guidelines (str/join "\n" (:prompt-guidelines (tools/get-tool reg "codemode")))]
+    (t/is (str/includes? guidelines "Batch independent reads"))
+    (t/is (str/includes? guidelines "not one call per file"))
+    (t/is (str/includes? guidelines "compose shell commands"))))
+
 (t/deftest test-codemode-emit-compact-result
   (let [r (run "(core/emit {:count 2 :items [1 2]})")]
     (t/is (not (:is-error r)))

@@ -21,13 +21,13 @@
 ;; ─── Tool record ──────────────────────────────────────────────────────────
 
 (def ^:private description
-  (str "Run a Clojure script to work over the environment and report a digest. "
-       "Use it when the intermediate output would flood the context — scan or transform many files, run a search→read→verify chain, compute counts, matches or a summary — instead of chaining bash cat/head/rg. Use bash for one small command and read for one file.\n\n"
-       "Every codemode call starts from a fresh context; definitions do not persist.\n\n"
-       "Inside the script the local primitives return values, not rendered text; prefer them over bash/read for local work. Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. A plain name is also a var — @(tools/read {:path \"x\"}) — while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one tool's declaration.\n\n"
-       "Callable tools include read(path, offset?, limit?), write(path, content), edit(path, edits), and bash(command, timeout?); the bare read, write, edit and bash forms (also core/read, core/write, core/edit and core/bash) call the matching implementations. Prefer (slurp path), (spit path text), fs/*, and (p/sh ...) for whole-file and shell work.\n\n"
-       "Report with (emit value) (also (core/emit value)), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image \"shot.png\") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.\n\n"
-       "Sandbox: SCI with the babashka surface; (tools/list) lists tools and (all-ns) namespaces. :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB."))
+  (str "Fresh Clojure SCI sandbox with the active tools bridged in; definitions do not persist.\n"
+       "Files: (read \"p\") or (read \"p\" {:offset N :limit N}); (write \"p\" text); (edit \"p\" old new).\n"
+       "Shell: (bash \"cmd1 && cmd2\" {:timeout N}) -> output + status; a nonzero exit is normal.\n"
+       "Tools: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; @(tools/read {…}) is the per-tool shorthand, while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) lists the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one declaration. Inner results never enter the conversation.\n"
+       "Batch independent reads, commands, and tests into one call; (emit v) for full output. Multi-form calls report one line per form.\n"
+       "Example: (emit {:spec (read \"SPEC-v2.txt\") :tests (bash \"bash test-v1.sh; bash test-v2.sh\")}).\n"
+       "Return the final value or (emit v); println is discarded. Prefer (slurp path), (spit path text), fs/*, and (p/sh ...) for whole-file and shell work. (emit-image path) attaches an image. Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB."))
 
 (defn title
   "Quiet one-liner body for the codemode tool: `codemode $ ` and the first
@@ -53,12 +53,14 @@
    :name "codemode"
    :label "Codemode"
    :description description
-   :prompt-snippet "One script per phase: read/write/run/verify, then emit only the digest."
+   :prompt-snippet "Fresh Clojure sandbox with tools; one script per phase. Files: (read \"p\"), (write \"p\" text), (edit \"p\" old new); shell: (bash \"cmd\" {:timeout N}); tools: @(tools/call \"name\" args). Batch independent reads/tests in one call; (emit v) for full output; (tools/list)."
    :prompt-guidelines
    ["Use codemode for Clojure — including one-liners — instead of writing bb -e/bb -f scripts through bash, unless the code needs the project classpath or its tests."
     "Use codemode when a fresh context matters: definitions do not persist between calls."
+    "Batch independent reads, commands, and tests into one codemode call: compose shell commands with &&/; in one (bash ...), put several read/bash forms in one call, or emit a map of the values; not one call per file, command, or test suite."
     "Use codemode when a command's output would flood the context: compute inside the script and (emit) only the digest — counts, matches, the lines that matter — instead of chaining bash cat/head/rg; println is discarded (emit the digest, or end on the value you want reported)."
     "Inside a script prefer (slurp path), fs/* and (p/sh ...) for local work over the bash and read tools — they return values, not rendered text — and call a tool only when its result is too large to read (a web fetch, an MCP call), emitting the filtered part: @(tools/call \"name\" args), or its per-tool var @(tools/read {…}). The bare read, write, edit and bash wrappers (also core/*) are available when you need the matching implementation's behavior."
+    "A multi-form call reports one line per form; use (emit value) for a full result. Return the final value or (emit value); println is discarded."
     "When the answer is an image (a screenshot, a chart, a rendered page), attach it with (emit-image path) rather than describing it."]
    :params {:code {:type :string :description "One Clojure script (one or more top-level forms), evaluated in order; definitions do not persist."}
             :timeout {:type :number
@@ -73,6 +75,7 @@
                   {:content "No code provided." :is-error true}
                   (script/run {:tool "codemode"
                                :code code
+                               :split-forms? true
                                :timeout (:timeout args)
                                :limits (script/resolve-limits (:max-output-bytes args))
                                :signal signal

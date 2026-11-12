@@ -90,7 +90,7 @@
 (def ^:private error-preview-chars 300)
 (def ^:private error-preview-lines 3)
 (def ^:private form-value-line-chars
-  "Characters of one form's value line in a multi-form eval result."
+  "Characters of one form's value line in a multi-form result."
   500)
 
 (def script-tool-names
@@ -1345,7 +1345,7 @@
 (defn- form-evaluator
   "The one-form evaluator over SCI-CTX. With NS-ATOM, each form runs in the
    remembered namespace and the namespace it ended in is stored back; without
-   it, a form runs in the thread's current namespace (the codemode path)."
+   it, a form runs in the thread's current namespace (a whole-source call)."
   [sci-ctx ns-atom]
   (if ns-atom
     (fn [form]
@@ -1582,7 +1582,7 @@
    wins when set: a script unwound by the interrupt (however it reports, e.g. a
    catch that rethrows) cannot outlive its deadline. TIMEOUT-MS nil = no
    deadline (bash parity) and the result's :timeout is nil; ELAPSED-MS is the
-   measured wall clock. A multi-form eval call reports every non-definition
+   measured wall clock. A multi-form call reports every non-definition
    form as one bounded line, before an error. RESULT-STORE,
    when given, keeps the full body and returns the id the truncation notice
    and error tail name."
@@ -1765,6 +1765,9 @@
            split-forms? result-store]
     :as opts}]
   (let [started-at (or started-at (concurrent/monotonic-ms))
+        ;; splitting forms evaluates them one at a time; without a kept
+        ;; context's namespace atom, each evaluation would fall back to user
+        ns-atom (or ns-atom (when split-forms? (atom nil)))
         state (or state (prepare (assoc opts :ctx ctx)))
         timeout-ms (:timeout-ms state)
         deadline (if (contains? opts :deadline)
@@ -1832,9 +1835,10 @@
    start there and the final namespace is stored back. SPLIT-FORMS? evaluates
    each top-level form separately, so a failure names the form and what ran
    and a multi-form call reports earlier forms one line each and the last value
-   in full (the eval tool's shape). RESULT-STORE receives the full pre-truncation
-   result map and returns the id used in the truncation notice and error
-   tail. EXTRA-DETAILS merges into the result's :details. `:abort` may supply
+   in full. A split-form call without NS-ATOM gets a call-local one, so a
+   top-level (ns ...) holds for the call's later forms. RESULT-STORE receives
+   the full pre-truncation result map and returns the id used in the
+   truncation notice and error tail. EXTRA-DETAILS merges into the result's :details. `:abort` may supply
    the timeout/output-limit abort atom `prepare` would create — the eval
    service shares that atom with its sources."
   [{:keys [ctx] :as opts}]

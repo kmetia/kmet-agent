@@ -581,7 +581,9 @@ probe and no real use, and is gone;
   `(core/emit v)`, is the curated text channel: strings print raw, other data
   `pr-str`, and it returns nil. A script that emits nothing and finishes
   normally reports its final value instead (the REPL rule, bounded like
-  emit); stdout and stderr are captured for the budget but never reported.
+  emit); with several top-level forms, each non-definition value is reported
+  as one bounded line and an error names the failing form and what ran;
+  stdout and stderr are captured for the budget but never reported.
   `(emit-image path-or-block)`
   is the second channel, capped at 4 MiB of base64 per image and 8 images per
   call, accepting exactly what `read` accepts. Capture is bounded at 1 MiB
@@ -729,12 +731,12 @@ reads a slice. A call using `eval/result` is not stored back, so slicing a
 large result cannot evict it. The ring holds the script body, not the final
 `[eval: …]` change report or error status. A truncated result keeps its tail
 and names the read form in its notice; an errored result carries its id
-after the error. Eval evaluates a call's top-level forms one at a time, so
-an error begins `ERROR` (after the values of earlier forms) and, with several
-forms, names the failing form and what already ran; a successful multi-form
-call reports every form as one bounded line; use `(emit value)` for a full
-value.
-`codemode` keeps the whole-source path.
+after the error. Like codemode, eval evaluates a call's top-level forms one
+at a time, so an error begins `ERROR` (after the values of earlier forms) and,
+with several forms, names the failing form and what already ran; a successful
+multi-form call reports every form as one bounded line; use `(emit value)` for
+a full value. The result ring is eval-specific, since it is read back with the
+sandbox's `eval/result` verb.
 `(eval/help :results)` states the emission, cap, truncation and error
 contract. The index is the one-call discovery path: every built-in verb with
 its arglists and one-line contract, then the topics, library counts, sources
