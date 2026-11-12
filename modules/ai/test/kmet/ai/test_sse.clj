@@ -79,6 +79,18 @@
                  "{\"id\":\"a\",\"index\":0,\"function\":{\"name\":\"read\"}},"
                  "{\"id\":\"b\",\"index\":1,\"function\":{\"name\":\"bash\"}}]}}]}")))))
 
+(t/deftest test-parse-openai-event-empty-name-continues-call
+  ;; opencode-go repeats function.name as "" on every argument chunk; the
+  ;; chunk continues the open call instead of opening a nameless sibling
+  (t/is (= [{:type :tool-call :id "call_1" :name "eval" :arguments "" :index 0}]
+           (sse/parse-openai-event
+            (str "{\"choices\":[{\"delta\":{\"tool_calls\":["
+                 "{\"id\":\"call_1\",\"index\":0,\"function\":{\"name\":\"eval\",\"arguments\":\"\"}}]}}]}"))))
+  (t/is (= [{:type :tool-call-args :id nil :arguments "{\"code\"" :index 0}]
+           (sse/parse-openai-event
+            (str "{\"choices\":[{\"delta\":{\"tool_calls\":["
+                 "{\"id\":null,\"index\":0,\"function\":{\"name\":\"\",\"arguments\":\"{\\\"code\\\"\"}}]}}]}")))))
+
 ;; ─── OpenAI Responses event parsing (pi processResponsesStream) ────────────
 
 (declare make-pipe)
@@ -618,6 +630,10 @@
             (str "{\"data\": {\"choices\": [{\"delta\": {\"tool_calls\": ["
                  "{\"id\": \"t1\", \"index\": 0, \"function\": {\"arguments\": {\"path\": \"/x\"}}}]},"
                  "\"finish_reason\": \"length\"}]}}"))))
+  (t/is (= [{:type :tool-call-args :id nil :arguments "{\"path\":\"/x\"}" :index 0}]
+           (sse/parse-mistral-event
+            (str "{\"data\": {\"choices\": [{\"delta\": {\"tool_calls\": ["
+                 "{\"id\": null, \"index\": 0, \"function\": {\"name\": \"\", \"arguments\": \"{\\\"path\\\":\\\"/x\\\"}\"}}]}}]}}"))))
   (let [events (sse/parse-mistral-event
                 (str "{\"data\": {\"choices\": [{\"delta\": {\"tool_calls\": ["
                      "{\"index\": 3, \"function\": {\"name\": \"read\"}}]}}]}}"))]
