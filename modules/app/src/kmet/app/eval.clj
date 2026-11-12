@@ -922,6 +922,10 @@
         i (str/index-of s ". ")]
     (if i (subs s 0 (inc i)) s)))
 
+(def ^:private help-topic-keys
+  "The built-in topics, in the order the index names them."
+  [:core :library :persistence :results])
+
 (defn- builtin-verb-lines
   []
   (map (fn [[name {:keys [doc arglists]}]]
@@ -931,7 +935,32 @@
 
 (defn- indent-text "TEXT with every line indented four spaces." [text] (str/join "\n" (map (fn [line] (str "    " line)) (str/split-lines (str text)))))
 
-(defn- source-help [env] (let [sources (clojure.core/deref (:source-info env))] (str "Eval sources:\n" (if (seq sources) (str/join "\n" (map (fn [source] (eval-format/source-line source :keyword)) sources)) "  (none)"))))
+(defn- source-topic
+  "SOURCE's id as a help-topic keyword, or nil."
+  [{:keys [id]}]
+  (let [topic (eval-format/source-id id)]
+    (when-not (str/blank? topic) (keyword topic))))
+
+(defn- source-summary-line
+  "One index line for SOURCE: its first sentence, verb count and the topic
+   that expands the full description and verb catalog."
+  [{:keys [error doc verbs] :as source}]
+  (let [id (eval-format/source-id source :keyword)
+        topic (source-topic source)
+        n (count verbs)]
+    (if error
+      (str "- " id ": " error)
+      (str "- " id ": " (first-sentence (or doc "(no description)"))
+           " — " n " verb" (when (not= 1 n) "s")
+           "; (eval/help " topic ")"))))
+
+(defn- source-help
+  [env]
+  (let [sources (clojure.core/deref (:source-info env))]
+    (str "Eval sources:\n"
+         (if (seq sources)
+           (str/join "\n" (map source-summary-line sources))
+           "  (none)"))))
 
 (defn- scope-help [env] (str "Scope: cwd " (get-in env [:roots :cwd]) " (shadows the global layer)" "\n       global " (get-in env [:roots :global]) "\nNew definitions write to cwd; (eval/move 'name :global) moves a saved " "definition to the global layer. A redefinition keeps the active layer; a failed file is repaired in place."))
 
@@ -1012,6 +1041,23 @@
        "also works; stdout and stderr are discarded; (eval/help :results) has the "
        "result contract."))
 
+(defn- doc-field
+  "The help detail's doc field: one line when DOC is one line, otherwise the
+   whole docstring indented under `doc:`."
+  [doc]
+  (let [doc (str/trim (str (or doc "")))]
+    (cond
+      (str/blank? doc) "  doc: (no docstring)"
+      (str/includes? doc "\n") (str "  doc:\n" (indent-text doc))
+      :else (str "  doc: " doc))))
+
+(defn- inspect-hint
+  "Where to read ENTRY-NAME's defining form or file, when it has either."
+  [entry-name source file]
+  (when (or (seq (str source)) file)
+    (str "\n  inspect: (eval/describe '" entry-name " :source) or "
+         "(eval/describe '" entry-name " :file).")))
+
 (defn- help-entry-text
   [entry]
   (let [{:keys [kind doc arglists file scope source load-status load-error]
@@ -1020,22 +1066,13 @@
         scope-label (cond
                       scope (str "(" (name scope) ")")
                       (str/blank? (str source)) "(built-in)"
-                      :else "(source)")
-        doc-line (or (eval-format/doc-line doc) "(no docstring)")]
+                      :else "(source)")]
     (str entry-name " " (when kind (name kind)) (or arg "") " " scope-label
-         "\n  doc: " doc-line
-         (when file (str "\n  file: " file))
+         "\n" (doc-field doc)
          (when (= :failed load-status)
            (str "\n  status: failed"
                 (when load-error (str ": " (truncate-report-error load-error)))))
-         (when-not (str/blank? (str source))
-           (str "\n  source:\n" (indent-text source))))))
-
-(defn- source-topic
-  "SOURCE's id as a help-topic keyword, or nil."
-  [{:keys [id]}]
-  (let [topic (eval-format/source-id id)]
-    (when-not (str/blank? topic) (keyword topic))))
+         (inspect-hint entry-name source file))))
 
 (defn- source-topics
   "The mounted sources' ids as help-topic keywords, sorted."
@@ -1046,6 +1083,16 @@
   "The mounted source whose id names TOPIC, or nil."
   [env topic]
   (some #(when (= topic (source-topic %)) %) @(:source-info env)))
+
+(defn- topic-for
+  "The topic STRING names, case-insensitively, or nil. A string is a topic,
+   never a definition name."
+  [env string]
+  (let [w (-> string str/trim str/lower-case)]
+    (some (fn [topic]
+            (when (= w (str/lower-case (subs (str topic) 1)))
+              topic))
+          (concat help-topic-keys (source-topics env)))))
 
 (defn- help-topic-text
   [env topic]
@@ -1058,8 +1105,8 @@
       (str "Eval source " (name topic) ":\n"
            (eval-format/source-line source))
       (bad-request! (str "unknown eval help topic " (pr-str topic)
-                         "; use :library, :persistence, :results, :core, "
-                         "or a mounted source id")
+                         "; use " (str/join ", " (map str help-topic-keys))
+                         ", or a mounted source id")
                     {:topic topic}))))
 
 (defn- help-index
@@ -1067,8 +1114,8 @@
   (let [entries (library-entries env)
         session-only (session-only-entries env)
         topics (source-topics env)]
-    (str "Eval help: (help) or (eval/help) index, (eval/help :topic) a topic, "
-         "or (help 'name) one verb or definition."
+    (str "Eval help: (help) or (eval/help) index, (eval/help :topic) or "
+         "(eval/help \"topic\") a topic, or (help 'name) one verb or definition."
          "\nTopics: :core sandbox, :library definitions and scopes, "
          ":persistence save/drop, :results output"
          (when (seq topics)
@@ -1094,8 +1141,8 @@
 
 (defn- environment-help
   "The `(eval/help)` text: an index, a topic, or one definition's interface.
-   `help` and `describe` are the bare aliases. Topics: :library,
-   :persistence, :results, :core."
+   A keyword or string names a topic; a symbol names a definition. `help` and
+   `describe` are the bare aliases."
   ([env] (help-index env))
   ([env what]
    (cond
@@ -1103,7 +1150,12 @@
      (keyword? what)
      (help-or-index env (str "No help for topic " (pr-str what))
                     #(help-topic-text env what))
-     (or (symbol? what) (string? what))
+     (string? what)
+     (if-let [topic (topic-for env what)]
+       (help-topic-text env topic)
+       (str "No help for topic " (pr-str what) "; the index:\n"
+            (help-index env)))
+     (symbol? what)
      (help-or-index env (str "No help for " (pr-str what))
                     #(help-entry-text (describe-entry env what)))
      :else (bad-request! (str "eval help needs a topic or name, got "

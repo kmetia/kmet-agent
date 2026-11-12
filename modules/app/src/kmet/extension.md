@@ -420,8 +420,9 @@ source with that call's signal.
 The optional third argument is registration metadata:
 `{:description "License helpers: ext.license/add!."}` — one line the eval
 manifest lists without invoking the source. Without it the manifest names the
-source id alone. Keep it a summary, not a catalog; `(eval/sources)` and
-`(eval/help)` list the verbs.
+source id alone. Keep it a summary, not a catalog; `(eval/sources)` lists the
+verbs, `(eval/help)` keeps one summary line, and `(eval/help :license)` lists
+them.
 
 - `:ns` and `:macros` namespaces must be exactly `ext.<source-id>` or start
   with `ext.<source-id>.`; any other namespace is refused. The system
@@ -436,8 +437,9 @@ source id alone. Keep it a summary, not a catalog; `(eval/sources)` and
   are host macro fns (they receive SCI's form and environment before their
   arguments). A value may carry `:doc`, `:arglists` and `:source` metadata (the
   keys a var uses, plus the implementation text, since a source verb has no
-  library file). `normalize-source` keeps them, `(eval/sources)` and
-  `(eval/help)` list each verb with its doc and arglists, and
+  library file). `normalize-source` keeps them; `(eval/sources)` lists each
+  verb with its doc and arglists, `(eval/help)` keeps one summary line per
+  source, and `(eval/help :license)` lists them all;
   `(eval/describe 'ext.license/add!)` returns its `:kind`, `:arglists`, `:source`
   and, when it has no source, `:doc` (a source-bearing entry omits the
   docstring; nil `:file` and `:scope` are omitted).
@@ -471,9 +473,9 @@ source id alone. Keep it a summary, not a catalog; `(eval/sources)` and
   source call; the manifest never invokes the source. For a fuller manual
   unprompted, register a skill. Discovery is `(eval/sources)` for the source
   and verb listing, `(eval/describe 'name)` for one verb's interface and
-  implementation, `(eval/help)` for the index (a mounted source id is also a
-  topic, e.g. `(eval/help :license)`), and `(eval/help :library)` for the
-  library.
+  implementation, `(eval/help)` for the index (one summary line per source,
+  and a mounted source id is also a topic, e.g. `(eval/help :license)` or
+  `(eval/help "license")`), and `(eval/help :library)` for the library.
 
 ### Tool execute contract
 

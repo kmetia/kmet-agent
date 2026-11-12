@@ -112,7 +112,18 @@
     (let [topic (support/eval! env "(eval/help :nope)")]
       (t/is (not (:is-error topic)) (:content topic))
       (t/is (str/includes? (:content topic) "No help for topic :nope"))
-      (t/is (str/includes? (:content topic) "Built-in verbs:")))))
+      (t/is (str/includes? (:content topic) "Built-in verbs:")))
+    (t/is (= (:content (support/eval! env "(help :core)"))
+             (:content (support/eval! env "(help \"CORE\")")))
+          "a string names the same topic as its keyword")
+    (let [miss (support/eval! env "(eval/help \"nope\")")]
+      (t/is (not (:is-error miss)) (:content miss))
+      (t/is (str/includes? (:content miss) "No help for topic \"nope\""))
+      (t/is (str/includes? (:content miss) "Built-in verbs:")))
+    (let [miss (support/eval! env "(help \"read\")")]
+      (t/is (not (:is-error miss)) (:content miss))
+      (t/is (str/includes? (:content miss) "No help for topic \"read\""))
+      (t/is (str/includes? (:content miss) "Built-in verbs:")))))
 
 (t/deftest test-an-existing-library-file-gains-its-interface
   (let [env (support/eval-ctx)
@@ -173,7 +184,10 @@
       (t/is (str/includes? help "user/undocumented defn ([x]) (cwd) — (no docstring)"))
       (t/is (= "true"
                (:content (support/eval! env
-                                        "(core/emit (nil? (eval/describe 'undocumented :doc)))")))))))
+                                        "(core/emit (nil? (eval/describe 'undocumented :doc)))")))))
+    (let [help (:content (support/eval! env "(eval/help 'documented)"))]
+      (t/is (str/includes? help "doc:\n    Doc line.\n    More.")
+            "help shows the whole docstring"))))
 
 (t/deftest test-help-omits-the-definition-file
   (let [env (support/eval-ctx)]
@@ -205,7 +219,10 @@
                            "eval/forget"))
       (t/is (str/includes? one "user/documented defn ([x]) (cwd)"))
       (t/is (str/includes? one "doc: Doc."))
-      (t/is (str/includes? one "source:"))
+      (t/is (str/includes? one "inspect: (eval/describe 'user/documented :source)"))
+      (t/is (str/includes? one "(eval/describe 'user/documented :file)"))
+      (t/is (not (str/includes? one "(defn documented"))
+            "help points at :source instead of dumping it")
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'core/read)"))
                            "core/read verb ([path] [path opts]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/describe 'core/read :doc)"))
@@ -347,16 +364,23 @@
              (:content (support/eval! env
                                       "(core/emit (nil? (eval/describe 'ext.license/bare :source)))"))))
     (let [help (:content (support/eval! env "(eval/help)"))]
-      (t/is (str/includes? help "ext.license/add! ([path]) — Add a header."))
-      (t/is (str/includes? help "ext.license/bare — (no docstring)"))
+      (t/is (str/includes? help
+                           "- :license: License helpers — 4 verbs; (eval/help :license)"))
+      (t/is (not (str/includes? help "ext.license/add!"))
+            "the index leaves source verbs to the source topic")
       (t/is (str/includes? help "source topics :license")))
     (let [help (:content (support/eval! env "(eval/help :license)"))]
       (t/is (str/includes? help "Eval source license:"))
       (t/is (str/includes? help "License helpers"))
-      (t/is (str/includes? help "ext.license/add! ([path]) — Add a header.")))
+      (t/is (str/includes? help "ext.license/add! ([path]) — Add a header."))
+      (t/is (= help (:content (support/eval! env "(eval/help \"license\")")))
+            "a string names a source topic"))
     (let [help (:content (support/eval! env "(eval/help 'ext.license/add!)"))]
       (t/is (str/includes? help "ext.license/add! verb ([path]) (source)"))
-      (t/is (str/includes? help "doc: Add a header.")))
+      (t/is (str/includes? help "doc: Add a header."))
+      (t/is (str/includes? help "inspect: (eval/describe 'ext.license/add! :source)"))
+      (t/is (not (str/includes? help "(fn [path] ...)"))
+            "help points at :source instead of dumping it"))
     (let [sources (:content (support/eval! env "(eval/sources)"))]
       (t/is (str/includes? sources ":license"))
       (t/is (str/includes? sources "ext.license/add!"))

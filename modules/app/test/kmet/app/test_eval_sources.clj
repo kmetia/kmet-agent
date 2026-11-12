@@ -249,6 +249,8 @@
       (t/is (str/includes? sources "License helpers"))
       (t/is (not (str/includes? sources ":core")))
       (t/is (str/includes? help "Eval sources"))
+      (t/is (str/includes? help
+                           "- :license: License helpers — 1 verb; (eval/help :license)"))
       (t/is (str/includes? help "Library:"))
       (t/is (str/includes? help "Built-in verbs:"))
       (t/is (str/includes? core "Core:"))

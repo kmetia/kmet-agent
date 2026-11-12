@@ -652,8 +652,10 @@ it is omitted.
   the call, never keep them.
 - A contributed value may carry `:doc`, `:arglists` and `:source` metadata
   (the keys a var uses, plus the implementation text, since a source verb has
-  no library file). `(eval/sources)` and `(eval/help)` list each verb with its
-  doc and arglists, and `(eval/help :license)` lists one mounted source;
+  no library file). `(eval/sources)` lists each verb with its doc and
+  arglists; `(eval/help)` keeps one summary line per source, and
+  `(eval/help :license)` (or `(eval/help "license")`) lists the source's
+  description and verbs;
   `(eval/describe 'ext.license/add!)` returns its `:kind`,
   `:arglists`, `:source` and, when it has no source, `:doc` (a source-bearing
   entry omits the docstring; nil `:file` and `:scope` are omitted).

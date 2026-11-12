@@ -638,12 +638,12 @@ immediately to one of two durable layers: the global
 `<agent-dir>/eval-scopes/<shared-cwd-key>/<ns>/<name>.clj` (one verbatim
 source slice per generated definition; a hand-written file can hold several;
 `kmet.app.eval.files`). A new definition without a docstring stays live in
-the session and is not written; `(eval/help)` lists it as session-only. A
-written definition's result line names its name and scope only;
-`(eval/describe 'name :file)` names its file. A
-`defmethod` is written with its loaded multimethod, since a method has no
-docstring slot. Existing `<agent-dir>/eval`
-files are the global layer; nothing is moved automatically. The key is the
+the session and is not written; `(eval/help :library)` lists it as
+session-only. A written definition's result line names its name and scope
+only; `(eval/describe 'name :file)` names its file. A `defmethod` is written
+with its loaded multimethod, since a method has no docstring slot. Existing
+`<agent-dir>/eval` files are the global layer; nothing is moved
+automatically. The key is the
 shared injective session-dir encoder, pinned when the environment is built: a
 later
 call's `:cwd` still resolves file verbs and sources, but never moves the
@@ -707,8 +707,8 @@ eval tool's description and `(eval/help)` name the shared script surface
 `codemode`, since either row can be selected alone; host-specific sandbox
 differences stay in this section, not in the model-facing text. A mounted eval
 source's id is also a help topic — `(eval/help :license)` lists that source's
-description and verbs, and `(eval/help)` derives the topic list from the
-mounted sources. `list` and
+description and verbs, while `(eval/help)` gives it one summary/count line and
+derives the topic list from the mounted sources. `list` and
 `search` read the disk index across both roots (the built environment's pinned
 roots when the session has one, else the command cwd), so they show the
 library rather than one session's cache and mark each entry `(cwd)` or
@@ -744,15 +744,20 @@ a full value. The result ring is eval-specific, since it is read back with the
 sandbox's `eval/result` verb.
 `(eval/help :results)` states the emission, cap, truncation and error
 contract. The index is the one-call discovery path: every built-in verb with
-its arglists and one-line contract, then the topics, library counts, sources
-and failures; the scope roots stay in `(eval/help :library)`, so the first
-`(eval/help)` stays bounded.
+its arglists and one-line contract, one summary/count line per mounted
+source, then the topics, library counts and failures; a source's full
+description and verb catalog stay in `(eval/help :source-id)`, and the scope
+roots stay in `(eval/help :library)`, so the first `(eval/help)` stays
+bounded. A string names a topic case-insensitively (`(eval/help "library")`);
+a symbol names a definition (`(eval/help 'name)`), whose whole docstring is
+its help text. `(eval/describe 'name :source)` reads the defining form and
+`:file` names its file.
 
 Every library record carries its model-visible interface, parsed from the
 defining form without evaluation: `:doc` (the docstring, else an attr-map or
 symbol `:doc`) and `:arglists` (for `defn`/`defn-`/`defmacro`, and the
-parameter vector of a `defmethod`). `(eval/library)`, `(eval/help)` and
-`/eval list` show them, so an existing file gains its interface when its
+parameter vector of a `defmethod`). `(eval/library)`, `(eval/help :library)`
+and `/eval list` show them, so an existing file gains its interface when its
 source has one. `(eval/describe 'name)` resolves a library definition, a
 source-provided key, or a live definition that was never written (a failed
 write or an errored call) and returns `{:name :kind :arglists :file :scope
@@ -771,12 +776,13 @@ metadata on their values (`with-meta`), which `normalize-source` validates and
 `(eval/sources)` stays the registered-source listing and includes each verb's
 doc and arglists. A non-blank docstring is the save contract: an undocumented new
 definition stays live for the session and is not written; its result line
-says `live only, not saved`, `(eval/help)` lists it under session-only
-definitions, and `(eval/describe 'name :doc)` is nil. A redefinition of a
-saved name without a docstring is not written; the saved file keeps its
-documented version. A redefinition of a saved definition with a docstring is written
-automatically to the file that defines it, keeping that file's layer; a failed
-file is still the file for its names, so redefining repairs it.
+says `live only, not saved`, `(eval/help :library)` lists it under
+session-only definitions, and `(eval/describe 'name :doc)` is nil. A
+redefinition of a saved name without a docstring is not written; the saved
+file keeps its documented version. A redefinition of a saved definition with
+a docstring is written automatically to the file that defines it, keeping
+that file's layer; a failed file is still the file for its names, so
+redefining repairs it.
 `(eval/keep ...)` is only for a live-only definition. A `defmethod` is covered
 by its multimethod.
 `(eval/keep 'name "doc")` saves a live-only definition without
@@ -805,9 +811,9 @@ line adds `N session-only; (eval/help :library)`, so the saved list does not
 hide them and names the way to list both. Mounted eval sources add one line
 each, from their registration-time `:description` — the sync never
 builds an environment and never invokes a source, so announcing one costs no
-source call. Source verbs stay out of the manifest; `(eval/help)` and
-`(eval/sources)` remain the detailed discovery paths. The first call that builds
-an environment reports a non-empty loaded set and every load failure in its
+source call. Source verbs stay out of the manifest; `(eval/help :license)`
+and `(eval/sources)` remain the detailed discovery paths. The first call that
+builds an environment reports a non-empty loaded set and every load failure in its
 result: `:details :loaded` is a bounded preview with the full `:loaded-count`,
 `:failures` carries every failure, and the result lines bound long lists,
 correcting any drift. A library that has always been empty and has no mounted
