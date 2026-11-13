@@ -69,16 +69,14 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description (str "Persistent Clojure/SCI script sandbox (Babashka-style; no tools namespace).\n"
-                     "Files: (read \"p\") or (read \"p\" {:offset N :limit N :footer false :tail N}); (write \"p\" text); (edit \"p\" old new) or (edit \"p\" pairs).\n"
-                     "Shell: (bash \"cmd\" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.\n"
-                     "Batch independent reads/tests; (emit v) for full output.\n"
-                     "Example: (emit {:spec (read \"SPEC-v2.txt\") :tests (bash \"bash test-v1.sh; bash test-v2.sh\")}).\n"
-                     "Definitions/results persist; println is discarded. Mounted source verbs: <id>/verb. (help :surface) lists this host's require-able namespaces, classes and limits; (help) indexes verbs and topics.")
-   :prompt-snippet "Files: (read \"p\"), (write \"p\" text), (edit \"p\" old new); shell: (bash \"cmd\" {:timeout N}). Batch independent reads/tests in one call; (emit v) for full output; (help)."
+   :description (str "Persistent Clojure/SCI sandbox. Runs in the session cwd; relative paths and shell commands resolve there (`(cwd)`; bash's :cwd overrides).\n"
+                     "Verbs: (read \"p\" {:offset N :limit N}), (write \"p\" text), (edit \"p\" old new), (bash \"cmd\" {:timeout N :max-lines N :as :map}); (spawn f)/pmap for concurrency. Nonzero shell exits are normal.\n"
+                     "Forms run in order; definitions/results persist. (emit v) for output; multi-form calls report one line per form; println is discarded. Result limit: 16 KiB (max 50 KiB); timeout per call (omit/0 = none). Discover: (help) index; (help :core) builtins; (sources) source verbs; (help :library) saved/live; (index \"text\") search saved/live/source; (describe 'name) contract. Source verbs: <id>/verb.\n"
+                     "Example: (emit {:out (bash \"cmd\") :src (read \"p\")}).")
+   :prompt-snippet "Runs in cwd. Verbs: (read), (write), (edit), (bash); independent eval calls may be issued together; one call for dependent forms; (emit v); (help)."
    :prompt-guidelines
-   ["Batch independent reads, commands, and tests into one eval call: compose shell commands with &&/; in one (bash ...), put several read/bash forms in one call, or emit a map of the values; not one call per file, command, or test suite."
-    "Return the final value or (emit value); a multi-form call reports one line per form; println is discarded."
+   ["Independent: several eval calls in one message or several verbs in one call; one call for dependent forms. (spawn f)/pmap inside one call."
+    "Bind intermediate output; keep reads bounded (:offset/:limit/:tail); emit only the summary. Multi-form calls report one line per form; println is discarded."
     "Don't assume host classes or libraries; (help :surface) lists this host's."]
    :parameters {:type "object"
                 :properties

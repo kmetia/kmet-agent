@@ -411,10 +411,8 @@ Only the current session is searchable. One result is capped at 50 KB.
 
 **Description:**
 
-Persistent Clojure/SCI script sandbox (Babashka-style; no tools namespace).
-Files: (read "p") or (read "p" {:offset N :limit N :footer false :tail N}); (write "p" text); (edit "p" old new) or (edit "p" pairs).
-Shell: (bash "cmd" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.
-Batch independent reads/tests; (emit v) for full output.
-Example: (emit {:spec (read "SPEC-v2.txt") :tests (bash "bash test-v1.sh; bash test-v2.sh")}).
-Definitions/results persist; println is discarded. Mounted source verbs: <id>/verb. (help :surface) lists this host's require-able namespaces, classes and limits; (help) indexes verbs and topics.
+Persistent Clojure/SCI sandbox. Runs in the session cwd; relative paths and shell commands resolve there (`(cwd)`; bash's :cwd overrides).
+Verbs: (read "p" {:offset N :limit N}), (write "p" text), (edit "p" old new), (bash "cmd" {:timeout N :max-lines N :as :map}); (spawn f)/pmap for concurrency. Nonzero shell exits are normal.
+Forms run in order; definitions/results persist. (emit v) for output; multi-form calls report one line per form; println is discarded. Result limit: 16 KiB (max 50 KiB); timeout per call (omit/0 = none). Discover: (help) index; (help :core) builtins; (sources) source verbs; (help :library) saved/live; (index "text") search saved/live/source; (describe 'name) contract. Source verbs: <id>/verb.
+Example: (emit {:out (bash "cmd") :src (read "p")}).
 
