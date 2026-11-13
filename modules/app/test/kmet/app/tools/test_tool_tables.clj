@@ -143,7 +143,7 @@
       (t/is (= "read" (:name read-tool))
             "the name is the row id's — :tool/read is the model's spelling, so a
              config cannot rename the tool out from under its row")
-      (t/is (= ["path" "offset" "limit"]
+      (t/is (= ["path" "offset" "limit" "tail" "footer"]
                (vec (keys (get-in read-tool [:parameters :properties]))))
             "and the parameters the plugin declared are untouched"))))
 

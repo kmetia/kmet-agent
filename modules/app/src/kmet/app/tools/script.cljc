@@ -668,31 +668,6 @@
     (throw (ex-info "session-recall expects no args, a params map, a query, or a query plus keyword options"
                     {:type :eval/bad-argument}))))
 
-(defn- core-namespace-fns []
-  {'cwd (fn [] (call-cwd))
-   'env (fn [k] (System/getenv (str k)))
-   'now (fn [] (System/currentTimeMillis))
-   'sleep (fn [ms] (Thread/sleep (long ms)))
-   'session-recall
-   (fn [& args]
-     (if-let [recall (:session-recall *call-state*)]
-       (recall (session-recall-params args))
-       (throw (ex-info "session-recall needs an agent session"
-                       {:type :eval/no-session}))))
-   'emit emit-with-state
-   'emit-image emit-image-with-state
-   ;; a derefable result on a daemon thread (babashka/jolt futures are
-   ;; daemon-backed; SCI's own future is unavailable in a value-shared ctx).
-   ;; The state and writers are re-bound: a future does not convey SCI's var
-   ;; bindings on Jolt, so a spawned println would write to an unbound *out*.
-   'spawn (fn [f]
-            (let [state *call-state*]
-              (future
-                (binding [*call-state* state]
-                  (if-let [{:keys [out-w err-w]} (some-> state :writers deref)]
-                    (eval-with-io out-w err-w f)
-                    (f))))))})
-
 (defn- tool-name
   "The registry name for X — strings pass through, keywords/symbols lose
    their prefix (`:read` → \"read\"), anything else stringifies. Discovery
@@ -1110,17 +1085,159 @@
             (verb-failed! "bash" result)
             content))))))
 
+(defn- read-verb
+  "Read PATH as text; OPTS may carry :offset, :limit, :tail (last N lines, not with :offset or :limit) and :footer. A :footer false drops the continuation hint when a limit stops before EOF."
+  {:arglists '([path] [path {:keys [offset limit tail footer]}])}
+  ([path] (read-verb path nil))
+  ([path opts] (read-text path opts (:cancelled *call-state*))))
+
+(defn- write-verb
+  "Write CONTENT to PATH whole, creating parents; returns the written-byte message."
+  [path content]
+  (write-text path content (:cancelled *call-state*)))
+
+(defn- edit-verb
+  "Replace one or more exact occurrences of OLD-TEXT in PATH; a vector of [old new] pairs matches all against the original text and writes once. Each OLD must occur exactly once; zero or several occurrences is an error."
+  ([path old-text new-text]
+   (edit-text path old-text new-text (:cancelled *call-state*)))
+  ([path edits]
+   (edit-text path edits (:cancelled *call-state*))))
+
+(defn- bash-verb
+  "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result. OPTS may carry :timeout (seconds), :cwd, :max-lines N, :max-bytes N (positive integers) and :as :map (a map for every outcome, including failures). stdout and stderr are combined."
+  {:arglists '([command] [command {:keys [timeout cwd max-lines max-bytes as]}])}
+  ([command] (bash-verb command nil))
+  ([command opts] (bash-text command opts (:cancelled *call-state*))))
+
+(defn- cwd-verb
+  "The call's working directory."
+  []
+  (call-cwd))
+
+(defn- env-verb
+  "The environment variable K, or nil."
+  [k]
+  (System/getenv (str k)))
+
+(defn- now-verb
+  "The current wall-clock time in milliseconds."
+  []
+  (System/currentTimeMillis))
+
+(defn- sleep-verb
+  "Sleep MS milliseconds."
+  [ms]
+  (Thread/sleep (long ms)))
+
+(defn- recall!
+  "Run the call's session-recall with ARGS."
+  [args]
+  (if-let [recall (:session-recall *call-state*)]
+    (recall (session-recall-params args))
+    (throw (ex-info "session-recall needs an agent session"
+                    {:type :eval/no-session}))))
+
+(defn- session-recall-verb
+  "Recall this session's history: no args, a params map, a query string, or a query plus keyword options. Returns the recall text."
+  {:arglists '([] [{:keys [query range expand page scope mode]}]
+                  [query]
+                  [query & {:keys [range expand page scope mode]}])}
+  ([] (recall! []))
+  ([params] (recall! [params]))
+  ([query & opts] (recall! (into [query] opts))))
+
+(defn- emit-verb
+  "Report VALUE as the call's result; without emit, a silent success reports its final value."
+  [value]
+  (emit-with-state value))
+
+(defn- emit-image-verb
+  "Attach an image file (PNG, JPEG, GIF or WebP) or a {:data :mime-type} map to the call."
+  [x]
+  (emit-image-with-state x))
+
+(defn- spawn-verb
+  "Run F on a daemon thread and return a derefable result; bindings do not cross threads."
+  [f]
+  (let [state *call-state*]
+    (future
+      (binding [*call-state* state]
+        (if-let [{:keys [out-w err-w]} (some-> state :writers deref)]
+          (eval-with-io out-w err-w f)
+          (f))))))
+
+(def ^:private core-verb-vars
+  {'read #'read-verb
+   'write #'write-verb
+   'edit #'edit-verb
+   'bash #'bash-verb
+   'cwd #'cwd-verb
+   'env #'env-verb
+   'now #'now-verb
+   'sleep #'sleep-verb
+   'emit #'emit-verb
+   'emit-image #'emit-image-verb
+   'spawn #'spawn-verb
+   'session-recall #'session-recall-verb})
+
+(defn- edit-form-verb
+  "Apply a structured whole-form edit (same arguments as the clojure_edit tool)."
+  {:arglists '([{:keys [file_path form_identifier form_type operation content]}])}
+  [args]
+  (clj-edit/edit-form (assoc args :cwd (call-cwd))))
+
+(defn- replace-sexp-verb
+  "Replace one form with another (same arguments as clojure_edit_replace_sexp)."
+  {:arglists '([{:keys [file_path match_form new_form replace_all operation]}])}
+  [args]
+  (clj-edit/replace-sexp (assoc args :cwd (call-cwd))))
+
+(defn- paren-repair-verb
+  "Repair unbalanced delimiters (same arguments as clojure_paren_repair)."
+  {:arglists '([{:keys [file_path format]}])}
+  [args]
+  (clj-edit/paren-repair (assoc args :cwd (call-cwd))))
+
+(def ^:private clj-verb-vars
+  {'edit-form #'edit-form-verb
+   'replace-sexp #'replace-sexp-verb
+   'paren-repair #'paren-repair-verb})
+
+(defn- core-namespace-fns
+  "The core namespace's functions from the built-in verb registry."
+  []
+  (into {} (map (fn [[sym v]] [sym @v]) core-verb-vars)))
+
+(defn- clj-namespace-fns
+  "The clj namespace's functions from the built-in verb registry."
+  []
+  (into {} (map (fn [[sym v]] [sym @v]) clj-verb-vars)))
+
+(defn- verb-help-entry
+  "One built-in help entry from V, keyed as NS-NAME/SYM."
+  [ns-name sym v]
+  (let [{:keys [doc arglists]} (meta v)
+        name (str ns-name "/" sym)]
+    [name {:name name :kind :verb :doc doc :arglists arglists}]))
+
+(def builtin-verb-help
+  "The model-facing doc/arglists of the sandbox's built-in core and clj verbs, keyed by qualified name. Generated from the verb vars' metadata, so the help surface follows the call surface."
+  (into {}
+        (concat
+         (map (fn [[sym v]] (verb-help-entry "core" sym v)) core-verb-vars)
+         (map (fn [[sym v]] (verb-help-entry "clj" sym v)) clj-verb-vars))))
+
 (declare tools-namespace)
 
 (defn call-namespaces
   "The per-call half of the sandbox namespaces: SCI core patches
    (slurp/spit/file-seq/pmap), the cwd/pid-tracking process wrappers, the
-   `core` namespace (cwd/emit/spawn helpers plus the direct `read`, `write`,
-   `edit` and `bash` verbs, which call the tool implementations, not the
-   tool bridge), the direct `clj/edit-form`, `clj/replace-sexp` and
-   `clj/paren-repair` verbs (which call `kmet.libs.clj-edit` directly), and —
-   unless the caller opted out with `:tools? false` — the `tools` namespace
-   (discovery, dispatch, the result readers and one var per active tool).
+   `core` namespace (the registry's cwd/emit/spawn/read/write/edit/bash
+   verbs, which call the tool implementations, not the tool bridge), the
+   direct `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` verbs
+   (which call `kmet.libs.clj-edit` directly), and — unless the caller opted
+   out with `:tools? false` — the `tools` namespace (discovery, dispatch,
+   the result readers and one var per active tool).
    The functions read `*call-state*` at call time, so a kept context's
    definitions follow the current call; `seed!` layers them over
    `base-namespaces` for the call. `:source-namespaces` — the eval source
@@ -1129,37 +1246,12 @@
   [{:keys [surface source-namespaces tools?]}]
   (let [tools? (not (false? tools?))
         process (process-fns)
-        runtime (core-namespace-fns)
         namespaces (cond-> {'clojure.core (merge {'pmap (deref #'pmap)}
                                                  (core-fns)
                                                  (extra-core-vars-map))
                             'babashka.process process
-                            'core (merge runtime
-                                         {'read (fn [path & [opts]]
-                                                  (read-text path opts
-                                                             (:cancelled *call-state*)))
-                                          'write (fn [path content]
-                                                   (write-text path content
-                                                               (:cancelled *call-state*)))
-                                          'edit (fn
-                                                  ([path old-text new-text]
-                                                   (edit-text path old-text new-text
-                                                              (:cancelled *call-state*)))
-                                                  ([path edits]
-                                                   (edit-text path edits
-                                                              (:cancelled *call-state*))))
-                                          'bash (fn [command & [opts]]
-                                                  (bash-text command opts
-                                                             (:cancelled *call-state*)))})
-                            'clj {'edit-form (fn [args]
-                                               (clj-edit/edit-form
-                                                (assoc args :cwd (call-cwd))))
-                                  'replace-sexp (fn [args]
-                                                  (clj-edit/replace-sexp
-                                                   (assoc args :cwd (call-cwd))))
-                                  'paren-repair (fn [args]
-                                                  (clj-edit/paren-repair
-                                                   (assoc args :cwd (call-cwd))))}}
+                            'core (core-namespace-fns)
+                            'clj (clj-namespace-fns)}
                      tools? (assoc 'tools (tools-namespace (or surface {}))))]
     (reduce-kv (fn [acc ns-name ns-map]
                  (update acc ns-name #(merge (or % {}) ns-map)))

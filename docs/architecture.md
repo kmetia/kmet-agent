@@ -690,7 +690,9 @@ name that resolves to a definition or source verb is a `describe` shorthand;
 an unresolvable one keeps the unknown-verb hint. The system already provides
 `read`, `write`, `edit`, `bash` and `session-recall` (also `core/...`);
 the row does not mount a separate eval source for them, and there is no
-`tools` namespace. `session-recall` calls the same `run-recall`
+`tools` namespace. The built-in help index is generated from the verb vars'
+docstrings and arglists, so `(help)` follows the call surface instead of a
+separate table. `session-recall` calls the same `run-recall`
 implementation as the `session_recall` tool.
 `bash` is the plain-output shell verb: its result carries the command output
 and a status footer, and a nonzero exit is a normal result. Its options add

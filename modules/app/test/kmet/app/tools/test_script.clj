@@ -60,6 +60,22 @@
   (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"needs :tool"
                           (script/run {:code "1"}))))
 
+(t/deftest test-builtin-verb-help-is-generated-from-var-metadata
+  (let [help script/builtin-verb-help
+        core-names (set (map #(str "core/" %) script/core-refer-verbs))]
+    (t/is (= (set (filter #(str/starts-with? % "core/") (keys help))) core-names))
+    (t/is (= #{"clj/edit-form" "clj/replace-sexp" "clj/paren-repair"}
+             (set (filter #(str/starts-with? % "clj/") (keys help)))))
+    (doseq [[name {:keys [doc arglists]}] help]
+      (t/is (string? doc) (str name " has a docstring"))
+      (t/is (seq arglists) (str name " has arglists")))
+    (t/is (str/includes? (pr-str (:arglists (get help "core/read"))) "offset"))
+    (t/is (str/includes? (pr-str (:arglists (get help "core/bash"))) "timeout"))
+    (t/is (str/includes? (pr-str (:arglists (get help "core/session-recall"))) "scope"))
+    (t/is (str/includes? (pr-str (:arglists (get help "clj/edit-form"))) "file_path"))
+    (t/is (str/includes? (pr-str (:arglists (get help "clj/replace-sexp"))) "match_form"))
+    (t/is (str/includes? (pr-str (:arglists (get help "clj/paren-repair"))) "format"))))
+
 (defn- write-cancel-fixture!
   "Write a parent/child fixture in DIR whose child writes MARKER after a few
    seconds while the parent blocks; the parent writes STARTED once the child

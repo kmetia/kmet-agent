@@ -105,6 +105,17 @@ user-facing); implementation notes sit beside their source. `perf.md`,
   conventions live in [`docs/architecture.md`](docs/architecture.md); keep it
   current.
 
+### Option maps and arglists
+
+- An option map is part of the call surface: destructure its keys in the
+  arglist — `[pattern {:keys [path max]}]` — instead of leaving an anonymous
+  `opts`/`args` parameter whose keys exist only in prose. When the real call
+  surface differs from the implementation (a factory or wrapper), put the
+  same destructuring in `:arglists` metadata.
+- The keys must be visible in `(help)`, the eval library manifest and a
+  tool's published parameters; a docstring alone is not enough for
+  discoverability.
+
 ### Time and durations
 
 Durations and deadlines go through `kmet.libs.concurrent/monotonic-ms`:

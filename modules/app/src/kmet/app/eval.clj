@@ -737,88 +737,116 @@
        (sort-by :name)
        vec))
 
+(declare index-text environment-help describe request-forget!
+         patch-definition! edit-form-definition! move-record-line!
+         save-definition!)
+
+(defn- library-verb
+  "List every loaded library definition with its scope; (help :library) also lists session-only definitions."
+  {:arglists '([])}
+  [env-ref]
+  (fn [] (library-entries @env-ref)))
+
+(defn- index-verb
+  "Search loaded and live definitions and mounted source verbs by text in their names, docstrings or source."
+  {:arglists '([text])}
+  [env-ref]
+  (fn [text] (index-text @env-ref text)))
+
+(defn- forget-verb
+  "Forget a saved definition or restore a source value."
+  {:arglists '([name])}
+  [env-ref]
+  (fn [name] (request-forget! @env-ref name)))
+
+(defn- sources-verb
+  "List the mounted eval sources and their contributed verbs."
+  {:arglists '([])}
+  [env-ref]
+  (fn [] @(:source-info @env-ref)))
+
+(defn- help-verb
+  "The eval manual (also bare help): index, topic, or one definition."
+  {:arglists '([] [what])}
+  [env-ref]
+  (fn [& [what]] (environment-help @env-ref what)))
+
+(defn- describe-verb
+  "Describe one definition or source verb (also bare describe); KEY selects one field."
+  {:arglists '([name] [name key])}
+  [env-ref]
+  (fn
+    ([name] (describe @env-ref name))
+    ([name key] (describe @env-ref name key))))
+
+(defn- save-verb
+  "Save a session-only definition, adding DOC when the live form has none; a defmethod uses its address string and saved multimethod."
+  {:arglists '([name] [name doc])}
+  [env-ref]
+  (fn [name & [doc]] (save-definition! @env-ref name doc)))
+
+(defn- result-verb
+  "List recent eval results, or read one result or slice (ID may be :last; :offset N :limit M or a map); a call using it is not stored."
+  {:arglists '([] [id] [id {:keys [offset limit]}]
+                  [id & {:keys [offset limit]}])}
+  [env-ref]
+  (fn [& args] (apply result-command @env-ref args)))
+
+(defn- patch-verb
+  "Replace one subform of a saved definition and keep it."
+  {:arglists '([name old new])}
+  [env-ref]
+  (fn [name old new]
+    (patch-definition! @env-ref name old new @(:call-scope @env-ref))))
+
+(defn- edit-form-verb
+  "Replace a saved definition with a whole new top-level form."
+  {:arglists '([name new-source])}
+  [env-ref]
+  (fn [name new-source]
+    (edit-form-definition! @env-ref name new-source @(:call-scope @env-ref))))
+
+(defn- move-verb
+  "Move a saved definition between the cwd and global scopes."
+  {:arglists '([name scope])}
+  [env-ref]
+  (fn [name scope]
+    (let [line (move-record-line! @env-ref name scope)]
+      (swap! (:change-lines @env-ref) conj line)
+      nil)))
+
+(defn- nrepl-eval-verb
+  "Evaluate Clojure code in a running nREPL server (same arguments as the clojure_eval tool)."
+  {:arglists '([{:keys [code port host ns timeout]}])}
+  [cwd]
+  (fn [args]
+    (clj-eval/evaluate
+     (assoc args :cwd (or (:cwd script/*call-state*) cwd))
+     (:cancelled script/*call-state*))))
+
+(def ^:private eval-verb-vars
+  {"eval/library" #'library-verb
+   "eval/index" #'index-verb
+   "eval/forget" #'forget-verb
+   "eval/sources" #'sources-verb
+   "eval/help" #'help-verb
+   "eval/describe" #'describe-verb
+   "eval/save" #'save-verb
+   "eval/result" #'result-verb
+   "eval/patch" #'patch-verb
+   "eval/edit-form" #'edit-form-verb
+   "eval/move" #'move-verb
+   "clj/nrepl-eval" #'nrepl-eval-verb})
+
+(def ^:private eval-verb-help
+  (into {}
+        (map (fn [[name v]]
+               (let [{:keys [doc arglists]} (meta v)]
+                 [name {:name name :kind :verb :doc doc :arglists arglists}]))
+             eval-verb-vars)))
+
 (def ^:private builtin-verb-help
-  {"core/read" {:name "core/read" :kind :verb
-                :doc "Read PATH as text; OPTS may carry :offset, :limit, :tail (last N lines, not with :offset or :limit) and :footer. A :footer false drops the continuation hint when a limit stops before EOF."
-                :arglists '([path] [path opts])}
-   "core/write" {:name "core/write" :kind :verb
-                 :doc "Write CONTENT to PATH whole, creating parents; returns the written-byte message."
-                 :arglists '([path content])}
-   "core/edit" {:name "core/edit" :kind :verb
-                :doc "Replace one or more exact occurrences of OLD-TEXT in PATH; a vector of [old new] pairs matches all against the original text and writes once. Each OLD must occur exactly once; zero or several occurrences is an error."
-                :arglists '([path old-text new-text] [path edits])}
-   "core/bash" {:name "core/bash" :kind :verb
-                :doc "Run COMMAND through the bash tool and return its output with a status footer; a nonzero exit is a normal result. OPTS may carry :timeout (seconds), :cwd, :max-lines N, :max-bytes N (positive integers) and :as :map (a map for every outcome, including failures). stdout and stderr are combined."
-                :arglists '([command] [command opts])}
-   "core/emit" {:name "core/emit" :kind :verb
-                :doc "Report VALUE as the call's result; without emit, a silent success reports its final value."
-                :arglists '([value])}
-   "core/emit-image" {:name "core/emit-image" :kind :verb
-                      :doc "Attach an image file (PNG, JPEG, GIF or WebP) or a {:data :mime-type} map to the call."
-                      :arglists '([x])}
-   "core/cwd" {:name "core/cwd" :kind :verb
-               :doc "The call's working directory."
-               :arglists '([])}
-   "core/env" {:name "core/env" :kind :verb
-               :doc "The environment variable K, or nil."
-               :arglists '([k])}
-   "core/now" {:name "core/now" :kind :verb
-               :doc "The current wall-clock time in milliseconds."
-               :arglists '([])}
-   "core/sleep" {:name "core/sleep" :kind :verb
-                 :doc "Sleep MS milliseconds."
-                 :arglists '([ms])}
-   "core/spawn" {:name "core/spawn" :kind :verb
-                 :doc "Run F on a daemon thread and return a derefable result; bindings do not cross threads."
-                 :arglists '([f])}
-   "core/session-recall" {:name "core/session-recall" :kind :verb
-                          :doc "Recall this session's history: no args, a params map, a query string, or a query plus keyword options. Returns the recall text."
-                          :arglists '([] [params] [query] [query & opts])}
-   "clj/edit-form" {:name "clj/edit-form" :kind :verb
-                    :doc "Apply a structured whole-form edit (same arguments as the clojure_edit tool)."
-                    :arglists '([args])}
-   "clj/replace-sexp" {:name "clj/replace-sexp" :kind :verb
-                       :doc "Replace one form with another (same arguments as clojure_edit_replace_sexp)."
-                       :arglists '([args])}
-   "clj/paren-repair" {:name "clj/paren-repair" :kind :verb
-                       :doc "Repair unbalanced delimiters (same arguments as clojure_paren_repair)."
-                       :arglists '([args])}
-   "clj/nrepl-eval" {:name "clj/nrepl-eval" :kind :verb
-                     :doc "Evaluate Clojure code in a running nREPL server (same arguments as the clojure_eval tool)."
-                     :arglists '([args])}
-   "eval/library" {:name "eval/library" :kind :verb
-                   :doc "List every loaded library definition with its scope; (help :library) also lists session-only definitions."
-                   :arglists '([])}
-   "eval/index" {:name "eval/index" :kind :verb
-                 :doc "Search loaded and live definitions and mounted source verbs by text in their names, docstrings or source."
-                 :arglists '([text])}
-   "eval/save" {:name "eval/save" :kind :verb
-                :doc "Save a session-only definition, adding DOC when the live form has none; a defmethod uses its address string and saved multimethod."
-                :arglists '([name] [name doc])}
-   "eval/result" {:name "eval/result" :kind :verb
-                  :doc "List recent eval results, or read one result or slice (ID may be :last; :offset N :limit M or a map); a call using it is not stored."
-                  :arglists '([] [id] [id & opts])}
-   "eval/sources" {:name "eval/sources" :kind :verb
-                   :doc "List the mounted eval sources and their contributed verbs."
-                   :arglists '([])}
-   "eval/describe" {:name "eval/describe" :kind :verb
-                    :doc "Describe one definition or source verb (also bare describe); KEY selects one field."
-                    :arglists '([name] [name key])}
-   "eval/forget" {:name "eval/forget" :kind :verb
-                  :doc "Forget a saved definition or restore a source value."
-                  :arglists '([name])}
-   "eval/patch" {:name "eval/patch" :kind :verb
-                 :doc "Replace one subform of a saved definition and keep it."
-                 :arglists '([name old new])}
-   "eval/edit-form" {:name "eval/edit-form" :kind :verb
-                     :doc "Replace a saved definition with a whole new top-level form."
-                     :arglists '([name new-source])}
-   "eval/move" {:name "eval/move" :kind :verb
-                :doc "Move a saved definition between the cwd and global scopes."
-                :arglists '([name scope])}
-   "eval/help" {:name "eval/help" :kind :verb
-                :doc "The eval manual (also bare help): index, topic, or one definition."
-                :arglists '([] [what])}})
+  (merge script/builtin-verb-help eval-verb-help))
 
 (def ^:private bare-builtin-help
   "Built-in verbs keyed by their unqualified call surface."
@@ -1791,8 +1819,6 @@
     (swap! (:forgotten env) conj {:name raw :scope scope})
     raw))
 
-(declare save-definition!)
-
 (defn- build-environment
   "Build a fresh environment: the SCI context, the library index, and every
    library definition evaluated into it. SIGNAL is the first call's cancel
@@ -1831,42 +1857,31 @@
              :lock (Object.)}
         interrupt (script/interrupt-holder)
         env-ref (atom nil)
-        library-fn (fn [] (library-entries @env-ref))
-        index-fn (fn [text] (index-text @env-ref text))
-        forget-fn (fn [name] (request-forget! @env-ref name))
-        sources-fn (fn [] @(:source-info @env-ref))
-        help-fn (fn [& [what]] (environment-help @env-ref what))
-        describe-fn (fn
-                      ([name] (describe @env-ref name))
-                      ([name key] (describe @env-ref name key)))
-        save-fn (fn [name & [doc]] (save-definition! @env-ref name doc))
-        result-fn (fn [& args] (apply result-command @env-ref args))
+        library-fn (library-verb env-ref)
+        index-fn (index-verb env-ref)
+        forget-fn (forget-verb env-ref)
+        sources-fn (sources-verb env-ref)
+        help-fn (help-verb env-ref)
+        describe-fn (describe-verb env-ref)
+        save-fn (save-verb env-ref)
+        result-fn (result-verb env-ref)
+        patch-fn (patch-verb env-ref)
+        edit-form-fn (edit-form-verb env-ref)
+        move-fn (move-verb env-ref)
+        nrepl-fn (nrepl-eval-verb cwd)
         base (script/base-namespaces)
         sci-ctx (script/context
                   (assoc (update base 'clojure.core merge
                                  {'help help-fn 'describe describe-fn})
-                         'clj {'nrepl-eval
-                               (fn [args]
-                                 (clj-eval/evaluate
-                                  (assoc args :cwd (or (:cwd script/*call-state*)
-                                                       cwd))
-                                  (:cancelled script/*call-state*)))}
+                         'clj {'nrepl-eval nrepl-fn}
                          'eval {'library library-fn
                                 'index index-fn
                                 'forget forget-fn
                                 'save save-fn
                                 'result result-fn
-                                'patch (fn [name old new]
-                                         (patch-definition! @env-ref name old new
-                                                            @(:call-scope @env-ref)))
-                                'edit-form (fn [name new-source]
-                                             (edit-form-definition! @env-ref
-                                                                    name new-source
-                                                                    @(:call-scope @env-ref)))
-                                'move (fn [name scope]
-                                        (let [line (move-record-line! @env-ref name scope)]
-                                          (swap! (:change-lines @env-ref) conj line)
-                                          nil))
+                                'patch patch-fn
+                                'edit-form edit-form-fn
+                                'move move-fn
                                 'describe describe-fn
                                 'sources sources-fn
                                 'help help-fn})
