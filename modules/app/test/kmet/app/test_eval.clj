@@ -258,7 +258,7 @@
                   (str/join "\n" prompt-guidelines))]
     (t/is (str/includes? text "SCI"))
     (t/is (str/includes? text "Clojure"))
-    (t/is (str/includes? text "(read \"p\")"))
+    (t/is (str/includes? text "(read \"p\""))
     (t/is (str/includes? text "(write \"p\" text)"))
     (t/is (str/includes? text "(edit \"p\" old new)"))
     (t/is (str/includes? text "{:timeout N :max-lines N :as :map}"))
@@ -280,6 +280,7 @@
     (t/is (not (str/includes? text "tools/list")))
     (t/is (str/includes? text "println is discarded"))
     (t/is (str/includes? text ":as :lines"))
+    (t/is (str/includes? text "{:start"))
     (t/is (str/includes? text "sed"))
     (t/is (<= (count text) 1300) "the per-request prompt stays compact")
     (t/is (not (str/includes? text "codemode"))
@@ -299,6 +300,17 @@
              (:content (support/eval! env
                                       "(let [r (read \"lines.txt\" {:offset 2 :limit 2 :as :lines})] (and (= 2 (:start r)) (= 3 (:end r)) (false? (:truncated? r)) (= [{:n 2 :text \"two\"} {:n 3 :text \"three\"}] (:lines r))))")))
           "the read verb folds read-lines in as :as :lines")
+    (t/is (= "two\nthree" (:content (support/eval! env "(read \"lines.txt\" {:start 2 :end 3})")))
+          "an inclusive start/end range is quiet by default")
+    (t/is (str/includes? (:content (support/eval! env "(read \"lines.txt\" {:start 2 :end 3 :footer true})"))
+                         "more line")
+          ":footer true restores the continuation hint")
+    (t/is (= "true"
+             (:content (support/eval! env
+                                      "(let [r (read \"lines.txt\" {:start 2 :end 3 :as :lines})] (and (= 2 (:start r)) (= 3 (:end r)) (= [{:n 2 :text \"two\"} {:n 3 :text \"three\"}] (:lines r)) (false? (:truncated? r))))")))
+          "start/end also feeds the numbered map")
+    (t/is (:is-error (support/eval! env "(read \"lines.txt\" {:start 2 :end 1})"))
+          "an inverted range is an error")
     (support/eval! env "(write \"out.txt\" \"alpha\")")
     (support/eval! env "(edit \"out.txt\" \"alpha\" \"beta\")")
     (t/is (= "beta" (slurp (str (fs/path cwd "out.txt")))))

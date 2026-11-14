@@ -306,6 +306,31 @@
        :is-error true}
       (lines-result raw-path all-lines start end))))
 
+(defn- range-error
+  "The error for conflicting or invalid range selectors, or nil."
+  [{:keys [offset start limit end tail]}]
+  (cond
+    (and (some? start) (some? offset))
+    "Use :start or :offset, not both."
+
+    (and (some? end) (some? limit))
+    "Use :end or :limit, not both."
+
+    (and (some? end) (nil? start) (nil? offset))
+    ":end needs :start or :offset."
+
+    (and (some? tail) (or (some? start) (some? end)))
+    "Use :tail without :start or :end."
+
+    (and (some? start) (not (tool-util/positive-integer? start)))
+    ":start must be a positive integer."
+
+    (and (some? end) (not (tool-util/positive-integer? end)))
+    ":end must be a positive integer."
+
+    (and (some? end) (some? (or offset start)) (< end (or offset start)))
+    ":end must not be before the start line."))
+
 (defn execute
   "Read file contents with optional offset/limit (1-indexed, pi: read.ts),
    tail (the last N lines, not with offset/limit), or footer suppression.
@@ -314,9 +339,9 @@
    takes the file's mutation lock, so it cannot observe a concurrent write's
    truncated half.
 
-   The eval verb's `:as :lines` returns structured numbered lines instead of
-   text; the model-facing read tool does not declare that option."
-  [{:keys [path file_path offset limit tail footer as]} _on-update signal _ctx]
+   The eval verb's `:start`/`:end` (inclusive) and `:as :lines` are
+   verb-only; the model-facing read tool does not declare them."
+  [{:keys [path file_path offset start limit end tail footer as]} _on-update signal _ctx]
   (let [raw-path (or path file_path)]
     (try
       (if (or (nil? raw-path) (and (string? raw-path) (str/blank? raw-path)))
@@ -350,30 +375,39 @@
                       ;; Pi: allLines = textContent.split("\n") — keeps trailing empty
                       all-lines (vec (str/split text-content #"\n" -1))
                       total-file-lines (count all-lines)
-                      input-error (cond
-                                    (and (some? as) (not= :lines as))
-                                    "Use :as :lines or omit :as."
-                                    (and (some? offset) (some? tail))
-                                    "Use :offset or :tail, not both."
-                                    (and (some? tail) (some? limit))
-                                    "Use :tail without :limit."
-                                    (and (some? tail)
-                                         (not (tool-util/positive-integer? tail)))
-                                    ":tail must be a positive integer."
-                                    (and (some? offset)
-                                         (not (tool-util/positive-integer? offset)))
-                                    ":offset must be a positive integer."
-                                    (and (some? limit)
-                                         (not (tool-util/positive-integer? limit)))
-                                    ":limit must be a positive integer."
-                                    :else nil)
+                      input-error (or (range-error {:offset offset
+                                                    :start start
+                                                    :limit limit
+                                                    :end end
+                                                    :tail tail})
+                                      (cond
+                                        (and (some? as) (not= :lines as))
+                                        "Use :as :lines or omit :as."
+                                        (and (some? offset) (some? tail))
+                                        "Use :offset or :tail, not both."
+                                        (and (some? tail) (some? limit))
+                                        "Use :tail without :limit."
+                                        (and (some? tail)
+                                             (not (tool-util/positive-integer? tail)))
+                                        ":tail must be a positive integer."
+                                        (and (some? offset)
+                                             (not (tool-util/positive-integer? offset)))
+                                        ":offset must be a positive integer."
+                                        (and (some? limit)
+                                             (not (tool-util/positive-integer? limit)))
+                                        ":limit must be a positive integer."
+                                        :else nil))
                       tail-total (if (str/ends-with? text-content "\n")
                                    (max 1 (dec total-file-lines))
                                    total-file-lines)
+                      effective-limit (when-not input-error
+                                        (if (some? end)
+                                          (inc (- end (or offset start)))
+                                          limit))
                       start-line (when-not input-error
                                    (cond
                                      (some? tail) (max 0 (- tail-total (long tail)))
-                                     (some? offset) (dec offset)
+                                     (some? (or offset start)) (dec (or offset start))
                                      :else 0))
                       start-line-display (when (some? start-line) (inc start-line))]
                   (cond
@@ -381,20 +415,20 @@
                     {:content input-error :is-error true}
 
                     (= :lines as)
-                    (structured-lines-result raw-path text-content offset limit tail)
+                    (structured-lines-result raw-path text-content (or offset start) effective-limit tail)
 
                     (>= start-line total-file-lines)
-                    {:content (str "Offset " offset " is beyond end of file (" total-file-lines " lines total)")
+                    {:content (str "Offset " (or offset start) " is beyond end of file (" total-file-lines " lines total)")
                      :is-error true}
 
                     :else
-                    (let [selected-content (if (some? limit)
-                                             (let [end (min (+ start-line limit) total-file-lines)]
-                                               (str/join "\n" (subvec all-lines start-line end)))
+                    (let [selected-content (if (some? effective-limit)
+                                             (let [range-end (min (+ start-line effective-limit) total-file-lines)]
+                                               (str/join "\n" (subvec all-lines start-line range-end)))
                                              (str/join "\n" (subvec all-lines start-line)))
-                          user-limited-lines (when (some? limit)
-                                               (let [end (min (+ start-line limit) total-file-lines)]
-                                                 (- end start-line)))
+                          user-limited-lines (when (some? effective-limit)
+                                               (let [range-end (min (+ start-line effective-limit) total-file-lines)]
+                                                 (- range-end start-line)))
                           truncation (bash-out/truncate-head selected-content)
                           output-text (cond
                                         (:first-line-exceeds-limit truncation)

@@ -82,6 +82,8 @@
       (t/is (seq arglists) (str name " has arglists")))
     (t/is (str/includes? (pr-str (:arglists (get help "core/read"))) "offset"))
     (t/is (str/includes? (pr-str (:arglists (get help "core/read"))) "as"))
+    (t/is (str/includes? (pr-str (:arglists (get help "core/read"))) "start"))
+    (t/is (str/includes? (pr-str (:arglists (get help "core/read"))) "end"))
     (t/is (str/includes? (pr-str (:arglists (get help "core/bash"))) "timeout"))
     (t/is (str/includes? (pr-str (:arglists (get help "core/session-recall"))) "scope"))
     (t/is (str/includes? (pr-str (:arglists (get help "clj/edit-form"))) "file_path"))

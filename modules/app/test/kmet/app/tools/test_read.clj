@@ -130,6 +130,23 @@
           (is (str/includes? (:content result) ":as :lines")))
         (finally (fs/delete-tree dir))))))
 
+(deftest inclusive-ranges-are-a-verb-option
+  (testing "start/end are inclusive and exclusive with the other selectors"
+    (let [dir (test-tmp/temp-dir! "test-read-range-")
+          f (str (fs/path dir "lines.txt"))]
+      (fs/create-dirs dir)
+      (spit f "one\ntwo\nthree\nfour\nfive")
+      (try
+        (let [result (read-call {:path f :start 2 :end 3 :as :lines})]
+          (is (= {:path f :start 2 :end 3 :total-lines 5
+                  :lines [{:n 2 :text "two"} {:n 3 :text "three"}]
+                  :truncated? true}
+                 (select-keys result [:path :start :end :total-lines :lines :truncated?]))))
+        (is (:is-error (read-call {:path f :start 2 :end 1})))
+        (is (:is-error (read-call {:path f :start 2 :end 3 :offset 2})))
+        (is (:is-error (read-call {:path f :start 2 :end 3 :limit 2})))
+        (finally (fs/delete-tree dir))))))
+
 (deftest structured-lines-default-to-a-bounded-page
   (testing ":as :lines without :limit caps at 400 rows and reports the rest"
     (let [dir (test-tmp/temp-dir! "test-read-lines-page-")
@@ -145,5 +162,7 @@
           (is (:truncated? result)))
         (finally (fs/delete-tree dir))))))
 
-(deftest the-read-tool-does-not-declare-the-lines-option
-  (is (not (contains? (:properties (:parameters read/definition)) "as"))))
+(deftest the-read-tool-does-not-declare-verb-only-options
+  (let [props (:properties (:parameters read/definition))]
+    (doseq [k ["as" "start" "end"]]
+      (is (not (contains? props k))))))
