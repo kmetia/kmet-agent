@@ -1506,20 +1506,19 @@
 ;; ─── Interrupt ────────────────────────────────────────────────────────────
 
 (defn interrupt-holder
-  "A mutable holder for one context's current call: the combined signal, the
-   deadline and the abort reason. SCI's :interrupt-fn is created from the
+  "A mutable holder for one context's current call: the run's cancel signal,
+   the deadline and the abort reason. SCI's :interrupt-fn is created from the
    holder, so a kept context (`eval`) re-aims it per call with `rearm!`
    instead of rebuilding the context."
   []
   (atom nil))
 
 (defn rearm!
-  "Point HOLDER at this call's STATE — the combined :cancelled signal, the
-   :deadline and the :abort atom. HOLDER must be the one SCI-CTX's
-   :interrupt-fn was created with, or the call's deadline reaches nothing.
-   Returns HOLDER."
+  "Point HOLDER at this call's STATE — the run's :signal, the :deadline and the
+   :abort atom. HOLDER must be the one SCI-CTX's :interrupt-fn was created
+   with, or the call's deadline reaches nothing. Returns HOLDER."
   [holder state]
-  (reset! holder {:signal (:cancelled state)
+  (reset! holder {:signal (:signal state)
                   :deadline (:deadline state)
                   :abort (:abort state)})
   holder)

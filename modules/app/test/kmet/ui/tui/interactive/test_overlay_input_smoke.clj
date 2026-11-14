@@ -101,7 +101,10 @@ sys.exit(status)
                                       "python3" "-"
                                       (str out-file)
                                       (str (fs/cwd))
-                                      "75"
+                                      ;; the JVM app's lsp panel takes tens of seconds
+                                      ;; under full-suite load; a passing run still exits
+                                      ;; at the last stage plus the grace
+                                      "180"
                                       ;; the host's own start task (`bb start`
                                       ;; forks babashka; the JVM runs through
                                       ;; `bb start-jvm`, which starts JVM Clojure)
@@ -136,7 +139,9 @@ sys.exit(status)
             ;; Payloads travel as HEX so no encoding layer can mangle ESC/CR.
             exit (run-stages! out-file agent-dir
                               [[logo 0.5 "2f6c7370"]         ;; "/lsp"
-                               ["-" 1.2 "0d"]                ;; enter — its own stage: a CR inside a multi-char burst is rewritten to a newline by the paste-burst guard
+                               ;; wait for the command menu row, not a fixed delay: under load
+                               ;; the CR could otherwise arrive before /lsp was processed
+                               ["Language server status" 0.3 "0d"]
                                ["clojure-lsp" 0.8 "1b"]      ;; the /lsp panel row is up: now ESC it closed
                                ["-" 1.5 "68656c6c6f2d736d6f6b65"]])] ; "hello-smoke"
         (testing "dialog opens"

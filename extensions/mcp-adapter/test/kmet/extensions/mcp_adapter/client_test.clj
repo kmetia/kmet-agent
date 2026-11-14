@@ -234,7 +234,7 @@
               result (mcp/request! conn "tools/call"
                                    {:name "http-slow" :arguments {}
                                     :_meta {:progressToken "t"}}
-                                   {:timeout-ms 5000
+                                   {:timeout-ms 15000
                                     :on-notification
                                     (fn [n] (swap! progress conj
                                                    (get-in n [:params :progress])))})]

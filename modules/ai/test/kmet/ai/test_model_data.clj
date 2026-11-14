@@ -589,36 +589,30 @@
     (t/is (some? canonical)
           (str "the referenced canonical model must exist (" rp " " rid ")"))))
 
-(t/deftest test-commandcode-cat-jam-ref-follows-beam-rename
+(t/deftest test-commandcode-beam-ref-follows-opencode-rename
   "Cat Jam was the stealth codename for reflection's Beam 1.0: OpenCode
    deprecated the cat-jam-free id in favour of beam-free (same limits and
    models.dev effort map), so the ref follows the rename instead of warning
-   on every generation run. The newly listed reflection/beam:free endpoint
-   id resolves against the same canonical.
+   on every generation run. The CommandCode endpoint retired the beam id in
+   the 2026-11-12 model bump, and process-commandcode ships what the endpoint
+   lists — so the refs and the canonical are what stay checkable.
 
-   Only the live id can be checked against the generated catalog: the
-   endpoint has since retired the cat-jam alias, and process-commandcode
-   ships what the endpoint lists. The ref and the override stay in the
-   generator so a reappearance transfers capabilities again."
+   The ref and the override stay in the generator so a reappearance transfers
+   both capabilities again."
   (let [refs @#'mg/commandcode-canonical-refs
+        overrides @#'mg/commandcode-overrides
         catalogs (#'mg/read-catalogs mg/data-dir)
         canonical (get-in catalogs [:opencode :openai-completions "beam-free"])
-        cid "reflection/beam:free"
-        cc (get-in catalogs [:commandcode :openai-completions cid])]
+        cid "reflection/beam:free"]
     (t/is (= [:opencode "beam-free"] (get refs "stealth/cat-jam:free"))
           "the retired cat-jam-free ref must follow the rename")
     (t/is (= [:opencode "beam-free"] (get refs "reflection/beam:free"))
           "the unveiled beam id resolves against the same canonical")
     (t/is (some? canonical) "the canonical beam-free entry must exist")
-    (t/is (some? cc) (str cid " must be listed"))
-    (t/is (= true (:reasoning cc))
-          (str cid " must carry thinking support"))
-    (t/is (= (:max-tokens canonical) (:max-tokens cc))
-          (str cid " must carry the canonical max-tokens"))
-    (t/is (= (:input canonical) (:input cc))
-          (str cid " must carry the canonical input modalities"))
-    (t/is (= (:thinking-level-map canonical) (:thinking-level-map cc))
-          (str cid " must carry the canonical thinking levels"))))
+    (t/is (= {:requires-reasoning-content-on-assistant-messages true
+              :reasoning-content-fill " "}
+             (:compat (get overrides cid)))
+          "the endpoint-bound fill stays pinned for a reappearance")))
 
 (t/deftest test-commandcode-qwen36-max-preview-override
   "OpenRouter retired qwen/qwen3.6-max-preview in the 2026-10-12 model bump

@@ -906,4 +906,8 @@
     (t/is (= [{:id "call_1" :name "eval" :arguments {:code "x"}}]
              (run [{:index 0 :arguments "{\"code\":\"x\"}"}
                    {:index 0 :id "call_1" :name "eval" :arguments ""}]))
-          "a late name fills the call without losing arguments")))
+          "a late name fills the call without losing arguments")
+    (t/is (= [{:id "call_1" :name "bash" :arguments {:command "echo approved"}}]
+             (run [{:id "call_1" :name "bash"
+                    :arguments {:command "echo approved"}}]))
+          "a complete map argument survives the accumulator")))

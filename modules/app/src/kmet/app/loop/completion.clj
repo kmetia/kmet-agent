@@ -17,14 +17,17 @@
             [kmet.app.config :as cfg]))
 
 (defn- append-tool-arguments
-  "OLD plus DELTA. Anthropic content_block_start seeds the tool's input as
-   a map ({}); input_json_delta then streams the partial JSON as strings.
-   pi keeps partialJson separate from arguments and re-parses at
-   content_block_stop — the deltas REPLACE the map, never concat to it (pi:
-   block.arguments = parseStreamingJson(partialJson)). A map OLD must
-   therefore start the string accumulator fresh."
+  "OLD plus DELTA. A map DELTA is a complete input block (Anthropic's
+   content_block_start seed, Google's whole input) and replaces the
+   accumulator. Otherwise a map OLD must start the string accumulator fresh:
+   input_json_delta streams the partial JSON as strings, and pi re-parses it at
+   content_block_stop (pi: block.arguments = parseStreamingJson(partialJson)),
+   never concatenating onto the seed map."
   [old delta]
-  (if (map? old) delta (str (or old "") delta)))
+  (cond
+    (map? delta) delta
+    (map? old) delta
+    :else (str (or old "") delta)))
 
 (defn- add-tool-delta!
   "Merge one streamed tool-call delta into PENDING by index. A named delta

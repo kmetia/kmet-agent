@@ -73,7 +73,7 @@
   ([env] (rearm-build! env (+ (concurrent/monotonic-ms) build-timeout-ms)))
   ([env deadline]
    (script/rearm! (:interrupt env)
-                  {:cancelled nil
+                  {:signal nil
                    :deadline (min deadline
                                   (+ (concurrent/monotonic-ms) build-timeout-ms))
                    :abort (atom nil)})))

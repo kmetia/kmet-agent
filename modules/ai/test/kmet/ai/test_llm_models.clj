@@ -9,6 +9,7 @@
             [kmet.ai.api.openai-completions :as completions]
             [kmet.ai.api.openai-responses :as responses]
             [kmet.ai.api.google-generative-ai :as google]
+            [kmet.ai.model-gen :as mg]
             [kmet.ai.models :as m]))
 
 ;; ─── Model resolution & dispatch ───────────────────────────────────────────
@@ -599,15 +600,12 @@
           "a pre-switch turn carries the non-empty fill, never the foreign CoT")
     (t/is (= "own CoT" (:reasoning_content own))
           "same-model reasoning still round-trips"))
-  ;; the shipped commandcode catalog carries the compat (commandcode-overrides
-  ;; must survive a regeneration)
-  (m/load-catalogs! nil)
-  ;; Only the live stealth id can be asserted here: the endpoint retired the
-  ;; cat-jam alias when Beam was unveiled, so the generated catalog drops it
-  ;; (process-commandcode ships what the endpoint lists). The ref and the
-  ;; override stay in the generator, so a reappearance transfers both again.
+  ;; The endpoint retired both stealth aliases in the 2026-11-12 model bump,
+  ;; and process-commandcode ships what the endpoint lists, so the generated
+  ;; catalog carries neither. The override stays in the generator so a
+  ;; reappearance transfers the fill again.
   (let [mid "reflection/beam:free"
-        compat (:compat (m/get-model :commandcode mid))]
+        compat (:compat (get @#'mg/commandcode-overrides mid))]
     (t/is (true? (:requires-reasoning-content-on-assistant-messages compat))
           (str mid " must send reasoning_content on every assistant message"))
     (t/is (pos? (count (:reasoning-content-fill compat)))

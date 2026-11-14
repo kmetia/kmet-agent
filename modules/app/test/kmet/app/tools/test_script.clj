@@ -200,6 +200,27 @@
     (t/is (= :done (#'script/await-script done (atom false) 0)))
     (t/is (= :timeout (#'script/await-script (promise) (atom false) 1)))))
 
+(t/deftest test-rearm-keeps-the-run-signal-separate-from-the-abort-reason
+  ;; A timeout abort must not be mistaken for Escape: the interrupt-fn checks
+  ;; the raw run signal, so a deadline that lands between its checks cannot
+  ;; relabel the timeout as an abort.
+  (let [holder (script/interrupt-holder)
+        signal (atom false)
+        abort (atom nil)
+        interrupt (script/interrupt-fn holder "eval")]
+    (script/rearm! holder {:signal signal
+                           :cancelled (concurrent/or-signal signal abort)
+                           :deadline nil
+                           :abort abort})
+    (t/is (identical? signal (:signal @holder)))
+    (reset! abort :timeout)
+    (t/is (= :timeout (try (interrupt) false
+                           (catch Exception e (:reason (ex-data e))))))
+    (reset! abort nil)
+    (reset! signal true)
+    (t/is (= :aborted (try (interrupt) false
+                           (catch Exception e (:reason (ex-data e))))))))
+
 (t/deftest ^:slow test-cancellation-kills-a-p-sh-process
   (let [{:keys [started? returned? marker-exists?]}
         (run-cancelled-process
