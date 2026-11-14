@@ -104,7 +104,7 @@
   (let [set-editor-text (fn [text]
                           (write-ui-record! out- {:method :set-editor-text :text text}))]
     (assoc base
-           :notify (fn [message type]
+           :notify (fn [message type & _opts] ; flash duration has no wire meaning
                      (write-ui-record! out- (cond-> {:method :notify :message message}
                                               type (assoc :notify-type type))))
            :set-status (fn [key text]

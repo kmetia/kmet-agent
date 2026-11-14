@@ -82,6 +82,14 @@
       (t/is (= {:placement :below-editor} (-> (nth @calls 2) (nth 3))))
       (t/is (= {:frames []} (-> (nth @calls 10) (nth 1)))))))
 
+(deftest test-ui-notify-opts
+  (testing "ui-notify forwards an opts map only when given, so 2-arity front ends keep working"
+    (let [calls (atom [])]
+      (ex/set-ui-registry! {:notify (fn [& args] (swap! calls conj (vec args)) nil)})
+      (ex/ui-notify "plain" :info)
+      (ex/ui-notify "longer" :info {:duration-ms 5000})
+      (t/is (= [["plain" :info] ["longer" :info {:duration-ms 5000}]] @calls)))))
+
 (deftest test-ui-custom-promise
   (testing "ui-custom returns a promise resolved by the factory's done fn"
     (let [calls (install-test-registry!)

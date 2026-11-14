@@ -500,6 +500,16 @@
           (tu/clear-extension-wiring!)
           (fs/delete-tree dir))))))
 
+(deftest extension-notify-duration
+  (testing "an extension notify may set the flash duration; omitted keeps the tui default"
+    (let [flashes (atom [])
+          registry ((var ui-registry/build-extension-ui-registry) {:tui {}} {} nil)]
+      (with-redefs [tui/tui-flash! (fn [_ message & {:keys [duration-ms]}]
+                                     (swap! flashes conj [message duration-ms]))]
+        ((:notify registry) "default" :info)
+        ((:notify registry) "longer" :info {:duration-ms 5000}))
+      (is (= [["default" nil] ["longer" 5000]] @flashes)))))
+
 (deftest replay-branch-restores-tool-rendering
   (testing "replaying a session branch restores tool executions with their
             real name + args: the components are created from the assistant

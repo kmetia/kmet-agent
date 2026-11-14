@@ -1103,6 +1103,7 @@ from the api.
 ```clojure
 (ext/ui-set-status api "my-ext" "loaded")   ; footer status; nil clears
 (ext/ui-notify api "Done" :info)            ; :info | :warning | :error
+(ext/ui-notify api "Done" :info {:duration-ms 5000}) ; TUI only; RPC ignores duration
 
 ;; widgets take HICCUP ELEMENT TREES (or a factory fn → component):
 (ext/ui-set-widget api "my-widget"

@@ -652,7 +652,8 @@
       (fn [opts]
         (reset! seen {:mode (extensions/extension-mode)
                       :has-ui (extensions/extension-has-ui?)})
-        (extensions/ui-notify "hello from an extension" :warning)
+        (extensions/ui-notify "duration probe" :warning)
+        (extensions/ui-notify "duration probe" :warning {:duration-ms 5000})
         (future
           (when-let [on-text (:on-text opts)] (on-text "ok"))
           (when-let [on-done (:on-done opts)] (on-done :stop))
@@ -663,13 +664,10 @@
                         :until ":agent-settled"})]
           (is (= {:mode :rpc :has-ui true} @seen)
               "the run reports a front end with a port, not print mode's headless one")
-          (is (some #(and (= :ui-request (:type %))
-                          (= :notify (:method %))
-                          (= "hello from an extension" (:message %))
-                          (= :warning (:notify-type %)))
-                    records)
-              "and the port's channel is the wire: the client sees what the
-               extension asked for"))))))
+          (is (= (repeat 2 {:type :ui-request :method :notify
+                            :message "duration probe" :notify-type :warning})
+                 (map #(dissoc % :id) (filter #(= "duration probe" (:message %)) records)))
+              "notifications with and without a duration have identical wire output apart from ids"))))))
 
 (deftest a-diagnostic-mount-creates-no-agent
   ;; `--dump-state` mounts every row of the profile, this one included: with no

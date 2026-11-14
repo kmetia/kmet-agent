@@ -258,8 +258,8 @@
                                                @(:extension-statuses-atom ftr))
                      :on-branch-change (fn [_f] (fn []))}
         registry
-        {:notify (fn [message _type]
-                   (tui/tui-flash! t message)
+        {:notify (fn [message _type & [{:keys [duration-ms]}]]
+                   (tui/tui-flash! t message :duration-ms duration-ms)
                    nil)
          ;; /session-style output for extension commands: append an :info
          ;; message to the chat history — part of the live transcript, no

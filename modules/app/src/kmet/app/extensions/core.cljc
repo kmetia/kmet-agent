@@ -815,7 +815,11 @@
   (fn [event]
     (handler event (build-extension-context))))
 
-(defn ui-notify [message & [type]] (ui-call :notify message type))
+(defn ui-notify
+  ;; opts only when given: front ends with a 2-arity :notify keep working
+  ([message] (ui-notify message nil))
+  ([message type] (ui-call :notify message type))
+  ([message type opts] (ui-call :notify message type opts)))
 (defn ui-custom [factory & [opts]]
   (ui-call :custom factory opts))
 (defn ui-chat-info [label content] (ui-call :chat-info label content))
