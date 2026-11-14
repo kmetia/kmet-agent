@@ -34,7 +34,11 @@
       (t/is (:truncated? r)))
     (t/is (= #{"root.clj" "src/a.clj"}
              (set (:paths (search/glob dir "**/*.clj"
-                                       {:path dir :exclude ["test/**" "target/**"]})))))))
+                                       {:path dir :exclude ["test/**" "target/**"]})))))
+    (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be relative"
+                            (search/glob dir "**/*.clj"
+                                         {:path dir
+                                          :exclude (str (fs/path dir "target"))})))))
 
 (t/deftest test-grep-matches-options-and-path-display
   (let [dir (fixture {"src/a.clj" "(def needle 1)\n(needle)\n"

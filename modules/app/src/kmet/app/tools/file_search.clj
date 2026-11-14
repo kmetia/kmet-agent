@@ -11,6 +11,7 @@
   (:require [babashka.fs :as fs]
             [babashka.process :as proc]
             [clojure.string :as str]
+            [kmet.libs.glob :as glob]
             [kmet.libs.path :as path]))
 
 (def ^:private default-max-file-bytes
@@ -58,83 +59,12 @@
   [base file]
   (str/replace (str (fs/relativize base file)) fs/file-separator "/"))
 
-(defn- expand-braces
-  "PATTERN with each top-level `{a,b}` expanded into one pattern per choice."
-  [pattern]
-  (if-let [open (str/index-of pattern "{")]
-    (if-let [close (str/index-of pattern "}" open)]
-      (let [body (subs pattern (inc open) close)
-            prefix (subs pattern 0 open)
-            suffix (subs pattern (inc close))]
-        (mapcat #(expand-braces (str prefix % suffix))
-                (str/split body #"," -1)))
-      [pattern])
-    [pattern]))
-
-(def ^:private regex-special
-  (set "\\.[]{}()*+?^$|"))
-
-(defn- star-token
-  "The `*` or `**` token at I in PATTERN: `[regex next-index]`."
-  [pattern i n]
-  (if (and (< (inc i) n) (= \* (nth pattern (inc i))))
-    (let [slash? (and (< (+ i 2) n) (= \/ (nth pattern (+ i 2))))]
-      [(if slash? "(?:.*/)?" ".*")
-       (if slash? (+ i 3) (+ i 2))])
-    ["[^/]*" (inc i)]))
-
-(defn- class-token
-  "The character-class token at I in PATTERN: `[regex next-index]`."
-  [pattern i n]
-  (loop [j (inc i)]
-    (if (>= j n)
-      ["\\[" (inc i)]
-      (if (= \] (nth pattern j))
-        (let [body (subs pattern (inc i) j)
-              body (if (str/starts-with? body "!") (str "^" (subs body 1)) body)]
-          [(str "[" body "]") (inc j)])
-        (recur (inc j))))))
-
-(defn- char->regex
-  "C as a regex atom, escaped when it is a regex metacharacter."
-  [c]
-  (if (contains? regex-special c) (str "\\" c) (str c)))
-
-(defn- glob->regex
-  "PATTERN as a regex string. `*` stays within a path segment, `**` crosses
-   segments, `**/` also matches zero directories, `?` is one non-slash char and
-   `[...]` is copied through."
-  [pattern]
-  (let [n (count pattern)]
-    (loop [i 0 parts []]
-      (if (>= i n)
-        (re-pattern (apply str parts))
-        (let [c (nth pattern i)
-              [part next-i] (cond
-                              (= c \*) (star-token pattern i n)
-                              (= c \?) ["[^/]" (inc i)]
-                              (= c \[) (class-token pattern i n)
-                              :else [(char->regex c) (inc i)])]
-          (recur next-i (conj parts part)))))))
-
-(defn- compile-glob
-  "A seq of regexes matching PATTERN, brace alternatives included."
-  [pattern]
-  (mapv glob->regex (expand-braces pattern)))
-
-(defn- glob-match?
-  [regexes path]
-  (boolean (some #(re-matches % path) regexes)))
-
 (defn- compile-excludes
-  "Compiled exclude patterns from EXCLUDE — nil, one pattern, or a seq."
+  "Compiled exclude matcher from EXCLUDE — nil, one pattern, or a seq."
   [exclude]
-  (->> (cond
-         (nil? exclude) []
-         (string? exclude) [exclude]
-         :else exclude)
-       (mapcat expand-braces)
-       (mapv glob->regex)))
+  (->> (if (string? exclude) [exclude] exclude)
+       (mapv #(relative-pattern % ":exclude"))
+       glob/compile-patterns))
 
 (defn- git-ignored?
   "True when BASE is covered by git's ignore rules."
@@ -180,8 +110,8 @@
   "Candidate files under BASE matching MATCHER and not EXCLUDES, sorted."
   [base matcher excludes gitignore?]
   (->> (candidate-files base gitignore?)
-       (filter #(glob-match? matcher (relative-path base %)))
-       (remove #(glob-match? excludes (relative-path base %)))
+       (filter #(glob/matches? matcher (relative-path base %)))
+       (remove #(glob/matches? excludes (relative-path base %)))
        (sort-by str)))
 
 (defn glob
@@ -198,7 +128,7 @@
                             {:type ::not-directory :path path})))
         pattern (relative-pattern pattern "PATTERN")
         max (positive-int max default-max-paths)
-        matcher (compile-glob pattern)
+        matcher (glob/compile-pattern pattern)
         excludes (compile-excludes exclude)
         files (vec (filtered-files base matcher excludes gitignore?))
         total (count files)]
@@ -258,7 +188,7 @@
         pattern (str pattern)
         re (re-pattern (if ignore-case? (str "(?i)" pattern) pattern))
         glob (relative-pattern glob ":glob")
-        matcher (compile-glob glob)
+        matcher (glob/compile-pattern glob)
         excludes (compile-excludes exclude)
         max (positive-int max default-max-matches)
         max-file-bytes (positive-int max-file-bytes default-max-file-bytes)

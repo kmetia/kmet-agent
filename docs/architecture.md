@@ -717,7 +717,9 @@ glob pattern; `grep` searches file contents and returns
 Inside a git work tree both use git's file list, so `.gitignore` is
 honored (an explicitly named ignored directory is still searched); outside
 git they use the shared safe traversal. `grep` skips binary and oversized
-files instead of decoding them, and both accept `:exclude` globs.
+files instead of decoding them, and both accept `:exclude` globs. Patterns
+and excludes are compiled by `kmet.libs.glob`; it matches `/`-separated paths,
+with `*` within a segment and `**` across segments.
 The same prelude refers the eval verbs (`library`, `sources`, `index`, `save`,
 `forget`, `patch`, `edit-form`, `move`, `result`), so the sandbox has one
 unqualified call surface. `clj` verbs stay namespaced (`clj/edit-form`), and a
