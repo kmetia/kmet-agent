@@ -18,7 +18,8 @@
 ;; files, (2) the jars its deps.edn declares (the complete transitive
 ;; closure, resolved in-process via clojure.tools.deps), and (3) anything else on
 ;; the classpath. Global namespaces the extension may touch — kmet.extension
-;; (the contract), clojure.*, babashka.*, and the shared library layers
+;; (the contract), clojure.*, babashka.*, the host FFI (babashka.ffi or
+;; jolt.ffi), and the shared library layers
 ;; kmet.tui.* (pi: @earendil-works/pi-tui), kmet.libs.* (generic
 ;; self-contained utilities) and the kmet.reakt.*/kmet.hikap.* framework
 ;; modules — are injected as shared references, never re-evaluated, so
@@ -128,6 +129,13 @@
      rewrite-clj.zip
      rewrite-clj.zip.subedit
      edamame.core})
+
+(def ^:private host-ffi-namespace
+  "The host FFI namespace extension contexts share by reference: babashka.ffi
+   (bundled in babashka, the standalone org.babashka/ffi on the JVM) or
+   jolt.ffi. Extension code selects it the way kmet's own platform code does:
+   [#?(:jolt jolt.ffi :default babashka.ffi) :as ffi]."
+  #?(:jolt 'jolt.ffi :default 'babashka.ffi))
 
 (def ^:private missing-classname-re
   "Matches SCI's analysis error for an unregistered class:
@@ -566,6 +574,7 @@
                                        (ns-name ns-obj))))))
          (or (str/starts-with? n "clojure.")
              (str/starts-with? n "babashka.")
+             (= (ns-name ns-obj) host-ffi-namespace)
              (contains? bb-shared-namespaces (ns-name ns-obj))
              (@bundled-extension-lib-predicate n)
              (tui-layer? n)
@@ -1230,6 +1239,19 @@
       (catch Throwable _ nil)))
   nil)
 
+(defn- require-host-ffi!
+  "Load the host FFI namespace so build-context-namespaces shares it:
+   babashka.ffi on babashka and the JVM, jolt.ffi on Jolt. The JVM's standalone
+   org.babashka/ffi needs the JDK 22+ FFM API — an older JVM keeps running
+   without the namespace (the fallback the clipboard backend documents)
+   instead of failing every extension load."
+  []
+  #?(:jolt (require 'jolt.ffi)
+     :bb (require 'babashka.ffi)
+     :default (try (require 'babashka.ffi)
+                   (catch Throwable _ nil)))
+  nil)
+
 (defn- host-requires!
   "Require the shared library layers before a per-extension context is
    built, so the all-ns scan in build-context-namespaces finds them.
@@ -1245,6 +1267,7 @@
   (require 'kmet.app.extensions.libs)
   (when-not (host/jolt?)
     (apply require (concat spec-port-namespaces bb-shared-namespaces)))
+  (require-host-ffi!)
   nil)
 
 (defn load-themes-from-dir!

@@ -730,7 +730,18 @@
       (let [result (load "http-direct" "(ns bad-http-direct\n  (:require [babashka.http-client :as http]))\n(defn init [api] nil)\n")]
         (t/is (some? (:error result)))
         (t/is (str/includes? (:error result) "kmet.libs.http")
-              "the rejection names the proxy-aware boundary")))))
+              "the rejection names the proxy-aware boundary")))
+    (testing "the host FFI namespace is shared (babashka.ffi / jolt.ffi)"
+      (@#'ext-context/host-requires!)
+      ;; An older JVM cannot load org.babashka/ffi (it needs the JDK 22+ FFM
+      ;; API), so host-requires! leaves the namespace unshared there.
+      (when (find-ns (if (host/jolt?) 'jolt.ffi 'babashka.ffi))
+        (let [ffi-ns (if (host/jolt?) "jolt.ffi" "babashka.ffi")
+              result (load "ffi" (str "(ns good-ffi\n  (:require [" ffi-ns " :as ffi]))\n"
+                                      "(defn init [_api]\n"
+                                      "  (when-not (fn? ffi/load-library)\n"
+                                      "    (throw (ex-info \"ffi failed\" {}))))\n"))]
+          (t/is (nil? (:error result)) (str "loaded: " (:error result))))))))
 
 (t/deftest ^:slow test-extension-bad-deps-fails-load
   (extensions/clear-extensions!)

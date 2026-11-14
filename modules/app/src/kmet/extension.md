@@ -133,6 +133,9 @@ What an extension may require is a fixed, enforced list:
 - The shared renderer namespaces `kmet.ui.tui.tool-renderers` and
   `kmet.app.keybindings`.
 - `clojure.*` and `babashka.*` builtins, and the fixed bundled set below.
+- The host FFI namespace: `babashka.ffi` on babashka and the JVM, `jolt.ffi`
+  on Jolt (see § Bundled extension libraries for the host-conditional
+  require).
 
 Any other kmet namespace — internals such as `kmet.app.*`, `kmet.srce.*`
 (except `kmet.srce.core`),
@@ -171,6 +174,12 @@ Plus the libraries shared from the host itself: `clojure.*` (`core.async`
 and `rrb-vector` included), `babashka.fs`, `babashka.process`, and the kmet
 layers (`kmet.extension`, `kmet.tui.*`, `kmet.libs.*`, `kmet.reakt.*`,
 `kmet.hikap.*` and the shared renderer namespaces).
+
+The host FFI is shared the same way: `babashka.ffi` on babashka and the JVM
+(the standalone `org.babashka/ffi` there needs the JDK 22+ FFM API; an older
+JVM leaves it unshared), `jolt.ffi` on Jolt. FFI code is host-specific by
+nature, so select the namespace the way kmet's own platform code does:
+`[#?(:jolt jolt.ffi :default babashka.ffi) :as ffi]`.
 
 The **guarantee is the namespace surface, not the version**: on babashka a
 bundled port decides its own edition, while Jolt uses the version kmet pins

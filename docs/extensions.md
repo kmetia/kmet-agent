@@ -436,6 +436,11 @@ reference's § Allowed namespaces and isolation):
   shared `kmet.tui.*` / `kmet.libs.*` / `kmet.reakt.*` / `kmet.hikap.*` libraries; other kmet
   internals are not resolvable from an extension context (the load fails with an explicit
   error) — the loader, `kmet.loader*`, is one of those internals.
+- The host FFI is shared too: `babashka.ffi` on babashka and the JVM (the
+  standalone `org.babashka/ffi` needs JDK 22+; an older JVM leaves it
+  unshared), `jolt.ffi` on Jolt. FFI code is host-specific by nature — select
+  it with the host-conditional require kmet's own platform code uses:
+  `[#?(:jolt jolt.ffi :default babashka.ffi) :as ffi]`.
 - **Contexts are forks of one shared base** — the shared layers and the
   seeded classes are built once and forked per extension, so your
   definitions live only in your context (two extensions may even declare
