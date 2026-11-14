@@ -1,5 +1,6 @@
 (ns kmet.libs.test-text
-  "Unit tests for the shared text helpers (quiet titles and call-line heads)."
+  "Unit tests for the shared text helpers (quiet titles, call-line heads,
+   edit distance and nearest words)."
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.libs.text :as text]))
 
@@ -42,3 +43,36 @@
     (is (= "(- 1 2)" (text/trim-leading-blank-lines "(- 1 2)")))
     (is (nil? (text/trim-leading-blank-lines nil)))
     (is (= 42 (text/trim-leading-blank-lines 42)))))
+
+(deftest edit-distance-counts-single-edits
+  (is (= 0 (text/edit-distance "profile" "profile")))
+  (is (= 1 (text/edit-distance "profile" "profiles"))
+      "an insertion is one edit")
+  (is (= 1 (text/edit-distance "profile" "profil"))
+      "a deletion is one edit")
+  (is (= 1 (text/edit-distance "profile" "prefile"))
+      "a substitution is one edit")
+  (is (= 1 (text/edit-distance "profile" "porfile"))
+      "a neighbour swap is one edit")
+  (is (= 3 (text/edit-distance "abc" "xyz"))))
+
+(deftest nearest-words-keeps-the-best-distance
+  (is (= ["profile"]
+         (text/nearest-words "porfile" ["profile" "profiles" "serve"])))
+  (is (= ["bat" "hat"]
+         (text/nearest-words "cat" ["bat" "hat" "rat"] {:limit 2}))
+      "ties keep candidate order and honor the limit"))
+
+(deftest nearest-words-falls-back-to-a-unique-prefix
+  (is (= ["profile"]
+         (text/nearest-words "pro" ["profile" "serve"])))
+  (is (= []
+         (text/nearest-words "pro" ["profile" "profiles" "serve"]))
+      "two prefixed candidates are not a guess"))
+
+(deftest nearest-words-does-not-guess-far-off
+  (is (= [] (text/nearest-words "xyz" ["profile" "serve"])))
+  (is (= [] (text/nearest-words "porfile" ["profile"] {:max-distance 0})))
+  (is (= [] (text/nearest-words "CORE" ["core"]))
+      "the helper is case-sensitive; the caller folds case when it wants to")
+  (is (= [] (text/nearest-words nil ["core"]))))

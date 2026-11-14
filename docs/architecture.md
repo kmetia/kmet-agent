@@ -682,13 +682,17 @@ root locks in the fixed global-then-cwd order,
 and roll back the target if the source delete fails. The `:tool/eval` row
 registers the eval tool and `/eval` (`list`, `index`, `describe`, `drop`,
 `move`, `reload`, `sources`, `help`, plus verbs an eval source contributes)
-as its two effects, so removing the row removes both. The command keeps no
+as its two effects, so removing the row removes both. The verb spellings,
+arguments and summaries live in one table (`kmet.app.eval.command-verbs`);
+dispatch, help, the argument hint, completion and the source reserved-name
+guard read it. An unknown `/eval` verb names the nearest spelling before the
+unknown-verb hint. The command keeps no
 front-end tag and stays engine-portable. `/eval help` and `/eval index` need
 a live environment; `list`, `describe`, `sources`, `drop` and `move` also work
 from disk and prefix `Eval inactive` to their output. An unknown leading
 name that resolves to a definition or source verb is a `describe` shorthand;
 an unresolvable one keeps the unknown-verb hint. The system already provides
-`read`, `write`, `edit`, `bash` and `session-recall` (also `core/...`);
+`read`, `write`, `edit`, `bash`, `glob`, `grep` and `session-recall` (also `core/...`);
 the row does not mount a separate eval source for them, and there is no
 `tools` namespace. The built-in help index is generated from the verb vars'
 docstrings and arglists, so `(help)` follows the call surface instead of a
@@ -707,6 +711,13 @@ them. The alias prelude refers the core verbs unqualified, so `(read ...)` and
 `{:path :start :end :total-lines :lines [{:n :text}] :truncated?}`; a bounded
 read omits the continuation footer by default and `:as :lines` pages at 400.
 The options are verb-only — the `read` tool keeps pi's raw-text contract.
+`glob` and `grep` are the file-search verbs. `glob` lists paths matching a
+glob pattern; `grep` searches file contents and returns
+`{:matches [{:path :line :text}] :skipped :skipped-count :truncated? :files}`.
+Inside a git work tree both use git's file list, so `.gitignore` is
+honored (an explicitly named ignored directory is still searched); outside
+git they use the shared safe traversal. `grep` skips binary and oversized
+files instead of decoding them, and both accept `:exclude` globs.
 The same prelude refers the eval verbs (`library`, `sources`, `index`, `save`,
 `forget`, `patch`, `edit-form`, `move`, `result`), so the sandbox has one
 unqualified call surface. `clj` verbs stay namespaced (`clj/edit-form`), and a

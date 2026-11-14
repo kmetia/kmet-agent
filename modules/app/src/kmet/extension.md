@@ -492,7 +492,8 @@ verbs.
   `(describe 'name)` for one verb's interface and implementation, `(help)`
   for the index (one summary line per source, and a mounted source id is also
   a topic, e.g. `(help :license)` or `(help "license")`), and
-  `(help :library)` for the library.
+  `(help :library)` for the library. A missed topic or name names the nearest
+  spelling before the index, so a typo still costs one call.
 
 ### Tool execute contract
 

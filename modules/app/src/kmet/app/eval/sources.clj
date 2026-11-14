@@ -5,7 +5,8 @@
    later calls. Validation happens here so `kmet.app.eval` only wires the
    values into SCI: a bad shape, a reserved namespace or key, or a reserved
    `/eval` verb refuses the whole source, never the eval call."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [kmet.app.eval.command-verbs :as command-verbs]))
 
 (def reserved-source-namespaces
   "Namespaces an extension source may not contribute to: the model's
@@ -27,9 +28,9 @@
     "clj/nrepl-eval"})
 
 (def ^:private reserved-command-names
-  "The unqualified `/eval` verbs a source may not replace."
-  #{"list" "index" "describe" "drop" "move" "reload" "sources" "help"
-    "--help" "-h"})
+  "The unqualified `/eval` verbs a source may not replace, read from the
+   command vocabulary so dispatch, help and validation share one list."
+  command-verbs/reserved-names)
 
 (defn source-key
   "The address of one contributed value — `ext.license/add!`."

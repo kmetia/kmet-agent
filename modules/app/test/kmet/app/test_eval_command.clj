@@ -8,6 +8,7 @@
             [kmet.app.commands.builtins :as builtins]
             [kmet.app.commands.eval :as eval-command]
             [kmet.app.eval :as eval-service]
+            [kmet.app.eval.command-verbs :as command-verbs]
             [kmet.app.eval.files :as eval-files]
             [kmet.app.registry :as registry]
             [kmet.app.session.core :as session]
@@ -516,6 +517,46 @@
     (let [[[_ _ content]] (run "help")]
       (t/is (str/includes? content "/eval license-lint"))
       (t/is (str/includes? content "Lint licenses")))))
+
+(t/deftest every-command-verb-is-documented-and-dispatched
+  (let [env (eval-env)
+        [[_ _ help]] (run env "help")]
+    (doseq [{:keys [name args]} command-verbs/verbs]
+      (t/is (str/includes? help
+                           (str "/eval " name
+                                (when (seq args) (str " " args))))
+            (str "the help names " name))
+      (let [[_ content] (first (run env name))]
+        (t/is (not (str/includes? (str content)
+                                  (str "Unknown verb: " name)))
+              (str name " dispatches"))))))
+
+(t/deftest command-completion-comes-from-the-table
+  (let [completion (:get-argument-completions eval-command/command)]
+    (t/is (= (mapv :name command-verbs/verbs)
+             (mapv :value (completion ""))))
+    (t/is (= ["index"] (mapv :value (completion "i"))))
+    (t/is (= command-verbs/argument-hint (:argument-hint eval-command/command)))))
+
+(t/deftest help-aliases-resolve
+  (let [env (eval-env)]
+    (doseq [alias ["--help" "-h"]]
+      (let [[[level _ content]] (run env alias)]
+        (t/is (= :info level) alias)
+        (t/is (str/includes? content "### /eval") alias)))))
+
+(t/deftest a-typo-names-the-nearest-command
+  (let [env (eval-env)
+        [[level content]] (run env "lis")]
+    (t/is (= :warning level))
+    (t/is (str/includes? content "Did you mean /eval list?")))
+  (let [env (eval-env {:service-commands
+                       {:license/lint
+                        {:description "Lint licenses"
+                         :run (fn [_] "linted")}}})
+        [[level content]] (run env "liscense/lint")]
+    (t/is (= :warning level))
+    (t/is (str/includes? content "Did you mean /eval license/lint?"))))
 
 (t/deftest a-built-in-verb-describes-without-a-source (let [env (support/eval-ctx) got (atom []) engine {:agent-state (atom {:ctx (:ctx env)}), :session (atom (:session env)), :cwd (atom (:cwd env))} run (fn [args] (reset! got []) ((:handler eval-command/command) {:runtime engine, :ui {:info (fn [label content] (swap! got conj [:info label content])), :warning (fn [text] (swap! got conj [:warning text]))}} args) (clojure.core/deref got)) [[level _ content]] (run "describe core/read")] (t/is (= :info level)) (t/is (str/includes? content "(built-in)")) (t/is (not (str/includes? content "source: (not recorded)"))) (t/is (str/includes? content "Read PATH"))))
 

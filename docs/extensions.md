@@ -669,7 +669,8 @@ a subnamespace keeps its dotted path (`license.internal/verb`).
   no library file). `(sources)` lists each verb with its doc and
   arglists; `(help)` keeps one summary line per source, and
   `(help :license)` (or `(help "license")`) lists the source's
-  description and verbs. The eval manifest announces the built-in help
+  description and verbs; a missed topic or name names the nearest spelling
+  before the index. The eval manifest announces the built-in help
   topics one line each and the source's registration description at prompt
   start, without building an evaluator or invoking the source;
   `(index "text")` searches loaded and live definitions and source verbs by

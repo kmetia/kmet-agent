@@ -47,6 +47,7 @@
             [kmet.libs.clj-edit :as clj-edit]
             [kmet.libs.clj-eval :as clj-eval]
             [kmet.libs.concurrent :as concurrent]
+            [kmet.libs.text :as text]
             [kmet.srce.core :as srce]
             [sci.core :as sci]))
 
@@ -1388,6 +1389,44 @@
               topic))
           (concat help-topic-keys (source-topics env)))))
 
+(defn- help-topic-names
+  "Every topic a help request can name: the fixed topics then mounted source
+   ids, without their leading colon."
+  [env]
+  (mapv name (concat help-topic-keys (source-topics env))))
+
+(defn- help-name-candidates
+  "The names a definition help request can resolve, for a did-you-mean
+   suggestion: built-in verbs, library definitions and source verbs."
+  [env]
+  (concat (sort (keys bare-builtin-help))
+          (map (comp eval-format/display-name :name) (library-entries env))
+          (map (comp eval-format/display-name :name) (session-only-entries env))
+          (map eval-format/display-name (sort (keys @(:source-values env))))))
+
+(defn- help-suggestion
+  "The `Did you mean ...?` suffix for a missed help topic or name, or an
+   empty string. A keyword names only a topic; a string or symbol also tries
+   definitions. Topics compare case-insensitively because `topic-for` does;
+   definition names stay exact."
+  [env what]
+  (let [topic? (keyword? what)
+        word (if topic? (name what) (str what))
+        topics (help-topic-names env)
+        topic-names (set topics)
+        topic-near (text/nearest-words (str/lower-case word) topics)
+        name-near (when (and (not topic?) (empty? topic-near))
+                    (text/nearest-words word (help-name-candidates env)))]
+    (when-let [near (seq (or (seq topic-near) name-near))]
+      (str " Did you mean "
+           (str/join " or "
+                     (map (fn [candidate]
+                            (if (contains? topic-names candidate)
+                              (str ":" candidate)
+                              candidate))
+                          near))
+           "?"))))
+
 (defn- help-topic-text
   [env topic]
   (case topic
@@ -1424,35 +1463,45 @@
          "\n(help 'name) describes one definition or verb.")))
 
 (defn- help-or-index
-  "Run F; a bad help request returns MISSING plus the index instead of an
-   error, so a typo costs one call rather than two."
-  [env missing f]
+  "Run F; a bad help request returns MISSING, SUGGESTION and the index
+   instead of an error, so a typo costs one call rather than two."
+  [env missing suggestion f]
   (try
     (f)
     (catch clojure.lang.ExceptionInfo e
       (if (= :eval/bad-request (:type (ex-data e)))
-        (str missing "; the index:\n" (help-index env))
+        (let [index (help-index env)]
+          (if (seq suggestion)
+            (str missing "." suggestion " The index:\n" index)
+            (str missing "; the index:\n" index)))
         (throw e)))))
 
 (defn- environment-help
   "The `(eval/help)` text: an index, a topic, or one definition's interface.
    A keyword or string names a topic first; an unmatched string falls back to
    a definition or verb name, and a symbol names a definition. `help` and
-   `describe` are the bare aliases."
+   `describe` are the bare aliases. A miss names the nearest spelling before
+   the index."
   ([env] (help-index env))
   ([env what]
    (cond
      (nil? what) (help-index env)
      (keyword? what)
-     (help-or-index env (str "No help for topic " (pr-str what))
+     (help-or-index env
+                    (str "No help for topic " (pr-str what))
+                    (help-suggestion env what)
                     #(help-topic-text env what))
      (string? what)
      (if-let [topic (topic-for env what)]
        (help-topic-text env topic)
-       (help-or-index env (str "No help for topic or name " (pr-str what))
+       (help-or-index env
+                      (str "No help for topic or name " (pr-str what))
+                      (help-suggestion env what)
                       #(help-entry-text env (describe-entry env (symbol what)))))
      (symbol? what)
-     (help-or-index env (str "No help for " (pr-str what))
+     (help-or-index env
+                    (str "No help for " (pr-str what))
+                    (help-suggestion env what)
                     #(help-entry-text env (describe-entry env what)))
      :else (bad-request! (str "eval help needs a topic or name, got "
                               (pr-str what))

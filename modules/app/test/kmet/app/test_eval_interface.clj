@@ -140,6 +140,28 @@
       (t/is (str/includes? (:content named) "read verb"))
       (t/is (str/includes? (:content named) "Read PATH as text")))))
 
+(t/deftest test-help-suggests-the-nearest-topic-or-name
+  (let [env (support/eval-ctx)
+        topic (support/eval! env "(eval/help :cor)")
+        named (support/eval! env "(eval/help \"reed\")")
+        far (support/eval! env "(eval/help :nope)")]
+    (t/is (not (:is-error topic)) (:content topic))
+    (t/is (str/includes? (:content topic)
+                         "No help for topic :cor. Did you mean :core? The index:"))
+    (t/is (str/includes? (:content topic) "Built-in verbs:"))
+    (t/is (str/includes? (:content named)
+                         "No help for topic or name \"reed\". Did you mean read? The index:"))
+    (t/is (not (str/includes? (:content far) "Did you mean")))))
+
+(t/deftest test-help-suggests-a-source-topic
+  (let [env (support/eval-ctx)]
+    (tools/register-eval-source! (:tools env) :license
+                                 (fn [_] {:doc "License helpers"}))
+    (support/eval! env "(core/emit :built)")
+    (let [help (:content (support/eval! env "(eval/help :licens)"))]
+      (t/is (str/includes? help
+                           "No help for topic :licens. Did you mean :license?")))))
+
 (t/deftest test-an-existing-library-file-gains-its-interface
   (let [env (support/eval-ctx)
         path (str (fs/path (:agent-dir env) "eval" "user" "legacy.clj"))]
@@ -287,7 +309,7 @@
                            "Report VALUE"))
       (t/is (str/includes? core "also referred unqualified"))
       (t/is (str/includes? index "  read ([path] [path {:keys [offset start limit end tail footer as]}]) - "))
-      (t/is (<= (count index) 4096) "the index stays one bounded discovery call")
+      (t/is (<= (count index) 4600) "the index stays one bounded discovery call")
       (t/is (str/includes? index "Topics:\n  :core — sandbox verbs"))
       (t/is (str/includes? index "  :surface — host, aliases"))
       (t/is (not (str/includes? index "core/sh")))

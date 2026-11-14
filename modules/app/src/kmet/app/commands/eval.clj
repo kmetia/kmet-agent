@@ -17,12 +17,19 @@
    not a known verb. An eval source may contribute a verb through the
    service's `:source-commands` map; built-in names are reserved. The
    `:tool/eval` plugin registers this command and the eval tool together, so
-   the row is the one switch for both."
+   the row is the one switch for both.
+
+   The verb list, its argument strings and its summaries live in
+   `kmet.app.eval.command-verbs`; this namespace attaches handlers and renders
+   the table. Adding a verb is one row plus its handler, and completion, help
+   and the source-validation guard read the same row."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
+            [kmet.app.eval.command-verbs :as command-verbs]
             [kmet.app.eval.files :as eval-files]
             [kmet.app.eval.format :as eval-format]
             [kmet.app.session.runtime :as runtime]
+            [kmet.libs.text :as text]
             [kmet.srce.core :as srce]))
 
 (defn- out
@@ -224,6 +231,26 @@
     (str (namespace verb) "/" (name verb))
     (name verb)))
 
+(defn- source-command-names
+  "The call spellings of source-contributed verbs, in stable order."
+  [commands]
+  (map (comp display-verb key) (sort-by key commands)))
+
+(defn- command-line
+  "One `/eval` help row: the display command and its summary."
+  [{:keys [summary] :as verb}]
+  [(str "/eval " (command-verbs/usage verb)) summary])
+
+(defn- did-you-mean
+  "The refusal suffix naming the nearest `/eval` spellings, or an empty
+   string when none is close."
+  [word candidates]
+  (if-let [near (seq (text/nearest-words word candidates))]
+    (str " Did you mean "
+         (str/join " or " (map (fn [candidate] (str "/eval " candidate)) near))
+         "?")
+    ""))
+
 (defn- inactive-text [text]
   (str "**Eval inactive** — no live environment for this session. "
        "Saved definitions are read from disk; run an eval or "
@@ -251,15 +278,7 @@
                       verbs)))
 
 (defn- command-help-text [svc cwd]
-  (let [verbs [["/eval list [pattern]" "List global, cwd, then live definitions"]
-               ["/eval index <text>" "Search the live sandbox by name, docstring or source"]
-               ["/eval describe <name>" "Describe one definition or source verb"]
-               ["/eval <name>" "Describe a definition (describe shorthand)"]
-               ["/eval drop <name>…" "Delete actual files and unbind the live names"]
-               ["/eval move <name> global|cwd" "Move a definition to the other scope"]
-               ["/eval reload" "Rebuild the sandbox from the library files"]
-               ["/eval sources" "List eval sources and saved definitions"]
-               ["/eval help [topic|name]" "Index, sandbox topic, or one definition"]]
+  (let [verbs (mapv command-line command-verbs/verbs)
         contributed (map (fn [[verb {:keys [description]}]]
                            [(str "/eval " (display-verb verb))
                             (or description "")])
@@ -268,7 +287,7 @@
      "\n\n"
      (concat
       ["### /eval"
-       (command-lines verbs)
+       (command-lines (conj verbs (command-line command-verbs/fallback)))
        "> A file shared by several definitions must be dropped together; a partial file is refused."]
       (when (seq contributed)
         ["**Source verbs**"
@@ -402,23 +421,30 @@
 
 (defn- fallback-command
   [{:keys [svc sess cwd live? verb arg ui]}]
-  (if-let [cmd (get (source-commands svc cwd) (keyword verb))]
-    (try
-      (let [output ((:run cmd) {:args arg :session sess :cwd cwd :service svc})]
-        (when-not (str/blank? (str output))
-          (out ui :info "Eval" (str output))))
-      (catch Throwable t
-        (out ui :warning (str "eval verb failed: "
-                              (or (ex-message t) (str t))))))
-    (let [name (str/trim (str verb (when (seq arg) (str " " arg))))
-          {:keys [text error]} (describe-outcome svc sess cwd name)]
-      (cond
-        text (out ui :info "Eval" (status-text live? text))
-        error (out ui :warning error)
-        :else (out ui :warning
-                   (str "Unknown verb: " verb ". Try /eval help."))))))
+  (let [commands (source-commands svc cwd)]
+    (if-let [cmd (get commands (keyword verb))]
+      (try
+        (let [output ((:run cmd) {:args arg :session sess :cwd cwd :service svc})]
+          (when-not (str/blank? (str output))
+            (out ui :info "Eval" (str output))))
+        (catch Throwable t
+          (out ui :warning (str "eval verb failed: "
+                                (or (ex-message t) (str t))))))
+      (let [name (str/trim (str verb (when (seq arg) (str " " arg))))
+            {:keys [text error]} (describe-outcome svc sess cwd name)
+            candidates (concat command-verbs/all-names
+                               (source-command-names commands))]
+        (cond
+          text (out ui :info "Eval" (status-text live? text))
+          error (out ui :warning error)
+          :else (out ui :warning
+                     (str "Unknown verb: " verb "."
+                          (did-you-mean verb candidates)
+                          " Try /eval help.")))))))
 
-(def ^:private command-handlers
+(def ^:private verb-handlers
+  "The handler for each primary `/eval` verb. The table in
+   `kmet.app.eval.command-verbs` owns the spellings; this map owns behavior."
   {"list" list-command
    "index" index-command
    "describe" describe-command
@@ -426,9 +452,7 @@
    "move" move-command
    "reload" reload-command
    "sources" sources-command
-   "help" help-command
-   "--help" help-command
-   "-h" help-command})
+   "help" help-command})
 
 (defn handle
   "The `/eval` handler: `ctx` is the command context (`:runtime` engine and
@@ -446,14 +470,18 @@
              :ui ui}]
     (if (nil? svc)
       (out ui :warning "The eval service is not available.")
-      (if-let [handler (get command-handlers verb)]
-        (handler ctx)
+      (if-let [entry (command-verbs/find-verb verb)]
+        (if-let [handler (get verb-handlers (:name entry))]
+          (handler ctx)
+          (out ui :warning (str "Unknown verb: " verb ". Try /eval help.")))
         (fallback-command ctx)))))
 
 (def command
   "The `/eval` command record, mounted by the `:tool/eval` plugin with the
-   eval tool."
+   eval tool. The argument hint and completions come from the same verb table
+   the handler and help text read."
   {:name "eval"
    :description "List, index, describe, move, drop or reload eval definitions"
-   :argument-hint "<list|index|describe|move|drop|reload|sources|help> [args], or <name>"
+   :argument-hint command-verbs/argument-hint
+   :get-argument-completions command-verbs/completions
    :handler handle})
