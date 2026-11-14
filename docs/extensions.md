@@ -603,6 +603,12 @@ is not part of the shared set (or a `kmet.app.*` / `kmet.srce.*` (except
 `kmet.srce.core`) / `kmet.loader*` require) fails the load with an explicit
 error — the loader is host machinery, never part of the shared set.
 
+Transient notifications use `ui-notify`: `(ext/ui-notify api "Done" :info)`
+flashes a message in the TUI, and an optional opts map —
+`(ext/ui-notify api "Done" :info {:duration-ms 5000})`, or `nil` TYPE to set
+only the duration — overrides the flash duration. RPC accepts and ignores the
+opts, as do other front ends without duration support.
+
 Mount the component with `ui-custom` (the pattern and its options are in the
 contract reference's § UI, and
 [`extensions/README.md`](../extensions/README.md#building-ui) documents it

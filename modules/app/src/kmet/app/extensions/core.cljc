@@ -816,10 +816,13 @@
     (handler event (build-extension-context))))
 
 (defn ui-notify
-  ;; opts only when given: front ends with a 2-arity :notify keep working
+  "Flash MESSAGE. TYPE is :info | :warning | :error. OPTS may carry
+   :duration-ms to override the TUI flash duration; omitting OPTS keeps front
+   ends with a 2-arity :notify working."
   ([message] (ui-notify message nil))
   ([message type] (ui-call :notify message type))
-  ([message type opts] (ui-call :notify message type opts)))
+  ([message type {:keys [duration-ms]}]
+   (ui-call :notify message type {:duration-ms duration-ms})))
 (defn ui-custom [factory & [opts]]
   (ui-call :custom factory opts))
 (defn ui-chat-info [label content] (ui-call :chat-info label content))
