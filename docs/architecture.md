@@ -748,10 +748,9 @@ wrappers and the tool bridge) read the current call's state rather than the
 call that compiled them. Parallel calls serialize on a per-session lock, the
 deadline starts after it is taken, and `:dispose!` clears every environment;
 the tool's `:prompt-guidelines` therefore steer a multi-step task into one
-call — one call per phase, many forms per call, with `spawn`/`pmap` for
-parallel work. A broken library file is reported under `:failures` and
-skipped. The pure parse and address rules live in
-`kmet.app.eval.definitions`.
+call — one call per phase, many forms per call. A broken library file is
+reported under `:failures` and skipped. The pure parse and address rules
+live in `kmet.app.eval.definitions`.
 
 Eval keeps each call's output/error body in a bounded per-session ring,
 newest first. `(result)` lists the recent ids with status, size and a
