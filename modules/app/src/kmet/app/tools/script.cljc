@@ -793,36 +793,28 @@
     java.util.Date java.util.UUID java.util.List java.util.Map java.util.Set
     java.util.ArrayList java.util.HashMap java.util.HashSet java.util.Collections])
 
+(defn- class-map-entries
+  "The full- and simple-name entries for C, or nil when C cannot be named."
+  [c]
+  (try
+    [[(symbol (.getName c)) c]
+     [(symbol (.getSimpleName c)) c]]
+    (catch Throwable _ nil)))
+
 (defn- host-class-map
   "symbol → Class under both its full and simple name, so
    System/Thread/java.io.*/Throwable/… resolve as in a babashka script. bb
    answers its whole class table; the JVM and Jolt get the explicit
    java.lang/java.io/java.util subset."
   []
-  (letfn [(add-class [m c]
-            (let [full (symbol (.getName c))
-                  simple (symbol (.getSimpleName c))]
-              (cond-> (assoc m full c)
-                (not= full simple) (assoc simple c))))
-          (class-map [names]
-            (reduce (fn [m name-sym]
-                      (try
-                        (if-let [c (resolve name-sym)]
-                          (add-class m c)
-                          m)
-                        (catch Throwable _ m)))
-                    {}
-                    names))]
-    (if (or (host/jvm?) (host/jolt?))
-      (class-map sandbox-class-names)
-      (try
-        (let [all-classes (deref (requiring-resolve 'babashka.classes/all-classes))]
-          (reduce (fn [m c]
-                    (try (add-class m c)
-                         (catch Throwable _ m)))
-                  {}
-                  (all-classes)))
-        (catch Throwable _ {})))))
+  (into {}
+        (mapcat class-map-entries
+                (if (or (host/jvm?) (host/jolt?))
+                  (keep resolve sandbox-class-names)
+                  (try
+                    (let [all-classes (deref (requiring-resolve 'babashka.classes/all-classes))]
+                      (all-classes))
+                    (catch Throwable _ nil))))))
 
 (def ^:private extra-core-vars
   "Host clojure.core vars copied into the sandbox core as sci vars (macros keep

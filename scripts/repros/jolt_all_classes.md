@@ -12,7 +12,7 @@ Jolt models a large, open set of JDK and Clojure classes, but there is no suppor
 
 ## Motivation
 
-kmet's script/eval tool copies the host class surface into SCI. On babashka it uses `babashka.classes/all-classes`; on the JVM it uses a short explicit list; on Jolt `host-class-map` returns `{}` because there is no class table (`modules/app/src/kmet/app/tools/script.cljc`). Scripts running on Jolt therefore cannot resolve host classes such as `System`, `Thread`, `StringBuilder`, `java.io.File` or `Collections`, even though Jolt models them. The same gap affects any SCI host or editor tool that wants Jolt's class surface.
+kmet's script/eval tool copies the host class surface into SCI. On babashka it uses `babashka.classes/all-classes`; on the JVM and Jolt it uses a short explicit `java.lang`/`java.io`/`java.util` list because Jolt has no class table to enumerate (`modules/app/src/kmet/app/tools/script.cljc`). Scripts on Jolt therefore cannot resolve modeled classes outside that list — `java.util.Arrays`, `java.util.Objects`, `java.nio.file.Files`, `java.net.URL` — even though Jolt models them. The same gap affects any SCI host or editor tool that wants Jolt's full class surface.
 
 ## Reproduction
 
