@@ -325,7 +325,6 @@
     (doseq [n babashka-names]
       (t/is (str/includes? text n) n))
     (t/is (str/includes? text (case (script/class-surface)
-                                :none "Classes: none"
                                 :subset "Classes: an explicit subset"
                                 :full "Classes: the host's full class table")))))
 

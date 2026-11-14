@@ -1258,12 +1258,7 @@
 
 (def ^:private class-surface-texts
   "The class-table paragraph per `script/class-surface` shape."
-  {:none (str "none — this host's SCI exposes no Java class table, so there "
-              "is no Java interop: java.util.Date, java.time.Instant, "
-              "StringBuilder, static methods and constructors all fail. Use "
-              "babashka.fs, babashka.process, clojure.string and the "
-              "kmet.libs ports.")
-   :subset (str "an explicit subset — java.lang core, java.io and java.util "
+  {:subset (str "an explicit subset — java.lang core, java.io and java.util "
                 "types; other JDK classes fail. Use the portable libraries "
                 "for anything outside it.")
    :full (str "the host's full class table (System, Thread, java.io.*, "

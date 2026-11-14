@@ -43,6 +43,17 @@
     (t/is (= "42" (:content (run-in s {} "(do (def kept 42) kept)"))))
     (t/is (= "43" (:content (run-in s {} "(+ kept 1)"))))))
 
+(t/deftest test-the-context-resolves-the-explicit-class-subset
+  (let [{:keys [ctx]} (kept-context)]
+    (t/is (= {:value :caught}
+             (script/eval-source! ctx
+                                  "(try (throw (ex-info \"boom\" {})) (catch Throwable e :caught))"
+                                  (atom 'user))))
+    (t/is (= {:value 1}
+             (script/eval-source! ctx
+                                  "(with-open [r (clojure.java.io/reader (java.io.StringReader. \"ab\"))] (count (line-seq r)))"
+                                  (atom 'user))))))
+
 (t/deftest test-seed-replaces-the-tools-namespace
   (let [s (kept-context)]
     (t/is (= "true"

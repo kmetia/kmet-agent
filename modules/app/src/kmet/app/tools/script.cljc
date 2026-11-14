@@ -770,14 +770,13 @@
               :when (copyable-namespace? s)]
           [s (copy-ns-publics s)])))
 
-;; referenced only from the :default reader branch, invisible to the bb lint view
-#_{:clj-kondo/ignore [:unused-private-var]}
-(def ^:private jvm-class-names
-  "The JVM sandbox's class surface: the java.lang core a script expects, the
-   java.io/java.util types the tool's contract names, and nothing else. bb
-   gets the whole host table (babashka.classes/all-classes); the JVM has no
-   such enumeration, and SCI's own JVM defaults resolve only java.lang.Exception
-   — so this list is explicit. Extend it when a script needs a new JDK type."
+(def ^:private sandbox-class-names
+  "The explicit class surface the JVM and Jolt sandboxes share: the
+   java.lang core a script expects, the java.io/java.util types the
+   tool's contract names, and nothing else. bb gets the whole host
+   table (babashka.classes/all-classes); SCI's own defaults resolve
+   only java.lang.Exception, so JVM and Jolt get this list. Extend it
+   when a script needs a new JDK type."
   '[java.lang.System java.lang.Thread java.lang.Runtime java.lang.Math
     java.lang.Object java.lang.String java.lang.StringBuilder
     java.lang.Character java.lang.Boolean java.lang.Byte java.lang.Short
@@ -797,34 +796,33 @@
 (defn- host-class-map
   "symbol → Class under both its full and simple name, so
    System/Thread/java.io.*/Throwable/… resolve as in a babashka script. bb
-   answers its whole class table, the JVM an explicit java.lang/java.io/
-   java.util subset (SCI's JVM defaults alone resolve only Exception), and
-   Jolt nothing — its SCI exposes no class table."
+   answers its whole class table; the JVM and Jolt get the explicit
+   java.lang/java.io/java.util subset."
   []
-  #?(:bb
-     (try
-       (let [all-classes (deref (requiring-resolve 'babashka.classes/all-classes))]
-         (reduce
-          (fn [m c]
-            (try
-              (let [full (symbol (.getName c))
-                    simple (symbol (.getSimpleName c))]
-                (cond-> (assoc m full c)
-                  (not= full simple) (assoc simple c)))
-              (catch Throwable _ m)))
-          {}
-          (all-classes)))
-       (catch Throwable _ {}))
-     :jolt {}
-     :default
-     (reduce (fn [m name-sym]
-               (try
-                 (let [c (Class/forName (str name-sym))
-                       simple (symbol (.getSimpleName c))]
-                   (assoc m name-sym c simple c))
-                 (catch Throwable _ m)))
-             {}
-             jvm-class-names)))
+  (letfn [(add-class [m c]
+            (let [full (symbol (.getName c))
+                  simple (symbol (.getSimpleName c))]
+              (cond-> (assoc m full c)
+                (not= full simple) (assoc simple c))))
+          (class-map [names]
+            (reduce (fn [m name-sym]
+                      (try
+                        (if-let [c (resolve name-sym)]
+                          (add-class m c)
+                          m)
+                        (catch Throwable _ m)))
+                    {}
+                    names))]
+    (if (or (host/jvm?) (host/jolt?))
+      (class-map sandbox-class-names)
+      (try
+        (let [all-classes (deref (requiring-resolve 'babashka.classes/all-classes))]
+          (reduce (fn [m c]
+                    (try (add-class m c)
+                         (catch Throwable _ m)))
+                  {}
+                  (all-classes)))
+        (catch Throwable _ {})))))
 
 (def ^:private extra-core-vars
   "Host clojure.core vars copied into the sandbox core as sci vars (macros keep
@@ -939,14 +937,13 @@
     :else "Babashka"))
 
 (defn class-surface
-  "How much of the host's Java class table the sandbox resolves: :full (the
-   babashka host's whole table), :subset (the JVM's explicit java.lang/io/util
-   list) or :none (Jolt, whose SCI exposes no classes)."
+  "How much of the host's Java class table the sandbox resolves: :full
+   (the babashka host's whole table) or :subset (the explicit java.lang/io/util
+   list the JVM and Jolt get)."
   []
-  (cond
-    (host/jolt?) :none
-    (host/jvm?) :subset
-    :else :full))
+  (if (or (host/jvm?) (host/jolt?))
+    :subset
+    :full))
 
 (defn- surface-namespaces
   "Group the copied namespace names for `(help :surface)`: the clojure and

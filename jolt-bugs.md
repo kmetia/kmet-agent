@@ -22,6 +22,23 @@ SSE suites pass on the installed build. The #46 entry is dropped: PR #47
 
 ## Live issues
 
+### [jolt#1663](https://github.com/jolt-lang/jolt/issues/1663) — no enumeration of Jolt's modeled classes (`babashka.classes/all-classes` equivalent)
+
+Filed 2026-11-14 against the installed `v0.8.27-52-g7ed36439`. Jolt can
+intern a Class by name (`jolt.host/jolt-class-for`, `Class/forName`) but
+exposes no way to enumerate the modeled surface. On this build the class
+graph has 992 rows; the statics/ctor/value-tag registries add 38 canonical
+names (26 statics-only, 2 ctor-only, 10 value-tag-only), for 1,030 modeled
+names, while `clojure.core`'s namespace map exposes only 642 direct class
+objects. A graph walk alone misses `java.util.Collections`/`Arrays`/`Objects`/
+`Files` (statics-only), `java.net.URL` (ctor-only) and `java.nio.file.WatchKey`
+(value-tag-only). kmet's script sandbox falls back to the explicit
+java.lang/java.io/java.util subset, not Jolt's modeled surface. The issue asks
+for `jolt.host/class-names` and `all-classes` (canonical names / Class objects;
+dynamic, sorted, including non-graph classes). Repro and ticket text:
+`scripts/repros/jolt_all_classes.clj` and
+`scripts/repros/jolt_all_classes.md`.
+
 ### [jolt#1654](https://github.com/jolt-lang/jolt/issues/1654) — lock + blocking file I/O from many futures is ~7–11× slower than the JVM
 
 Filed 2026-11-13 against the installed `v0.8.27-52-g7ed36439`. Four hundred
