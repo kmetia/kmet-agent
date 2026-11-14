@@ -1,0 +1,1 @@
+{:name "local", :plugin kmet.extensions.local.core/plugin, :loader [:sci :jolt]}
