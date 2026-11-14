@@ -375,6 +375,7 @@
                       ;; Pi: allLines = textContent.split("\n") — keeps trailing empty
                       all-lines (vec (str/split text-content #"\n" -1))
                       total-file-lines (count all-lines)
+                      page-start (or offset start)
                       input-error (or (range-error {:offset offset
                                                     :start start
                                                     :limit limit
@@ -400,14 +401,14 @@
                       tail-total (if (str/ends-with? text-content "\n")
                                    (max 1 (dec total-file-lines))
                                    total-file-lines)
-                      effective-limit (when-not input-error
-                                        (if (some? end)
-                                          (inc (- end (or offset start)))
-                                          limit))
+                      page-limit (when-not input-error
+                                   (if (some? end)
+                                     (inc (- end page-start))
+                                     limit))
                       start-line (when-not input-error
                                    (cond
                                      (some? tail) (max 0 (- tail-total (long tail)))
-                                     (some? (or offset start)) (dec (or offset start))
+                                     (some? page-start) (dec page-start)
                                      :else 0))
                       start-line-display (when (some? start-line) (inc start-line))]
                   (cond
@@ -415,19 +416,19 @@
                     {:content input-error :is-error true}
 
                     (= :lines as)
-                    (structured-lines-result raw-path text-content (or offset start) effective-limit tail)
+                    (structured-lines-result raw-path text-content page-start page-limit tail)
 
                     (>= start-line total-file-lines)
-                    {:content (str "Offset " (or offset start) " is beyond end of file (" total-file-lines " lines total)")
+                    {:content (str "Offset " page-start " is beyond end of file (" total-file-lines " lines total)")
                      :is-error true}
 
                     :else
-                    (let [selected-content (if (some? effective-limit)
-                                             (let [range-end (min (+ start-line effective-limit) total-file-lines)]
+                    (let [selected-content (if (some? page-limit)
+                                             (let [range-end (min (+ start-line page-limit) total-file-lines)]
                                                (str/join "\n" (subvec all-lines start-line range-end)))
                                              (str/join "\n" (subvec all-lines start-line)))
-                          user-limited-lines (when (some? effective-limit)
-                                               (let [range-end (min (+ start-line effective-limit) total-file-lines)]
+                          user-limited-lines (when (some? page-limit)
+                                               (let [range-end (min (+ start-line page-limit) total-file-lines)]
                                                  (- range-end start-line)))
                           truncation (bash-out/truncate-head selected-content)
                           output-text (cond
