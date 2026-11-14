@@ -85,10 +85,26 @@
     (t/is (str/includes? (pr-str (:arglists (get help "core/read"))) "start"))
     (t/is (str/includes? (pr-str (:arglists (get help "core/read"))) "end"))
     (t/is (str/includes? (pr-str (:arglists (get help "core/bash"))) "timeout"))
+    (t/is (str/includes? (pr-str (:arglists (get help "core/glob"))) "gitignore?"))
+    (t/is (str/includes? (pr-str (:arglists (get help "core/grep"))) "max-file-bytes"))
     (t/is (str/includes? (pr-str (:arglists (get help "core/session-recall"))) "scope"))
     (t/is (str/includes? (pr-str (:arglists (get help "clj/edit-form"))) "file_path"))
     (t/is (str/includes? (pr-str (:arglists (get help "clj/replace-sexp"))) "match_form"))
     (t/is (str/includes? (pr-str (:arglists (get help "clj/paren-repair"))) "format"))))
+
+(t/deftest test-core-grep-and-glob-use-the-file-search-implementation
+  (let [s (kept-context)
+        dir (str (fs/absolutize (test-tmp/temp-dir! "test-core-search-")))]
+    (fs/create-dirs (fs/path dir "src"))
+    (spit (str (fs/path dir "src/a.clj")) "(def needle 1)\n")
+    (spit (str (fs/path dir "src/b.txt")) "needle\n")
+    (let [globbed (:content (run-in s {} (str "(core/emit (core/glob \"**/*.clj\" {:path "
+                                              (pr-str dir) "}))")))
+          grepped (:content (run-in s {} (str "(core/emit (core/grep \"needle\" {:path "
+                                              (pr-str dir) " :glob \"**/*.clj\"}))")))]
+      (t/is (str/includes? globbed "src/a.clj"))
+      (t/is (str/includes? grepped "src/a.clj"))
+      (t/is (not (str/includes? grepped "src/b.txt"))))))
 
 (defn- write-cancel-fixture!
   "Write a parent/child fixture in DIR whose child writes MARKER after a few

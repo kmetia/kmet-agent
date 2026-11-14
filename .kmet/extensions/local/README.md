@@ -1,7 +1,8 @@
 # local extension (project-local)
 
-Exposes the project gate workflow as `local/gate` and file discovery/search
-as `local/glob` and `local/grep`.
+Exposes the project gate workflow as `local/gate`. File discovery and content
+search are built into the eval sandbox as the `glob` and `grep` verbs, so this
+extension no longer contributes them.
 
 ## Compose
 
@@ -25,15 +26,16 @@ adding the row.
 (local/gate {:host :jolt :tasks [:test]})         ; jolt test tasks
 (local/gate {:host :jvm :tasks [:test]})          ; bb test*-jvm
 
-(local/glob "**/*.clj" {:path "modules/app/src" :max 10})
-(local/glob "**/*.clj" {:path "/data/data/com.termux/files/home/kmet/modules"})
-(local/grep "register-eval-source!" {:path "modules/app/src"})
-(local/grep "defn" {:path "core.clj" :ignore-case? true})
+(glob "**/*.clj" {:path "modules/app/src" :max 10})
+(glob "**/*.clj" {:path "/data/data/com.termux/files/home/kmet/modules"})
+(grep "register-eval-source!" {:path "modules/app/src"})
+(grep "defn" {:path "core.clj" :ignore-case? true})
 ```
 
 Patterns are relative to `:path`, which may be absolute or `~`. Both verbs
 show paths relative to the call's cwd, `~/...` under home, and absolute paths
-outside it. `grep` skips files above `:max-file-bytes`.
+outside it. `grep` skips binary and oversized files; inside a git work tree it
+uses git's file list, so `.gitignore` is honored.
 
 Formatting is checked, fixed, and re-checked. The returned map carries
 `:report`, `:findings` by category, `:formatted`, and per-gate results.

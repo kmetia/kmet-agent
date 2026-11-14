@@ -26,6 +26,7 @@
             [kmet.app.tools.bash-output :as bash-out]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.edit :as edit-tool]
+            [kmet.app.tools.file-search :as file-search]
             [kmet.app.tools.invoke :as invoke]
             [kmet.app.tools.read :as read-tool]
             [kmet.app.tools.util :as tool-util]
@@ -116,7 +117,7 @@
   (str "aliases " (str/join ", " (map first standard-aliases))
        "; cwd-resolving slurp, "
        "spit and file-seq; core verbs, also referred unqualified: read, write, "
-       "edit, bash, cwd, env, now, sleep, emit, emit-image, spawn and "
+       "edit, bash, glob, grep, cwd, env, now, sleep, emit, emit-image, spawn and "
        "session-recall "
        "(core/<verb> stays available); the core, clj and eval "
        "namespaces; the loaded clojure.* and babashka.* namespaces, the "
@@ -127,7 +128,7 @@
   "The core verbs the sandbox also refers unqualified. They are the same
    functions the `core` namespace installs, so `(emit v)` and `(core/emit v)`
    are one call; `read` deliberately shadows `clojure.core/read`."
-  '[read write edit bash cwd env now sleep emit emit-image spawn session-recall])
+  '[read write edit bash glob grep cwd env now sleep emit emit-image spawn session-recall])
 
 (def alias-prelude
   "The aliases and core refers every script gets without its own require — the
@@ -1112,6 +1113,18 @@
   ([command] (bash-verb command nil))
   ([command opts] (bash-text command opts (:cancelled *call-state*))))
 
+(defn- glob-verb
+  "List files matching PATTERN; OPTS: :path, :max, :exclude, :gitignore?. PATTERN is relative to :path (default: the call's cwd). Returns {:paths :total :truncated?} with paths relative to the call's cwd."
+  {:arglists '([pattern] [pattern {:keys [path max exclude gitignore?]}])}
+  ([pattern] (glob-verb pattern nil))
+  ([pattern opts] (file-search/glob (call-cwd) pattern opts)))
+
+(defn- grep-verb
+  "Search file contents for PATTERN (regex); OPTS: :path, :glob, :ignore-case?, :max, :max-file-bytes, :exclude, :gitignore?. Returns {:matches [{:path :line :text}] :skipped :skipped-count :truncated? :files}; paths are relative to the call's cwd. Binary and oversized files are skipped."
+  {:arglists '([pattern] [pattern {:keys [path glob ignore-case? max max-file-bytes exclude gitignore?]}])}
+  ([pattern] (grep-verb pattern nil))
+  ([pattern opts] (file-search/grep (call-cwd) pattern opts)))
+
 (defn- cwd-verb
   "The call's working directory."
   []
@@ -1174,6 +1187,8 @@
    'write #'write-verb
    'edit #'edit-verb
    'bash #'bash-verb
+   'glob #'glob-verb
+   'grep #'grep-verb
    'cwd #'cwd-verb
    'env #'env-verb
    'now #'now-verb

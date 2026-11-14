@@ -143,6 +143,7 @@
 (t/deftest test-the-eval-prompt-covers-work-and-discovery
   (t/is (str/includes? (:description eval-tool/definition) "session cwd"))
   (t/is (str/includes? (:description eval-tool/definition) "(emit v)"))
+  (t/is (str/includes? (:description eval-tool/definition) "(grep"))
   (t/is (str/includes? (:description eval-tool/definition) ":max-lines N"))
   (t/is (str/includes? (:description eval-tool/definition)
                        "(help :library) saved/live"))
@@ -153,6 +154,7 @@
     (t/is (not (str/includes? guidelines "spawn")))
     (t/is (not (str/includes? guidelines "pmap")))
     (t/is (str/includes? guidelines "Bind intermediate output"))
+    (t/is (str/includes? guidelines "rg/find"))
     (t/is (str/includes? (:description eval-tool/definition) "(help)"))
     (t/is (str/includes? guidelines "println is discarded"))
     (t/is (not (str/includes? guidelines "serialize")))))

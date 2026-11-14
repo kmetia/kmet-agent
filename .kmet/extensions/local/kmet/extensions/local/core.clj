@@ -1,24 +1,20 @@
 (ns kmet.extensions.local.core
-  "Project-local extension: expose the gate and file-search verbs."
+  "Project-local extension: expose the gate workflow."
   (:require [kmet.extension :as ext]
             [kmet.srce.core :as srce]
-            [kmet.extensions.local.files :as files]
             [kmet.extensions.local.gate :as gate]))
 
 (def ^:private source-description
-  "Project gates and file search: local/gate, local/glob, local/grep.")
+  "Project gates: local/gate.")
 
 (defn- eval-source
   [ctx]
-  (let [root (str (or (:project-dir ctx) (:cwd ctx) "."))
-        cwd (str (or (:cwd ctx) root))]
+  (let [root (str (or (:project-dir ctx) (:cwd ctx) "."))]
     {:doc source-description
-     :ns {'ext.local {'gate (gate/gate-verb root)
-                      'glob (files/glob-verb cwd)
-                      'grep (files/grep-verb cwd)}}}))
+     :ns {'ext.local {'gate (gate/gate-verb root)}}}))
 
 (defn init
-  "Register the local gate and file-search eval source."
+  "Register the local gate eval source."
   [api]
   (ext/register-eval-source! api :local eval-source
                              {:description source-description})

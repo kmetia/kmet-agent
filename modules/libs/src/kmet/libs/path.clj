@@ -52,3 +52,15 @@
                                fs/file-separator "/")]
           (if (empty? rel) "~" (str "~/" rel)))
         path))))
+
+(defn display-path
+  "A path for a tool result line: relative to CWD when inside it, `~/...` under
+   home, else absolute. Separators are `/` on every platform."
+  [cwd file]
+  (let [file (fs/normalize (fs/absolutize file))
+        cwd (fs/normalize (fs/absolutize cwd))]
+    (if (fs/starts-with? file cwd)
+      (let [rel (str/replace (str (fs/relativize cwd file))
+                             fs/file-separator "/")]
+        (if (str/blank? rel) "." rel))
+      (home-relative (str file)))))
