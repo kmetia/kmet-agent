@@ -614,8 +614,8 @@ probe and no real use, and is gone;
   emitted for them; the only things the model sees are the emitted text (or a
   silent success's final value), the images and the result map.
 
-**`eval`** (`kmet.app.tools.eval`, the `:tool/eval` row) is the persistent
-counterpart. It shares `kmet.app.tools.script` — capability namespaces, capture,
+**`eval`** (`kmet.app.eval.tool`, mounted by the `kmet.app.eval.plugin` row)
+is the persistent counterpart. It shares `kmet.app.tools.script` — capability namespaces, capture,
 deadline/abort and result assembly — but not the tools bridge, and the state
 belongs to the session, not the call: `kmet.app.eval/value` owns one SCI
 context per session (built lazily on the first call), its interrupt holder,

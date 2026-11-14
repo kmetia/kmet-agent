@@ -26,7 +26,7 @@
    without resending it by `(save ...)`; every call's full body is kept
    in a bounded ring read by `(result ...)`.
 
-   `kmet.app.tools.eval` owns the model-facing tool; `kmet.app.eval.files`
+   `kmet.app.eval.tool` owns the model-facing tool; `kmet.app.eval.files`
    owns the reviewable files and `kmet.app.eval.definitions` the pure parse
    and address rules."
   (:require [babashka.fs :as fs]

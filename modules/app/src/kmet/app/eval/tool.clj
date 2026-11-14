@@ -1,4 +1,4 @@
-(ns kmet.app.tools.eval
+(ns kmet.app.eval.tool
   "The `eval` tool: model-written Clojure in the agent session's persistent
    SCI environment (`kmet.app.eval`). Unlike `codemode`, the environment is
    kept across calls, so a definition from one call is visible to the next.
@@ -13,13 +13,10 @@
 
    The shared `read`, `write`, `edit` and `bash` verbs (also
    available as `core/...`) are the file and shell surface. The sandbox has no
-   `tools` namespace: an eval call cannot invoke any tool. The same
-   `:tool/eval` row mounts the `/eval` slash command, so the tool and the
-   command are registered and disposed together."
+   `tools` namespace: an eval call cannot invoke any tool. The
+   `kmet.app.eval.plugin` row owns this tool and the `/eval` slash command, so
+   the two are registered and disposed together."
   (:require [clojure.string :as str]
-            [kmet.app.commands :as commands]
-            [kmet.app.commands.eval :as eval-command]
-            [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
             [kmet.app.tools.session-recall :as session-recall]
             [kmet.app.tools.tool :as tool]
@@ -94,11 +91,3 @@
    :status true
    :serial-group :eval
    :title title))
-
-(srce/defplugin plugin
-  {:name :tool/eval
-   :inject [:tools :commands]
-   :apply (fn [ctx config]
-            (registry/mount-tool! ctx definition config)
-            (commands/mount-command! ctx eval-command/command :tool/eval)
-            nil)})

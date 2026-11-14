@@ -1,7 +1,7 @@
 (ns kmet.app.eval.command-verbs
   "The `/eval` command vocabulary: the words the command accepts, their
    arguments and one-line summaries. Data only: handlers and output live in
-   `kmet.app.commands.eval`, while source validation reads the reserved names
+   `kmet.app.eval.command`, while source validation reads the reserved names
    here so dispatch, help, completion and the reserved-name guard cannot
    drift apart."
   (:require [clojure.string :as str]))

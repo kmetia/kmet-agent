@@ -54,7 +54,7 @@
           {:id :tool/bash :plugin kmet.app.tools.bash/plugin}
           {:id :tool/codemode :plugin kmet.app.tools.codemode/plugin
            :default-enabled? false}
-          {:id :tool/eval :plugin kmet.app.tools.eval/plugin
+          {:id :tool/eval :plugin kmet.app.eval.plugin/plugin
            :default-enabled? false}
           {:id :tool/tool_search :plugin kmet.app.tools.search/plugin}
           {:id :tool/session_recall :plugin kmet.app.tools.session-recall/plugin}

@@ -10,7 +10,7 @@
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.session.core :as session]
             [kmet.app.test-eval-support :as support]
-            [kmet.app.tools.eval :as eval-tool]
+            [kmet.app.eval.tool :as eval-tool]
             [kmet.app.tools.registry :as tools]
             [kmet.app.tools.script :as script]
             [kmet.libs.concurrent :as concurrent]

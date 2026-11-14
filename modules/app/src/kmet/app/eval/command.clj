@@ -1,4 +1,4 @@
-(ns kmet.app.commands.eval
+(ns kmet.app.eval.command
   "The `/eval` slash command: the human-facing view of the eval library and
    the session's live-only definitions.
 
@@ -16,8 +16,8 @@
    `/eval <name>` is a `describe` shorthand when the name is defined and is
    not a known verb. An eval source may contribute a verb through the
    service's `:source-commands` map; built-in names are reserved. The
-   `:tool/eval` plugin registers this command and the eval tool together, so
-   the row is the one switch for both.
+   `kmet.app.eval.plugin` row registers this command and the eval tool
+   together, so the row is the one switch for both.
 
    The verb list, its argument strings and its summaries live in
    `kmet.app.eval.command-verbs`; this namespace attaches handlers and renders

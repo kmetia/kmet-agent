@@ -6,14 +6,14 @@
             [clojure.test :as t]
             [kmet.app.commands :as commands]
             [kmet.app.commands.builtins :as builtins]
-            [kmet.app.commands.eval :as eval-command]
             [kmet.app.eval :as eval-service]
+            [kmet.app.eval.command :as eval-command]
             [kmet.app.eval.command-verbs :as command-verbs]
             [kmet.app.eval.files :as eval-files]
+            [kmet.app.eval.plugin :as eval-plugin]
             [kmet.app.registry :as registry]
             [kmet.app.session.core :as session]
             [kmet.app.test-eval-support :as support]
-            [kmet.app.tools.eval :as eval-tool]
             [kmet.app.tools.registry :as tools]
             [kmet.srce.core :as srce]
             [kmet.test-tmp :as test-tmp]
@@ -570,7 +570,7 @@
         tool-handle (tu/tools-service! root)
         command-handle (registry/atom-registry)
         _ (srce/provide! root :commands command-handle)
-        fiber (srce/plugin! root eval-tool/plugin nil)
+        fiber (srce/plugin! root eval-plugin/plugin nil)
         command-entry #(registry/entry command-handle :kmet/command "eval")
         tool-entry #(tools/get-tool tool-handle "eval")]
     (srce/settle! root)
