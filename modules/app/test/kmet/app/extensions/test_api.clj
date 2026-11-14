@@ -128,6 +128,11 @@
         (ext/ui-custom api factory opts)
         (t/is (some (fn [[k f o]] (and (= k :custom) (identical? f factory) (= o opts)))
                     (:ui-calls @state)))))
+    (testing "ui-notify passes its opts map through; omitted opts are not sent"
+      (ext/ui-notify api "plain" :info)
+      (ext/ui-notify api "longer" :info {:duration-ms 5000})
+      (t/is (= [[:notify "plain" :info] [:notify "longer" :info {:duration-ms 5000}]]
+               (filterv #(= :notify (first %)) (:ui-calls @state)))))
     (testing "models register/unregister are captured (pi: ctx.registerProvider)"
       (ext/models-register-provider! api :ext-prov {:models [{:id "m"}]})
       (ext/models-unregister-provider! api :ext-prov)

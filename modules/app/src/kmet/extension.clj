@@ -327,7 +327,16 @@
 ;; components with the shared kmet.tui.* layer instead — the api carries no
 ;; host-built dialogs or theme lookups (kmet.libs.theme is shared).
 
-(defn ui-notify [api message & [type]] ((:notify (ui api)) message type))
+(defn ui-notify
+  "Flash MESSAGE. TYPE is :info | :warning | :error. OPTS may carry
+   :duration-ms to override the TUI flash duration (default:
+   DEFAULT-DURATION-MS in kmet.tui.components.alt-screen-flash); pass nil
+   TYPE to set only the duration. Front ends without duration support (RPC)
+   ignore OPTS."
+  ([api message] (ui-notify api message nil))
+  ([api message type] ((:notify (ui api)) message type))
+  ([api message type {:keys [duration-ms]}]
+   ((:notify (ui api)) message type {:duration-ms duration-ms})))
 (defn ui-custom [api factory & [opts]] ((:custom (ui api)) factory opts))
 
 (defn ui-chat-info
