@@ -102,3 +102,48 @@
             (is (= "on disk\n" (:content result)))
             (is (not (:is-error result)))))
         (finally (fs/delete-tree dir))))))
+
+(deftest structured-lines-are-a-verb-only-option
+  (testing "the eval verb's :as :lines returns numbered data from the same
+            path, range and lock handling as a text read"
+    (let [dir (test-tmp/temp-dir! "test-read-lines-")
+          f (str (fs/path dir "lines.txt"))]
+      (fs/create-dirs dir)
+      (spit f "one\ntwo\nthree\nfour\nfive")
+      (try
+        (let [result (read-call {:path f :offset 2 :limit 2 :as :lines})]
+          (is (not (:is-error result)))
+          (is (nil? (:content result)))
+          (is (= {:path f :start 2 :end 3 :total-lines 5
+                  :lines [{:n 2 :text "two"} {:n 3 :text "three"}]
+                  :truncated? true}
+                 (select-keys result [:path :start :end :total-lines :lines :truncated?]))))
+        (let [result (read-call {:path f :tail 2 :as :lines})]
+          (is (= [4 5] (mapv :n (:lines result))))
+          (is (= ["four" "five"] (mapv :text (:lines result))))
+          (is (false? (:truncated? result))))
+        (let [result (read-call {:path f :offset 5 :as :lines})]
+          (is (= [{:n 5 :text "five"}] (:lines result)))
+          (is (false? (:truncated? result))))
+        (let [result (read-call {:path f :as :json})]
+          (is (:is-error result))
+          (is (str/includes? (:content result) ":as :lines")))
+        (finally (fs/delete-tree dir))))))
+
+(deftest structured-lines-default-to-a-bounded-page
+  (testing ":as :lines without :limit caps at 400 rows and reports the rest"
+    (let [dir (test-tmp/temp-dir! "test-read-lines-page-")
+          f (str (fs/path dir "many.txt"))]
+      (fs/create-dirs dir)
+      (spit f (str/join "\n" (map #(str "line-" %) (range 1 501))))
+      (try
+        (let [result (read-call {:path f :as :lines})]
+          (is (= 400 (count (:lines result))))
+          (is (= 1 (:start result)))
+          (is (= 400 (:end result)))
+          (is (= 500 (:total-lines result)))
+          (is (:truncated? result)))
+        (finally (fs/delete-tree dir))))))
+
+(deftest the-read-tool-does-not-declare-the-lines-option
+  (is (not (contains? (:properties (:parameters read/definition)) "as"))))

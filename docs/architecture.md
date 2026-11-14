@@ -702,9 +702,13 @@ truncation and spill path; failures also return the map). The namespaced
 (`:out`, `:err`, `:exit`). `help` and `describe` are installed in
 `clojure.core`, so they resolve unqualified and a model definition can shadow
 them. The alias prelude refers the core verbs unqualified, so `(read ...)` and
-`(core/read ...)` are one call. The same prelude refers the eval verbs
-(`library`, `sources`, `index`, `save`, `forget`, `patch`, `edit-form`,
-`move`, `result`), so the sandbox has one unqualified call surface. `clj`
+`(core/read ...)` are one call. `read` also accepts `:as :lines`, returning
+`{:path :start :end :total-lines :lines [{:n :text}] :truncated?}`; `:limit`
+defaults to 400 in that mode and `:tail` is supported. The option is
+verb-only — the `read` tool keeps pi's raw-text contract. The same prelude
+refers the eval verbs (`library`, `sources`, `index`, `save`, `forget`,
+`patch`, `edit-form`, `move`, `result`), so the sandbox has one unqualified
+call surface. `clj`
 verbs stay namespaced (`clj/edit-form`), and a mounted source whose values live
 under `ext.<id>` is called as `<id>/verb` (`mcp/search`) while its values keep
 their internal `ext.<id>` home. The

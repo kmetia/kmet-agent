@@ -279,6 +279,8 @@
     (t/is (not (str/includes? text "tools/call")))
     (t/is (not (str/includes? text "tools/list")))
     (t/is (str/includes? text "println is discarded"))
+    (t/is (str/includes? text ":as :lines"))
+    (t/is (str/includes? text "sed"))
     (t/is (<= (count text) 1300) "the per-request prompt stays compact")
     (t/is (not (str/includes? text "codemode"))
           "eval's prompt must stand alone when codemode is not selected")
@@ -292,8 +294,11 @@
     (t/is (= ":ok" (:content (support/eval! env "(emit :ok)"))))
     (t/is (= "bare" (:content (support/eval! env "(read \"note.txt\")"))))
     (spit (str (fs/path cwd "lines.txt")) "one\ntwo\nthree\n")
-    (t/is (str/includes? (:content (support/eval! env "(read \"lines.txt\" {:offset 2 :limit 1})"))
-                         "two"))
+    (t/is (str/includes? (:content (support/eval! env "(read \"lines.txt\" {:offset 2 :limit 1})")) "two"))
+    (t/is (= "true"
+             (:content (support/eval! env
+                                      "(let [r (read \"lines.txt\" {:offset 2 :limit 2 :as :lines})] (and (= 2 (:start r)) (= 3 (:end r)) (false? (:truncated? r)) (= [{:n 2 :text \"two\"} {:n 3 :text \"three\"}] (:lines r))))")))
+          "the read verb folds read-lines in as :as :lines")
     (support/eval! env "(write \"out.txt\" \"alpha\")")
     (support/eval! env "(edit \"out.txt\" \"alpha\" \"beta\")")
     (t/is (= "beta" (slurp (str (fs/path cwd "out.txt")))))

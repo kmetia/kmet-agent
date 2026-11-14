@@ -272,14 +272,51 @@
                          (+ start limit -1))]
                (str ":" start (when end (str "-" end)))))))))
 
+(def ^:private default-lines-read
+  "The default number of lines a structured read returns."
+  400)
+
+(defn- lines-result
+  "The structured `:as :lines` result for ALL-LINES over [START END), where
+   START is 0-based and END is exclusive."
+  [raw-path all-lines start end]
+  (let [total (count all-lines)]
+    {:path (str raw-path)
+     :start (inc start)
+     :end end
+     :total-lines total
+     :lines (mapv (fn [i] {:n (inc i) :text (nth all-lines i)})
+                  (range start end))
+     :truncated? (< end total)}))
+
+(defn- structured-lines-result
+  "The `:as :lines` result for TEXT-CONTENT. OFFSET is 1-based, TAIL selects
+   the last N lines, and LIMIT is the page size (default 400). Returns the
+   read error map when OFFSET is past the last line."
+  [raw-path text-content offset limit tail]
+  (let [all-lines (bash-out/split-lines-for-counting text-content)
+        total (count all-lines)
+        start (cond
+                (some? tail) (max 0 (- total tail))
+                (some? offset) (dec offset)
+                :else 0)
+        end (min total (+ start (or tail limit default-lines-read)))]
+    (if (and (some? offset) (>= start total))
+      {:content (str "Offset " offset " is beyond end of file (" total " lines total)")
+       :is-error true}
+      (lines-result raw-path all-lines start end))))
+
 (defn execute
   "Read file contents with optional offset/limit (1-indexed, pi: read.ts),
    tail (the last N lines, not with offset/limit), or footer suppression.
    For image files, returns the image data in :images and a text description
    in :content. Truncated text reads return :truncation. The filesystem read
    takes the file's mutation lock, so it cannot observe a concurrent write's
-   truncated half."
-  [{:keys [path file_path offset limit tail footer]} _on-update signal _ctx]
+   truncated half.
+
+   The eval verb's `:as :lines` returns structured numbered lines instead of
+   text; the model-facing read tool does not declare that option."
+  [{:keys [path file_path offset limit tail footer as]} _on-update signal _ctx]
   (let [raw-path (or path file_path)]
     (try
       (if (or (nil? raw-path) (and (string? raw-path) (str/blank? raw-path)))
@@ -314,6 +351,8 @@
                       all-lines (vec (str/split text-content #"\n" -1))
                       total-file-lines (count all-lines)
                       input-error (cond
+                                    (and (some? as) (not= :lines as))
+                                    "Use :as :lines or omit :as."
                                     (and (some? offset) (some? tail))
                                     "Use :offset or :tail, not both."
                                     (and (some? tail) (some? limit))
@@ -340,6 +379,9 @@
                   (cond
                     input-error
                     {:content input-error :is-error true}
+
+                    (= :lines as)
+                    (structured-lines-result raw-path text-content offset limit tail)
 
                     (>= start-line total-file-lines)
                     {:content (str "Offset " offset " is beyond end of file (" total-file-lines " lines total)")

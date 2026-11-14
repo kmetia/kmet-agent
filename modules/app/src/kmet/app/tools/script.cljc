@@ -968,11 +968,13 @@
 
 (defn read-text
   "Read PATH through the read tool's implementation; OPTS may carry :offset,
-   :limit, :tail (not with offset/limit) and :footer. Throws on a read error;
-   use emit-image for images."
+   :limit, :tail (not with offset/limit), :footer and :as. :as :lines returns
+   the numbered map {:path :start :end :total-lines :lines :truncated?}
+   instead of the content string. Throws on a read error; use emit-image for
+   images."
   [path opts signal]
-  (let [{:keys [content is-error images]}
-        (read-tool/execute (merge {:path (str path)} opts) nil signal nil)]
+  (let [result (read-tool/execute (merge {:path (str path)} opts) nil signal nil)
+        {:keys [content is-error images]} result]
     (cond
       (seq images)
       (throw (ex-info (str "read reads text; use (emit-image "
@@ -980,6 +982,7 @@
                       {:type :script/read-image :path (str path)}))
       is-error
       (throw (ex-info (str content) {:type :script/read-error :path (str path)}))
+      (= :lines (:as opts)) result
       :else content)))
 
 (defn write-result
@@ -1075,8 +1078,8 @@
             content))))))
 
 (defn- read-verb
-  "Read PATH as text; OPTS may carry :offset, :limit, :tail (last N lines, not with :offset or :limit) and :footer. A :footer false drops the continuation hint when a limit stops before EOF."
-  {:arglists '([path] [path {:keys [offset limit tail footer]}])}
+  "Read PATH as text; OPTS may carry :offset, :limit, :tail (last N lines, not with :offset or :limit), :footer and :as. :as :lines returns numbered {:path :start :end :total-lines :lines [{:n :text}] :truncated? (true when more lines follow)} (default 400 lines; :limit overrides). A :footer false drops the continuation hint when a limit stops before EOF."
+  {:arglists '([path] [path {:keys [offset limit tail footer as]}])}
   ([path] (read-verb path nil))
   ([path opts] (read-text path opts (:cancelled *call-state*))))
 

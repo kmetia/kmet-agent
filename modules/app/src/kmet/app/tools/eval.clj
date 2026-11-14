@@ -70,13 +70,14 @@
    :name "eval"
    :label "Eval"
    :description (str "Persistent Clojure/SCI sandbox. Runs in the session cwd; relative paths and shell commands resolve there (`(cwd)`; bash's :cwd overrides).\n"
-                     "Verbs: (read \"p\" {:offset N :limit N}), (write \"p\" text), (edit \"p\" old new), (bash \"cmd\" {:timeout N :max-lines N :as :map}); (spawn f)/pmap for concurrency. Nonzero shell exits are normal.\n"
+                     "Verbs: (read \"p\" {:offset N :limit N :as :lines}), (write \"p\" text), (edit \"p\" old new), (bash \"cmd\" {:timeout N :max-lines N :as :map}); (spawn f)/pmap for concurrency. Nonzero shell exits are normal.\n"
                      "Forms run in order; definitions/results persist. (emit v) for output; multi-form calls report one line per form; println is discarded. Result limit: 16 KiB (max 50 KiB); timeout per call (omit/0 = none). Discover: (help) index; (help :core) builtins; (sources) source verbs; (help :library) saved/live; (index \"text\") search saved/live/source; (describe 'name) contract. Source verbs: <id>/verb.\n"
                      "Example: (emit {:out (bash \"cmd\") :src (read \"p\")}).")
    :prompt-snippet "Runs in cwd. Verbs: (read), (write), (edit), (bash); independent eval calls may be issued together; one call for dependent forms; (emit v); (help)."
    :prompt-guidelines
    ["Independent: several eval calls in one message or several verbs in one call; one call for dependent forms. (spawn f)/pmap inside one call."
-    "Bind intermediate output; keep reads bounded (:offset/:limit/:tail); emit only the summary. Multi-form calls report one line per form; println is discarded."
+    "Bind intermediate output; keep reads bounded (:offset/:limit/:tail); emit only the summary; println is discarded."
+    "Use read, not sed/cat/head/tail."
     "Don't assume host classes or libraries; (help :surface) lists this host's."]
    :parameters {:type "object"
                 :properties

@@ -33,7 +33,7 @@
   [^String s]
   (alength (.getBytes s "UTF-8")))
 
-(defn- split-lines-for-counting
+(defn split-lines-for-counting
   "Pi: splitLinesForCounting — '' -> [], else split on \"\\n\" and drop a
    single trailing empty entry when the content ends with \"\\n\"."
   [content]
