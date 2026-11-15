@@ -73,6 +73,61 @@
       (t/is (pos? (:skipped-count r)))
       (t/is (every? #(str/includes? (:reason %) "larger than") (:skipped r))))))
 
+(t/deftest test-glob-metacharacters-in-patterns-and-grep-filters
+  (let [dir (fixture {"root.txt" "needle\n"
+                      "src/a.clj" "needle\n"
+                      "src/b.clj" "needle\n"
+                      "src/c.edn" "needle\n"})]
+    (doseq [[pattern expected] [["src/?.clj" ["src/a.clj" "src/b.clj"]]
+                                ["src/[ab].clj" ["src/a.clj" "src/b.clj"]]
+                                ["src/[!a].clj" ["src/b.clj"]]
+                                ["**/*.{clj,edn}" ["src/a.clj" "src/b.clj" "src/c.edn"]]]]
+      (t/testing pattern
+        (t/is (= expected (:paths (search/glob dir pattern nil))))
+        (t/is (= expected
+                 (mapv :path (:matches (search/grep dir "needle" {:glob pattern})))))))
+    (t/is (= ["root.txt" "src/c.edn"]
+             (mapv :path (:matches (search/grep dir "needle" {:exclude "**/*.clj"})))))))
+
+(t/deftest test-native-separators-and-spaces-in-search-paths
+  (let [dir (fixture {"project space/code/src/a.txt" "Needle\r\nneedle\r\n"
+                      "project space/code/src/b.txt" "needle\r\n"
+                      "project space/code/~notes.txt" "needle\r\n"})
+        base (str (fs/path dir "project space" "code"))
+        expected [{:path "project space/code/src/a.txt" :line 1 :text "Needle"}
+                  {:path "project space/code/src/a.txt" :line 2 :text "needle"}]]
+    (doseq [opts [{:path (str (fs/path "project space" "code"))
+                   :glob (str "src" fs/file-separator "?.txt")
+                   :exclude (str "**" fs/file-separator "b.*")}
+                  {:path (str/replace base fs/file-separator "/")
+                   :glob "src/?.txt" :exclude ["**/b.*"]}]]
+      (let [globbed (search/glob dir (:glob opts) (dissoc opts :glob))
+            grepped (search/grep dir "needle" (assoc opts :ignore-case? true))]
+        (t/is (= ["project space/code/src/a.txt"] (:paths globbed)))
+        (t/is (= expected (:matches grepped)))))
+    (let [single (search/grep dir "needle"
+                              {:path (str (fs/path base "src" "a.txt"))
+                               :ignore-case? true})]
+      (t/is (= expected (:matches single))))
+    (t/is (= ["project space/code/~notes.txt"]
+             (:paths (search/glob dir "~notes.txt" {:path base}))))))
+
+(t/deftest test-search-patterns-must-be-relative-on-every-platform
+  (let [dir (fixture {"a.txt" "needle\n"})]
+    (doseq [pattern ["/**/*.txt" "C:/*.txt" "c:\\src\\?.txt"
+                     "\\\\server\\share\\**\\*.txt" "//server/share/**/*.txt"
+                     "\\root\\*.txt" "C:*.txt" "~" "~/*.txt" "~\\*.txt"]
+            [option run] [["PATTERN" #(search/glob dir pattern nil)]
+                          [":glob" #(search/grep dir "needle" {:glob pattern})]
+                          [":exclude" #(search/glob dir "**/*" {:exclude pattern})]
+                          [":exclude" #(search/grep dir "needle" {:exclude [pattern]})]]]
+      (let [error (try (run) nil
+                       (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (t/is (= {:type :kmet.app.tools.file-search/absolute-pattern
+                  :option option :pattern pattern}
+                 error)
+              (str option " " (pr-str pattern)))))))
+
 (t/deftest ^:slow test-gitignore-and-explicit-ignored-directory
   (when (fs/which "git")
     (let [dir (fixture {"src/a.clj" "needle\n"

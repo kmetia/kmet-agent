@@ -43,16 +43,17 @@
                               (fs/expand-home (str (or path ".")))))
 
 (defn- relative-pattern
-  "PATTERN as a string, refusing an absolute pattern. OPTION names it in the
-   error."
+  "PATTERN as a `/`-separated string, refusing rooted, drive-qualified and
+   home-relative forms. Globs are text, not host filesystem paths: Windows
+   path parsers reject their metacharacters. OPTION names the error."
   [pattern option]
   (let [pattern (str pattern)]
-    (when (fs/absolute? (fs/path (fs/expand-home pattern)))
+    (when (re-find #"^(?:[/\\]|[A-Za-z]:|~(?:[/\\]|$))" pattern)
       (throw (ex-info (str option " must be relative to :path")
                       {:type ::absolute-pattern
                        :option option
                        :pattern pattern})))
-    pattern))
+    (str/replace pattern fs/file-separator "/")))
 
 (defn- relative-path
   "FILE relative to BASE, `/`-separated."
