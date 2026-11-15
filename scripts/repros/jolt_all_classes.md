@@ -1,6 +1,8 @@
 # Expose an enumeration of Jolt's modeled classes (`babashka.classes/all-classes` equivalent)
 
 Filed as [jolt#1663](https://github.com/jolt-lang/jolt/issues/1663) on 2026-11-14.
+Fixed by [PR #1667](https://github.com/jolt-lang/jolt/pull/1667) on 2026-11-15
+(`jolt.host/class-names`, `jolt.host/all-classes`); kept as the repro record.
 
 Environment: Jolt `v0.8.27-52-g7ed36439`, Clojure `1.12.0-jolt`, Linux aarch64; babashka `1.13.229` for comparison.
 

@@ -538,8 +538,9 @@ probe and no real use, and is gone;
   `kmet.libs.markdown`) — the documented replacements for host-only data and
   HTTP libraries. `:load-fn` refuses the rest, so requiring any other kmet
   namespace is the named boundary error. Classes are the host's whole table
-  on bb and an explicit `java.lang`/`java.io`/`java.util` subset on Jolt and
-  the JVM. A `def` in one call is invisible to the next (`eval` is the
+  on bb, Jolt's modeled classes on Jolt, and an explicit
+  `java.lang`/`java.io`/`java.util` subset on the JVM. A `def` in one call is
+  invisible to the next (`eval` is the
   persistent-context counterpart below), and redefining an injected var stays
   call-local.
 - **Ordering.** The tool declares no execution mode, so its calls use the

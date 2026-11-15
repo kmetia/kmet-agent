@@ -1,5 +1,6 @@
 (ns jolt-all-classes
-  "Repro for jolt#1663: no enumeration of Jolt's modeled classes.
+  "Repro for jolt#1663 (fixed by PR #1667): no enumeration of Jolt's
+   modeled classes.
 
    Run:
      jolt scripts/repros/jolt_all_classes.clj

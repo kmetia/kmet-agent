@@ -1262,9 +1262,10 @@
   {:subset (str "an explicit subset — java.lang core, java.io and java.util "
                 "types; other JDK classes fail. Use the portable libraries "
                 "for anything outside it.")
-   :full (str "the host's full class table (System, Thread, java.io.*, "
-              "java.util.*); SCI's own core still differs from the host's, "
-              "but a host class name resolves.")})
+   :full (str "the host's full class table — babashka's whole table, Jolt's "
+              "modeled classes (System, Thread, java.io.*, java.util.*); "
+              "SCI's own core still differs from the host's, but a host "
+              "class name resolves.")})
 
 (defn- surface-help
   "The `(help :surface)` text: the host, aliases, the grouped namespaces the

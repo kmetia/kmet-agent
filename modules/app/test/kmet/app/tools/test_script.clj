@@ -43,7 +43,7 @@
     (t/is (= "42" (:content (run-in s {} "(do (def kept 42) kept)"))))
     (t/is (= "43" (:content (run-in s {} "(+ kept 1)"))))))
 
-(t/deftest test-the-context-resolves-the-explicit-class-subset
+(t/deftest test-the-context-resolves-host-classes
   (let [{:keys [ctx]} (kept-context)]
     (t/is (= {:value :caught}
              (script/eval-source! ctx

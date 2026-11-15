@@ -770,15 +770,17 @@
         (t/is (some #(str/includes? (:content %) "inner-progress") @updates))))))
 
 (t/deftest test-codemode-full-script-surface
-  ;; the sandbox carries the host's clojure.*/babashka.* namespaces; on
-  ;; babashka it also carries the class table (jolt's SCI exposes none), so a
-  ;; normal script resolves System/Throwable and uses future
+  ;; the sandbox carries the host's clojure.*/babashka.* namespaces and class
+  ;; table, so a normal script resolves System/Throwable and uses future
   (t/is (= "x" (:content (run "(require '[clojure.java.io :as io]) (core/emit (str (io/file \"x\")))"))))
   (t/is (= "true" (:content (run "(core/emit (boolean (resolve 'clojure.pprint/pprint)))"))))
   (t/is (= "3" (:content (run "(core/emit @(future 3))"))))
-  (when-not (host/jolt?)
-    (t/is (= "true" (:content (run "(core/emit (pos? (System/currentTimeMillis)))"))))
-    (t/is (= ":caught" (:content (run "(core/emit (try (throw (Throwable. \"x\")) (catch Throwable t :caught)))"))))))
+  (t/is (= "true" (:content (run "(core/emit (pos? (System/currentTimeMillis)))"))))
+  (t/is (= ":caught" (:content (run "(core/emit (try (throw (Throwable. \"x\")) (catch Throwable t :caught)))"))))
+  (when (host/jolt?)
+    (t/is (= "[\"a\" \"b\"]"
+             (:content (run (str "(core/emit (vec (java.util.Arrays/asList "
+                                 "(into-array String [\"a\" \"b\"]))))")))))))
 
 (t/deftest test-codemode-boundary
   ;; kmet's own namespaces stay out of the sandbox

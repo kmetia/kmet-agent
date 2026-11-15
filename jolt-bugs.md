@@ -6,38 +6,15 @@ builds and tests against the installed build. The `:jolt/min-version` floor is
 the last tagged release (`0.8.27`); older tags are below what the tree needs,
 since the workarounds for the dropped tickets went with their fixes.
 
-Jolt tickets were last checked on 2026-11-13 against the installed
-`v0.8.27-36-g829f1710`. Every earlier ticket this project filed except #1031 is
-fixed and its entry dropped: #1433 (PR #1435, follow-up PR #1437), #1453/#1454
-(PR #1472), #1466/#1469 (PR #1478), #1467/#1468 (PR #1477), #1548 (PR #1550),
-#1611 (PR #1626, follow-up #1636) and #1628 (PR #1634). The `spit` in-place
-write (`83fe128e`, follow-up `3be07637`) is also closed: mode, symlink and
-hard-link behaviour are verified on the installed build.
+Jolt tickets were last checked on 2026-11-15 against the installed
+`v0.8.27-76-g2b7ec41f`. A source build wants a Jolt from `main`: the latest
+dropped fix merged after the `v0.8.27` tag.
 
 `jolt-lang/http-client` `main` (`b45e46f`, unchanged at this check) is the
 version pinned by the project and has no open tickets; its HTTP, crypto and MCP
-SSE suites pass on the installed build. The #46 entry is dropped: PR #47
-(v0.1.8, `8405dc0`) renamed the shadowing TLS constant, and requiring
-`jolt.http.tls` is silent on the pinned commit.
+SSE suites pass on the installed build.
 
 ## Live issues
-
-### [jolt#1663](https://github.com/jolt-lang/jolt/issues/1663) — no enumeration of Jolt's modeled classes (`babashka.classes/all-classes` equivalent)
-
-Filed 2026-11-14 against the installed `v0.8.27-52-g7ed36439`. Jolt can
-intern a Class by name (`jolt.host/jolt-class-for`, `Class/forName`) but
-exposes no way to enumerate the modeled surface. On this build the class
-graph has 992 rows; the statics/ctor/value-tag registries add 38 canonical
-names (26 statics-only, 2 ctor-only, 10 value-tag-only), for 1,030 modeled
-names, while `clojure.core`'s namespace map exposes only 642 direct class
-objects. A graph walk alone misses `java.util.Collections`/`Arrays`/`Objects`/
-`Files` (statics-only), `java.net.URL` (ctor-only) and `java.nio.file.WatchKey`
-(value-tag-only). kmet's script sandbox falls back to the explicit
-java.lang/java.io/java.util subset, not Jolt's modeled surface. The issue asks
-for `jolt.host/class-names` and `all-classes` (canonical names / Class objects;
-dynamic, sorted, including non-graph classes). Repro and ticket text:
-`scripts/repros/jolt_all_classes.clj` and
-`scripts/repros/jolt_all_classes.md`.
 
 ### [jolt#1654](https://github.com/jolt-lang/jolt/issues/1654) — lock + blocking file I/O from many futures is ~7–11× slower than the JVM
 

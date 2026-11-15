@@ -772,12 +772,12 @@
           [s (copy-ns-publics s)])))
 
 (def ^:private sandbox-class-names
-  "The explicit class surface the JVM and Jolt sandboxes share: the
-   java.lang core a script expects, the java.io/java.util types the
-   tool's contract names, and nothing else. bb gets the whole host
-   table (babashka.classes/all-classes); SCI's own defaults resolve
-   only java.lang.Exception, so JVM and Jolt get this list. Extend it
-   when a script needs a new JDK type."
+  "The JVM sandbox's explicit class surface: the java.lang core a script
+   expects, the java.io/java.util types the tool's contract names, and
+   nothing else. bb gets the whole host table (babashka.classes/all-classes),
+   Jolt its modeled classes (jolt.host/all-classes), and the JVM has no such
+   enumeration — SCI's own JVM defaults resolve only java.lang.Exception, so
+   the JVM gets this list. Extend it when a script needs a new JDK type."
   '[java.lang.System java.lang.Thread java.lang.Runtime java.lang.Math
     java.lang.Object java.lang.String java.lang.StringBuilder
     java.lang.Character java.lang.Boolean java.lang.Byte java.lang.Short
@@ -805,17 +805,18 @@
 (defn- host-class-map
   "symbol → Class under both its full and simple name, so
    System/Thread/java.io.*/Throwable/… resolve as in a babashka script. bb
-   answers its whole class table; the JVM and Jolt get the explicit
-   java.lang/java.io/java.util subset."
+   answers its whole class table, Jolt its modeled classes and the JVM the
+   explicit java.lang/java.io/java.util subset."
   []
   (into {}
         (mapcat class-map-entries
-                (if (or (host/jvm?) (host/jolt?))
-                  (keep resolve sandbox-class-names)
-                  (try
-                    (let [all-classes (deref (requiring-resolve 'babashka.classes/all-classes))]
-                      (all-classes))
-                    (catch Throwable _ nil))))))
+                (cond
+                  (host/jolt?) ((requiring-resolve 'jolt.host/all-classes))
+                  (host/jvm?) (keep resolve sandbox-class-names)
+                  :else (try
+                          (let [all-classes (deref (requiring-resolve 'babashka.classes/all-classes))]
+                            (all-classes))
+                          (catch Throwable _ nil))))))
 
 (def ^:private extra-core-vars
   "Host clojure.core vars copied into the sandbox core as sci vars (macros keep
@@ -931,12 +932,10 @@
 
 (defn class-surface
   "How much of the host's Java class table the sandbox resolves: :full
-   (the babashka host's whole table) or :subset (the explicit java.lang/io/util
-   list the JVM and Jolt get)."
+   (babashka's whole table, Jolt's modeled classes) or :subset (the JVM's
+   explicit java.lang/io/util list)."
   []
-  (if (or (host/jvm?) (host/jolt?))
-    :subset
-    :full))
+  (if (host/jvm?) :subset :full))
 
 (defn- surface-namespaces
   "Group the copied namespace names for `(help :surface)`: the clojure and
