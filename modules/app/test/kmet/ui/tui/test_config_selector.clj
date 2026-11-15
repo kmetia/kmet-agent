@@ -9,7 +9,8 @@
             [kmet.tui.protocols :as protocols]
             [kmet.ui.tui.config-selector :as sut]
             [kmet.ui.tui.dock :as dock]
-            [kmet.ui.tui.grouped-selector :as grouped]))
+            [kmet.ui.tui.grouped-selector :as grouped]
+            [kmet.srce.core :as srce]))
 
 (def ^:private base-rows
   "The resources the fake catalog serves, with whether each is selected when
@@ -181,17 +182,52 @@
 
 (deftest resource-items-form-provider-groups
   (let [service (fake-service (atom {}))
-        items (#'sut/items service :project)]
+        items (#'sut/items service :project nil)]
     (testing "the catalog items carry their [type name] identity"
       (is (= [[:tool "bash"] [:tool "read"] [:skill "review"]]
              (mapv :id items)))
       (is (= "tool/bash" (:label (first items))))
       (is (= [:tool "bash"] (:id (#'sut/row (first (:tool base-rows))))))))
   (testing "groups are providers with type/name rows inside"
-    (let [groups (#'sut/groups (#'sut/items (fake-service (atom {})) :project))]
+    (let [groups (#'sut/groups (#'sut/items (fake-service (atom {})) :project nil))]
       (is (= ["Built-in tools" "ext/review"] (mapv :label groups)))
       (is (= [["tool/bash" "tool/read"] ["skill/review"]]
              (mapv #(mapv :label (:items %)) groups))))))
+
+(deftest verb-catalog-reads-the-eval-service
+  (let [ctx (srce/root {:name :test-config-verbs})
+        engine {:agent-state (atom {:ctx ctx})
+                :cwd (atom "/tmp/project")}]
+    (srce/provide! ctx :eval
+                   {:verbs (fn [opts]
+                             {"core/read" {:name "core/read"
+                                           :display-name "read"
+                                           :options opts}})})
+    (is (= {:cwd "/tmp/project"}
+           (:options (get (#'sut/verb-catalog engine) "core/read"))))))
+
+(deftest verb-items-use-the-simple-name-inside-the-provider-group
+  (let [service (fake-service (atom {}))
+        verbs {"core/read" {:name "core/read"
+                            :display-name "read"
+                            :provider {:kind :builtin :id :verb/builtin}}
+               "ext.mcp/search" {:name "ext.mcp/search"
+                                 :display-name "mcp/search"
+                                 :provider {:kind :extension
+                                            :id :ext/mcp-adapter}}}
+        items (#'sut/items service :project verbs)
+        verb-items (filterv #(= :verb (:type %)) items)
+        groups (#'sut/groups items)
+        group (fn [label] (first (filter #(= label (:label %)) groups)))]
+    (is (= [[:verb "core/read"] [:verb "ext.mcp/search"]]
+           (mapv :id verb-items)))
+    (is (= ["verb/read" "verb/mcp/search"] (mapv :label verb-items)))
+    (is (= ["Built-in tools" "Built-in verbs" "ext/mcp-adapter" "ext/review"]
+           (mapv :label groups)))
+    (is (= ["verb/read"]
+           (mapv :label (:items (group "Built-in verbs")))))
+    (is (= ["verb/mcp/search"]
+           (mapv :label (:items (group "ext/mcp-adapter")))))))
 
 (deftest groups-split-providers
   (let [items [{:type :tool :name "mcp"

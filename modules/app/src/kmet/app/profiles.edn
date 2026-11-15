@@ -63,8 +63,10 @@
           {:id :skills :plugin kmet.app.registries/skills}
           ;; Resource selection over the three registries above: availability
           ;; from what this composition and its extensions mounted, selection
-          ;; from the scoped :resources settings. Consumers read
-          ;; `enabled-names`; the service never mounts or prunes a provider.
+          ;; from the scoped :resources settings. Eval verbs have no registry
+          ;; provider; /config supplies their availability and the eval
+          ;; sandbox reads `selected?`/`selected-names`. The service never
+          ;; mounts or prunes a provider.
           {:id :resources :plugin kmet.app.resources/plugin}
           ;; The prompt builder a driver hands its state (7a): the app's pure
           ;; builder over the skills registry above. What a prompt is *about*

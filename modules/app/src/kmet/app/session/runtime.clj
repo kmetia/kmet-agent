@@ -417,15 +417,20 @@
 (defn refresh-resources!
   "Apply a persisted resource-selection change to ENGINE's live agent without
    remounting providers: a tool change clears the session override and records
-   the declared-set delta, and a skill change rebuilds the system prompt from
-   its stored options. Prompt lookup and autocomplete read the registry live,
-   so a prompt change needs no push. Emits :resources-change for KINDS when the
-   engine has an agent ctx. Returns nil."
+   the declared-set delta, a skill change rebuilds the system prompt from its
+   stored options, and a verb change advances the eval sandbox's selection
+   generation so its next build applies the new surface. Prompt lookup and
+   autocomplete read the registry live, so a prompt change needs no push.
+   Emits :resources-change for KINDS when the engine has an agent ctx. Returns
+   nil."
   [engine kinds]
   (when-let [agent (agent-state engine)]
     (cond
       (some #{:tool} kinds) (loop-state/set-active-tools! agent nil)
       (some #{:skill} kinds) (loop-state/refresh-system-prompt! agent)))
+  (when (some #{:verb} kinds)
+    (when-let [eval-service (some-> (agent-ctx engine) (srce/get :eval))]
+      ((:refresh-verbs! eval-service))))
   (when-let [ctx (agent-ctx engine)]
     (events/emit! ctx {:type :resources-change :types (vec kinds)}))
   nil)

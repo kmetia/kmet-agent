@@ -38,6 +38,7 @@
             [kmet.app.eval.patch :as patch]
             [kmet.app.eval.sources :as eval-sources]
             [kmet.app.extensions.core :as extensions]
+            [kmet.app.resources :as resources]
             [kmet.app.session.store :as session-store]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.read :as read-tool]
@@ -381,7 +382,7 @@
   "Read every registered source once for CWD/SIGNAL. Sources are merged in
    registration order, so a later source wins a shared key. A throwing or
    invalid source contributes nothing; its error is reported in :info and
-   :errors."
+   :errors. :owners maps each source id to the owner path that registered it."
   [service cwd signal]
   (let [registrations (source-registrations service)
         results (mapv #(call-source service % cwd signal)
@@ -390,8 +391,10 @@
         errors (mapv #(select-keys % [:id :error])
                      (filterv #(contains? % :error) results))
         values (reduce (fn [acc source] (merge acc (:values source))) {} good)
-        commands (reduce (fn [acc source] (merge acc (:commands source))) {} good)]
+        commands (reduce (fn [acc source] (merge acc (:commands source))) {} good)
+        owners (into {} (map (juxt :id :owner)) registrations)]
     {:ids (mapv :id registrations)
+     :owners owners
      :values values
      :keys (set (keys values))
      :commands commands
@@ -402,29 +405,38 @@
                  results)
      :errors errors}))
 
+(declare verb-selected? disabled-verbs filter-source-info builtin-verb-help)
+
 (defn- source-var
-  [ns-name name {:keys [value macro? doc arglists]}]
-  (let [ns (sci/create-ns ns-name)]
+  [ns-name name {:keys [value doc arglists] :as entry} disabled]
+  (let [ns (sci/create-ns ns-name)
+        name-string (str ns-name "/" name)
+        value (if (contains? disabled name-string)
+                (script/disabled-verb-stub name-string)
+                value)]
     (sci/new-var name value
                  (cond-> {:ns ns :name name}
-                   macro? (assoc :macro true)
+                   (:macro? entry) (assoc :macro true)
                    (some? doc) (assoc :doc doc)
                    (some? arglists) (assoc :arglists arglists)))))
 
 (defn- source-namespaces
-  "The SCI vars for VALUES not excluded by SKIP?. A source value and a fixed
-   namespace (the core `user` helpers) merge in one map."
-  [values skip?]
-  (reduce-kv
-   (fn [acc key entry]
-     (if (skip? key)
-       acc
-       (let [i (str/index-of key "/")
-             ns-name (symbol (subs key 0 i))
-             name (symbol (subs key (inc i)))]
-         (assoc-in acc [ns-name name] (source-var ns-name name entry)))))
-   {}
-   values))
+  "The SCI vars for VALUES not excluded by SKIP?, with DISABLED keys bound to
+   the error stub so a namespace alias still requires. A source value and a
+   fixed namespace (the core `user` helpers) merge in one map."
+  ([values skip?] (source-namespaces values skip? #{}))
+  ([values skip? disabled]
+   (reduce-kv
+    (fn [acc key entry]
+      (if (skip? key)
+        acc
+        (let [i (str/index-of key "/")
+              ns-name (symbol (subs key 0 i))
+              name (symbol (subs key (inc i)))]
+          (assoc-in acc [ns-name name]
+                    (source-var ns-name name entry disabled)))))
+    {}
+    values)))
 
 (defn- source-known?
   "Does the model own NAME in this environment (a library definition, an
@@ -440,7 +452,8 @@
    string or nil."
   [env name entry]
   (try
-    (doseq [[ns-name vars] (source-namespaces {name entry} (constantly false))]
+    (doseq [[ns-name vars] (source-namespaces {name entry} (constantly false)
+                                              @(:disabled-verbs env))]
       (sci/add-namespace! (:sci-ctx env) ns-name vars))
     nil
     (catch Throwable t (ex-message t))))
@@ -452,19 +465,26 @@
    the SCI namespace additions for a new call. Returns the namespaces, info,
    errors and commands."
   [service env cwd signal]
-  (let [{:keys [ids values keys commands info errors]}
+  (let [{:keys [ids values commands info errors]
+         ;; the map's :keys set shadows clojure.core/keys if bound as `keys`
+         source-keys :keys}
         (resolve-sources service cwd signal)
-        stale (remove keys @(:active-source-keys env))]
+        stale (remove source-keys @(:active-source-keys env))
+        disabled (disabled-verbs service (keys values))
+        info (filter-source-info service info)]
     (doseq [name stale
             :when (not (source-known? env name))]
       (unbind! env name nil))
-    (swap! (:source-keys env) into keys)
-    (reset! (:active-source-keys env) keys)
+    (swap! (:source-keys env) into source-keys)
+    (reset! (:active-source-keys env) source-keys)
     (reset! (:source-ids env) ids)
     (reset! (:source-values env) values)
     (reset! (:source-info env) info)
     (reset! (:source-errors env) errors)
-    {:namespaces (source-namespaces values #(source-known? env %))
+    (reset! (:disabled-verbs env)
+            (into (disabled-verbs service (keys builtin-verb-help))
+                  disabled))
+    {:namespaces (source-namespaces values #(source-known? env %) disabled)
      :commands commands
      :info info
      :errors errors}))
@@ -476,7 +496,8 @@
    source's work (and its side effects)."
   [env]
   {:namespaces (source-namespaces @(:source-values env)
-                                  #(source-known? env %))
+                                  #(source-known? env %)
+                                  @(:disabled-verbs env))
    :info @(:source-info env)
    :errors @(:source-errors env)
    :commands {}})
@@ -855,6 +876,47 @@
                   [(eval-format/display-name name) entry]))
         builtin-verb-help))
 
+(defn- source-provider
+  "The /config provider for source ID: the extension that registered it, or
+   the source id itself for a registration outside an extension."
+  [owners id]
+  (or (resources/extension-provider (get owners id))
+      {:kind :extension :id (keyword "ext" (eval-sources/source-id-name id))}))
+
+(defn- selected-verb-names
+  "The subset of NAMES selected in the agent's persisted `:resources :verbs`
+   entry. No resources service (a bare test, a composition without the row)
+   keeps every verb on."
+  [service names]
+  (let [names (vec names)
+        resources (:resources service)]
+    (if resources
+      (set ((:selected-names resources) :verb names))
+      (set names))))
+
+(defn- verb-selected?
+  "Is NAME selected in the agent's persisted `:resources :verbs` entry?"
+  [service name]
+  (contains? (selected-verb-names service [name]) (str name)))
+
+(defn- disabled-verbs
+  "The subset of NAMES the current selection turns off."
+  [service names]
+  (let [names (vec names)]
+    (into #{} (remove (selected-verb-names service names)) names)))
+
+(defn- filter-source-info
+  "SOURCE-INFO with the verbs the current selection turns off removed, so the
+   help and source listings agree with the sandbox surface."
+  [service info]
+  (let [names (mapcat (comp (partial map :name) :verbs) info)
+        selected (selected-verb-names service names)]
+    (mapv (fn [{:keys [verbs] :as source}]
+            (cond-> source
+              (seq verbs)
+              (assoc :verbs (filterv #(contains? selected (:name %)) verbs))))
+          info)))
+
 (def ^:private system-namespaces
   #{"core" "clj" "eval" "clojure" "clojure.core"
     "babashka.process" "kmet.libs.http" "kmet.libs.json"
@@ -879,6 +941,74 @@
   [name]
   (str/starts-with? (str (name-namespace name)) "ext."))
 
+(defn- env-verb-disabled?
+  "Is the canonical verb NAME turned off in ENV's selection?"
+  [env name]
+  (contains? @(:disabled-verbs env) name))
+
+(defn- describe-unwritten-entry
+  "An unwritten live definition's describe view."
+  [name record]
+  {:name name
+   :kind (:kind record)
+   :doc (:doc record)
+   :arglists (:arglists record)
+   :file nil
+   :scope (record-scope record)
+   :source (:source record)})
+
+(defn- describe-library-entry
+  "A saved or failed library definition's describe view."
+  [name record]
+  (cond-> {:name name
+           :kind (:kind record)
+           :doc (:doc record)
+           :arglists (:arglists record)
+           :file (:file record)
+           :scope (record-scope record)
+           :source (:source record)}
+    (failed-entry? record)
+    (assoc :load-status :failed :load-error (:load-error record))))
+
+(defn- source-key-for
+  "The source key NAME resolves to in ENV, or nil."
+  [env name]
+  (let [values @(:source-values env)]
+    (or (when (contains? values name) name)
+        (when (contains? values (str "ext." name)) (str "ext." name)))))
+
+(defn- describe-source-entry
+  "SOURCE-KEY's contributed ENTRY, or a directed error when the selection
+   turns the verb off."
+  [env source-key entry]
+  (if (env-verb-disabled? env source-key)
+    (bad-request! (str "verb " source-key
+                       " is disabled; enable it in /config")
+                  {:name source-key :disabled true})
+    {:name source-key
+     :kind (if (:macro? entry) :macro :verb)
+     :doc (:doc entry)
+     :arglists (:arglists entry)
+     :file nil
+     :scope nil
+     :source (:source entry)}))
+
+(defn- describe-builtin-entry
+  "The built-in verb ENTRY for NAME, or a directed error for an unknown or
+   disabled verb."
+  [env name bare-builtin]
+  (let [builtin (or (get builtin-verb-help name) bare-builtin)]
+    (cond
+      (nil? builtin)
+      (bad-request! (str "no eval definition named " name) {:name name})
+
+      (env-verb-disabled? env (:name builtin))
+      (bad-request! (str "verb " (:name builtin)
+                         " is disabled; enable it in /config")
+                    {:name (:name builtin) :disabled true})
+
+      :else builtin)))
+
 (defn- describe-entry
   "The interface and implementation of RAW-NAME, resolved against the same
    names the rest of the eval vocabulary uses: a library definition, a
@@ -898,45 +1028,20 @@
     (let [unwritten? (contains? @(:unwritten env) name)
           unwritten-record (get @(:unwritten-records env) name)
           library-record (active-record env name)
-          source-key (or (when (contains? @(:source-values env) name) name)
-                         (when (contains? @(:source-values env) (str "ext." name))
-                           (str "ext." name)))
+          source-key (source-key-for env name)
           source-entry (get @(:source-values env) source-key)]
       (cond
         unwritten?
-        {:name name
-         :kind (:kind unwritten-record)
-         :doc (:doc unwritten-record)
-         :arglists (:arglists unwritten-record)
-         :file nil
-         :scope (record-scope unwritten-record)
-         :source (:source unwritten-record)}
+        (describe-unwritten-entry name unwritten-record)
 
         library-record
-        (cond-> {:name name
-                 :kind (:kind library-record)
-                 :doc (:doc library-record)
-                 :arglists (:arglists library-record)
-                 :file (:file library-record)
-                 :scope (record-scope library-record)
-                 :source (:source library-record)}
-          (failed-entry? library-record)
-          (assoc :load-status :failed :load-error (:load-error library-record)))
+        (describe-library-entry name library-record)
 
         (contains? @(:active-source-keys env) source-key)
-        {:name source-key
-         :kind (if (:macro? source-entry) :macro :verb)
-         :doc (:doc source-entry)
-         :arglists (:arglists source-entry)
-         :file nil
-         :scope nil
-         :source (:source source-entry)}
+        (describe-source-entry env source-key source-entry)
 
         :else
-        (or (get builtin-verb-help name)
-            bare-builtin
-            (bad-request! (str "no eval definition named " name)
-                          {:name name}))))))
+        (describe-builtin-entry env name bare-builtin)))))
 
 (defn- describe-view
   "The default `(eval/describe 'name)` view: nil-valued fields are omitted,
@@ -994,12 +1099,14 @@
   (mapv :key help-topics))
 
 (defn- builtin-verb-lines
-  []
-  (map (fn [[name {:keys [doc arglists]}]]
-         (str "  " (eval-format/display-name name)
-              (or (eval-format/arglists-text arglists) "")
-              " - " (first-sentence (or doc ""))))
-       (sort-by (fn [[name _]] [(verb-family name) name]) builtin-verb-help)))
+  [env]
+  (->> builtin-verb-help
+       (remove (fn [[name _]] (env-verb-disabled? env name)))
+       (sort-by (fn [[name _]] [(verb-family name) name]))
+       (map (fn [[name {:keys [doc arglists]}]]
+              (str "  " (eval-format/display-name name)
+                   (or (eval-format/arglists-text arglists) "")
+                   " - " (first-sentence (or doc "")))))))
 
 (defn- indent-text "TEXT with every line indented four spaces." [text] (str/join "\n" (map (fn [line] (str "    " line)) (str/split-lines (str text)))))
 
@@ -1301,8 +1408,16 @@
          "Discovery: (all-ns), (ns-publics 'ns), (resolve 'name), "
          "(describe 'name), (index \"text\").")))
 
+(defn- eval-verb-call-names
+  "The enabled eval verbs as call names, sorted, for the :core help topic."
+  [env]
+  (->> (keys eval-verb-vars)
+       (remove #(env-verb-disabled? env %))
+       (map eval-format/display-name)
+       sort))
+
 (defn- core-help
-  []
+  [env]
   (str "Core: Clojure/SCI — " script/core-summary
        "\n" (builtin-help-line)
        "\nUnqualified read is the file reader; clojure.core/read remains "
@@ -1318,11 +1433,9 @@
        "\nLocal let/fn bindings are scratch; every call starts in user."
        "\nOwnership: define in user; core, clj and eval are read-only; "
        "ext.* is live-only."
-       "\nEval verbs: (library), (sources), (index \"text\"), "
-       "(describe 'name), (describe 'name key), (forget 'name), "
-       "(save 'name [doc]), (patch 'name old new), "
-       "(edit-form 'name new-source), (move 'name :global|:cwd), "
-       "(result [id opts])."
+       "\nEval verbs: "
+       (str/join ", " (map #(str "(" % ")") (eval-verb-call-names env)))
+       "."
        "\nDiscovery: (all-ns) lists the live namespaces — the copied set plus "
        "session-created ones; (ns-publics 'ns) lists a namespace's vars, including session-only "
        "definitions; (help :surface) names the host's aliases, classes and "
@@ -1400,10 +1513,17 @@
   "The names a definition help request can resolve, for a did-you-mean
    suggestion: built-in verbs, library definitions and source verbs."
   [env]
-  (concat (sort (keys bare-builtin-help))
+  (concat (->> bare-builtin-help
+               (remove (fn [[_ entry]] (env-verb-disabled? env (:name entry))))
+               keys
+               sort)
           (map (comp eval-format/display-name :name) (library-entries env))
           (map (comp eval-format/display-name :name) (session-only-entries env))
-          (map eval-format/display-name (sort (keys @(:source-values env))))))
+          (->> @(:source-values env)
+               keys
+               (remove #(env-verb-disabled? env %))
+               sort
+               (map eval-format/display-name))))
 
 (defn- help-suggestion
   "The `Did you mean ...?` suffix for a missed help topic or name, or an
@@ -1435,7 +1555,7 @@
     :surface (surface-help (:surface env))
     :persistence (persistence-help)
     :results (results-help)
-    :core (core-help)
+    :core (core-help env)
     (if-let [source (source-for-topic env topic)]
       (str "Eval source " (name topic) ":\n"
            (eval-format/source-line source))
@@ -1457,7 +1577,7 @@
                                     (str "  " key " — " summary))
                                   help-topics))
          "\n" (source-help env)
-         "\nBuilt-in verbs:\n" (str/join "\n" (builtin-verb-lines))
+         "\nBuilt-in verbs:\n" (str/join "\n" (builtin-verb-lines env))
          "\nLibrary: " (:text (library-counts entries))
          ", " (count session-only) " session-only"
          "; (help :library) lists both and the scope roots."
@@ -1845,10 +1965,11 @@
   "A prepared state for evaluating library definitions at rebuild: no tool
    surface is installed, and a discarded emit channel holds until a real
    call binds its state."
-  [cwd source-namespaces]
+  [cwd source-namespaces disabled]
   (script/prepare {:tool "eval"
                    :cwd cwd
                    :source-namespaces source-namespaces
+                   :disabled-verbs disabled
                    :tools? false}))
 
 (defn- request-forget!
@@ -1873,6 +1994,10 @@
   (let [roots (roots-for service cwd)
         failures (atom [])
         library (atom {})
+        ;; snapshot the generation before the selection reads: a /config write
+        ;; that races this build leaves the env stale, never silently newer
+        generation @(:verbs-generation service)
+        disabled (disabled-verbs service (keys builtin-verb-help))
         env {:roots roots
              :cwd cwd
              :scope-key (session-store/encode-cwd cwd)
@@ -1885,6 +2010,9 @@
              :source-info (atom [])
              :source-errors (atom [])
              :source-ids (atom [])
+             :disabled-verbs (atom disabled)
+             ;; the selection generation this build used (see refresh-verbs!)
+             :verbs-generation generation
              ;; the ids the result renderer last reported; the eval-source
              ;; line appears only when this set changes
              :reported-source-ids (atom nil)
@@ -1917,19 +2045,25 @@
         base (script/base-namespaces)
         sci-ctx (script/context
                   (assoc (update base 'clojure.core merge
-                                 {'help help-fn 'describe describe-fn})
-                         'clj {'nrepl-eval nrepl-fn}
-                         'eval {'library library-fn
-                                'index index-fn
-                                'forget forget-fn
-                                'save save-fn
-                                'result result-fn
-                                'patch patch-fn
-                                'edit-form edit-form-fn
-                                'move move-fn
-                                'describe describe-fn
-                                'sources sources-fn
-                                'help help-fn})
+                                 {'help (if (contains? disabled "eval/help")
+                                          (script/disabled-verb-stub "eval/help")
+                                          help-fn)
+                                  'describe (if (contains? disabled "eval/describe")
+                                              (script/disabled-verb-stub "eval/describe")
+                                              describe-fn)})
+                         'clj (script/stub-verbs "clj" {'nrepl-eval nrepl-fn} disabled)
+                         'eval (script/stub-verbs "eval" {'library library-fn
+                                                          'index index-fn
+                                                          'forget forget-fn
+                                                          'save save-fn
+                                                          'result result-fn
+                                                          'patch patch-fn
+                                                          'edit-form edit-form-fn
+                                                          'move move-fn
+                                                          'describe describe-fn
+                                                          'sources sources-fn
+                                                          'help help-fn}
+                                                  disabled))
                   (script/interrupt-fn interrupt "eval")
                   "eval")
         env (assoc env :sci-ctx sci-ctx :interrupt interrupt
@@ -1942,7 +2076,7 @@
               bash-tool/*session-env-fn* bash-tool/*session-env-fn*
               read-tool/*skill-resolver* read-tool/*skill-resolver*]
       (script/with-prime-context
-        sci-ctx (prime-state cwd (:namespaces sources))
+        sci-ctx (prime-state cwd (:namespaces sources) disabled)
         (fn []
           (read-library! env (:global roots) :global deadline)
           (read-library! env (:cwd roots) :cwd deadline)
@@ -1958,20 +2092,37 @@
                    :failures (vec @(:failures env))}))))
     env))
 
+(declare reload-environment!)
+
 (defn- ensure-environment!
   "The current environment for SESSION, built from the library on first use.
-   An existing environment is reused until an explicit `/eval reload`: a session
-   is a runtime cache, not a branch-scoped definition log."
+   An existing environment is rebuilt when a `/config` verb write advanced the
+   service's generation; it is otherwise reused until an explicit
+   `/eval reload`: a session is a runtime cache, not a branch-scoped
+   definition log."
   [service session cwd signal]
-  (let [id (:id session)]
-    (or (get @(:envs service) id)
-        (let [env (build-environment service cwd signal)]
-          (when @(:disposed? service)
-            (throw (ex-info "the agent's eval service is disposed"
-                            {:type :eval/disposed})))
-          (get (swap! (:envs service)
-                      #(if (contains? % id) % (assoc % id env)))
-               id)))))
+  (let [id (:id session)
+        env (get @(:envs service) id)]
+    (cond
+      (nil? env)
+      (let [env (build-environment service cwd signal)]
+        (when @(:disposed? service)
+          (throw (ex-info "the agent's eval service is disposed"
+                          {:type :eval/disposed})))
+        (get (swap! (:envs service)
+                    #(if (contains? % id) % (assoc % id env)))
+             id))
+
+      (= (:verbs-generation env) @(:verbs-generation service))
+      env
+
+      :else
+      (let [{:keys [env kept?]} (reload-environment! service env)]
+        (if kept?
+          env
+          (do
+            (swap! (:envs service) assoc id env)
+            env))))))
 
 (defn- replay-live!
   "Evaluate OLD's session-only records into ENV, keeping them live-only. A
@@ -2555,6 +2706,7 @@
                                                                  (when-not @(:skip-result-store? env)
                                                                    (store-result! env result)))
                                                  :source-namespaces (:namespaces sources)
+                                                 :disabled-verbs @(:disabled-verbs env)
                                                  :session-recall session-recall
                                                  :extra-details extra-details
                                                  :tools? false})]
@@ -2790,16 +2942,33 @@
   "A mounted source's view of NAME, read without an environment. Nil when no
    active source contributes it."
   [service cwd name]
-  (when-let [entry (get (:values (resolve-sources service (or cwd (tool-util/cwd))
-                                                  nil))
-                        name)]
-    {:name name
-     :kind (if (:macro? entry) :macro :verb)
-     :doc (:doc entry)
-     :arglists (:arglists entry)
-     :file nil
-     :scope nil
-     :source (:source entry)}))
+  (when (verb-selected? service name)
+    (when-let [entry (get (:values (resolve-sources service
+                                                    (or cwd (tool-util/cwd))
+                                                    nil))
+                          name)]
+      {:name name
+       :kind (if (:macro? entry) :macro :verb)
+       :doc (:doc entry)
+       :arglists (:arglists entry)
+       :file nil
+       :scope nil
+       :source (:source entry)})))
+
+(defn- describe-builtin-service
+  "BUILT-IN-NAME's view without an environment, or a directed error for an
+   unknown or disabled verb."
+  [service raw-name]
+  (let [name (str raw-name)]
+    (cond
+      (not (verb-selected? service name))
+      (bad-request! (str "verb " name " is disabled; enable it in /config")
+                    {:name name :disabled true})
+
+      :else
+      (or (get builtin-verb-help name)
+          (bad-request! (str "no eval definition named " raw-name)
+                        {:name raw-name})))))
 
 (defn- describe-request
   "The service's `:describe` reader: NAME as `(eval/describe)` resolves it in
@@ -2823,9 +2992,7 @@
     (or env-entry
         (describe-indexed service session cwd raw-name)
         (describe-source service cwd raw-name)
-        (get builtin-verb-help (str raw-name))
-        (bad-request! (str "no eval definition named " raw-name)
-                      {:name raw-name}))))
+        (describe-builtin-service service raw-name))))
 
 (defn- service-manifest
   "The prompt manifest for SESSION: the built environment's loaded records when
@@ -2919,7 +3086,10 @@
    service's `:sources` reader. Invokes each source with CWD and no signal;
    source errors are part of the report."
   [service cwd]
-  (:info (resolve-sources service (or cwd (tool-util/cwd)) nil)))
+  (filter-source-info service
+                      (:info (resolve-sources service
+                                              (or cwd (tool-util/cwd))
+                                              nil))))
 
 (defn- service-source-commands
   "The source-contributed `/eval` verbs, read per call."
@@ -2951,21 +3121,61 @@
             (eval!* service env cwd (assoc opts :abort abort
                                            :source-signal source-signal))))))))
 
+(defn- service-verbs
+  "The available eval verbs for CWD, keyed by canonical name: the built-in
+   core/clj/eval verbs plus each mounted source's current values. `/config`
+   groups a source's verbs by the extension that registered it and shows the
+   simple call surface."
+  [service cwd]
+  (let [{:keys [info owners]} (resolve-sources service
+                                               (or cwd (tool-util/cwd))
+                                               nil)
+        builtin (map (fn [name]
+                       {:name name
+                        ;; the eval help's own call surface: core/eval verbs
+                        ;; are unqualified, clj verbs keep their namespace
+                        :display-name (eval-format/display-name name)
+                        :provider {:kind :builtin :id :verb/builtin}})
+                     (keys builtin-verb-help))
+        contributed (mapcat
+                     (fn [{:keys [id verbs error]}]
+                       (when-not error
+                         (let [provider (source-provider owners id)]
+                           (map (fn [{:keys [name]}]
+                                  {:name name
+                                   :display-name (eval-format/display-name name)
+                                   :provider provider})
+                                verbs))))
+                     info)]
+    (into {} (map (juxt :name identity)) (concat builtin contributed))))
+
+(defn- refresh-verbs!
+  "Advance the selection generation after a `/config` verb write. Every built
+   environment records the generation it was built with; the next eval call
+   rebuilds a stale one, so /config never blocks on a sandbox rebuild."
+  [service]
+  (swap! (:verbs-generation service) inc)
+  nil)
+
 (defn value
   "The `:eval` service for AGENT-CTX. The environments are keyed by session
    and owned here. The sandbox has no `tools` namespace: an eval call cannot
    invoke any tool.
 
    OPTS: `:agent-dir` pins the agent home, hence both library roots (tests, a
-   sandboxed composition); it defaults to `cfg/get-agent-dir`."
+   sandboxed composition); it defaults to `cfg/get-agent-dir`. `:resources`
+   overrides the `:resources` service read from AGENT-CTX; its `:verb`
+   selection gates the sandbox's built-in and source verbs."
   ([agent-ctx] (value agent-ctx nil))
-  ([agent-ctx {:keys [agent-dir]}]
+  ([agent-ctx {:keys [agent-dir resources]}]
    (let [envs (atom {})
          session-locks (atom {})
          manifest-cache (atom {})
          disposed? (atom false)
          service {:agent-ctx agent-ctx
                   :agent-dir (or agent-dir (cfg/get-agent-dir))
+                  :verbs-generation (atom 0)
+                  :resources (or resources (srce/get agent-ctx :resources))
                   :envs envs
                   :session-locks session-locks
                   :manifest-cache manifest-cache
@@ -2993,6 +3203,10 @@
       :source-commands (fn
                          ([] (if @disposed? {} (service-source-commands service (tool-util/cwd))))
                          ([opts] (if @disposed? {} (service-source-commands service (:cwd opts)))))
+      :verbs (fn
+               ([] (if @disposed? {} (service-verbs service (tool-util/cwd))))
+               ([opts] (if @disposed? {} (service-verbs service (:cwd opts)))))
+      :refresh-verbs! #(refresh-verbs! service)
       :failures #(service-failures service)
       :dispose! (fn []
                   (reset! disposed? true)

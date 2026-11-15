@@ -363,7 +363,7 @@
      :handler (fn [cs _] (tools-selector/show-tools-selector cs))})
    (register-builtin-command!
     {:name "config"
-     :description "Select tools, skills, and prompts for global and project scope"
+     :description "Select tools, skills, prompts, and eval verbs for global and project scope"
      :handler (fn [cs _] (config-selector/show-config cs))})
    (register-builtin-command!
     {:name "model"

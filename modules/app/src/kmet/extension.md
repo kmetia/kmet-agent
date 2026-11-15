@@ -438,6 +438,17 @@ a subnamespace keeps its dotted path (`license.internal/verb`). The source id
 must not collide with the sandbox's standard aliases, namespaces, or eval
 verbs.
 
+`/config` lists each contributed verb under the extension that registered the
+source, labelled with the eval call surface (`verb/license/add!` under the
+extension's `ext/<name>` group); the persisted `:resources :verbs` entry uses
+the canonical source key `ext.license/add!`. A disabled verb stays bound
+as an error stub (so aliases still require and stored definitions still
+compile), is omitted from `(help)`, `(index)` and `(sources)`, is reported as
+disabled by `(describe)`, and fails with
+`verb <name> is disabled; enable it in /config`. Only verbs are
+selectable: `/eval` commands from `:commands` are not, and a source's values
+do not become `/config` rows for the user library.
+
 - `:ns` and `:macros` namespaces must be exactly `ext.<source-id>` or start
   with `ext.<source-id>.`; any other namespace is refused. The system
   namespaces (`core`, `clj`, `eval`) and the fixed host namespaces are never

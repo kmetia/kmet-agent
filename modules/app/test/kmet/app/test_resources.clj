@@ -403,6 +403,7 @@
             {:resources {:skills [1]}})))
   (is (config-schema/validate-resource-settings? nil))
   (is (config-schema/validate-resource-settings? {:tools ["-bash"]}))
+  (is (config-schema/validate-resource-settings? {:verbs ["-core/read"]}))
   (is (not (config-schema/validate-resource-settings? {:tools "bash"}))))
 
 (deftest scopes-are-read-unmerged
@@ -413,6 +414,59 @@
               :project {:skills ["+review"]}}
              (cfg/read-resource-settings))
           "each scope keeps its own map; the service merges per type"))))
+
+;; ─── External verb availability ───────────────────────────────────────────
+
+(deftest external-verb-catalog-and-selection
+  (let [read {:name "core/read"
+              :display-name "read"
+              :provider {:kind :builtin :id :verb/builtin}}
+        search {:name "ext.mcp/search"
+                :display-name "search"
+                :provider {:kind :extension :id :ext/mcp}}
+        entries [read search]
+        s (service [])]
+    (with-settings nil nil
+      (fn [_ _]
+        (let [rows (resources/external-catalog :verb entries)]
+          (is (= ["core/read" "ext.mcp/search"] (mapv :name rows)))
+          (is (= "read" (:display-name (row rows "core/read"))))
+          (is (= {:kind :extension :id :ext/mcp}
+                 (:provider (row rows "ext.mcp/search"))))
+          (is (selected? s :verb "core/read"))
+          (is (selected? s :verb "ext.mcp/search")
+              "verbs default on even without a registry provider"))))
+    (with-settings {:resources {:verbs ["-ext.mcp/search"]}} nil
+      (fn [_ _]
+        (let [rows (resources/external-catalog :verb entries)]
+          (is (true? (:selected? (row rows "core/read"))))
+          (is (false? (:selected? (row rows "ext.mcp/search"))))
+          (is (not (selected? s :verb "ext.mcp/search")))
+          (is (= #{"core/read"}
+                 ((:selected-names s) :verb ["core/read" "ext.mcp/search"]))
+              "one settings read resolves a whole catalog"))))
+    (with-settings {:resources {:verbs ["core/read"]}} nil
+      (fn [_ _]
+        (is (selected? s :verb "core/read"))
+        (is (not (selected? s :verb "ext.mcp/search"))
+            "a plain global list is absolute over every verb")))
+    (with-settings {:resources {:verbs ["-core/read"]}}
+      {:resources {:verbs ["+core/read"]}}
+      (fn [_ _]
+        (is (selected? s :verb "core/read")
+            "the project delta wins over global")))
+    (with-settings {:resources {:verbs []}} nil
+      (fn [_ _]
+        (is (= #{} ((:selected-names s) :verb ["core/read"
+                                               "ext.mcp/search"]))
+            "an empty list selects nothing, like every other type")))
+    (with-settings {:resources {:verbs ["core/read" "gone/search"]}} nil
+      (fn [_ _]
+        (let [rows (resources/external-unavailable
+                    :verb :global ["core/read"])]
+          (is (= ["gone/search"] (mapv :name rows)))
+          (is (false? (:available? (first rows))))
+          (is (= {:kind :unavailable :id nil} (:provider (first rows)))))))))
 
 ;; ─── Read-time filters ─────────────────────────────────────────────────────
 

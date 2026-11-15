@@ -1220,15 +1220,45 @@
    'replace-sexp #'replace-sexp-verb
    'paren-repair #'paren-repair-verb})
 
+(defn disabled-verb-stub
+  "A callable that reports NAME as disabled. The var stays bound because the
+   sandbox prelude refers core and eval verbs by name; a disabled verb fails
+   with a directed error instead of disappearing from that prelude. Shared by
+   the eval sandbox's built-in and source stubs."
+  [name]
+  (fn [& _]
+    (throw (ex-info (str "verb " name " is disabled; enable it in /config")
+                    {:type :script/verb-disabled :verb name}))))
+
+(defn stub-verbs
+  "FNS keyed by simple name, with DISABLED qualified names (`prefix/name`)
+   replaced by the error stub."
+  [prefix fns disabled]
+  (reduce-kv (fn [m sym f]
+               (let [name (str prefix "/" sym)]
+                 (assoc m sym (if (contains? disabled name)
+                                (disabled-verb-stub name)
+                                f))))
+             {}
+             fns))
+
+(defn- namespace-fns
+  "PREFIX's built-in functions from VARS, with DISABLED names replaced by an
+   error stub."
+  [prefix vars disabled]
+  (stub-verbs prefix
+              (into {} (map (fn [[sym v]] [sym @v]) vars))
+              disabled))
+
 (defn- core-namespace-fns
   "The core namespace's functions from the built-in verb registry."
-  []
-  (into {} (map (fn [[sym v]] [sym @v]) core-verb-vars)))
+  [disabled]
+  (namespace-fns "core" core-verb-vars disabled))
 
 (defn- clj-namespace-fns
   "The clj namespace's functions from the built-in verb registry."
-  []
-  (into {} (map (fn [[sym v]] [sym @v]) clj-verb-vars)))
+  [disabled]
+  (namespace-fns "clj" clj-verb-vars disabled))
 
 (defn- verb-help-entry
   "One built-in help entry from V, keyed as NS-NAME/SYM."
@@ -1259,16 +1289,18 @@
    definitions follow the current call; `seed!` layers them over
    `base-namespaces` for the call. `:source-namespaces` — the eval source
    layer's current values — merges into the same namespace maps, so a source
-   value and a built-in `user` helper share one namespace."
-  [{:keys [surface source-namespaces tools?]}]
+   value and a built-in `user` helper share one namespace. `:disabled-verbs`
+   is the set of qualified built-in names an error stub replaces."
+  [{:keys [surface source-namespaces tools? disabled-verbs]}]
   (let [tools? (not (false? tools?))
+        disabled (set disabled-verbs)
         process (process-fns)
         namespaces (cond-> {'clojure.core (merge {'pmap (deref #'pmap)}
                                                  (core-fns)
                                                  (extra-core-vars-map))
                             'babashka.process process
-                            'core (core-namespace-fns)
-                            'clj (clj-namespace-fns)}
+                            'core (core-namespace-fns disabled)
+                            'clj (clj-namespace-fns disabled)}
                      tools? (assoc 'tools (tools-namespace (or surface {}))))]
     (reduce-kv (fn [acc ns-name ns-map]
                  (update acc ns-name #(merge (or % {}) ns-map)))
@@ -1898,7 +1930,7 @@
    (the `eval` sandbox)."
   [{:keys [tool cwd timeout limits signal abort ctx on-update
            get-all-tools get-contributed-tools select-tools execute-tool
-           source-namespaces session-recall tools?]
+           source-namespaces session-recall tools? disabled-verbs]
     :or {tools? true}}]
   (require-tool! tool)
   (let [cwd (or cwd (tool-util/cwd))
@@ -1952,6 +1984,7 @@
      :tools? tools?
      :surface surface
      :source-namespaces (or source-namespaces {})
+     :disabled-verbs (set disabled-verbs)
      :session-recall session-recall
      :abort abort
      :emitted emitted

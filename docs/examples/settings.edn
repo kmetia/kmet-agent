@@ -27,7 +27,7 @@
  :http-transport :platform
  :shell-path nil
  :shell-command-prefix nil
- ;; scoped resource selection, e.g. {:tools ["-bash"]}; global lists
+ ;; scoped resource selection, e.g. {:tools ["-bash"] :verbs ["-core/read"]}; global lists
  ;; select or modify the defaults, project lists are +name/-name deltas over
  ;; global. See docs/configuration.md#resource-selection. The old
  ;; :default-tools and :enabled-tools keys are ignored.

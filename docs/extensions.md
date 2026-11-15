@@ -113,8 +113,9 @@ ignored there — the composition decides what loads. Discovery feeds
 
 Per-type package filters (`:extensions [...]`) still shape the discovered
 list, but they no longer decide whether an extension loads: compose or
-remove its row. (Skills, prompts and themes use `/config`'s `:resources`
-selection; top-level paths are discovery only.)
+remove its row. (Skills, prompts and an eval source's verbs use `/config`'s
+`:resources` selection; themes use their own setting; top-level paths are
+discovery only.)
 
 An extension that was enabled only through settings after an upgrade is not
 migrated automatically: `kmet plugins` lists it unchecked, so compose it once.
@@ -647,7 +648,12 @@ manifest lists without invoking the source; the source id alone is listed when
 it is omitted. The source id is also the public call alias (`license/add!`);
 it must not collide with the sandbox's standard aliases, namespaces, or eval
 verbs. Put the verbs meant as `<id>/verb` directly under `ext.<id>`; a verb in
-a subnamespace keeps its dotted path (`license.internal/verb`).
+a subnamespace keeps its dotted path (`license.internal/verb`). `/config`
+lists each contributed verb under the extension that registered the source,
+labelled with the eval call surface (`verb/license/add!` under
+`ext/<extension>`), and persists the canonical source key
+`ext.license/add!`; a disabled verb stays bound as an error stub and is omitted
+from the help listings.
 
 - Values must live under `ext.<source-id>` or a subnamespace of it:
   `ext.license`, `ext.license.internal`. The model's `user`, the system

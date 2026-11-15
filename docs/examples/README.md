@@ -57,7 +57,7 @@ global agent directory can be changed with `KMET_CODING_AGENT_DIR`.
 | `:http-transport` | `:platform` uses the built-in HTTP client where possible and curl for proxy cases; `:curl` sends all requests through curl. |
 | `:terminal`, `:images` | Inline-image display, image width, clear-on-shrink, and whether images are sent to providers. |
 | `:shell-path`, `:shell-command-prefix` | Custom bash executable and a command prepended to every bash command (cmd.exe joins it with `&`). |
-| `:resources` | Scoped tool/skill/prompt selection; global lists select or modify defaults, project lists are `+name`/`-name` deltas. See [Resource selection](../configuration.md#resource-selection). |
+| `:resources` | Scoped tool/skill/prompt/eval-verb selection; global lists select or modify defaults, project lists are `+name`/`-name` deltas. See [Resource selection](../configuration.md#resource-selection). |
 | `:system-prompt`, `:append-system-prompt` | Replace or extend the system prompt. A value naming an existing file is read as that file's contents. |
 
 See the [configuration guide](../configuration.md)

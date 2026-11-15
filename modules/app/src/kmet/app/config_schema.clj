@@ -8,7 +8,8 @@
   [:map {:closed false}
    [:tools {:optional true} [:or :nil [:sequential :string]]]
    [:skills {:optional true} [:or :nil [:sequential :string]]]
-   [:prompts {:optional true} [:or :nil [:sequential :string]]]])
+   [:prompts {:optional true} [:or :nil [:sequential :string]]]
+   [:verbs {:optional true} [:or :nil [:sequential :string]]]])
 
 (def Config
   [:map {:closed false}

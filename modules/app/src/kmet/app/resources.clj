@@ -1,15 +1,19 @@
 (ns kmet.app.resources
-  "Resource selection: which available tools, skills and prompt templates a
-   consumer uses.
+  "Resource selection: which available tools, skills, prompt templates and
+   eval verbs a consumer uses.
 
-   A resource is available when a provider mounted it in the current project
-   run (a tool row or extension registration); selection is the settings
-   layer's choice over that set. A consumer uses a resource only when it is
-   both: `enabled?` is `(and (available? kind name) (selected? kind name))`.
+   A resource is available when a provider offers it in the current project
+   run (a tool row, an extension registration, or an eval source's current
+   values); selection is the settings layer's choice over that set. A
+   consumer uses a resource only when it is both: `enabled?` is
+   `(and (available? kind name) (selected? kind name))`.
 
    **The store is scoped.** The global settings map carries enable/disable
-   entries per type (`:resources {:tools [...] :skills [...] :prompts [...]}`);
-   the project map carries only `+name`/`-name` deltas over it. `selected?`
+   entries per type (`:resources {:tools [...] :skills [...] :prompts [...]
+   :verbs [...]}`); verbs whose availability comes from outside the app's
+   registries (the eval sandbox's built-in and source verbs) use the same
+   selection rules through `external-catalog`/`external-unavailable` below.
+   The project map carries only `+name`/`-name` deltas over it. `selected?`
    resolves global first, then applies the project's last entry for a name:
 
      defaults -> global selection -> project delta
@@ -38,9 +42,11 @@
    global again.
 
    The service value is a map of fns (`(catalog kind)`, `(enabled-names kind)`,
-   `(set-project! kind name state)`, …); the kind is `:tool`, `:skill` or
-   `:prompt`, and its settings key is the plural (`:tools`, `:skills`,
-   `:prompts`)."
+   `(set-project! kind name state)`, …); the kind is `:tool`, `:skill`,
+   `:prompt` or `:verb`, and its settings key is the plural (`:tools`,
+   `:skills`, `:prompts`, `:verbs`). A verb's availability is supplied by the
+   caller (`external-catalog`/`external-unavailable`), because the sandbox
+   resolves sources per cwd."
   (:require [kmet.app.config :as cfg]
             [kmet.app.registry :as registry]
             [kmet.app.tools.registry :as tools]
@@ -50,10 +56,11 @@
 ;; ─── Types and settings keys ───────────────────────────────────────────────
 
 (def ^:private type-info
-  "Per-type settings key and registry tag."
+  "Per-type settings key and, for the registry-backed types, registry tag."
   {:tool {:settings :tools :tag :kmet/tool}
    :skill {:settings :skills :tag :kmet/skill}
-   :prompt {:settings :prompts :tag :kmet/prompt}})
+   :prompt {:settings :prompts :tag :kmet/prompt}
+   :verb {:settings :verbs}})
 
 (def types
   "The selectable resource types."
@@ -197,7 +204,7 @@
   [kind name]
   (case kind
     :tool (not (tools/default-off-tool? name))
-    (:skill :prompt) true))
+    (:skill :prompt :verb) true))
 
 (defn- default-names
   "The names of UNIVERSE selected by default."
@@ -223,7 +230,8 @@
   (case kind
     :tool tools
     :skill skills
-    :prompt prompts))
+    :prompt prompts
+    :verb nil))
 
 (defn- available-names
   "The names the providers mounted in this run make available for KIND, in
@@ -233,7 +241,8 @@
     (case kind
       :tool (vec (keys (tools/get-all-tools handle)))
       (:skill :prompt)
-      (mapv first (registry/effective-entries handle (registry-tag kind))))))
+      (mapv first (registry/effective-entries handle (registry-tag kind)))
+      :verb [])))
 
 (defn- extension-owner?
   "True for an extension's owner path, `[:app :extensions <name>]`."
@@ -243,23 +252,29 @@
        (= :extensions (second owner))
        (>= (count owner) 3)))
 
+(defn extension-provider
+  "Provider metadata for an extension OWNER path, or nil when OWNER is not an
+   extension owner. `/config` uses this to group an eval source's verbs by the
+   extension that registered the source."
+  [owner]
+  (when (extension-owner? owner)
+    {:kind :extension
+     :id (keyword "ext" (str (nth owner 2)))}))
+
 (defn- provider-of
   "The provider metadata for OWNER: an extension id, a built-in tool row id, or
    the app owner path."
   [owner]
-  (cond
-    (extension-owner? owner)
-    {:kind :extension
-     :id (keyword "ext" (str (nth owner 2)))}
+  (or (extension-provider owner)
+      (cond
+        (and (keyword? owner) (= "tool" (namespace owner)))
+        {:kind :builtin :id owner}
 
-    (and (keyword? owner) (= "tool" (namespace owner)))
-    {:kind :builtin :id owner}
+        (some? owner)
+        {:kind :app :id owner}
 
-    (some? owner)
-    {:kind :app :id owner}
-
-    :else
-    {:kind :app :id nil}))
+        :else
+        {:kind :app :id nil})))
 
 (defn- owner-of
   "The owner that holds VALUE, the effective registration of NAME under TAG;
@@ -299,27 +314,31 @@
 (defn- snapshot
   "The current selection view for KIND: availability, the resolved global
    vector and set, the project override map, and the names each scope's raw
-   entry list mentions."
-  [handles kind]
-  (let [{:keys [global project]} (cfg/read-resource-settings)
-        global-list (global-entries global kind)
-        project-list (raw-entries project kind)
-        available (available-names handles kind)
-        universe (vec (distinct (concat available
-                                        (stored-entry-names global-list)
-                                        (stored-entry-names
-                                         (when (valid-project-list? project-list)
-                                           project-list)))))
-        global-vector (resolve-global kind global-list universe)]
-    {:available available
-     :available-set (set available)
-     :global-set (set global-vector)
-     :global-stored (vec (distinct (stored-entry-names global-list)))
-     :project-stored (vec (distinct
-                           (stored-entry-names
-                            (when (valid-project-list? project-list)
-                              project-list))))
-     :project (project-states kind project-list)}))
+   entry list mentions. OPTS may supply `:available` (an external provider's
+   names, for :verb) and `:extra` (names the caller is asking about, so a
+   default-on type resolves them without a catalog)."
+  ([handles kind] (snapshot handles kind nil))
+  ([handles kind {:keys [available extra]}]
+   (let [{:keys [global project]} (cfg/read-resource-settings)
+         global-list (global-entries global kind)
+         project-list (raw-entries project kind)
+         available (vec (or available (available-names handles kind)))
+         universe (vec (distinct (concat available
+                                         extra
+                                         (stored-entry-names global-list)
+                                         (stored-entry-names
+                                          (when (valid-project-list? project-list)
+                                            project-list)))))
+         global-vector (resolve-global kind global-list universe)]
+     {:available available
+      :available-set (set available)
+      :global-set (set global-vector)
+      :global-stored (vec (distinct (stored-entry-names global-list)))
+      :project-stored (vec (distinct
+                            (stored-entry-names
+                             (when (valid-project-list? project-list)
+                               project-list))))
+      :project (project-states kind project-list)})))
 
 (defn- selected-in
   "The effective persisted selection in SNAPSHOT for NAME, ignoring
@@ -334,17 +353,20 @@
   "One row for KIND's NAME in SNAP. AVAILABLE? tells whether a mounted
    provider offers it; PROVIDER is the provider metadata or the unavailable
    marker."
-  [snap kind name provider available?]
-  (let [selected? (selected-in snap name)]
-    {:kind :resource
-     :type kind
-     :name name
-     :available? available?
-     :provider provider
-     :global? (contains? (:global-set snap) name)
-     :project-state (get (:project snap) name :inherit)
-     :selected? selected?
-     :enabled? (and available? selected?)}))
+  ([snap kind name provider available?]
+   (resource-row snap kind name provider available? nil))
+  ([snap kind name provider available? display-name]
+   (let [selected? (selected-in snap name)]
+     (cond-> {:kind :resource
+              :type kind
+              :name name
+              :available? available?
+              :provider provider
+              :global? (contains? (:global-set snap) name)
+              :project-state (get (:project snap) name :inherit)
+              :selected? selected?
+              :enabled? (and available? selected?)}
+       display-name (assoc :display-name display-name)))))
 
 (defn- catalog-rows
   "The available rows for KIND with both scope states and the effective
@@ -364,17 +386,41 @@
   "The rows for KIND's stored entries in SCOPE that no mounted provider
    offers, sorted by name. A project list that is not a valid delta is
    already ignored by `project-states`, so it contributes none."
-  [handles kind scope]
-  (let [{:keys [available-set global-stored project-stored] :as snap}
-        (snapshot handles kind)
-        names (remove available-set
-                      (if (= scope :global) global-stored project-stored))]
-    (->> names
-         (map (fn [name]
-                (resource-row snap kind name
-                              {:kind :unavailable :id nil} false)))
+  ([handles kind scope] (unavailable-rows handles kind scope nil))
+  ([handles kind scope opts]
+   (let [{:keys [available-set global-stored project-stored] :as snap}
+         (snapshot handles kind opts)
+         names (remove available-set
+                       (if (= scope :global) global-stored project-stored))]
+     (->> names
+          (map (fn [name]
+                 (resource-row snap kind name
+                               {:kind :unavailable :id nil} false)))
+          (sort-by :name)
+          vec))))
+
+(defn external-catalog
+  "Available rows for KIND over ENTRIES — maps with `:name`, optional
+   `:display-name` and `:provider` — for a type whose availability is resolved
+   outside the app's registries (`:verb`). Selection and both scope states are
+   read exactly as for the registry-backed types."
+  [kind entries]
+  (check-kind kind)
+  (let [entries (vec entries)
+        snap (snapshot nil kind {:available (mapv :name entries)})]
+    (->> entries
+         (map (fn [{:keys [name provider display-name]}]
+                (resource-row snap kind name provider true display-name)))
          (sort-by :name)
          vec)))
+
+(defn external-unavailable
+  "Stored-but-unavailable rows for KIND in SCOPE, given the AVAILABLE names a
+   caller resolved for this run."
+  [kind scope available]
+  (check-kind kind)
+  (check-scope scope)
+  (unavailable-rows nil kind scope {:available (vec available)}))
 
 ;; ─── Writers ───────────────────────────────────────────────────────────────
 
@@ -488,7 +534,10 @@
   "The `:resources` service value over the live registry HANDLES
    (`{:tools :skills :prompts}`). Every read re-reads the settings files and
    the registries, so a project layer or a provider mounted later is visible
-   without a restart.
+   without a restart. `:verb` availability has no registry provider; `/config`
+   builds its rows with `external-catalog`, and the eval sandbox asks
+   `selected?`/`selected-names`, which resolve the queried names against the
+   default-on rule.
 
    Keys:
      (catalog kind)                  ; available rows, both scope states
@@ -496,13 +545,20 @@
      (global-selected? kind name)    ; the global list selects NAME
      (project-state kind name)       ; :inherit | :enabled | :disabled
      (selected? kind name)           ; effective persisted selection
+     (selected-names kind names)     ; the selected subset of NAMES
      (enabled? kind name)            ; available and selected
      (enabled-names kind)            ; available and selected names
      (unavailable kind scope)        ; stored entries no provider offers
      (set-global! kind name enabled-or-:inherit)
      (set-project! kind name state)"
   [handles]
-  (letfn [(snap [kind] (snapshot handles kind))]
+  (letfn [(snap [kind] (snapshot handles kind))
+          (snap-for [kind names]
+            (if (= kind :verb)
+              ;; no static provider: include the queried names so a missing
+              ;; global list resolves against the default (verbs are on)
+              (snapshot handles kind {:extra names})
+              (snap kind)))]
     {:catalog
      (fn [kind]
        (check-kind kind)
@@ -516,7 +572,7 @@
      :global-selected?
      (fn [kind name]
        (check-kind kind)
-       (contains? (:global-set (snap kind)) name))
+       (contains? (:global-set (snap-for kind [name])) name))
 
      :project-state
      (fn [kind name]
@@ -526,7 +582,15 @@
      :selected?
      (fn [kind name]
        (check-kind kind)
-       (selected-in (snap kind) name))
+       (selected-in (snap-for kind [name]) name))
+
+     :selected-names
+     (fn [kind names]
+       (check-kind kind)
+       (let [names (vec names)
+             ;; one settings read for a whole catalog or source
+             state (snap-for kind names)]
+         (into #{} (filter #(selected-in state %)) names)))
 
      :enabled?
      (fn [kind name]

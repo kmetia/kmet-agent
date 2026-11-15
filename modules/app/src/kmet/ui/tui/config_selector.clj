@@ -4,8 +4,10 @@
    Rows are the available resources of the current project run, plus the
    stored entries no provider offers any more (a dimmed `Stored, unavailable`
    group; Space forgets one), grouped by the extension that provides them
-   (built-in tools and app resources have their own groups) and labelled
-   `type/name`. The screen starts in project scope: project scope cycles a
+   (built-in tools, built-in verbs and app resources have their own groups)
+   and labelled `type/name`; a verb's call surface is shown inside the
+   extension that registered its source (`verb/mcp/search` under
+   `ext/mcp-adapter`, `verb/clj/edit-form` under `Built-in verbs`). The screen starts in project scope: project scope cycles a
    resource's delta state (inherit -> enabled -> disabled -> inherit) and dims
    inherited rows; Tab switches to global scope, which toggles the persistent
    selection, the same layout as `kmet plugins`. A write persists through the
@@ -17,6 +19,7 @@
             [kmet.app.resources :as resources]
             [kmet.app.session.runtime :as runtime]
             [kmet.libs.theme :as th]
+            [kmet.srce.core :as srce]
             [kmet.tui.core :as tui]
             [kmet.tui.utils :as u]
             [kmet.ui.tui.dock :as dock]
@@ -28,24 +31,37 @@
    provider/scope fields."
   [{:keys [type] resource-name :name :as resource}]
   (assoc resource :id [type resource-name]
-         :label (str (name type) "/" resource-name)))
+         :label (str (name type) "/"
+                     (or (:display-name resource) resource-name))))
 
 (defn- items
   "Every available resource of every type plus the stored-but-unavailable
-   entries for SCOPE, in display order."
-  [service scope]
-  (vec (mapcat (fn [kind]
-                 (concat (map row ((:catalog service) kind))
-                         (map row ((:unavailable service) kind scope))))
-               [:tool :skill :prompt])))
+   entries for SCOPE, in display order. VERBS is the eval service's
+   name -> {:display-name :provider} catalog; nil leaves the verb rows out."
+  [service scope verbs]
+  (let [verbs (or verbs {})]
+    (vec (concat
+          (mapcat (fn [kind]
+                    (concat (map row ((:catalog service) kind))
+                            (map row ((:unavailable service) kind scope))))
+                  [:tool :skill :prompt])
+          (map row (resources/external-catalog :verb (vals verbs)))
+          (map row (resources/external-unavailable :verb scope (keys verbs)))))))
+
+(defn- verb-catalog
+  "The current eval sandbox's available verbs for ENGINE's cwd, or nil when
+   the composition mounted no :eval service."
+  [engine]
+  (when-let [eval-service (some-> (runtime/agent-ctx engine) (srce/get :eval))]
+    ((:verbs eval-service) {:cwd (runtime/cwd engine)})))
 
 (defn- provider-group
   "The group heading for a resource's provider: its extension id, the
    built-in tool set, the app, or the stored entries no provider offers."
-  [{:keys [provider]}]
+  [{:keys [type provider]}]
   (case (:kind provider)
     :extension (subs (str (:id provider)) 1)
-    :builtin "Built-in tools"
+    :builtin (if (= :verb type) "Built-in verbs" "Built-in tools")
     :app "kmet app"
     :unavailable "Stored, unavailable"
     (str (:kind provider))))
@@ -55,7 +71,7 @@
    app, then stored-unavailable entries."
   [label]
   (case label
-    "Built-in tools" 0
+    ("Built-in tools" "Built-in verbs") 0
     "kmet app" 2
     "Stored, unavailable" 3
     1))
@@ -195,7 +211,7 @@
      :size-ref (when tui (tui/tui-terminal-size-ref tui))
      :request-render! (when tui #(tui/tui-request-render tui true))
      :on-close #(close! cs frame-atom)
-     :read (fn [scope] (items service scope))
+     :read (fn [scope] (items service scope (verb-catalog (:engine cs))))
      :groups groups
      :filter-match query-match?
      :item-identity :id

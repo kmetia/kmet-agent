@@ -147,17 +147,18 @@ content. CLI flags `--system-prompt <txt>` and `--append-system-prompt <txt>`
 
 ## Resource selection
 
-Tools, skills and prompt templates share one persisted selection under
-`:resources`; a resource is identified by its type and exact registry name.
+Tools, skills, prompt templates and eval verbs share one persisted selection
+under `:resources`; a resource is identified by its type and exact name.
 Settings keep one list per type:
 
 ```edn
 ;; ~/.kmet/agent/settings.edn
 {:resources {:tools  ["-bash"]
-             :skills ["-clojure-edit"]}}
+             :skills ["-clojure-edit"]
+             :verbs  ["-core/read"]}}
 
 ;; .kmet/settings.edn
-{:resources {:tools ["+bash"]}}
+{:resources {:verbs ["+core/read"]}}
 ```
 
 The global list selects or modifies the defaults; the project list is a delta
@@ -189,14 +190,16 @@ defaults -> global selection -> project delta -> /tools session override
 
 The `/tools` override applies to tools only.
 
-Defaults: skills and prompt templates are on. A built-in tool is on unless
-its row carries `:default-enabled? false` (`codemode` and `eval`); extension
-tools are on. A modifier-only or unset selection never turns `codemode` or
-`eval` on; a plain name or `+name` does.
+Defaults: skills, prompt templates and verbs are on. A built-in tool is on
+unless its row carries `:default-enabled? false` (`codemode` and `eval`);
+extension tools are on. A modifier-only or unset selection never turns
+`codemode` or `eval` on; a plain name or `+name` does.
 
 Availability is separate from selection. A resource is available when a
 provider mounted and active in the current project run registers it (a tool
-row, an extension, a package or a discovery path). A consumer uses it only
+row, an extension, a package or a discovery path). An eval verb is available
+when the sandbox contributes it: every built-in `core`, `clj` and `eval` verb,
+and every value a mounted eval source returns for the current cwd. A consumer uses it only
 when it is both available and selected. `/config` lists available rows, plus a
 dimmed `Stored, unavailable` group for the stored entries no mounted provider
 offers (a removed tool row, an uninstalled extension, a package-filtered
@@ -219,16 +222,23 @@ The three surfaces are:
 - `/config` — live selector for the persisted `:resources` selection over the
   providers available in the current run. Rows are grouped by provider and
   labelled `type/name` (a `:deferred` tool source's tools sit under the
-  extension that registered the source); it starts in project scope, and Tab
-  switches between project and global. Project rows cycle
+  extension that registered the source). A verb row uses the call surface
+  under its extension group — `verb/mcp/search` under `ext/mcp-adapter`,
+  `verb/read` under `Built-in verbs` (a clj verb keeps its namespace,
+  `verb/clj/edit-form`) — while settings store the canonical key
+  (`ext.mcp/search`, `core/read`) so
+  two sources cannot collide. It starts in project scope, and Tab switches
+  between project and global. Project rows cycle
   inherit/enabled/disabled and name the inherited global state
   (`inherited global (enabled)` or `(disabled)`); global rows toggle
   enabled/disabled. Stored entries whose provider is unavailable this
   run appear dimmed in `Stored, unavailable`; Space forgets them from the
   current scope. A tool write clears the `/tools` session override and
   refreshes the live tool set; a skill write rebuilds the prompt;
-  prompt-template lookup reads the selection live. An unchanged write is a
-  no-op, and a write does not remount providers or re-run discovery.
+  prompt-template lookup reads the selection live; a verb write advances the
+  eval sandbox's selection generation, so the next eval call rebuilds its
+  environment and the new surface applies. An unchanged write is a no-op, and
+  a write does not remount providers or re-run discovery.
 - `/tools` — session-only absolute tool set. It never writes settings and
   disappears with the session. `/reload` does not clear the override; a
   `/config` tool write or a session switch does.
@@ -353,6 +363,35 @@ it was recorded (`tool_addition`/`tool_removal`, `additional_tools`, or a
 tool-bearing system message), so the array itself is never re-sent and the
 message list stays a growing prefix. Every other wire drops the markers and
 re-sends the current array; that is a fallback, not a regression.
+
+## Eval verbs
+
+`/config` also lists the callable names of the eval sandbox. A built-in verb is
+shown under `Built-in verbs` with the name the eval tool uses (`verb/read`,
+`verb/edit-form`, `verb/help`; a `clj` verb keeps its namespace,
+`verb/clj/edit-form`); a source verb is shown under the extension that
+registered the source, labelled with the eval call surface
+(`verb/mcp/search` under `ext/mcp-adapter` for the `:mcp` eval source). A
+subnamespace keeps its dotted path (`ext.license.internal/add!` shows as
+`verb/license.internal/add!`). Settings store the canonical source key
+(`core/read`, `clj/edit-form`, `eval/help`, `ext.mcp/search`), so two sources
+that contribute the same simple name remain distinct.
+
+Only the built-in verbs and the verbs a registered eval source contributes are
+selectable. Saved definitions — the eval library's global, cwd and session-only
+entries — are not: they belong to the user's library and are managed with
+`save`, `forget` and `move`. `/eval` command words (`list`, `help`,
+`sources`, …) and the `tools` namespace are a different vocabulary and are not
+part of this selection.
+
+A source resolves per cwd and may fail or contribute nothing; its verbs then
+fall under `Stored, unavailable` until the source returns. A disabled built-in
+or source verb stays bound in the SCI namespace as an error stub, so existing
+preludes and stored definitions still compile; `(help)`, `(index)` and
+`(sources)` omit it, `(describe)` reports that it is disabled, and a call fails
+with a directed error. Disabling `core/read`, for example, does not remove the
+unqualified `read` refer from the call surface — both spellings hit the same
+stub.
 
 ## HTTP and reload
 

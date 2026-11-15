@@ -176,8 +176,10 @@ the process install — which is why a connection must not take the slot.
   [`srce.md`](../../../../modules/srce/src/kmet/srce/srce.md).
 - A second resource-selection surface: `:resources` (global list plus project
   delta) is the only persisted selection, `/tools` is the session override and
-  `kmet plugins` is composition. Per-command, per-eval-source and per-theme
-  selection, project-scope absolute lists, live composition recomposition and
-  a generic extension API for persisted selection stay unbuilt; there is no
-  offline selection (an unavailable stored entry can be forgotten, not
-  edited), and MCP tools are `:sandbox` sources, not `/config` rows.
+  `kmet plugins` is composition. Individual eval verbs are selectable there
+  (`:verbs`, built-in and source-contributed); per-command, whole-eval-source
+  and per-theme selection, project-scope absolute lists, live composition
+  recomposition and a generic extension API for persisted selection stay
+  unbuilt; there is no offline selection (an unavailable stored entry can be
+  forgotten, not edited), and MCP tools are `:sandbox` sources, not `/config`
+  rows (an MCP eval source's verbs are).

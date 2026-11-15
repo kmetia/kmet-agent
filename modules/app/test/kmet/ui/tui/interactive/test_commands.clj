@@ -120,7 +120,7 @@
      {:name "config" :description "stale app registration"
       :handler (fn [_ _] nil)})
     ((var builtins/register-builtin-commands!) cfg/default-config)
-    (t/is (= "Select tools, skills, and prompts for global and project scope"
+    (t/is (= "Select tools, skills, prompts, and eval verbs for global and project scope"
              (:description (commands/find-command "config")))
           "the builtin claims the name over a stale registration")))
 

@@ -17,11 +17,12 @@
   "A test agent: tool table, `:eval` service, and one session. OPTS may pin
    `:cwd` and `:agent-dir`, which a restart or a second session reuses."
   ([] (eval-ctx {}))
-  ([{:keys [cwd agent-dir session]}]
+  ([{:keys [cwd agent-dir session resources]}]
    (let [cwd (or cwd (test-tmp/temp-dir! "eval-project-"))
          agent-dir (or agent-dir (test-tmp/temp-dir! "eval-agent-"))
          ctx (srce/root {:name :test-eval})
          handle (tu/tools-service! ctx)
+         _ (when resources (srce/provide! ctx :resources resources))
          service (eval-service/value ctx {:agent-dir agent-dir})
          sess (or session
                   (session/create-session (test-tmp/temp-dir! "eval-session-")
