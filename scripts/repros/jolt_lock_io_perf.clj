@@ -1,6 +1,6 @@
 (ns jolt-lock-io-perf
-  "Repro for jolt#1654: lock + blocking file I/O from many futures is
-   ~7-11x slower than the JVM on Jolt.
+  "Repro for jolt#1654 (fixed by 7dae6ed): lock + blocking file I/O from
+   many futures was ~7-11x slower than the JVM on Jolt.
 
    See scripts/repros/jolt_lock_io_perf.md for the ticket text.
 

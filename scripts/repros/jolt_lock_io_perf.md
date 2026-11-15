@@ -1,6 +1,11 @@
 # Lock + blocking file I/O from many futures is ~7–11× slower than the JVM on Jolt
 
-Filed as [jolt#1654](https://github.com/jolt-lang/jolt/issues/1654).
+Filed as [jolt#1654](https://github.com/jolt-lang/jolt/issues/1654) on 2026-11-13.
+Fixed by [`7dae6ed`](https://github.com/jolt-lang/jolt/commit/7dae6ede26e613b44ffd8df62988923d8178ed0a)
+on 2026-11-15: a monitor release signals one waiter instead of broadcasting
+to all. Verified on `v0.8.27-140-g9cf28bdb` (Linux aarch64): across six runs
+the locked append tracks the no-lock case (best run: 70 ms vs 46 ms min)
+instead of the 7–11× outlier; kept as the repro record.
 
 ## Summary
 
