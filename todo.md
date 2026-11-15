@@ -8,8 +8,9 @@ Status: reviewed; decisions recorded, implementation not started.
    It must be host-side, not a saved library definition: the eval sandbox will
    no longer expose `kmet.libs.*`, so a saved definition could not require the
    backend.
-2. **grep context** — add `:before`, `:after` and `:context`; additive output,
-   defaults unchanged.
+2. **grep context** — mirror pi's grep tool: one `:context N` option (lines
+   before and after each match; default 0), no separate `:before`/`:after`.
+   Matches still count toward `:max`; context lines do not. Defaults unchanged.
 3. **glob :stat** — add `:stat true`; additive `:entries`, defaults unchanged.
 4. **read prompt line** — say that `read` takes an absolute path argument,
    `grep`/`glob` take an absolute `:path`, and `read` with `:as :lines` returns
@@ -34,9 +35,11 @@ Status: reviewed; decisions recorded, implementation not started.
 10. **Boundary errors** — keep the error contract (`:type :script/unreadable`,
     one directed message), but update the surface facts it names; do not expand
     the namespace surface.
-11. **fetch lifecycle** — default `:timeout` 120 s (proposed) and pass the
-    call's cancel signal; curl aborts, the native transport is bounded by the
-    timeout. JSON error responses follow the 2xx/JSON-content-type rule in A.
+11. **fetch lifecycle (proposed)** — resolve `:timeout` as per-call > positive agent
+    `:http-total-timeout-ms` > 120 s script default; do not reuse
+    `:http-idle-timeout-ms` as a total. Pass the call's cancel signal; curl
+    aborts, the native transport is bounded by the timeout. JSON error
+    responses follow the 2xx/JSON-content-type rule in A.
 
 ## Review findings / risks
 
@@ -65,11 +68,12 @@ Status: reviewed; decisions recorded, implementation not started.
   from `require-host-namespaces!` while making `fetch` lazy can leave
   `clojure.data.json` uncopied when `alias-prelude` requires it. Require it
   explicitly (top-level in `script.cljc` or in `require-host-namespaces!`).
-- **Additive option shapes.** `grep` context keys appear only when requested;
-  `glob :stat` adds `:entries` without changing `:paths`. Default results must
-  stay byte-compatible.
+- **Additive option shapes.** `grep` keeps `:matches` unchanged and adds
+  `:lines` only when `:context > 0`; `glob :stat` adds `:entries` without
+  changing `:paths`. Default results must stay byte-compatible.
 - **Prompt and catalog gates.** The planned alias line, fetch entry and longer
-  read guideline exceed the 1300-char prompt test; decide trim vs cap. The eval
+  read guideline exceed the 1300-char prompt target. Keep 1300 as the goal but
+  temporarily allow 1500 in the test; add a follow-up to trim back. The eval
   description change also requires regenerating `docs/composition.md`.
 - **Test fallout is wider than the plan says.** `test_codemode.clj:271` uses
   `json/generate-string`; `test_eval_library.clj:304` defines a helper using
@@ -94,9 +98,13 @@ Status: reviewed; decisions recorded, implementation not started.
     overwrite an explicit `:content-type`/`"Content-Type"`.
   - Return `{:status :headers :body}`; pass through `:follow-redirects` and
     `:timeout` (seconds → ms), and `:method`, `:headers`, `:body`.
-  - Default `:timeout` is explicit (proposed 120 s) rather than unbounded, so a
-    native request cannot outlive the script deadline indefinitely. Document the
-    value and the curl/native difference.
+  - Timeout resolution: per-call `:timeout`; else the agent's positive
+    `:http-total-timeout-ms`; else the script default 120 s. Do not use
+    `:http-idle-timeout-ms` as a total — it is a per-byte stream idle bound,
+    and `:http-total-timeout-ms` defaults to 0 (disabled). Threading the agent
+    setting into the eval/codemode call state is a small wiring change; if not
+    wired in v1, keep the 120 s script default and document it. Document the
+    curl/native difference.
   - Cancellation: pass `(:cancelled *call-state*)` to `kmet.libs.http/request`
     as `:signal`; it aborts the curl transport. The native transport cannot be
     interrupted mid-request, so the timeout is the bound there.
@@ -104,6 +112,9 @@ Status: reviewed; decisions recorded, implementation not started.
     host (top-level in `script.cljc` or lazily in `fetch`) and make sure
     `clojure.data.json` is loaded before `base-namespaces` copies it; the alias
     prelude cannot depend on an incidental transitive load.
+  - If the app setting is honored, thread `:http-total-timeout-ms` into the
+    eval/codemode script state and test nil/0/positive values; do not read the
+    config from the sandbox.
 - [ ] Add `fetch` to `core-verb-vars`, `core-refer-verbs` and `core-summary`;
       update the arglists metadata.
 - [ ] Add `(fetch "url" {...})` to the Verbs line in
@@ -128,26 +139,31 @@ Status: reviewed; decisions recorded, implementation not started.
       redefine it to call `fetch` with `:as :json` and `:throw? true` (the
       current wrapper throws on HTTP >= 400), keep the GitHub `Accept` and
       `User-Agent` headers, then `select-keys` the summary fields; verify
-      `(library)` and a fresh-session load. Drop it if fetch makes the wrapper
-      unnecessary. This file is user state under `~/.kmet/agent`, not a repo
-      file.
+      `(library)` and a fresh-session load. Migrate it; do not drop it. This
+      file is user state under `~/.kmet/agent`, not a repo file.
 
 ### B. grep context
 - [ ] `modules/app/src/kmet/app/tools/file_search.clj`: add non-negative
-      `:before`, `:after`, `:context`; `:context N` fills both, explicit
-      `:before`/`:after` win. Define zero vs absent, invalid values, and the
-      ordering of context lines.
-- [ ] Emit per-match context only when requested:
-      `{:path :line :text :before [{:line :text} ...] :after [...]}`; clip at
-      file boundaries; do not add empty keys by default. Decide whether a
-      requested context at a boundary emits an empty vector or omits the key.
+      `:context N` only, mirroring pi's grep tool; default 0/nil means no
+      context. Do not add `:before`/`:after`.
+- [ ] Shape: keep `:matches` as match-only entries and add `:lines` only when
+      `:context > 0`, ordered by file/line and formatted exactly like the grep
+      tool — `path:line: text` for matches and `path-line- text` for context;
+      paths keep the verb's existing display form. Once `:max` is reached, a
+      match inside the last allowed match's trailing context is emitted as
+      context. Reject text-only: eval verbs are values-first, and scripts need
+      to filter and count matches; `:lines` gives the model the grep-tool
+      rendering without losing the structured result.
 - [ ] `:max` still limits matches, not context lines; `:truncated?` remains
-      match-count based. Document the result-size multiplication.
+      match-count based; keep the last allowed match's trailing context.
+      Document the result-size multiplication.
 - [ ] Extract a `context-lines` helper so `grep` stays inside the CC budget.
 - [ ] Update the `grep` docstring and `grep-verb` `:arglists` in `script.cljc`.
-- [ ] Tests in `modules/app/test/kmet/app/tools/test_file_search.clj`:
-      before/after/context, zero/explicit options, boundaries, adjacent
-      matches, `:max`, `:glob` and `:exclude`, binary skip unchanged.
+- [ ] Tests in `modules/app/test/kmet/app/tools/test_file_search.clj`, mirroring
+      pi's `grep-operations.test.ts`: `context 1` produces the expected
+      before/match/after lines; default shape unchanged; boundaries; after
+      `:max`, a match inside the last allowed match's trailing context is
+      context; `:glob`/`:exclude`; binary skip unchanged.
 
 ### C. glob :stat
 - [ ] `modules/app/src/kmet/app/tools/file_search.clj`: add `:stat` boolean.
@@ -239,10 +255,10 @@ Status: reviewed; decisions recorded, implementation not started.
 - [ ] Update `modules/app/src/kmet/app/tools/codemode.cljc` (description and
       prompt guidelines) for the alias change and `fetch`; codemode has no
       `(help)` namespace, so the prompt is the only discovery surface.
-- [ ] Keep the assembled eval prompt within
-      `modules/app/test/kmet/app/test_eval.clj:291` (1300 chars) by trimming the
-      description, or raise the cap there with a stated reason. Re-check the
-      index cap at `test_eval_interface.clj:312` (4600).
+- [ ] Keep 1300 chars as the eval-prompt goal; temporarily raise
+      `modules/app/test/kmet/app/test_eval.clj:291` to 1500 so the alias/fetch
+      work can land, and add a follow-up to trim back. Re-check the index cap at
+      `test_eval_interface.clj:312` (4600).
 - [ ] Verify `(help :core)` and `(help :surface)` pick up the new verb, alias
       target and removed kmet.libs line from `script.cljc`.
 
@@ -270,11 +286,8 @@ Status: reviewed; decisions recorded, implementation not started.
         `github-issue-summary`.
 
 ## Open questions
-- **fetch default**: `:throw? false` (curl-like) vs `true` (kmet.libs.http
-  default). Proposed false; the github wrapper migration explicitly uses
-  `:throw? true`.
-- **Context/stat shapes**: per-match `:before`/`:after` and additive `:entries`;
-  confirm.
-- **Prompt budget**: trim the eval description to stay under 1300 chars, or
-  raise the test cap. Trimming is preferred.
-- **github-issue-summary**: migrate (proposed) or drop now that fetch exists.
+- **fetch timeout**: resolution is per-call `:timeout` > positive agent
+  `:http-total-timeout-ms` > 120 s script default. Confirm whether v1 wires the
+  agent setting or ships the script default first.
+- **Grep validation**: reject negative/non-integer `:context` with
+  `:script/bad-argument`; 0/nil means no context.
