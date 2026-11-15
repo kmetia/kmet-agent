@@ -35,6 +35,12 @@
   (testing "deps.edn :jolt/build :embed is the manifest embed list"
     (is (= (modules/embed-paths) (get-in (read-edn "deps.edn") [:jolt/build :embed])))))
 
+(deftest deps-edn-includes-runtime-only-host-namespaces
+  (testing "deps.edn :jolt/build :include bakes what the script hosts require at runtime"
+    (let [includes (set (get-in (read-edn "deps.edn") [:jolt/build :include]))]
+      (doseq [ns '[clojure.core.async babashka.cli babashka.tasks]]
+        (is (contains? includes ns) (str ns " is baked into a built image"))))))
+
 (deftest dependencies-edn-point-at-manifest-modules
   (testing "every module has a deps.edn whose :paths is the module layout"
     (doseq [mod (modules/modules)]

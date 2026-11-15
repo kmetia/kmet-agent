@@ -38,12 +38,14 @@
  ;; the same path in a binary as in a checkout. A
  ;; missing root embeds nothing — the runtime then offers no bundled set.
  :jolt/build {:embed ["modules/reakt/src" "modules/hikap/src" "modules/libs/src" "modules/tui/src" "modules/ai/src" "modules/loader/src" "modules/srce/src" "modules/app/src" "modules/tk/src" "target/kmet-version" "target/kmet-bundled"]
-               ;; clojure.core.async's overlay (alts!!, mult, …) arrives
-               ;; only through a require, so the static scan cannot see it;
-               ;; without the include a built binary has only the native
-               ;; primitives, and the extension host's runtime require needs
-               ;; the full API (jolt#1628 made that require fail loudly).
-               :include [clojure.core.async]}
+               ;; Runtime-only requires the static scan cannot see. clojure.core.async's
+               ;; overlay (alts!!, mult, …) is loaded by the extension host; babashka.cli
+               ;; and babashka.tasks are loaded by the eval/codemode sandbox
+               ;; (require-host-namespaces!). Without the include a built binary has
+               ;; only the runtime primitives and the first eval/codemode call fails
+               ;; with "Could not locate babashka/cli.jolt" (jolt#1628 made the
+               ;; extension host's miss fail loudly too).
+               :include [clojure.core.async babashka.cli babashka.tasks]}
 
  ;; OpenSSL stays dynamically loaded for run/repl and for the default dist mode
  ;; on Linux (including WSL), macOS, and other non-Windows platforms. Windows
