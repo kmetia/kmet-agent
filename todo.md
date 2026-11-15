@@ -1,1 +1,280 @@
-# Todo
+# Eval verb surface — reviewed proposal
+
+Status: reviewed; decisions recorded, implementation not started.
+
+## Decisions
+
+1. **fetch** — add a built-in `core` verb backed by `kmet.libs.http/request`.
+   It must be host-side, not a saved library definition: the eval sandbox will
+   no longer expose `kmet.libs.*`, so a saved definition could not require the
+   backend.
+2. **grep context** — add `:before`, `:after` and `:context`; additive output,
+   defaults unchanged.
+3. **glob :stat** — add `:stat true`; additive `:entries`, defaults unchanged.
+4. **read prompt line** — say that `read` takes an absolute path argument,
+   `grep`/`glob` take an absolute `:path`, and `read` with `:as :lines` returns
+   `{:n :text}` maps; use them instead of `sed -n`/`nl`/`cat`.
+5. **alias prompt block** — one line listing the pre-bound aliases with targets:
+   fs, str, set, edn, walk, json (`clojure.data.json`), p (`babashka.process`);
+   no require needed.
+6. **json alias** — repoint from `kmet.libs.json` to `clojure.data.json`.
+7. **kmet.libs exposure** — drop all four ports from the shared script sandbox
+   base; extension contexts keep them. Rationale: the ports were the only
+   `kmet.*` namespaces admitted by the sandbox boundary. `json` becomes the
+   standard `clojure.data.json` alias and HTTP becomes the built-in `fetch`
+   verb, so neither needs a project namespace; YAML and Markdown are dropped
+   with no replacement in v1. The result is one boundary rule: host-standard
+   `clojure.*`/`babashka.*`, the fixed bundled set, and built-in verbs — no
+   kmet implementation namespace is require-able from a script.
+8. **process -> p** — keep `p` as the babashka.process alias (current surface);
+   do not add a `process` alias; document `p`. Resolved: keep `p`.
+9. **Shared base** — `eval` and `codemode` both build from the same
+   `script/base-namespaces`, so both lose the ports. Do not scope the filter to
+   eval; the two sandboxes stay identical.
+10. **Boundary errors** — keep the error contract (`:type :script/unreadable`,
+    one directed message), but update the surface facts it names; do not expand
+    the namespace surface.
+11. **fetch lifecycle** — default `:timeout` 120 s (proposed) and pass the
+    call's cancel signal; curl aborts, the native transport is bounded by the
+    timeout. JSON error responses follow the 2xx/JSON-content-type rule in A.
+
+## Review findings / risks
+
+- **fetch vs. dropping kmet.libs.http** is compatible only if fetch is built
+  in. Implement `fetch-verb` in `kmet.app.tools.script`; the host namespace may
+  require `kmet.libs.http`, while the sandbox copy list must not include it.
+- **github-issue-summary will break.** It is a saved global verb using
+  `kmet.libs.http/request` and `kmet.libs.json/parse-string`. Migrate it to
+  `fetch` with `:throw? true` (preserving the current 4xx/5xx throw), keeping
+  the `Accept` and `User-Agent` headers. The file lives under `~/.kmet/agent`,
+  so the migration is user state, not a repo file.
+- **The json repoint is a breaking alias change.** Code using
+  `json/parse-string` or `json/generate-string` breaks; clojure.data.json uses
+  `read-str`/`write-str`. Also: `kmet.libs.json` preserves namespaced keyword
+  keys and disables slash/unicode escaping, while direct data.json does not;
+  the boolean `(parse-string s true)` becomes `(read-str s :key-fn keyword)`.
+  Audit saved definitions, tests and docs.
+- **YAML/Markdown access disappears from the sandbox by decision.** No
+  replacement in v1; extension contexts still expose the ports.
+- **fetch reads the whole body into memory.** The eval result limit bounds the
+  display, not the download; no streaming in v1. Document it.
+- **Keep platform-owned checks.** `system-namespaces`,
+  `reserved-source-aliases` and `reserved-source-keys` still refuse kmet.libs
+  definitions after exposure removal; add `core/fetch` to the last.
+- **The alias backend must be copied.** Removing the `kmet.libs.*` requires
+  from `require-host-namespaces!` while making `fetch` lazy can leave
+  `clojure.data.json` uncopied when `alias-prelude` requires it. Require it
+  explicitly (top-level in `script.cljc` or in `require-host-namespaces!`).
+- **Additive option shapes.** `grep` context keys appear only when requested;
+  `glob :stat` adds `:entries` without changing `:paths`. Default results must
+  stay byte-compatible.
+- **Prompt and catalog gates.** The planned alias line, fetch entry and longer
+  read guideline exceed the 1300-char prompt test; decide trim vs cap. The eval
+  description change also requires regenerating `docs/composition.md`.
+- **Test fallout is wider than the plan says.** `test_codemode.clj:271` uses
+  `json/generate-string`; `test_eval_library.clj:304` defines a helper using
+  `json/parse-string`. Both fail after the alias repoint.
+
+## Tasks
+
+### A. fetch core verb
+- [ ] Add `fetch-verb` to `modules/app/src/kmet/app/tools/script.cljc` beside
+      the other core verbs.
+  - Contract: `(fetch url)` / `(fetch url {:keys [method headers body as throw?
+    timeout follow-redirects]})`.
+  - Defaults: `:method :get`, `:as :string`, `:throw? false`; `:timeout` in
+    seconds, converted to the backend's ms.
+  - `:as :json` parses with `clojure.data.json/read-str` and `:key-fn keyword`;
+    an empty body parses to nil. A parse failure is an explicit script error
+    (`ex-info` with a `:type`); the message names the URL and status, not the
+    whole body. With `:throw? false`, parse only a non-empty body whose status
+    is 2xx or whose content type is JSON; otherwise return the raw string.
+  - A map `:body` is JSON-encoded; set `Content-Type: application/json` when
+    the caller did not set it. Match header names case-insensitively and do not
+    overwrite an explicit `:content-type`/`"Content-Type"`.
+  - Return `{:status :headers :body}`; pass through `:follow-redirects` and
+    `:timeout` (seconds → ms), and `:method`, `:headers`, `:body`.
+  - Default `:timeout` is explicit (proposed 120 s) rather than unbounded, so a
+    native request cannot outlive the script deadline indefinitely. Document the
+    value and the curl/native difference.
+  - Cancellation: pass `(:cancelled *call-state*)` to `kmet.libs.http/request`
+    as `:signal`; it aborts the curl transport. The native transport cannot be
+    interrupted mid-request, so the timeout is the bound there.
+  - Backend: `kmet.libs.http/request`. Require the backend explicitly on the
+    host (top-level in `script.cljc` or lazily in `fetch`) and make sure
+    `clojure.data.json` is loaded before `base-namespaces` copies it; the alias
+    prelude cannot depend on an incidental transitive load.
+- [ ] Add `fetch` to `core-verb-vars`, `core-refer-verbs` and `core-summary`;
+      update the arglists metadata.
+- [ ] Add `(fetch "url" {...})` to the Verbs line in
+      `modules/app/src/kmet/app/eval/tool.clj` and a prompt guideline.
+- [ ] Tests: local HTTP fixture (see the proposal below; no external network).
+      Cover: GET 200 string; 404 with `:throw? false`; `:throw? true` throws;
+      headers; `:as :json`; empty body → nil; parse failure; non-2xx
+      non-JSON body stays raw; POST map body and Content-Type (including
+      caller-supplied); timeout conversion and default via `with-redefs` (a
+      real timeout test is `^:slow`); `:signal` pass-through; `:follow-redirects`
+      pass-through. Reset the HTTP transport in a fixture.
+- [ ] Fixture proposal: extract the one-shot server helpers (`respond`,
+      `read-request`, `start-server`) into `test/kmet/test_http_server.clj`
+      next to `kmet.test-tmp`, make them public, and require that namespace
+      from both `modules/libs/test/kmet/libs/test_http.clj` and the new app
+      fetch tests. Keep the transport-reset fixture local to each test
+      namespace (or move it too if it is identical). This avoids duplicating
+      the server and avoids reaching into another test namespace's private
+      vars.
+- [ ] Migrate the saved `github-issue-summary` after fetch lands (confirmed
+      to exist at `~/.kmet/agent/eval/user/github-issue-summary.clj`):
+      redefine it to call `fetch` with `:as :json` and `:throw? true` (the
+      current wrapper throws on HTTP >= 400), keep the GitHub `Accept` and
+      `User-Agent` headers, then `select-keys` the summary fields; verify
+      `(library)` and a fresh-session load. Drop it if fetch makes the wrapper
+      unnecessary. This file is user state under `~/.kmet/agent`, not a repo
+      file.
+
+### B. grep context
+- [ ] `modules/app/src/kmet/app/tools/file_search.clj`: add non-negative
+      `:before`, `:after`, `:context`; `:context N` fills both, explicit
+      `:before`/`:after` win. Define zero vs absent, invalid values, and the
+      ordering of context lines.
+- [ ] Emit per-match context only when requested:
+      `{:path :line :text :before [{:line :text} ...] :after [...]}`; clip at
+      file boundaries; do not add empty keys by default. Decide whether a
+      requested context at a boundary emits an empty vector or omits the key.
+- [ ] `:max` still limits matches, not context lines; `:truncated?` remains
+      match-count based. Document the result-size multiplication.
+- [ ] Extract a `context-lines` helper so `grep` stays inside the CC budget.
+- [ ] Update the `grep` docstring and `grep-verb` `:arglists` in `script.cljc`.
+- [ ] Tests in `modules/app/test/kmet/app/tools/test_file_search.clj`:
+      before/after/context, zero/explicit options, boundaries, adjacent
+      matches, `:max`, `:glob` and `:exclude`, binary skip unchanged.
+
+### C. glob :stat
+- [ ] `modules/app/src/kmet/app/tools/file_search.clj`: add `:stat` boolean.
+      When true, add `:entries [{:path :size :modified}]` with the same
+      count/order as `:paths`; `:paths` stays strings; `:total` and
+      `:truncated?` unchanged.
+- [ ] Stat only the returned/taken paths; `:modified` in epoch milliseconds;
+      nil on a stat failure; do not fail the listing.
+- [ ] Update the `glob` docstring and `glob-verb` `:arglists` in `script.cljc`.
+- [ ] Tests: default shape unchanged; `:stat` entries, size and modified
+      time; 0-byte file; `:max` and `:truncated?`; no `:entries` without
+      `:stat`; `:entries` order matches `:paths`.
+      - For mtime, set an explicit value aligned to 2 s (for example
+        `2021-01-01T00:00:00Z`) with `fs/set-last-modified-time`, then assert
+        `:modified` is within 2 s of it rather than exact: filesystems differ in
+        timestamp granularity.
+      - Add a `with-redefs` case where `fs/size`/`fs/last-modified-time` throw;
+        assert the listing still succeeds and the stat-failure fields are nil.
+
+### D. json alias and kmet.libs removal
+- [ ] `script.cljc` `standard-aliases`: `["json" 'clojure.data.json]`; keep
+      `["p" 'babashka.process]`.
+- [ ] Remove `script-lib-namespaces`, its clause in `copyable-namespace?`, the
+      `:libs` group in `surface-namespaces`, and the kmet.libs line in
+      `surface-help` (`modules/app/src/kmet/app/eval.clj`). Update the stale
+      docstrings/comments at `script.cljc` (~720-725, 734, 760-766, 841-847,
+      875-880, 942-951).
+- [ ] Remove the four `(require 'kmet.libs...)` lines from
+      `require-host-namespaces!`; require `kmet.libs.http` in the host
+      `script.cljc` for fetch. Add an explicit `(require 'clojure.data.json)`
+      (or an equivalent guaranteed host load) so `alias-prelude` can require
+      it after the copy filter is built.
+- [ ] Update the `namespace-boundary` messages: kmet's own namespaces are
+      excluded; roots are clojure.*, babashka.* and the bundled libs; no
+      kmet.libs mention. Add directed hints for the removed ports
+      (`kmet.libs.json` → "use the json alias"; `kmet.libs.http` → "use
+      fetch"), and change `surface-help`'s "other kmet.* namespaces" to
+      "kmet.* namespaces".
+- [ ] Update `core-summary`: remove the kmet.libs ports sentence; add fetch.
+- [ ] Keep `system-namespaces`, `reserved-source-aliases` and the eval-source
+      forbidden-name checks; add `core/fetch` to
+      `modules/app/src/kmet/app/eval/sources.clj` `reserved-source-keys`.
+- [ ] Update `modules/app/src/kmet/app/eval/tool.clj` (alias/read lines) and
+      `eval.clj` help text.
+- [ ] Docs: `docs/architecture.md` eval-sandbox section (~386, 536-538,
+      722-746); `docs/extensions.md` (~468-470); `modules/app/src/kmet/extension.md`
+      (~197-198, not ~483-484 — the latter is the reserved-host-namespace list
+      and stays). `docs/configuration.md` only gives examples, so no change is
+      expected there.
+- [ ] Regenerate `docs/composition.md` after the eval/codemode description
+      edits (`bb generate-catalog`); it embeds the tool descriptions at
+      ~414-417 and ~358-364.
+- [ ] Tests:
+  - [ ] `test_eval_interface.clj`: alias line `json -> clojure.data.json` and
+        `p -> babashka.process`; assert kmet.libs is absent; assert
+        `(help :core)` includes `fetch`; re-check the 4600-char index cap.
+  - [ ] `test_script.clj:88-89`: extend the arglists checks for `:context`,
+        `:stat` and `fetch`.
+  - [ ] `test_codemode.clj` (~303-309, ~793-796, ~811): kmet.libs ports are no
+        longer require-able; `kmet.libs.edn-store` is rejected as a kmet
+        namespace; `(all-ns)` no longer contains `kmet.libs.json`; replace the
+        `json/parse-string` assertion with `json/read-str`.
+  - [ ] `test_codemode.clj:271` and `:311`: `json/generate-string` →
+        `json/write-str`, `json/parse-string` → `json/read-str`; check the
+        capability expectation at `:282`.
+  - [ ] `test_eval_library.clj:304`: the saved `parse-json` helper uses
+        `json/parse-string`; switch it to `json/read-str` (default string keys).
+  - [ ] Any eval/codemode surface tests asserting core-summary or description
+        text.
+  - [ ] `test_eval_sources` kmet.libs source rejection still passes.
+- [ ] Audit the saved eval library, tests and docs for `kmet.libs.`,
+      `json/parse-string` and `json/generate-string`; migrate
+      `github-issue-summary` (A).
+- [ ] Commit body must name this as an ABI break: removed require-able
+      `kmet.libs` ports and the `json` alias's `parse-string`/`generate-string`
+      surface.
+
+### E. Prompt and help lines
+- [ ] `modules/app/src/kmet/app/eval/tool.clj` `:prompt-guidelines` add:
+      `"Pre-bound aliases: fs, str, set, edn, walk, json (clojure.data.json),
+      p (babashka.process); no require needed."`
+- [ ] Replace the existing read/search guideline, but keep the `sed`, `head`,
+      `tail`, `rg`/`find` words the prompt tests assert: `read` takes an
+      absolute path argument; `grep`/`glob` take an absolute `:path`;
+      `read` with `:as :lines` returns `{:n :text}` maps, not numbered strings;
+      use them instead of `sed -n`/`nl`/`cat` or bash `rg`/`find`.
+- [ ] Add fetch to the eval Verbs line; optionally show
+      `(grep "p" {:context N})` and `(glob "p" {:stat true})`.
+- [ ] Update `modules/app/src/kmet/app/tools/codemode.cljc` (description and
+      prompt guidelines) for the alias change and `fetch`; codemode has no
+      `(help)` namespace, so the prompt is the only discovery surface.
+- [ ] Keep the assembled eval prompt within
+      `modules/app/test/kmet/app/test_eval.clj:291` (1300 chars) by trimming the
+      description, or raise the cap there with a stated reason. Re-check the
+      index cap at `test_eval_interface.clj:312` (4600).
+- [ ] Verify `(help :core)` and `(help :surface)` pick up the new verb, alias
+      target and removed kmet.libs line from `script.cljc`.
+
+### F. Verification
+- [ ] `bb test-changed`
+- [ ] `bb test-ext-changed` (the slow gitignore test still passes)
+- [ ] `bb lint-changed`
+- [ ] `bb format-check-changed`
+- [ ] `bb generate-catalog` (or `bb check-catalog`)
+- [ ] `bb check` for source namespaces
+- [ ] Extension-context guard: `modules/app/test/kmet/app/extensions/test_resources.clj`
+      (~702) still proves an extension context can require `kmet.libs.yaml`;
+      run the relevant extension test or `bb test` for it.
+- [ ] Optionally `bb slop --dups` if a test HTTP server is copied
+- [ ] Fresh-session manual checks:
+  - [ ] `(help :surface)` shows `json -> clojure.data.json`,
+        `p -> babashka.process`, and no kmet.libs.
+  - [ ] `(fetch ...)` returns status/body; use a local server for the offline
+        check.
+  - [ ] `(grep "needle" {:context 2})` and `(glob "**/*.clj" {:stat true})`
+        shapes.
+  - [ ] `(read "/absolute/path" {:start 1 :end 3 :as :lines})` returns
+        `{:n :text}` maps.
+  - [ ] The saved library loads, including the migrated
+        `github-issue-summary`.
+
+## Open questions
+- **fetch default**: `:throw? false` (curl-like) vs `true` (kmet.libs.http
+  default). Proposed false; the github wrapper migration explicitly uses
+  `:throw? true`.
+- **Context/stat shapes**: per-match `:before`/`:after` and additive `:entries`;
+  confirm.
+- **Prompt budget**: trim the eval description to stay under 1300 chars, or
+  raise the test cap. Trimming is preferred.
+- **github-issue-summary**: migrate (proposed) or drop now that fetch exists.
