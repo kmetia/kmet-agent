@@ -7,8 +7,12 @@
    (built-in tools, built-in verbs and app resources have their own groups)
    and labelled `type/name`; a verb's call surface is shown inside the
    extension that registered its source (`verb/mcp/search` under
-   `ext/mcp-adapter`, `verb/clj/edit-form` under `Built-in verbs`). The screen starts in project scope: project scope cycles a
-   resource's delta state (inherit -> enabled -> disabled -> inherit) and dims
+   `ext/mcp-adapter`, `verb/clj/edit-form` under `Built-in verbs`). Groups
+   start collapsed and show their row count, enabled count and project
+   overrides; Space/Enter on a heading folds or unfolds it, and a non-blank
+   search unfolds matching groups. The screen starts in project scope:
+   project scope cycles a resource's delta state
+   (inherit -> enabled -> disabled -> inherit) and dims
    inherited rows; Tab switches to global scope, which toggles the persistent
    selection, the same layout as `kmet plugins`. A write persists through the
    resources service, refreshes only the affected consumers and emits
@@ -94,12 +98,37 @@
       (str/includes? (str/lower-case (:label item)) query)
       (str/includes? (str/lower-case (provider-group item)) query)))
 
+(defn- group-summary
+  "The at-a-glance state after a provider heading: total rows, the effective
+   enabled count, and the project overrides in project scope. A
+   stored-unavailable group reads as stored entries."
+  [theme scope group]
+  (let [items (:items group)
+        enabled (count (filter (if (= scope :global) :global? :selected?) items))
+        overrides (if (= scope :project)
+                    (count (filter #(not= :inherit (:project-state %)) items))
+                    0)
+        unavailable? (= :unavailable (:kind (:provider (first items))))]
+    (str "  " (th/fg theme :dim (str (count items)))
+         (if unavailable?
+           (th/fg theme :dim " stored")
+           (str (th/fg theme :dim (str " · " enabled " enabled"))
+                (when (pos? overrides)
+                  (th/fg theme :muted
+                         (str " · " overrides " "
+                              (if (= 1 overrides) "override" "overrides")))))))))
+
 (defn- group-line
-  "Render a provider group heading."
-  [theme width group]
-  (u/truncate-to-width
-   (str "  " (th/fg theme :accent (th/bold (:label group))))
-   width ""))
+  "Render a provider group heading: cursor, fold marker, label and state
+   summary."
+  [{:keys [group scope theme width selected? collapsed?]}]
+  (let [cursor (if selected? (th/fg theme :accent "> ") "  ")]
+    (u/truncate-to-width
+     (str cursor
+          (th/fg theme :accent
+                 (str (if collapsed? "▸" "▾") " " (th/bold (:label group))))
+          (group-summary theme scope group))
+     width "")))
 
 (defn- checkbox-state
   "Map a project delta state to the shared checkbox state; inherit keeps the
@@ -207,6 +236,7 @@
         size (when tui (tui/tui-terminal-size tui))]
     {:write-scope :project
      :can-switch-scope? true
+     :collapsible? true
      :rows (or (:rows size) 24)
      :size-ref (when tui (tui/tui-terminal-size-ref tui))
      :request-render! (when tui #(tui/tui-request-render tui true))
@@ -215,8 +245,7 @@
      :groups groups
      :filter-match query-match?
      :item-identity :id
-     :render-group (fn [{:keys [group theme width]}]
-                     (group-line theme width group))
+     :render-group group-line
      :render-item (fn [{:keys [item scope theme width selected?]}]
                     (item-line theme scope width item selected?))
      :on-activate (fn [{:keys [screen item scope]}]
@@ -240,8 +269,10 @@
   "Open the builtin `/config` resource selector over the engine's live
    `:resources` service, starting in project scope.
 
-   Tab switches global/project scope. Space/Enter cycles the selected row:
-   global toggles enabled/disabled, project cycles
+   Tab switches global/project scope. Provider groups start collapsed;
+   Space/Enter on a heading folds or unfolds it, and a non-blank search
+   unfolds matching groups. On a resource row Space/Enter cycles the
+   selection: global toggles enabled/disabled, project cycles
    inherit -> enabled -> disabled -> inherit. A stored row whose provider is
    unavailable this run is dimmed; Space/Enter forgets it from the current
    scope. Every write takes effect immediately and persists; Esc closes."

@@ -10,8 +10,13 @@
    by `make-screen`).
 
    State lives in `:state-atom` as `{:write-scope :global|:project :query
-   string :selected index :rows [flat rows] :items [owner items]}`. A flat
-   row is `{:kind :group :group g}` or `{:kind :item :group g :item i}`; only
+   string :selected index :rows [flat rows] :items [owner items] :expanded
+   #{group-key}}`. A flat row is `{:kind :group :group g :collapsed? bool}` or
+   `{:kind :item :group g :item i}`. A group's key is its `:key`, falling back
+   to `:label`. With `:collapsible?` the `:expanded` set starts empty (every
+   group is folded) and group rows are selectable so Space/Enter can fold or
+   unfold one; a non-blank query unfolds every matching group, so search never
+   hides a result. Without `:collapsible?` groups are static headings and only
    item rows are selectable. The search field is a tag-owned `[:input]` whose
    text is mirrored into `:query` as it forwards, so the tree feeds the value
    straight back and an unchanged value never disturbs the caret.
@@ -26,15 +31,17 @@
    Spec keys:
      :write-scope        initial scope, `:global` (default) or `:project`
      :can-switch-scope?  whether Tab switches scope (default false)
+     :collapsible?       fold group rows; groups start collapsed (default false)
      :rows               initial terminal height (default 24)
      :size-ref           the TUI's live terminal-size ref (optional)
      :request-render!    0-arg forced repaint (with :size-ref)
      :on-close           called on escape/ctrl+c
      :read               `(fn [scope]) -> owner items`
-     :groups             `(fn [items]) -> [{:label ... :items [...]} ...]`
+     :groups             `(fn [items]) -> [{:key ... :label ... :items [...]} ...]`
      :filter-match       `(fn [item lower-case-query]) -> truthy`
      :item-identity      `(fn [item]) -> stable identity`
-     :render-group       `(fn [{:keys [group scope theme width]}]) -> string`
+     :render-group       `(fn [{:keys [group collapsed? selected? scope theme
+                          width]}]) -> string`
      :render-item        `(fn [{:keys [item scope theme width selected?]}])
                           -> string`
      :on-activate        `(fn [{:keys [screen item scope]}])`
@@ -96,57 +103,91 @@
   [screen item]
   ((:item-identity (:spec screen)) item))
 
-(defn- selected-item-id
-  [screen]
-  (let [{:keys [rows selected]} @(:state-atom screen)
-        row (get rows selected)]
-    (when (= :item (:kind row))
-      (item-id screen (:item row)))))
+(defn- group-key
+  "The stable identity of GROUP across rebuilds and scope switches."
+  [group]
+  (or (:key group) (:label group)))
+
+(defn- group-expanded?
+  "Whether GROUP's items are visible: non-collapsible screens always show
+   them, a non-blank search query unfolds every matching group, and otherwise
+   the user controls membership in the `:expanded` set."
+  [screen group query]
+  (or (not (:collapsible? (:spec screen)))
+      (not (str/blank? query))
+      (contains? (:expanded @(:state-atom screen)) (group-key group))))
 
 (defn- build-rows
-  "The filtered flat rows of ITEMS: group rows and item rows, keeping only
-   groups with matching items. QUERY is already trimmed and lower-cased."
+  "The filtered flat rows of ITEMS: group rows and their item rows. A group
+   keeps only matching items and disappears when none match. QUERY is already
+   trimmed and lower-cased; a non-blank query unfolds matching groups."
   [screen items query]
   (let [match? (:filter-match (:spec screen))]
     (vec (mapcat (fn [group]
                    (let [items (filterv #(match? % query) (:items group))
                          group (assoc group :items items)]
                      (when (seq items)
-                       (cons {:kind :group :group group}
-                             (map (fn [item]
-                                    {:kind :item :group group :item item})
-                                  items)))))
+                       (let [collapsed? (not (group-expanded? screen group query))]
+                         (cons {:kind :group :group group :collapsed? collapsed?}
+                               (when-not collapsed?
+                                 (map (fn [item]
+                                        {:kind :item :group group :item item})
+                                      items)))))))
                  ((:groups (:spec screen)) items)))))
 
+(defn- selectable-row?
+  "Whether ROW takes the cursor: every item row, plus a group row on a
+   collapsible screen (so the group can be folded and unfolded)."
+  [screen row]
+  (or (= :item (:kind row))
+      (and (:collapsible? (:spec screen)) (= :group (:kind row)))))
+
+(defn- selectable-indices
+  "The indices of rows that may take the cursor."
+  [screen rows]
+  (keep-indexed (fn [i row] (when (selectable-row? screen row) i)) rows))
+
 (defn- item-indices
-  "The indices of selectable item rows."
+  "The indices of item rows."
   [rows]
   (keep-indexed (fn [i row] (when (= :item (:kind row)) i)) rows))
 
+(defn- row-identity
+  "The identity a row's selection keeps across a rebuild."
+  [screen row]
+  (case (:kind row)
+    :item [:item (item-id screen (:item row))]
+    :group [:group (group-key (:group row))]))
+
 (defn- rebuild-rows!
   "Rebuild the flat rows from the cached items and the current query. With
-   PRESERVE-SELECTED? the item under the cursor keeps its identity when it
-   survives the rebuild; otherwise the first item is selected."
+   PRESERVE-SELECTED? the row under the cursor keeps its identity when it
+   survives the rebuild; otherwise a non-blank query selects the first
+   matching item and an unfiltered screen selects the first selectable row."
   [screen preserve-selected?]
   (let [st @(:state-atom screen)
-        keep-id (when preserve-selected? (selected-item-id screen))
-        rows (build-rows screen (:items st)
-                         (str/lower-case (str/trim (:query st))))
+        keep-id (when preserve-selected?
+                  (when-let [row (get (:rows st) (:selected st))]
+                    (row-identity screen row)))
+        query (str/lower-case (str/trim (:query st)))
+        rows (build-rows screen (:items st) query)
+        indices (vec (selectable-indices screen rows))
         items (vec (item-indices rows))
         selected (or (when keep-id
                        (first (filter (fn [i]
                                         (= keep-id
-                                           (item-id screen
-                                                    (:item (nth rows i)))))
-                                      items)))
-                     (first items)
+                                           (row-identity screen (nth rows i))))
+                                      indices)))
+                     (when (and (not (str/blank? query)) (seq items))
+                       (first items))
+                     (first indices)
                      0)]
     (swap! (:state-atom screen)
            assoc :rows rows :selected selected)))
 
 (defn screen-refresh!
   "Re-read the owner items for the current scope and rebuild the rows,
-   keeping the selected item when it still exists."
+   keeping the selected row when it still exists."
   [screen]
   (let [st @(:state-atom screen)]
     (swap! (:state-atom screen) assoc
@@ -154,27 +195,21 @@
     (rebuild-rows! screen true)))
 
 (defn screen-refilter!
-  "Re-filter the cached items (a search change does not change the source)
-   and select the first matching item."
+  "Re-filter the cached items (a search change does not change the source):
+   a non-blank query selects its first match, an unfiltered screen its first
+   selectable row."
   [screen]
   (rebuild-rows! screen false))
 
 (defn screen-update-item!
-  "Merge CHANGES into the cached item with ITEM's identity and into every row
-   that carries it, without re-reading the source."
+  "Merge CHANGES into the cached item with ITEM's identity and rebuild the
+   rows from the cached items, without re-reading the source."
   [screen item changes]
-  (let [id (item-id screen item)
-        same? (fn [it] (= id (item-id screen it)))]
-    (swap! (:state-atom screen)
-           (fn [{:keys [items rows] :as st}]
-             (assoc st
-                    :items (mapv #(if (same? %) (merge % changes) %) items)
-                    :rows (mapv (fn [row]
-                                  (if (and (= :item (:kind row))
-                                           (same? (:item row)))
-                                    (update row :item merge changes)
-                                    row))
-                                rows))))))
+  (let [id (item-id screen item)]
+    (swap! (:state-atom screen) update :items
+           (fn [items]
+             (mapv #(if (= id (item-id screen %)) (merge % changes) %) items)))
+    (rebuild-rows! screen true)))
 
 ;; ─── Input actions ────────────────────────────────────────────────────────
 
@@ -182,37 +217,37 @@
   [screen direction]
   (swap! (:state-atom screen)
          (fn [{:keys [rows selected] :as st}]
-           (let [items (vec (item-indices rows))]
-             (if (seq items)
-               (let [pos (count (take-while #(< % selected) items))
-                     pos (max 0 (min (dec (count items)) (+ pos direction)))]
-                 (assoc st :selected (nth items pos)))
+           (let [indices (vec (selectable-indices screen rows))]
+             (if (seq indices)
+               (let [pos (count (take-while #(< % selected) indices))
+                     pos (max 0 (min (dec (count indices)) (+ pos direction)))]
+                 (assoc st :selected (nth indices pos)))
                st)))))
 
 (defn- page-target
-  "The nearest item row at or beyond TARGET in DIRECTION, or nil when the
-   scan leaves the rows."
-  [rows target direction]
-  (let [items (item-indices rows)
-        candidates (if (pos? direction)
-                     (filter #(>= % target) items)
-                     (filter #(<= % target) items))]
+  "The nearest selectable row at or beyond TARGET in DIRECTION, or nil when
+   the scan leaves the rows."
+  [indices target direction]
+  (let [candidates (if (pos? direction)
+                     (filter #(>= % target) indices)
+                     (filter #(<= % target) indices))]
     (if (pos? direction) (first candidates) (last candidates))))
 
 (defn- page-selection!
-  "Jump by the visible row count, then to the nearest item row in DIRECTION
-   (+1 forward, -1 backward)."
+  "Jump by the visible row count, then to the nearest selectable row in
+   DIRECTION (+1 forward, -1 backward)."
   [screen direction]
   (swap! (:state-atom screen)
          (fn [st]
            (let [rows (:rows st)
+                 indices (vec (selectable-indices screen rows))
                  max-visible (max 5 (- @(:rows-count screen) chrome-lines))
                  sel (:selected st)
                  n (count rows)
                  target (if (= -1 direction)
                           (max 0 (- sel max-visible))
                           (min (max 0 (dec n)) (+ sel max-visible)))
-                 found (page-target rows target direction)]
+                 found (page-target indices target direction)]
              (if found
                (assoc st :selected found)
                st)))))
@@ -236,26 +271,46 @@
                        (hikap/materialize-ref! screen (:search-ref screen))))
   (screen-refilter! screen))
 
+(defn- toggle-group!
+  "Fold or unfold GROUP-KEY, keeping the group's row under the cursor."
+  [screen group-key]
+  (swap! (:state-atom screen) update :expanded
+         (fn [expanded]
+           (if (contains? expanded group-key)
+             (disj expanded group-key)
+             (conj expanded group-key))))
+  (rebuild-rows! screen true))
+
 (defn- activate-selected!
   [screen]
   (let [{:keys [rows selected write-scope]} @(:state-atom screen)
-        row (get rows selected)]
-    (when (= :item (:kind row))
-      ((:on-activate (:spec screen))
-       {:screen screen :item (:item row) :scope write-scope}))))
+        row (get rows selected)
+        spec (:spec screen)]
+    (if (= :item (:kind row))
+      ((:on-activate spec)
+       {:screen screen :item (:item row) :scope write-scope})
+      (when (and (:collapsible? spec) (= :group (:kind row)))
+        (toggle-group! screen (group-key (:group row)))))))
 
 ;; ─── The frame ────────────────────────────────────────────────────────────
 
 (defn- header-line
-  "The title and key hints, padded to the frame width."
+  "The title and key hints, padded to the frame width. A selected group row
+   gets the fold hint instead of the owner's item action hint."
   [screen theme width]
   (let [spec (:spec screen)
-        scope (:write-scope @(:state-atom screen))
+        st @(:state-atom screen)
+        scope (:write-scope st)
+        selected-row (get (:rows st) (:selected st))
+        group-row? (and (:collapsible? spec) (= :group (:kind selected-row)))
+        action-hint (if group-row?
+                      "space expand/collapse"
+                      ((:action-hint spec) scope))
         title (th/bold ((:title spec) scope))
         sep (th/fg theme :muted " · ")
         switch-hint (when (:can-switch-scope? spec)
                       (str (hint "tui.input.tab" "tab" "switch mode") sep))
-        hints (str switch-hint ((:action-hint spec) scope) sep "esc close")]
+        hints (str switch-hint action-hint sep "esc close")]
     (u/truncate-to-width
      (str title (apply str (repeat (max 1 (- width (u/visible-width title)
                                              (u/visible-width hints)))
@@ -275,7 +330,8 @@
   (let [spec (:spec screen)]
     (if (= :group (:kind row))
       ((:render-group spec)
-       {:group (:group row) :scope scope :theme theme :width width})
+       {:group (:group row) :collapsed? (:collapsed? row) :scope scope
+        :theme theme :width width :selected? selected?})
       ((:render-item spec)
        {:item (:item row) :scope scope :theme theme :width width
         :selected? selected?}))))
@@ -289,7 +345,7 @@
         scope (:write-scope st)
         rows (:rows st)
         n (count rows)
-        item-total (count (filterv #(= :item (:kind %)) rows))
+        row-total (count (selectable-indices screen rows))
         max-visible (max 5 (- rows-count chrome-lines))
         sel (min (or (:selected st) 0) (max 0 (dec n)))
         [start-idx end-idx] (ls/window sel max-visible n)
@@ -297,17 +353,17 @@
         border-fn #(th/fg theme :accent %)
         row-lines (map-indexed (fn [rel row]
                                  (render-row screen theme scope width row
-                                             (and (= :item (:kind row))
+                                             (and (selectable-row? screen row)
                                                   (= (+ start-idx rel) sel))))
                                visible)
         clipped? (or (pos? start-idx) (< end-idx n))
         scroll-line (when clipped?
-                      (let [cur (count (filterv #(= :item (:kind %))
+                      (let [cur (count (filterv #(selectable-row? screen %)
                                                 (subvec rows 0 (inc sel))))]
                         (u/truncate-to-width
-                         (th/fg theme :dim (str "  (" cur "/" item-total ")"))
+                         (th/fg theme :dim (str "  (" cur "/" row-total ")"))
                          width "")))
-        empty-line (when (zero? item-total)
+        empty-line (when (zero? row-total)
                      (when-let [text (:empty-text (:spec screen))]
                        (u/truncate-to-width
                         (th/fg theme :muted (str "  " text)) width "")))]
@@ -408,7 +464,8 @@
                           :query ""
                           :selected 0
                           :rows []
-                          :items []})
+                          :items []
+                          :expanded #{}})
         screen (map->GroupedSelector
                 {:state-atom state-atom
                  :search-ref (engine/ref)

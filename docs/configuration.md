@@ -227,7 +227,10 @@ The three surfaces are:
   `verb/read` under `Built-in verbs` (a clj verb keeps its namespace,
   `verb/clj/edit-form`) — while settings store the canonical key
   (`ext.mcp/search`, `core/read`) so
-  two sources cannot collide. It starts in project scope, and Tab switches
+  two sources cannot collide. Provider groups start collapsed; each heading
+  shows the group's total, enabled and project-override counts, Space/Enter
+  expands or collapses it, and a non-blank search expands matching groups.
+  It starts in project scope, and Tab switches
   between project and global. Project rows cycle
   inherit/enabled/disabled and name the inherited global state
   (`inherited global (enabled)` or `(disabled)`); global rows toggle

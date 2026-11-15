@@ -174,8 +174,14 @@
 (defn- render-lines [screen width]
   (protocols/render screen width))
 
+(defn- group-rows [screen]
+  (filterv #(= :group (:kind %)) (grouped/screen-rows screen)))
+
 (defn- item-rows [screen]
   (mapv :item (filter #(= :item (:kind %)) (grouped/screen-rows screen))))
+
+(defn- selected-row [screen]
+  (nth (grouped/screen-rows screen) (grouped/screen-selected screen)))
 
 (defn- item-by-id [screen id]
   (first (filter #(= id (:id %)) (item-rows screen))))
@@ -266,7 +272,7 @@
     (is (= ["Built-in tools" "ext/review" "kmet app" "Stored, unavailable"]
            (mapv :label (#'sut/groups items))))))
 
-(deftest screen-shows-groups-and-switches-scope
+(deftest screen-starts-with-collapsed-groups-and-switches-scope
   (let [settings (atom {})
         service (fake-service settings)
         focused (atom nil)
@@ -280,31 +286,66 @@
       (let [screen (dock/top-component @(:dock-stack cs))]
         (is (identical? screen @focused)
             "the grouped screen itself takes focus")
-        (testing "the project view is the default and groups by provider"
+        (testing "the project view starts with every provider group collapsed"
+          (is (= :project (grouped/screen-write-scope screen)))
+          (is (= ["Built-in tools" "ext/review"]
+                 (mapv #(get-in % [:group :label]) (group-rows screen))))
+          (is (empty? (item-rows screen)))
+          (is (every? :collapsed? (group-rows screen)))
+          (is (= :group (:kind (selected-row screen))))
           (let [lines (render-lines screen 120)]
-            (is (= :project (grouped/screen-write-scope screen)))
             (is (some #(str/includes? % "Project Local Resources") lines))
             (is (some #(str/includes? % ".kmet/settings.edn") lines))
-            (is (some #(str/includes? % "inherited global (enabled)") lines))
-            (is (some #(str/includes? % "inherited global (disabled)") lines))
-            (is (some #(str/includes? % "space cycle inherit/+/-") lines))
+            (is (some #(str/includes? % "space expand/collapse") lines))
             (is (some #(str/includes? % "Built-in tools") lines))
             (is (some #(str/includes? % "ext/review") lines))
-            (is (some #(str/includes? % "tool/bash") lines))
-            (is (some #(str/includes? % "skill/review") lines))
+            (is (some #(str/includes? % "1 enabled") lines))
+            (is (not-any? #(str/includes? % "tool/bash") lines))
+            (is (not-any? #(str/includes? % "skill/review") lines))
             (is (not-any? #(str/includes? % "Scope") lines)
                 "there is no scope row any more")))
-        (testing "Tab switches to the global view"
+        (testing "expanding a group reveals its rows and counts"
+          (protocols/handle-input screen " ")
+          (is (= [[:tool "bash"] [:tool "read"]]
+                 (mapv :id (item-rows screen))))
+          (is (false? (:collapsed? (selected-row screen))))
+          (is (= "Built-in tools" (get-in (selected-row screen) [:group :label])))
+          (let [lines (render-lines screen 120)]
+            (is (some #(str/includes? % "tool/bash") lines))
+            (is (some #(str/includes? % "tool/read") lines))
+            (is (some #(str/includes? % "inherited global (enabled)") lines))
+            (is (some #(str/includes? % "inherited global (disabled)") lines)))
+          (protocols/handle-input screen "\u001b[B")
+          (is (= [:tool "bash"] (:id (:item (selected-row screen)))))
+          (is (some #(str/includes? % "space cycle inherit/+/-")
+                    (render-lines screen 120))
+              "an item row shows the item action hint"))
+        (testing "a second group expands independently"
+          (protocols/handle-input screen "\u001b[B")
+          (protocols/handle-input screen "\u001b[B")
+          (is (= "ext/review" (get-in (selected-row screen) [:group :label])))
+          (protocols/handle-input screen " ")
+          (is (= [[:tool "bash"] [:tool "read"] [:skill "review"]]
+                 (mapv :id (item-rows screen))))
+          (is (some #(str/includes? % "skill/review")
+                    (render-lines screen 120))))
+        (testing "Tab switches to the global view and keeps the fold state"
           (protocols/handle-input screen "\t")
           (is (= :global (grouped/screen-write-scope screen)))
+          (is (= 3 (count (item-rows screen)))
+              "expanded groups stay expanded")
           (let [lines (render-lines screen 120)]
             (is (some #(str/includes? % "Global Resources") lines))
-            (is (some #(str/includes? % "space toggle") lines))))
+            (is (some #(str/includes? % "space expand/collapse") lines)))
+          (protocols/handle-input screen "\u001b[B")
+          (is (= [:skill "review"] (:id (:item (selected-row screen)))))
+          (is (some #(str/includes? % "space toggle")
+                    (render-lines screen 120))))
         (testing "Tab switches back"
           (protocols/handle-input screen "\t")
           (is (= :project (grouped/screen-write-scope screen))))))))
 
-(deftest navigation-skips-group-headings
+(deftest navigation-moves-across-group-rows-and-items
   (let [settings (atom {})
         service (fake-service settings)
         cs {:engine ::engine :dock-stack (atom []) :tui nil}]
@@ -315,17 +356,76 @@
                   core/tui-request-render (fn [_] nil)]
       (sut/show-config cs)
       (let [screen (dock/top-component @(:dock-stack cs))
-            selected-id #(-> (nth (grouped/screen-rows screen)
-                                  (grouped/screen-selected screen))
-                             :item :id)]
-        (is (= [:tool "bash"] (selected-id)))
+            selected-label #(case (:kind (selected-row screen))
+                              :group (get-in (selected-row screen)
+                                             [:group :label])
+                              :item (:label (:item (selected-row screen))))]
+        (is (= "Built-in tools" (selected-label)))
         (protocols/handle-input screen "\u001b[B")
-        (is (= [:tool "read"] (selected-id)))
+        (is (= "ext/review" (selected-label)))
         (protocols/handle-input screen "\u001b[B")
-        (is (= [:skill "review"] (selected-id))
-            "the ext/review group heading is skipped")
+        (is (= "ext/review" (selected-label))
+            "down at the last group stays")
+        (protocols/handle-input screen "\u001b[A")
+        (is (= "Built-in tools" (selected-label)))
+        (protocols/handle-input screen " ")
         (protocols/handle-input screen "\u001b[B")
-        (is (= [:skill "review"] (selected-id)))))))
+        (is (= "tool/bash" (selected-label)))
+        (protocols/handle-input screen "\u001b[B")
+        (is (= "tool/read" (selected-label)))
+        (protocols/handle-input screen "\u001b[B")
+        (is (= "ext/review" (selected-label)))
+        (protocols/handle-input screen "\u001b[B")
+        (is (= "ext/review" (selected-label)))))))
+
+(deftest group-rows-fold-and-unfold-without-writing
+  (let [settings (atom {})
+        service (fake-service settings)
+        cs {:engine ::engine :dock-stack (atom []) :tui nil}]
+    (with-redefs [cfg/read-resource-settings (fn [] @settings)
+                  runtime/resources (fn [_] service)
+                  runtime/refresh-resources! (fn [_ _] nil)
+                  core/tui-set-focus (fn [_ _] nil)
+                  core/tui-request-render (fn [_] nil)]
+      (sut/show-config cs)
+      (let [screen (dock/top-component @(:dock-stack cs))]
+        (is (empty? (item-rows screen)))
+        (protocols/handle-input screen " ")
+        (is (= [[:tool "bash"] [:tool "read"]]
+               (mapv :id (item-rows screen))))
+        (is (= {} @settings) "folding a group writes no resource")
+        (protocols/handle-input screen " ")
+        (is (empty? (item-rows screen)) "the second press folds it again")
+        (is (= :group (:kind (nth (grouped/screen-rows screen)
+                                  (grouped/screen-selected screen)))))))))
+
+(deftest search-unfolds-matching-groups-and-clearing-restores-folds
+  (let [settings (atom {})
+        service (fake-service settings)
+        cs {:engine ::engine :dock-stack (atom []) :tui nil}]
+    (with-redefs [cfg/read-resource-settings (fn [] @settings)
+                  runtime/resources (fn [_] service)
+                  runtime/refresh-resources! (fn [_ _] nil)
+                  core/tui-set-focus (fn [_ _] nil)
+                  core/tui-request-render (fn [_] nil)]
+      (sut/show-config cs)
+      (let [screen (dock/top-component @(:dock-stack cs))]
+        (is (empty? (item-rows screen)))
+        (grouped/screen-set-query! screen "review")
+        (is (= [[:skill "review"]] (mapv :id (item-rows screen))))
+        (is (= ["ext/review"]
+               (mapv #(get-in % [:group :label]) (group-rows screen))))
+        (is (false? (:collapsed? (first (group-rows screen)))))
+        (is (= [:skill "review"] (:id (:item (selected-row screen))))
+            "typing selects the first matching item")
+        (grouped/screen-set-query! screen "built-in tools")
+        (is (= [[:tool "bash"] [:tool "read"]]
+               (mapv :id (item-rows screen))))
+        (grouped/screen-set-query! screen "")
+        (is (empty? (item-rows screen))
+            "clearing the query restores the folds")
+        (is (= ["Built-in tools" "ext/review"]
+               (mapv #(get-in % [:group :label]) (group-rows screen))))))))
 
 (deftest search-filters-items-and-groups
   (let [settings (atom {})
@@ -404,7 +504,10 @@
           (protocols/handle-input screen " ")
           (is (= ["+bash"] (get-in @settings [:project :tools])))
           (is (= :enabled (:project-state (item-by-id screen [:tool "bash"]))))
-          (is (= [[:tool]] @refreshed)))
+          (is (= [[:tool]] @refreshed))
+          (is (some #(str/includes? % "1 override")
+                    (render-lines screen 120))
+              "the group heading counts the project override"))
         (testing "enabled -> disabled writes a -name delta"
           (protocols/handle-input screen " ")
           (is (= ["-bash"] (get-in @settings [:project :tools])))
@@ -413,7 +516,10 @@
           (protocols/handle-input screen " ")
           (is (nil? (get-in @settings [:project :tools])))
           (is (= :inherit (:project-state (item-by-id screen [:tool "bash"]))))
-          (is (= [[:tool] [:tool] [:tool]] @refreshed)))))))
+          (is (= [[:tool] [:tool] [:tool]] @refreshed))
+          (is (not-any? #(str/includes? % "override")
+                        (render-lines screen 120))
+              "the override count disappears with the delta"))))))
 
 (deftest esc-closes-the-docked-selector
   (let [settings (atom {})
