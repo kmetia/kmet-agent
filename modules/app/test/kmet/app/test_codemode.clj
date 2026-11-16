@@ -803,6 +803,10 @@
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "fetch")
           "the removed HTTP port points at its replacement"))
+  (let [r (run "(require 'kmet.libs.edn-store)")]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "kmet.libs ports were removed")
+          "other kmet.libs namespaces get the generic replacement hint"))
   (let [r (run "(require 'cheshire.core)")]
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "outside the sandbox's namespace roots"))

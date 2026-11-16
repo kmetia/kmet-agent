@@ -136,7 +136,8 @@ Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:
       vars.
 - [ ] Migrate the saved `github-issue-summary` after fetch lands (confirmed
       to exist at `~/.kmet/agent/eval/user/github-issue-summary.clj`, but
-      absent in this environment — only `signal-send-me` is saved):
+      absent in this environment — the saved library has `signal-send-me`
+      (global) and the cwd-scoped `bb` and `stat`, but no `github-issue-summary`):
       redefine it to call `fetch` with `:as :json` and `:throw? true` (the
       current wrapper throws on HTTP >= 400), keep the GitHub `Accept` and
       `User-Agent` headers, then `select-keys` the summary fields; verify
