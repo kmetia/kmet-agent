@@ -1,6 +1,6 @@
 # Eval verb surface — reviewed proposal
 
-Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:stat`), D (json alias and `kmet.libs` removal), E (prompt/help lines) and F (verification) are implemented. The only open items are the eval-prompt trim follow-up and the blocked saved-definition migration (`github-issue-summary` is absent under `~/.kmet/agent`).
+Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:stat`), D (json alias and `kmet.libs` removal), E (prompt/help lines) and F (verification) are implemented. The only open item is the blocked saved-definition migration: `github-issue-summary` is absent under `~/.kmet/agent`.
 
 ## Decisions
 
@@ -261,8 +261,8 @@ Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:
       `modules/app/test/kmet/app/test_eval.clj:291` to 1500 so the alias/fetch
       work can land, and add a follow-up to trim back. Re-check the index cap at
       `test_eval_interface.clj:312` (4600).
-- [ ] Follow-up: trim the eval prompt back under 1300 chars
-      (`test_eval.clj:291`) once the alias/fetch lines settle.
+- [x] Follow-up: trim the eval prompt back under 1300 chars
+      (`test_eval.clj:291`); it is 1292 now and the cap is back to 1300.
 - [x] Verify `(help :core)` and `(help :surface)` pick up the new verb, alias
       target and removed kmet.libs line from `script.cljc`.
 

@@ -66,18 +66,18 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description (str "Persistent Babashka script sandbox (Clojure/SCI). Runs in the session cwd; relative paths and shell commands resolve there (`(cwd)`; bash's :cwd overrides).\n"
-                     "Verbs: (read \"p\" {:start N :end N :as :lines}), (write \"p\" text), (edit \"p\" old new), (bash \"cmd\" {:timeout N :max-lines N :as :map}), (glob \"p\"), (grep \"p\"), (fetch \"url\" {:as :json}). Nonzero exits are normal.\n"
-                     "Forms run in order; definitions/results persist. (emit v) for output; each form reports one line; println is discarded. Limit 16 KiB (max 50 KiB); timeout (omit/0 = none). Discover: (help) index; (help :core); (sources); (help :library) saved/live; (index \"text\") saved/live/source; (describe 'name). Source verbs: <id>/verb.\n"
+   :description (str "Persistent Babashka script sandbox (Clojure/SCI) in the session cwd; relative paths and shell commands resolve there (`(cwd)`; bash's :cwd overrides).\n"
+                     "Verbs: (read \"p\" {:start N :as :lines}), (write \"p\" text), (edit \"p\" old new), (bash \"cmd\" {:timeout N :max-lines N :as :map}), (glob \"p\"), (grep \"p\"), (fetch \"url\" {:as :json}). Nonzero exits are normal.\n"
+                     "Forms run in order; definitions/results persist. (emit v) for output; each form reports one line; println is discarded. Limit 16 KiB (max 50 KiB); timeout (omit/0 = none). Discover: (help) index; (sources); (help :library) saved/live; (index \"text\") saved/live/source; (describe 'name). Source verbs: <id>/verb.\n"
                      "Example: (-> (read \"deps.edn\") (edn/read-string) :deps (count)).")
-   :prompt-snippet "Runs in cwd as a Babashka script. Verbs: (read), (write), (edit), (bash), (glob), (grep), (fetch); independent eval calls may be issued together; (emit v); (help)."
+   :prompt-snippet "Runs in cwd as a Babashka script; independent eval calls may be issued together."
    :prompt-guidelines
-   ["Independent: several eval calls in one message or verbs in one call; one call for dependent forms."
+   ["Run several eval calls in one message; keep dependent forms in one call."
     "Bind intermediate output; keep reads bounded; emit the summary; println is discarded."
-    "`read` takes a path, `grep`/`glob` a `:path`; `:as :lines` puts `{:n :text}` maps in `:lines`, not strings; avoid `sed`/`head`/`tail`/`cat` and bash `rg/find`."
-    "Pre-bound aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require."
+    "`read` takes a path, `grep`/`glob` a `:path`; `:as :lines` returns `{:n :text}` entries; avoid `sed`/`head`/`tail`/`cat` and bash `rg/find`."
+    "Aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require."
     "Use fetch for HTTP."
-    "Don't assume host classes or libraries; (help :surface) lists them."]
+    "Don't assume host classes/libraries; (help :surface) lists them."]
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"

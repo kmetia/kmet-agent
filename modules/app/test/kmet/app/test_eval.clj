@@ -292,7 +292,7 @@
     (t/is (str/includes? text "{:start"))
     (t/is (str/includes? text "{:n :text}"))
     (t/is (str/includes? text "sed"))
-    (t/is (<= (count text) 1500) "the per-request prompt stays compact")
+    (t/is (<= (count text) 1300) "the per-request prompt stays compact")
     (t/is (not (str/includes? text "codemode"))
           "eval's prompt must stand alone when codemode is not selected")
     (t/is (not (str/includes? text "Jolt")))
