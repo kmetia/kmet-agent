@@ -128,7 +128,8 @@
                       (fn [s _ _ _] (respond s "200 OK" "ok" {"X-Custom" "abc"})))]
     (try
       (t/is (= {"content-length" "2" "x-custom" "abc"}
-               (:headers (http/get (str base "/") {}))))
+               (select-keys (:headers (http/get (str base "/") {}))
+                            ["content-length" "x-custom"])))
       (finally (close)))))
 
 (deftest-transports test-method-and-body

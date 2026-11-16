@@ -3,12 +3,15 @@
   (:require [clojure.string :as str]))
 
 (defn respond
-  "Write an HTTP/1.1 response to socket S."
+  "Write an HTTP/1.1 response to socket S. The connection closes after each
+   response, so a pooled client connection is never reused against the next
+   one-shot server call."
   [s status body hdrs]
   (let [b (.getBytes body)
         h (apply str (map (fn [[k v]] (str k ": " v "\r\n")) hdrs))
         head (str "HTTP/1.1 " status " X\r\n" h
-                  "Content-Length: " (count b) "\r\n\r\n")]
+                  "Content-Length: " (count b) "\r\n"
+                  "Connection: close\r\n\r\n")]
     (.write (.getOutputStream s) (.getBytes head))
     (.write (.getOutputStream s) b)
     (.flush (.getOutputStream s))))
