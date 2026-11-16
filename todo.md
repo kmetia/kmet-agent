@@ -1,6 +1,6 @@
 # Eval verb surface — reviewed proposal
 
-Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:stat`), D (json alias and `kmet.libs` removal) and E (prompt/help lines) are implemented; F (verification) and the eval-prompt trim follow-up are pending. The saved `github-issue-summary` migration cannot run here: that file is absent under `~/.kmet/agent`.
+Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:stat`), D (json alias and `kmet.libs` removal) and E (prompt/help lines) are implemented; F's automated gates pass, while its fresh-session manual checks and the eval-prompt trim follow-up are pending. The saved `github-issue-summary` migration cannot run here: that file is absent under `~/.kmet/agent`.
 
 ## Decisions
 
@@ -266,13 +266,13 @@ Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:
       target and removed kmet.libs line from `script.cljc`.
 
 ### F. Verification
-- [ ] `bb test-changed`
-- [ ] `bb test-ext-changed` (the slow gitignore test still passes)
-- [ ] `bb lint-changed`
-- [ ] `bb format-check-changed`
-- [ ] `bb generate-catalog` (or `bb check-catalog`)
-- [ ] `bb check` for source namespaces
-- [ ] Extension-context guard: `modules/app/test/kmet/app/extensions/test_resources.clj`
+- [x] `bb test-changed`
+- [x] `bb test-ext-changed` (the slow gitignore test still passes)
+- [x] `bb lint-changed`
+- [x] `bb format-check-changed`
+- [x] `bb generate-catalog` (or `bb check-catalog`)
+- [x] `bb check` for source namespaces
+- [x] Extension-context guard: `modules/app/test/kmet/app/extensions/test_resources.clj`
       (~702) still proves an extension context can require `kmet.libs.yaml`;
       run the relevant extension test or `bb test` for it.
 - [ ] Optionally `bb slop --dups` if a test HTTP server is copied
