@@ -1381,7 +1381,7 @@
    names what the sandbox actually has rather than what the host claims."
   [surface]
   (let [{:keys [host classes aliases namespaces]} surface
-        {:keys [clojure babashka bundled libs]} (or namespaces {})]
+        {:keys [clojure babashka bundled]} (or namespaces {})]
     (str "Surface (host: " host ")\n"
          "Aliases: " (str/join ", " (map (fn [[alias ns-sym]]
                                            (str alias " -> " ns-sym))
@@ -1391,10 +1391,9 @@
          (namespace-line "clojure.*" clojure) "\n"
          (namespace-line "babashka.*" babashka) "\n"
          (bundled-line bundled) "\n"
-         (namespace-line "kmet.libs" libs) "\n"
          "  clojure.core: SCI's own core (not the host's), with (help) and "
          "(describe) added.\n"
-         "Not require-able: other kmet.* namespaces; tools; babashka.nrepl; "
+         "Not require-able: kmet.* namespaces; tools; babashka.nrepl; "
          "libraries outside those roots (e.g. cheshire.core, jsonista.core).\n"
          "Sandbox namespaces: core (file/shell verbs), clj (structured "
          "edits, nREPL), eval (library/discovery); user is each call's "

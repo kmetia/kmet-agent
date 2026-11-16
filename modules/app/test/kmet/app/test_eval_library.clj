@@ -301,7 +301,7 @@
   (let [env (support/eval-ctx)
         cwd (:cwd env)]
     (spit (str (fs/path cwd "note.txt")) "library\n")
-    (support/eval! env "(defn parse-json \"Parse JSON.\" [s] (json/parse-string s))")
+    (support/eval! env "(defn parse-json \"Parse JSON.\" [s] (json/read-str s))")
     (support/eval! env "(defn say \"Say hi.\" [] (core/emit :hi))")
     (support/eval! env "(defn read-note \"Read the note.\" [] (str/trim (slurp \"note.txt\")))")
     (let [restarted (support/restart-service env)]

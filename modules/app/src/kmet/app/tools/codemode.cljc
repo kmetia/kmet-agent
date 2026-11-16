@@ -24,6 +24,7 @@
   (str "Fresh Clojure SCI sandbox with the active tools bridged in; definitions do not persist.\n"
        "Files: (read \"p\") or (read \"p\" {:offset N :limit N :footer false :tail N}); (write \"p\" text); (edit \"p\" old new) or (edit \"p\" pairs).\n"
        "Shell: (bash \"cmd\" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.\n"
+       "Aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require needed. HTTP: (fetch \"url\" {:as :json}) -> {:status :headers :body}.\n"
        "Tools: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; @(tools/read {…}) is the per-tool shorthand, while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) lists the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one declaration. Inner results never enter the conversation.\n"
        "Batch independent reads, commands, and tests into one call; (emit v) for full output. Multi-form calls report one line per form.\n"
        "Example: (emit {:spec (read \"SPEC-v2.txt\") :tests (bash \"bash test-v1.sh; bash test-v2.sh\")}).\n"
@@ -60,6 +61,7 @@
     "Batch independent reads, commands, and tests into one codemode call: compose shell commands with &&/; in one (bash ...), put several read/bash forms in one call, or emit a map of the values; not one call per file, command, or test suite."
     "Use codemode when a command's output would flood the context: compute inside the script and (emit) only the digest — counts, matches, the lines that matter — instead of chaining bash cat/head/rg; println is discarded (emit the digest, or end on the value you want reported)."
     "Inside a script prefer (slurp path), fs/* and (p/sh ...) for local work over the bash and read tools — they return values, not rendered text — and call a tool only when its result is too large to read (a web fetch, an MCP call), emitting the filtered part: @(tools/call \"name\" args), or its per-tool var @(tools/read {…}). The bare read, write, edit and bash wrappers (also core/*) are available when you need the matching implementation's behavior."
+    "Use (fetch \"url\" {:as :json}) for HTTP; it returns {:status :headers :body}."
     "A multi-form call reports one line per form; use (emit value) for a full result. Return the final value or (emit value); println is discarded."
     "When the answer is an image (a screenshot, a chart, a rendered page), attach it with (emit-image path) rather than describing it."]
    :params {:code {:type :string :description "One Clojure script (one or more top-level forms), evaluated in order; definitions do not persist."}

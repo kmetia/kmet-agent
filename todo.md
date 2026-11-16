@@ -1,6 +1,6 @@
 # Eval verb surface — reviewed proposal
 
-Status: reviewed; decisions recorded. A (fetch), B (grep `:context`) and C (glob `:stat`) are implemented; D, E and F are pending. The saved `github-issue-summary` migration cannot run here: that file is absent under `~/.kmet/agent`.
+Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:stat`), D (json alias and `kmet.libs` removal) and E (prompt/help lines) are implemented; F (verification) and the eval-prompt trim follow-up are pending. The saved `github-issue-summary` migration cannot run here: that file is absent under `~/.kmet/agent`.
 
 ## Decisions
 
@@ -185,82 +185,84 @@ Status: reviewed; decisions recorded. A (fetch), B (grep `:context`) and C (glob
         assert the listing still succeeds and the stat-failure fields are nil.
 
 ### D. json alias and kmet.libs removal
-- [ ] `script.cljc` `standard-aliases`: `["json" 'clojure.data.json]`; keep
+- [x] `script.cljc` `standard-aliases`: `["json" 'clojure.data.json]`; keep
       `["p" 'babashka.process]`.
-- [ ] Remove `script-lib-namespaces`, its clause in `copyable-namespace?`, the
+- [x] Remove `script-lib-namespaces`, its clause in `copyable-namespace?`, the
       `:libs` group in `surface-namespaces`, and the kmet.libs line in
       `surface-help` (`modules/app/src/kmet/app/eval.clj`). Update the stale
       docstrings/comments at `script.cljc` (~720-725, 734, 760-766, 841-847,
       875-880, 942-951).
-- [ ] Remove the four `(require 'kmet.libs...)` lines from
+- [x] Remove the four `(require 'kmet.libs...)` lines from
       `require-host-namespaces!`; require `kmet.libs.http` in the host
       `script.cljc` for fetch. Add an explicit `(require 'clojure.data.json)`
       (or an equivalent guaranteed host load) so `alias-prelude` can require
       it after the copy filter is built.
-- [ ] Update the `namespace-boundary` messages: kmet's own namespaces are
+- [x] Update the `namespace-boundary` messages: kmet's own namespaces are
       excluded; roots are clojure.*, babashka.* and the bundled libs; no
       kmet.libs mention. Add directed hints for the removed ports
       (`kmet.libs.json` → "use the json alias"; `kmet.libs.http` → "use
       fetch"), and change `surface-help`'s "other kmet.* namespaces" to
       "kmet.* namespaces".
-- [ ] Update `core-summary`: remove the kmet.libs ports sentence; add fetch.
-- [ ] Keep `system-namespaces`, `reserved-source-aliases` and the eval-source
+- [x] Update `core-summary`: remove the kmet.libs ports sentence; add fetch.
+- [x] Keep `system-namespaces`, `reserved-source-aliases` and the eval-source
       forbidden-name checks; add `core/fetch` to
       `modules/app/src/kmet/app/eval/sources.clj` `reserved-source-keys`.
-- [ ] Update `modules/app/src/kmet/app/eval/tool.clj` (alias/read lines) and
+- [x] Update `modules/app/src/kmet/app/eval/tool.clj` (alias/read lines) and
       `eval.clj` help text.
-- [ ] Docs: `docs/architecture.md` eval-sandbox section (~386, 536-538,
+- [x] Docs: `docs/architecture.md` eval-sandbox section (~386, 536-538,
       722-746); `docs/extensions.md` (~468-470); `modules/app/src/kmet/extension.md`
       (~197-198, not ~483-484 — the latter is the reserved-host-namespace list
       and stays). `docs/configuration.md` only gives examples, so no change is
       expected there.
-- [ ] Regenerate `docs/composition.md` after the eval/codemode description
+- [x] Regenerate `docs/composition.md` after the eval/codemode description
       edits (`bb generate-catalog`); it embeds the tool descriptions at
       ~414-417 and ~358-364.
-- [ ] Tests:
-  - [ ] `test_eval_interface.clj`: alias line `json -> clojure.data.json` and
+- [x] Tests:
+  - [x] `test_eval_interface.clj`: alias line `json -> clojure.data.json` and
         `p -> babashka.process`; assert kmet.libs is absent; assert
         `(help :core)` includes `fetch`; re-check the 4600-char index cap.
-  - [ ] `test_script.clj:88-89`: extend the arglists checks for `:context`,
+  - [x] `test_script.clj:88-89`: extend the arglists checks for `:context`,
         `:stat` and `fetch`.
-  - [ ] `test_codemode.clj` (~303-309, ~793-796, ~811): kmet.libs ports are no
+  - [x] `test_codemode.clj` (~303-309, ~793-796, ~811): kmet.libs ports are no
         longer require-able; `kmet.libs.edn-store` is rejected as a kmet
         namespace; `(all-ns)` no longer contains `kmet.libs.json`; replace the
         `json/parse-string` assertion with `json/read-str`.
-  - [ ] `test_codemode.clj:271` and `:311`: `json/generate-string` →
+  - [x] `test_codemode.clj:271` and `:311`: `json/generate-string` →
         `json/write-str`, `json/parse-string` → `json/read-str`; check the
         capability expectation at `:282`.
-  - [ ] `test_eval_library.clj:304`: the saved `parse-json` helper uses
+  - [x] `test_eval_library.clj:304`: the saved `parse-json` helper uses
         `json/parse-string`; switch it to `json/read-str` (default string keys).
-  - [ ] Any eval/codemode surface tests asserting core-summary or description
+  - [x] Any eval/codemode surface tests asserting core-summary or description
         text.
-  - [ ] `test_eval_sources` kmet.libs source rejection still passes.
-- [ ] Audit the saved eval library, tests and docs for `kmet.libs.`,
+  - [x] `test_eval_sources` kmet.libs source rejection still passes.
+- [x] Audit the saved eval library, tests and docs for `kmet.libs.`,
       `json/parse-string` and `json/generate-string`; migrate
       `github-issue-summary` (A).
-- [ ] Commit body must name this as an ABI break: removed require-able
+- [x] Commit body must name this as an ABI break: removed require-able
       `kmet.libs` ports and the `json` alias's `parse-string`/`generate-string`
       surface.
 
 ### E. Prompt and help lines
-- [ ] `modules/app/src/kmet/app/eval/tool.clj` `:prompt-guidelines` add:
+- [x] `modules/app/src/kmet/app/eval/tool.clj` `:prompt-guidelines` add:
       `"Pre-bound aliases: fs, str, set, edn, walk, json (clojure.data.json),
       p (babashka.process); no require needed."`
-- [ ] Replace the existing read/search guideline, but keep the `sed`, `head`,
-      `tail`, `rg`/`find` words the prompt tests assert: `read` takes an
-      absolute path argument; `grep`/`glob` take an absolute `:path`;
+- [x] Replace the existing read/search guideline, but keep the `sed`, `head`,
+      `tail`, `rg`/`find` words the prompt tests assert: `read` takes a
+      path (absolute or cwd-relative); `grep`/`glob` take a `:path`;
       `read` with `:as :lines` returns `{:n :text}` maps, not numbered strings;
       use them instead of `sed -n`/`nl`/`cat` or bash `rg`/`find`.
-- [ ] Add fetch to the eval Verbs line; optionally show
+- [x] Add fetch to the eval Verbs line; optionally show
       `(grep "p" {:context N})` and `(glob "p" {:stat true})`.
-- [ ] Update `modules/app/src/kmet/app/tools/codemode.cljc` (description and
+- [x] Update `modules/app/src/kmet/app/tools/codemode.cljc` (description and
       prompt guidelines) for the alias change and `fetch`; codemode has no
       `(help)` namespace, so the prompt is the only discovery surface.
-- [ ] Keep 1300 chars as the eval-prompt goal; temporarily raise
+- [x] Keep 1300 chars as the eval-prompt goal; temporarily raise
       `modules/app/test/kmet/app/test_eval.clj:291` to 1500 so the alias/fetch
       work can land, and add a follow-up to trim back. Re-check the index cap at
       `test_eval_interface.clj:312` (4600).
-- [ ] Verify `(help :core)` and `(help :surface)` pick up the new verb, alias
+- [ ] Follow-up: trim the eval prompt back under 1300 chars
+      (`test_eval.clj:291`) once the alias/fetch lines settle.
+- [x] Verify `(help :core)` and `(help :surface)` pick up the new verb, alias
       target and removed kmet.libs line from `script.cljc`.
 
 ### F. Verification

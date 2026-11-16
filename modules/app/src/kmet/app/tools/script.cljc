@@ -110,7 +110,7 @@
    ["set" 'clojure.set]
    ["edn" 'clojure.edn]
    ["walk" 'clojure.walk]
-   ["json" 'kmet.libs.json]
+   ["json" 'clojure.data.json]
    ["p" 'babashka.process]])
 
 (def core-summary
@@ -122,9 +122,9 @@
        "edit, bash, glob, grep, fetch, cwd, env, now, sleep, emit, emit-image, "
        "spawn and session-recall "
        "(core/<verb> stays available); the core, clj and eval "
-       "namespaces; the loaded clojure.* and babashka.* namespaces, the "
-       "bundled libs (rewrite-clj, cljfmt, edamame, parinferish) and the "
-       "kmet.libs ports (json, http, yaml, markdown) are require-able."))
+       "namespaces; the loaded clojure.* and babashka.* namespaces and the "
+       "bundled libs (rewrite-clj, cljfmt, edamame, parinferish) are "
+       "require-able."))
 
 (def core-refer-verbs
   "The core verbs the sandbox also refers unqualified. They are the same
@@ -720,13 +720,6 @@
    copies."
   (delay @(requiring-resolve 'kmet.app.extensions.libs/bundled-library-roots)))
 
-(def ^:private script-lib-namespaces
-  "The kmet.libs ports a script may require: the portable data boundaries
-   (JSON, YAML, Markdown) and the proxy-aware HTTP boundary. They replace the
-   babashka-hosted libraries that are not portable, and they are the same
-   seams extension contexts get. Every other kmet namespace stays out."
-  '#{kmet.libs.http kmet.libs.json kmet.libs.markdown kmet.libs.yaml})
-
 (defn- copyable-namespace?
   "True for a loaded host namespace the sandbox base copies: the
    babashka/clojure vocabulary, minus clojure.core (SCI's builtin core is the
@@ -734,14 +727,12 @@
    server, not a script API), plus the fixed bundled extension set
    (kmet.app.extensions.libs — the same shared copies extension contexts get,
    so a script's structural-editing and formatting vocabulary matches an
-   extension's) and the script library ports (script-lib-namespaces). All
-   other kmet namespaces stay out."
+   extension's). All other kmet namespaces stay out."
   [ns-sym]
   (let [n (str ns-sym)]
     (and (or (str/starts-with? n "clojure.")
              (str/starts-with? n "babashka.")
-             (@bundled-lib-namespace? n)
-             (contains? script-lib-namespaces ns-sym))
+             (@bundled-lib-namespace? n))
          (not= n "clojure.core")
          (not (str/starts-with? n "babashka.nrepl")))))
 
@@ -762,11 +753,10 @@
 
 (defn- full-babashka-namespaces
   "Map of the sandbox base namespaces: the host's babashka/clojure
-   namespaces plus the script library ports, copied for the per-call context —
-   the `full babashka script` surface (clojure.pprint, java.io, clojure.zip,
-   babashka http/process/… all `require`-able) and the kmet.libs data/HTTP
-   seams. Rebuilt each call so a script's redefinitions stay call-local; the
-   copy costs a few ms (measured ~3ms copy + ~9ms sci/init)."
+   namespaces copied for the per-call context — the `full babashka script`
+   surface (clojure.pprint, java.io, clojure.zip, babashka http/process/… all
+   `require`-able). Rebuilt each call so a script's redefinitions stay
+   call-local; the copy costs a few ms (measured ~3ms copy + ~9ms sci/init)."
   []
   (into {}
         (for [n (all-ns)
@@ -846,8 +836,7 @@
    Jolt does not; on both non-JVM hosts the common script namespaces (cli,
    tasks) are required too, so the copy sees them. kmet.app.extensions.libs is
    the fixed bundled extension set (its requires are the enumeration), loaded
-   here so the copy sees it; the script library ports are loaded for the same
-   reason."
+   here so the copy sees it. clojure.data.json is loaded for the json alias."
   []
   (require 'babashka.fs)
   (require 'babashka.process)
@@ -857,16 +846,14 @@
     (require 'babashka.cli)
     (require 'babashka.tasks))
   (require 'kmet.app.extensions.libs)
-  (require 'kmet.libs.http)
-  (require 'kmet.libs.json)
-  (require 'kmet.libs.markdown)
-  (require 'kmet.libs.yaml)
+  (require 'clojure.data.json)
   nil)
 
 (defn- namespace-boundary
   "Why NAMESPACE is outside the sandbox's script surface: an excluded kmet or
    host-internal namespace, a host namespace that was not copied when the
-   sandbox was built, or a library outside the allowed roots."
+   sandbox was built, or a library outside the allowed roots. The removed
+   kmet.libs ports name their replacement."
   [namespace]
   (let [n (str namespace)]
     (cond
@@ -874,13 +861,19 @@
       "the sandbox has no tools namespace"
       (= n "babashka.nrepl")
       "the sandbox excludes the host's nREPL server namespace"
+      (= n "kmet.libs.json")
+      "the kmet.libs.json port was removed; use the pre-bound json alias (clojure.data.json)"
+      (= n "kmet.libs.http")
+      "the kmet.libs.http port was removed; use the fetch verb"
+      (str/starts-with? n "kmet.libs.")
+      "the kmet.libs ports were removed; use the json alias for JSON and fetch for HTTP"
       (str/starts-with? n "kmet.")
-      "kmet's own namespaces are excluded (the sandbox exposes only the kmet.libs json, http, yaml and markdown ports)"
+      "kmet's own namespaces are excluded"
       (or (str/starts-with? n "clojure.")
           (str/starts-with? n "babashka."))
       "the host had not loaded it when the sandbox was built; only the namespaces copied into the context are require-able"
       :else
-      "it is outside the sandbox's namespace roots (clojure.*, babashka.*, the bundled libs and kmet.libs.{json,http,yaml,markdown})")))
+      "it is outside the sandbox's namespace roots (clojure.*, babashka.* and the bundled libs)")))
 
 (defn- unreadable-namespace
   "The boundary error for a namespace the sandbox cannot serve."
@@ -942,16 +935,14 @@
 
 (defn- surface-namespaces
   "Group the copied namespace names for `(help :surface)`: the clojure and
-   babashka roots, the fixed bundled set, and the kmet.libs ports. Grouping
-   lives here so the help renderer and the copy filter name one set."
+   babashka roots and the fixed bundled set. Grouping lives here so the help
+   renderer and the copy filter name one set."
   [namespaces]
   (let [names (sort (map str namespaces))
-        under (fn [root] (filterv #(str/starts-with? % (str root ".")) names))
-        libs (set (map str script-lib-namespaces))]
+        under (fn [root] (filterv #(str/starts-with? % (str root ".")) names))]
     {:clojure (under "clojure")
      :babashka (under "babashka")
-     :bundled (mapv (fn [root] [root (under root)]) @bundled-roots)
-     :libs (filterv libs names)}))
+     :bundled (mapv (fn [root] [root (under root)]) @bundled-roots)}))
 
 (defn surface
   "The live script surface for `(help :surface)`: HOST, the standard aliases,

@@ -460,14 +460,15 @@ a clear error unless it is part of the fixed bundled set below.
 ### The fixed bundled set
 
 kmet ships a fixed set of libraries in **both** artifacts and shares them by
-reference with every extension context and `codemode` script, so requiring a
-set member needs **no `deps.edn`** and no host-conditional code (the table
-and the portability guarantee are in the contract reference's
+reference with every extension context and `codemode`/`eval` script, so
+requiring a set member needs **no `deps.edn`** and no host-conditional code
+(the table and the portability guarantee are in the contract reference's
 § Bundled extension libraries).
 
-Script contexts (`codemode` and `eval`) also get the four portable `kmet.libs`
-ports — `kmet.libs.json`, `kmet.libs.http`, `kmet.libs.yaml` and
-`kmet.libs.markdown`; no other kmet namespace is require-able from a script.
+Script contexts (`codemode` and `eval`) pre-bind `json`
+(`clojure.data.json`), `fs`, `str`, `set`, `edn` and `walk`, and `fetch` is the
+HTTP verb. The `kmet.libs` ports stay available to extension contexts but are
+not require-able from a script.
 
 The **guarantee is the namespace surface, not the version**: on babashka a
 bundled port decides its own edition, while Jolt uses the version kmet pins

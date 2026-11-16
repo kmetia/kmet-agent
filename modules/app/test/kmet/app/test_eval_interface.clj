@@ -308,6 +308,7 @@
       (t/is (str/includes? (:content (support/eval! env "(eval/describe 'emit :doc)"))
                            "Report VALUE"))
       (t/is (str/includes? core "also referred unqualified"))
+      (t/is (str/includes? core "fetch"))
       (t/is (str/includes? index "  read ([path] [path {:keys [offset start limit end tail footer as]}]) - "))
       (t/is (<= (count index) 4600) "the index stays one bounded discovery call")
       (t/is (str/includes? index "Topics:\n  :core — sandbox verbs"))
@@ -342,7 +343,9 @@
                             sort)]
     (t/is (str/includes? text (str "Surface (host: " (script/host-label) ")")))
     (t/is (str/includes? text "Aliases: fs -> babashka.fs"))
-    (t/is (str/includes? text "kmet.libs.json"))
+    (t/is (str/includes? text "json -> clojure.data.json"))
+    (t/is (str/includes? text "p -> babashka.process"))
+    (t/is (not (str/includes? text "kmet.libs")))
     (t/is (str/includes? text "clojure.core: SCI's own core"))
     (doseq [n babashka-names]
       (t/is (str/includes? text n) n))

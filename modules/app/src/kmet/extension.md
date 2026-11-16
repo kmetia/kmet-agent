@@ -194,8 +194,10 @@ SCI — Java-backed copies fail on classes the native image does not expose —
 and Jolt has no copies at all. Use `kmet.libs.json`, `kmet.libs.yaml`,
 `kmet.libs.markdown` and `kmet.libs.http` instead.
 
-Script contexts (`codemode` and `eval`) share those same four ports; no other
-kmet namespace is require-able from a script.
+Script contexts (`codemode` and `eval`) pre-bind `json`
+(`clojure.data.json`), `p` (`babashka.process`) and the Clojure vocabulary, and
+use `fetch` for HTTP; the `kmet.libs` ports above are not require-able from a
+script.
 
 ## Runtime lifecycle
 

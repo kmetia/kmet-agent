@@ -72,11 +72,12 @@
                      "Example: (-> (read \"deps.edn\") (edn/read-string) :deps (count)).")
    :prompt-snippet "Runs in cwd as a Babashka script. Verbs: (read), (write), (edit), (bash), (glob), (grep); independent eval calls may be issued together; (emit v); (help)."
    :prompt-guidelines
-   ["Independent: several eval calls in one message or several verbs in one call; one call for dependent forms."
-    "Bind intermediate output; keep reads bounded; emit only the summary; println is discarded."
-    "Use read for ranges and grep/glob for search, not sed/cat/head/tail or bash rg/find."
+   ["Independent: several eval calls in one message or verbs in one call; one call for dependent forms."
+    "Bind intermediate output; keep reads bounded; emit the summary; println is discarded."
+    "`read` takes a file path (absolute or relative); `grep`/`glob` take a `:path`; `:as :lines` returns `{:n :text}` maps, not strings; use them, not `sed`/`head`/`tail`/`cat` or bash `rg/find`."
+    "Pre-bound aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require needed."
     "Use fetch for HTTP."
-    "Don't assume host classes or libraries; (help :surface) lists this host's."]
+    "Don't assume host classes or libraries; (help :surface) lists them."]
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"

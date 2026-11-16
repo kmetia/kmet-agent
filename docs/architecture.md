@@ -533,10 +533,11 @@ probe and no real use, and is gone;
   host's `clojure.*`/`babashka.*` namespaces are copied in (public vars
   re-wrapped so macros survive), and the
   fixed bundled-extension set (`kmet.app.extensions.libs`) is shared by value
-  the way an extension context gets it, as are the four portable `kmet.libs`
-  ports (`kmet.libs.json`, `kmet.libs.http`, `kmet.libs.yaml`,
-  `kmet.libs.markdown`) — the documented replacements for host-only data and
-  HTTP libraries. `:load-fn` refuses the rest, so requiring any other kmet
+  the way an extension context gets it. Scripts pre-bind `fs`, `str`, `set`,
+  `edn`, `walk`, `json` (`clojure.data.json`) and `p`
+  (`babashka.process`), and `fetch` is the HTTP verb; the four `kmet.libs`
+  ports stay available to extension contexts but are not require-able from a
+  script. `:load-fn` refuses the rest, so requiring any other kmet
   namespace is the named boundary error. Classes are the host's whole table
   on bb, Jolt's modeled classes on Jolt, and an explicit
   `java.lang`/`java.io`/`java.util` subset on the JVM. A `def` in one call is
@@ -742,8 +743,8 @@ eval tool's description and `(help)` name the shared script surface
 `codemode`, since either row can be selected alone. The host-specific half is
 `(help :surface)`: the environment records the base namespace map and the
 host's class-table shape when it builds, and the topic renders the aliases,
-every copied `clojure.*`/`babashka.*` namespace, the bundled roots, the four
-`kmet.libs` ports, the class surface and the limits from that record — so the
+every copied `clojure.*`/`babashka.*` namespace, the bundled roots, the
+class surface and the limits from that record — so the
 manual names what the sandbox actually copied, not what the host claims, and
 `(all-ns)` stays the live authority. The require boundary error names the same
 categories (kmet-owned, not loaded at build, outside the roots), so a failed

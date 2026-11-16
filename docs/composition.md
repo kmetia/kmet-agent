@@ -358,6 +358,7 @@ Execute a bash command in the current working directory. Returns stdout and stde
 Fresh Clojure SCI sandbox with the active tools bridged in; definitions do not persist.
 Files: (read "p") or (read "p" {:offset N :limit N :footer false :tail N}); (write "p" text); (edit "p" old new) or (edit "p" pairs).
 Shell: (bash "cmd" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.
+Aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require needed. HTTP: (fetch "url" {:as :json}) -> {:status :headers :body}.
 Tools: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; @(tools/read {…}) is the per-tool shorthand, while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) lists the callable tools with their descriptions and parameters; (tools/describe "name") returns one declaration. Inner results never enter the conversation.
 Batch independent reads, commands, and tests into one call; (emit v) for full output. Multi-form calls report one line per form.
 Example: (emit {:spec (read "SPEC-v2.txt") :tests (bash "bash test-v1.sh; bash test-v2.sh")}).

@@ -181,12 +181,16 @@
                          "Batch independent reads, commands, and tests"))
     (t/is (str/includes? (:description tool)
                          "Multi-form calls report one line per form"))
+    (t/is (str/includes? (:description tool)
+                         "json (clojure.data.json)"))
+    (t/is (str/includes? (:description tool) "(fetch"))
     (t/is (str/includes? (:prompt-snippet tool)
                          "Batch independent reads/tests")))
   (let [guidelines (str/join "\n" (:prompt-guidelines (tools/get-tool reg "codemode")))]
     (t/is (str/includes? guidelines "Batch independent reads"))
     (t/is (str/includes? guidelines "not one call per file"))
-    (t/is (str/includes? guidelines "compose shell commands"))))
+    (t/is (str/includes? guidelines "compose shell commands"))
+    (t/is (str/includes? guidelines "(fetch"))))
 
 (t/deftest test-codemode-emit-compact-result
   (let [r (run "(core/emit {:count 2 :items [1 2]})")]
@@ -268,7 +272,7 @@
 (t/deftest test-codemode-capabilities
   (let [r (run (str "(core/emit [(fs/exists? \"deps.edn\")"
                     "  (> (count (slurp \"deps.edn\")) 0)"
-                    "  (json/generate-string {:a 1})"
+                    "  (json/write-str {:a 1})"
                     "  (vec (pmap inc [1 2 3]))"
                     "  @(core/spawn (fn [] 42))"
                     "  (pos? (core/now))"
@@ -299,16 +303,17 @@
   (t/is (= "[1 2 3]"
            (:content (run "(require '[edamame.core :as e]) (core/emit (e/parse-string \"[1 2 3]\"))")))))
 
-(t/deftest test-codemode-script-library-ports
-  ;; the portable kmet.libs seams are require-able in the shared sandbox
-  (t/is (= "true"
-           (:content (run "(require '[kmet.libs.http :as http]) (core/emit (fn? http/request))"))))
-  (t/is (= "true"
-           (:content (run "(require '[kmet.libs.yaml :as yaml]) (core/emit (fn? yaml/parse))"))))
-  (t/is (= "true"
-           (:content (run "(require '[kmet.libs.markdown :as md]) (core/emit (fn? md/parse))"))))
-  (t/is (= "true"
-           (:content (run "(core/emit (fn? json/parse-string))")))))
+(t/deftest test-codemode-standard-json-alias
+  ;; the json alias is clojure.data.json; the kmet.libs port is gone
+  (t/is (= "true" (:content (run "(core/emit (fn? json/read-str))"))))
+  (t/is (= "true" (:content (run "(core/emit (fn? json/write-str))")))))
+
+(t/deftest test-codemode-kmet-libs-ports-are-removed
+  (doseq [[ns-sym hint] [["kmet.libs.json" "json alias"]
+                         ["kmet.libs.http" "fetch"]]]
+    (let [r (run (str "(require '" ns-sym ")"))]
+      (t/is (:is-error r) ns-sym)
+      (t/is (str/includes? (:content r) hint) ns-sym))))
 
 (t/deftest test-codemode-reload-is-noop
   ;; SCI consults the sandbox :load-fn even for a :reload; a known namespace
@@ -790,10 +795,14 @@
     (t/is (str/includes? (:content r) "cannot load namespace")
           "the sandbox's own boundary error, not SCI's generic one")
     (t/is (str/includes? (:content r) "kmet's own namespaces are excluded")))
-  (let [r (run "(require 'kmet.libs.edn-store)")]
+  (let [r (run "(require 'kmet.libs.json)")]
     (t/is (:is-error r))
-    (t/is (str/includes? (:content r) "kmet.libs.edn-store")
-          "the kmet.libs allow-list is the portable ports, not every lib"))
+    (t/is (str/includes? (:content r) "json alias")
+          "the removed JSON port points at its replacement"))
+  (let [r (run "(require 'kmet.libs.http)")]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "fetch")
+          "the removed HTTP port points at its replacement"))
   (let [r (run "(require 'cheshire.core)")]
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "outside the sandbox's namespace roots"))
@@ -806,14 +815,15 @@
 
 (t/deftest test-codemode-namespace-discovery
   ;; the sandbox is self-describing: all-ns lists its surface, ns-publics its vars
-  (let [r (run (str "(core/emit [(contains? (set (map str (all-ns))) \"babashka.fs\")"
+  (let [r (run (str "(core/emit [(contains? (set (map str (all-ns))) \"clojure.data.json\")"
                     "        (contains? (set (map str (all-ns))) \"cljfmt.core\")"
                     "        (contains? (set (map str (all-ns))) \"kmet.libs.json\")"
                     "        (contains? (set (map str (all-ns))) \"kmet.app.tools.registry\")"
+                    "        (contains? (set (map str (all-ns))) \"babashka.fs\")"
                     "        (pos? (count (ns-publics 'babashka.fs)))])"))]
     (t/is (not (:is-error r)) (:content r))
-    (t/is (= "[true true true false true]" (:content r))
-          "the host surface is visible; the app's own namespaces are not")))
+    (t/is (= "[true true false false true true]" (:content r))
+          "the host surface is visible; kmet's namespaces are not")))
 
 (t/deftest test-codemode-context-isolation
   (let [r (run "(def leaked 42) (defn tally [] 1) (core/emit leaked)")]
