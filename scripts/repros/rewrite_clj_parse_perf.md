@@ -1,6 +1,9 @@
 # rewrite-clj parsing is ~17–27× slower on Jolt; clojure.tools.reader is ~13–18× slower
 
-Filed as [jolt#1646](https://github.com/jolt-lang/jolt/issues/1646).
+Filed as [jolt#1646](https://github.com/jolt-lang/jolt/issues/1646); its
+reader-layer fix landed in #1693, and
+[jolt#1713](https://github.com/jolt-lang/jolt/issues/1713) tracks the residual
+per-call overhead. `jolt-bugs.md` carries the current re-check.
 
 ## Summary
 

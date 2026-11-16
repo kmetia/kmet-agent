@@ -6,45 +6,34 @@ builds and tests against the installed build. The `:jolt/min-version` floor is
 the last tagged release (`0.8.27`); older tags are below what the tree needs,
 since the workarounds for the dropped tickets went with their fixes.
 
-Jolt tickets were last checked on 2026-11-16 against the installed
-`v0.8.27-153-gfe0764f8`. #1654's fix (`7dae6ed`, wake one waiter per monitor
-release) is in and the entry is dropped; #1653 and #1646 still reproduce, and
-#1031 is still open upstream. A source build wants a Jolt from `main`: the
-latest dropped fix merged after the `v0.8.27` tag. No change to the
-source-namespace loader path or the reader landed between the two builds.
+Jolt tickets were last checked on 2026-11-17 against the installed
+`v0.8.27-237-gc721c3fe`. #1654's fix (`7dae6ed`, wake one waiter per monitor
+release), #1653's loader cache (`9d2c5000`) and #1646's reader work
+(`c3fd859`, PR #1693) are in, and all three entries are dropped; #1031 is
+still open upstream. #1653's first load compiles (~7.9 s here), and the next
+fresh loaders reuse the artifact (219–280 ms). The reader gap is smaller but
+not gone: on this aarch64 host a warm `parse-string` ×5000 is ~13× bb,
+`parse-string-all` ~10× and `tools.reader/read-string` ~11×, with
+`clojure.core/read-string` at parity; #1713 tracks the remainder. A source
+build wants a Jolt from `main`: the dropped fixes merged after the `v0.8.27`
+tag.
 
 `jolt-lang/http-client` `main` (`b45e46f`, unchanged at this check) is the
-version pinned by the project and has no open tickets; its HTTP, crypto and MCP
-SSE suites pass on the installed build.
+version pinned by the project and has no open tickets; its tests are green on
+that commit (CI, 2026-11-14).
 
 ## Live issues
 
-### [jolt#1653](https://github.com/jolt-lang/jolt/issues/1653) — native loader recompiles context-private source namespaces every load
+### [jolt#1713](https://github.com/jolt-lang/jolt/issues/1713) — rewrite-clj parsing is still ~10–14× slower than the JVM/bb after #1693
 
-Filed 2026-11-13 against the installed `v0.8.27-52-g7ed36439`. The native
-loader reads and compiles private source namespaces on every load; a host
-loading shipped extensions from `src/` pays ~3.7–4.6 s vs ~0.21 s on bb.
-The eviction-repair reload of 91 `kmet.extensions.*` namespaces costs
-~18.6 s (45 source namespaces: ~5.7 s), making
-`test-shipped-extensions-load-from-src` the largest single full-suite
-outlier. The issue asks for evicted-name reporting/precise restore and a
-loader-scoped artifact cache (or precompiled roots). Re-checked on
-`v0.8.27-153-gfe0764f8`: three fresh loaders still take ~6.7–7.0 s each.
-Repro and ticket text: `scripts/repros/jolt_native_loader_perf.clj` and
-`scripts/repros/jolt_native_loader_perf.md`.
-
-### [jolt#1646](https://github.com/jolt-lang/jolt/issues/1646) — rewrite-clj parsing ~17–27× slower than on the JVM/bb
-
-Filed 2026-11-13 against the installed `v0.8.27-52-g7ed36439`.
-`rewrite-clj.parser/parse-string` and `parse-string-all` are ~17–27× slower
-than on the JVM or babashka; `clojure.tools.reader/read-string` is ~13–18×
-slower, while `clojure.core/read-string` is at parity. The parser guards
-(`test-submit-guard`, `test-self-contained`) pay it directly. Re-checked on
-`v0.8.27-153-gfe0764f8`: still ~21× bb for `parse-string`, ~17× for
-`parse-string-all` and ~16× for `tools.reader/read-string`; the build's
-changelog records a partial 17–22% improvement, not a fix. Open PR #1693
-(2026-11-16) takes the reader-layer costs further but leaves the issue open.
-Repro and ticket text: `scripts/repros/rewrite_clj_parse_perf.clj` and
+Filed 2026-11-17 against the installed `v0.8.27-237-gc721c3fe`. #1693 removed
+the reader-layer costs that had a single cause, but the remaining per-call
+overhead keeps `rewrite-clj.parser/parse-string` at ~13× bb, `parse-string-all`
+at ~10× and `clojure.tools.reader/read-string` at ~11× on the test host
+(warm; JVM ratios ~13×/12×/14×), while `clojure.core/read-string` stays at
+parity. The parser guards (`test-submit-guard`, `test-self-contained`) still
+pay it directly. Repro and ticket text:
+`scripts/repros/rewrite_clj_parse_perf.clj` and
 `scripts/repros/rewrite_clj_parse_perf.md`.
 
 ### [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) — SCI host-protocol support on Jolt
@@ -59,6 +48,6 @@ declaring `:jolt` use Jolt's native loader and are not blocked, which is why
 `modules/app/deps.edn` pin yogthos/sci at `1295142` (the #1093 branch) for the
 `:sci` fallback. Keep the pin until the change is released by Jolt; v0.8.27
 vendors SCI at `32d62a5`, which the #1093 branch includes, so the pin still
-applies. The installed `v0.8.27-153-gfe0764f8` still pins `vendor/sci` at
+applies. The installed `v0.8.27-237-gc721c3fe` still pins `vendor/sci` at
 `32d62a5`.
 
