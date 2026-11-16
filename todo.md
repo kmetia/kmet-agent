@@ -1,6 +1,6 @@
 # Eval verb surface — reviewed proposal
 
-Status: reviewed; decisions recorded. B (grep `:context`) and C (glob `:stat`) are implemented; A, D, E and F are pending.
+Status: reviewed; decisions recorded. A (fetch), B (grep `:context`) and C (glob `:stat`) are implemented; D, E and F are pending. The saved `github-issue-summary` migration cannot run here: that file is absent under `~/.kmet/agent`.
 
 ## Decisions
 
@@ -82,7 +82,7 @@ Status: reviewed; decisions recorded. B (grep `:context`) and C (glob `:stat`) a
 ## Tasks
 
 ### A. fetch core verb
-- [ ] Add `fetch-verb` to `modules/app/src/kmet/app/tools/script.cljc` beside
+- [x] Add `fetch-verb` to `modules/app/src/kmet/app/tools/script.cljc` beside
       the other core verbs.
   - Contract: `(fetch url)` / `(fetch url {:keys [method headers body as throw?
     timeout follow-redirects]})`.
@@ -115,18 +115,18 @@ Status: reviewed; decisions recorded. B (grep `:context`) and C (glob `:stat`) a
   - If the app setting is honored, thread `:http-total-timeout-ms` into the
     eval/codemode script state and test nil/0/positive values; do not read the
     config from the sandbox.
-- [ ] Add `fetch` to `core-verb-vars`, `core-refer-verbs` and `core-summary`;
+- [x] Add `fetch` to `core-verb-vars`, `core-refer-verbs` and `core-summary`;
       update the arglists metadata.
-- [ ] Add `(fetch "url" {...})` to the Verbs line in
+- [x] Add `(fetch "url" {...})` to the Verbs line in
       `modules/app/src/kmet/app/eval/tool.clj` and a prompt guideline.
-- [ ] Tests: local HTTP fixture (see the proposal below; no external network).
+- [x] Tests: local HTTP fixture (see the proposal below; no external network).
       Cover: GET 200 string; 404 with `:throw? false`; `:throw? true` throws;
       headers; `:as :json`; empty body → nil; parse failure; non-2xx
       non-JSON body stays raw; POST map body and Content-Type (including
       caller-supplied); timeout conversion and default via `with-redefs` (a
       real timeout test is `^:slow`); `:signal` pass-through; `:follow-redirects`
       pass-through. Reset the HTTP transport in a fixture.
-- [ ] Fixture proposal: extract the one-shot server helpers (`respond`,
+- [x] Fixture proposal: extract the one-shot server helpers (`respond`,
       `read-request`, `start-server`) into `test/kmet/test_http_server.clj`
       next to `kmet.test-tmp`, make them public, and require that namespace
       from both `modules/libs/test/kmet/libs/test_http.clj` and the new app
@@ -135,7 +135,8 @@ Status: reviewed; decisions recorded. B (grep `:context`) and C (glob `:stat`) a
       the server and avoids reaching into another test namespace's private
       vars.
 - [ ] Migrate the saved `github-issue-summary` after fetch lands (confirmed
-      to exist at `~/.kmet/agent/eval/user/github-issue-summary.clj`):
+      to exist at `~/.kmet/agent/eval/user/github-issue-summary.clj`, but
+      absent in this environment — only `signal-send-me` is saved):
       redefine it to call `fetch` with `:as :json` and `:throw? true` (the
       current wrapper throws on HTTP >= 400), keep the GitHub `Accept` and
       `User-Agent` headers, then `select-keys` the summary fields; verify
@@ -286,8 +287,8 @@ Status: reviewed; decisions recorded. B (grep `:context`) and C (glob `:stat`) a
         `github-issue-summary`.
 
 ## Open questions
-- **fetch timeout**: resolution is per-call `:timeout` > positive agent
-  `:http-total-timeout-ms` > 120 s script default. Confirm whether v1 wires the
-  agent setting or ships the script default first.
+- **fetch timeout**: resolved for v1 — per-call `:timeout` > 120 s script
+  default. The agent's `:http-total-timeout-ms` is not threaded into the
+  eval/codemode state yet; wire it later if the setting should bound fetch.
 - **Grep validation**: resolved in the implementation — negative,
   non-numeric and nil `:context` clamp to 0 (pi's behavior); no rejection.

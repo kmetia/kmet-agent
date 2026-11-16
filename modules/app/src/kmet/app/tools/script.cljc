@@ -20,6 +20,7 @@
    worker pool) with its result readers and one var per active tool. `eval`
    opts out: its sandbox has no tools namespace and cannot call a tool."
   (:require [babashka.fs :as fs]
+            [clojure.data.json :as data-json]
             [clojure.string :as str]
             [kmet.app.debug :as debug]
             [kmet.app.sandbox :as sandbox]
@@ -34,6 +35,7 @@
             [kmet.libs.clj-edit :as clj-edit]
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.host :as host]
+            [kmet.libs.http :as http]
             [kmet.libs.process :as kprocess]
             [kmet.srce.core :as srce]
             [rewrite-clj.node :as n]
@@ -117,8 +119,8 @@
   (str "aliases " (str/join ", " (map first standard-aliases))
        "; cwd-resolving slurp, "
        "spit and file-seq; core verbs, also referred unqualified: read, write, "
-       "edit, bash, glob, grep, cwd, env, now, sleep, emit, emit-image, spawn and "
-       "session-recall "
+       "edit, bash, glob, grep, fetch, cwd, env, now, sleep, emit, emit-image, "
+       "spawn and session-recall "
        "(core/<verb> stays available); the core, clj and eval "
        "namespaces; the loaded clojure.* and babashka.* namespaces, the "
        "bundled libs (rewrite-clj, cljfmt, edamame, parinferish) and the "
@@ -128,7 +130,8 @@
   "The core verbs the sandbox also refers unqualified. They are the same
    functions the `core` namespace installs, so `(emit v)` and `(core/emit v)`
    are one call; `read` deliberately shadows `clojure.core/read`."
-  '[read write edit bash glob grep cwd env now sleep emit emit-image spawn session-recall])
+  '[read write edit bash glob grep fetch cwd env now sleep emit emit-image spawn
+    session-recall])
 
 (def alias-prelude
   "The aliases and core refers every script gets without its own require — the
@@ -1112,6 +1115,106 @@
   ([command] (bash-verb command nil))
   ([command opts] (bash-text command opts (:cancelled *call-state*))))
 
+(defn- content-type
+  "HEADERS' Content-Type value, matched case-insensitively."
+  [headers]
+  (some (fn [[k v]] (when (= "content-type" (str/lower-case (name k))) v))
+        headers))
+
+(defn- json-content-type?
+  "True when HEADERS name a JSON content type (application/json or +json)."
+  [headers]
+  (when-let [ct (content-type headers)]
+    (let [mediatype (-> ct str (str/split #";" 2) first str/trim
+                        str/lower-case)]
+      (or (= "application/json" mediatype)
+          (str/ends-with? mediatype "+json")))))
+
+(defn- ensure-json-content-type
+  "HEADERS with a JSON Content-Type unless one is already present."
+  [headers]
+  (if (content-type headers)
+    headers
+    (assoc (or headers {}) "Content-Type" "application/json")))
+
+(defn- fetch-timeout-ms
+  "TIMEOUT seconds as milliseconds; the 120 s script default when it is absent
+   or not positive. The agent's :http-total-timeout-ms is not threaded into
+   the sandbox yet."
+  [timeout]
+  (or (when timeout
+        (try
+          (let [secs (double timeout)]
+            (when (pos? secs)
+              (max 1 (long (* 1000 secs)))))
+          (catch Exception _ nil)))
+      120000))
+
+(defn- parse-json
+  "BODY of RESP parsed as JSON; a parse failure names URL and STATUS only."
+  [url {:keys [status body]}]
+  (try
+    (data-json/read-str body :key-fn keyword)
+    (catch Exception e
+      (throw (ex-info (str "fetch could not parse JSON from " url
+                           " (HTTP " status ")")
+                      {:type :script/fetch-json
+                       :url url
+                       :status status}
+                      e)))))
+
+(defn- fetch-result
+  "RESP with :body parsed for :as :json: an empty body is nil, a 2xx or JSON
+   content-type body parses, and any other body stays a string."
+  [url as {:keys [status headers body] :as resp}]
+  (if (not= as :json)
+    resp
+    (assoc resp :body
+           (cond
+             (str/blank? body) nil
+             (or (and status (<= 200 status 299)) (json-content-type? headers))
+             (parse-json url resp)
+             :else body))))
+
+(defn fetch-response
+  "Fetch URL through kmet.libs.http. OPTS: :method (default :get), :headers,
+   :body (a map is JSON-encoded), :as (:string default, or :json), :throw?
+   (default false; true throws on HTTP >= 400), :timeout (seconds; default
+   120 s), :follow-redirects. A map body gets Content-Type: application/json
+   unless HEADERS already set one. :as :json parses a non-empty body when the
+   status is 2xx or the content type is JSON (a failure throws
+   :script/fetch-json); an empty body is nil and any other body stays a
+   string. SIGNAL is the call's cancel atom: the curl transport aborts on it,
+   while the native transport is bounded only by :timeout. Returns
+   {:status :headers :body}."
+  [url opts signal]
+  (let [{:keys [method headers body as throw? timeout follow-redirects]} opts
+        as (or as :string)]
+    (when (str/blank? (str url))
+      (throw (ex-info "fetch needs a URL"
+                      {:type :script/bad-argument :option :url :value url})))
+    (when-not (#{:string :json} as)
+      (throw (ex-info (str "fetch :as must be :string or :json, got " (pr-str as))
+                      {:type :script/bad-argument :option :as :value as})))
+    (let [headers (if (map? body) (ensure-json-content-type headers) headers)
+          request (cond-> {:url (str url)
+                           :method (or method :get)
+                           :as :string
+                           :throw? (boolean throw?)
+                           :timeout (fetch-timeout-ms timeout)
+                           :signal signal}
+                    (seq headers) (assoc :headers headers)
+                    (some? body) (assoc :body body)
+                    (contains? opts :follow-redirects)
+                    (assoc :follow-redirects follow-redirects))]
+      (fetch-result url as (http/request request)))))
+
+(defn- fetch-verb
+  "Fetch URL and return {:status :headers :body}. OPTS: :method (default :get), :headers, :body (a map is JSON-encoded), :as (:string default, or :json), :throw? (default false; true throws on HTTP >= 400), :timeout (seconds; default 120 s), :follow-redirects. :as :json parses a 2xx or JSON body; an empty body is nil. Cancellation aborts the curl transport; the native transport is bounded only by :timeout."
+  {:arglists '([url] [url {:keys [method headers body as throw? timeout follow-redirects]}])}
+  ([url] (fetch-verb url nil))
+  ([url opts] (fetch-response url opts (:cancelled *call-state*))))
+
 (defn- glob-verb
   "List files matching PATTERN; OPTS: :path, :max, :exclude, :gitignore?, :stat. With :stat the result adds :entries [{:path :size :modified}] in :paths order, modified in epoch milliseconds. PATTERN is relative to :path (default: the call's cwd). Returns {:paths :total :truncated?} with paths relative to the call's cwd."
   {:arglists '([pattern] [pattern {:keys [path max exclude gitignore? stat]}])}
@@ -1188,6 +1291,7 @@
    'bash #'bash-verb
    'glob #'glob-verb
    'grep #'grep-verb
+   'fetch #'fetch-verb
    'cwd #'cwd-verb
    'env #'env-verb
    'now #'now-verb

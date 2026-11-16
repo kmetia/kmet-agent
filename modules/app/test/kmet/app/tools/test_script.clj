@@ -7,7 +7,9 @@
             [clojure.test :as t]
             [kmet.app.tools.script :as script]
             [kmet.libs.concurrent :as concurrent]
+            [kmet.libs.http :as http]
             [kmet.libs.process :as kprocess]
+            [kmet.test-http-server :as http-server]
             [kmet.test-tmp :as test-tmp]))
 
 (defn- tool-def [name]
@@ -37,6 +39,8 @@
   (script/run (assoc (run-opts tools code)
                      :sci-ctx ctx
                      :interrupt holder)))
+
+(t/use-fixtures :each (fn [f] (http/set-transport! :platform) (f)))
 
 (t/deftest test-a-kept-context-keeps-a-definition
   (let [s (kept-context)]
@@ -89,6 +93,8 @@
     (t/is (str/includes? (pr-str (:arglists (get help "core/glob"))) "stat"))
     (t/is (str/includes? (pr-str (:arglists (get help "core/grep"))) "max-file-bytes"))
     (t/is (str/includes? (pr-str (:arglists (get help "core/grep"))) "context"))
+    (t/is (contains? help "core/fetch"))
+    (t/is (str/includes? (pr-str (:arglists (get help "core/fetch"))) "follow-redirects"))
     (t/is (str/includes? (pr-str (:arglists (get help "core/session-recall"))) "scope"))
     (t/is (str/includes? (pr-str (:arglists (get help "clj/edit-form"))) "file_path"))
     (t/is (str/includes? (pr-str (:arglists (get help "clj/replace-sexp"))) "match_form"))
@@ -387,3 +393,162 @@
           (fs/delete-if-exists marker-name))))))
 
 (t/deftest test-core-verbs-use-the-implementations-not-the-tool-bridge (let [s (kept-context) read-tools {"read" (tool-def "read")} bash-tools {"bash" (tool-def "bash")} path (str "target/test-core-verbs-" (random-uuid) ".txt")] (t/is (str/includes? (:content (run-with-dispatch s read-tools "(core/emit (core/read \"no-such-file\"))")) "File not found") "core/read calls the read implementation, not the tool stub") (t/is (= "hi\n" (:content (run-with-dispatch s bash-tools "(core/emit (core/bash \"echo hi\"))"))) "core/bash calls the bash implementation, not the tool stub") (try (run-with-dispatch s {"write" (tool-def "write")} (str "(core/write " (pr-str path) " \"old\")")) (t/is (= "old" (slurp path))) (run-with-dispatch s {"edit" (tool-def "edit")} (str "(core/edit " (pr-str path) " \"old\" \"new\")")) (t/is (= "new" (slurp path))) (finally (fs/delete-if-exists path)))))
+
+(defn- with-server
+  "Run F with the base URL of a one-shot server handled by HANDLER."
+  [handler f]
+  (let [[base close] (http-server/start-server handler)]
+    (try (f base) (finally (close)))))
+
+(defn- with-response
+  "Run F with the base URL of a server answering every request with STATUS,
+   BODY and HEADERS."
+  [status body headers f]
+  (with-server (fn [s _ _ _] (http-server/respond s status body headers)) f))
+
+(defn- request-body
+  "Read the request body from RDR using the Content-Length header."
+  [headers rdr]
+  (let [n (Long/parseLong (get headers "content-length" "0"))
+        buf (char-array n)]
+    (loop [off 0]
+      (when (< off n)
+        (let [read (.read rdr buf off (- n off))]
+          (when (pos? read)
+            (recur (+ off read))))))
+    (String. buf)))
+
+(t/deftest test-fetch-get-string
+  (with-response "200 OK" "hello" {"Content-Type" "text/plain"}
+    (fn [base]
+      (let [r (script/fetch-response (str base "/") nil nil)]
+        (t/is (= 200 (:status r)))
+        (t/is (= "hello" (:body r)))
+        (t/is (= "text/plain" (get (:headers r) "content-type")))))))
+
+(t/deftest test-fetch-status-and-throw
+  (with-response "404 Not Found" "missing" {"Content-Type" "text/plain"}
+    (fn [base]
+      (let [r (script/fetch-response (str base "/") nil nil)]
+        (t/is (= 404 (:status r)))
+        (t/is (= "missing" (:body r))))
+      (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"404"
+                              (script/fetch-response (str base "/")
+                                                     {:throw? true} nil))))))
+
+(t/deftest test-fetch-sends-headers
+  (with-server
+    (fn [s _ headers _]
+      (http-server/respond s "200 OK" (get headers "x-test" "") {}))
+    (fn [base]
+      (t/is (= "yes" (:body (script/fetch-response
+                             (str base "/") {:headers {"X-Test" "yes"}} nil)))))))
+
+(t/deftest test-fetch-json
+  (with-response "200 OK" "{\"a\":1}" {"Content-Type" "application/json; charset=utf-8"}
+    (fn [base]
+      (t/is (= {:a 1} (:body (script/fetch-response (str base "/") {:as :json} nil))))))
+  (with-response "200 OK" "{\"b\":2}" {"Content-Type" "application/vnd.test+json"}
+    (fn [base]
+      (t/is (= {:b 2} (:body (script/fetch-response (str base "/") {:as :json} nil))))))
+  (with-response "200 OK" "1" {"Content-Type" "text/plain"}
+    (fn [base]
+      (t/is (= 1 (:body (script/fetch-response (str base "/") {:as :json} nil))))))
+  (with-response "200 OK" "" {"Content-Type" "application/json"}
+    (fn [base]
+      (t/is (nil? (:body (script/fetch-response (str base "/") {:as :json} nil))))))
+  (with-response "404 Not Found" "{\"error\":true}" {"Content-Type" "application/json"}
+    (fn [base]
+      (t/is (= {:error true}
+               (:body (script/fetch-response (str base "/") {:as :json} nil))))))
+  (with-response "500 Internal Server Error" "oops" {"Content-Type" "text/plain"}
+    (fn [base]
+      (t/is (= "oops" (:body (script/fetch-response (str base "/") {:as :json} nil)))))))
+
+(t/deftest test-fetch-json-parse-error-names-url-and-status
+  (with-response "200 OK" "not json" {"Content-Type" "application/json"}
+    (fn [base]
+      (let [url (str base "/bad")
+            error (try (script/fetch-response url {:as :json} nil)
+                       nil
+                       (catch clojure.lang.ExceptionInfo e e))]
+        (t/is (= :script/fetch-json (:type (ex-data error))))
+        (t/is (str/includes? (ex-message error) url))
+        (t/is (str/includes? (ex-message error) "200"))
+        (t/is (not (str/includes? (ex-message error) "not json")))))))
+
+(t/deftest test-fetch-json-request-body-and-content-type
+  (let [seen (atom nil)]
+    (with-server
+      (fn [s _ headers rdr]
+        (reset! seen [(get headers "content-type") (request-body headers rdr)])
+        (http-server/respond s "200 OK" "ok" {}))
+      (fn [base]
+        (t/is (= "ok" (:body (script/fetch-response
+                              (str base "/") {:method :post :body {:a 1}} nil))))
+        (t/is (= ["application/json" "{\"a\":1}"] @seen))
+        (t/is (= "ok" (:body (script/fetch-response
+                              (str base "/")
+                              {:method :post
+                               :headers {"content-type" "application/vnd.test+json"}
+                               :body {:a 1}} nil))))
+        (t/is (= ["application/vnd.test+json" "{\"a\":1}"] @seen))))))
+
+(t/deftest test-fetch-request-options
+  (let [seen (atom nil)
+        signal (atom false)]
+    (with-redefs [http/request (fn [opts]
+                                 (reset! seen opts)
+                                 {:status 200 :headers {} :body ""})]
+      (script/fetch-response "http://example.test/"
+                             {:timeout 1.5
+                              :follow-redirects :never
+                              :throw? true
+                              :headers {"X-Test" "1"}}
+                             signal)
+      (t/is (= 1500 (:timeout @seen)))
+      (t/is (= :never (:follow-redirects @seen)))
+      (t/is (true? (:throw? @seen)))
+      (t/is (identical? signal (:signal @seen)))
+      (t/is (= :get (:method @seen)))
+      (t/is (= "1" (get (:headers @seen) "X-Test")))
+      (script/fetch-response "http://example.test/" nil nil)
+      (t/is (= 120000 (:timeout @seen)))
+      (t/is (false? (:throw? @seen)))
+      (script/fetch-response "http://example.test/" {:timeout 0} nil)
+      (t/is (= 120000 (:timeout @seen)))
+      (script/fetch-response "http://example.test/" {:timeout 0.0001} nil)
+      (t/is (= 1 (:timeout @seen)))
+      (script/fetch-response "http://example.test/" {:body {:a 1}} nil)
+      (t/is (= {"Content-Type" "application/json"} (:headers @seen)))
+      (script/fetch-response "http://example.test/"
+                             {:body {:a 1} :headers {:content-type "x/y"}} nil)
+      (t/is (= {:content-type "x/y"} (:headers @seen))))))
+
+(t/deftest test-fetch-rejects-a-bad-surface
+  (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"needs a URL"
+                          (script/fetch-response "" nil nil)))
+  (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #":string or :json"
+                          (script/fetch-response "http://example.test/"
+                                                 {:as :bytes} nil))))
+
+(t/deftest test-fetch-is-a-referred-core-verb
+  (with-response "200 OK" "hello" {}
+    (fn [base]
+      (let [s (kept-context)
+            url (str base "/")]
+        (t/is (str/includes?
+               (:content (run-in s {} (str "(core/emit (fetch \"" url "\"))")))
+               "hello"))
+        (t/is (str/includes?
+               (:content (run-in s {} (str "(core/emit (core/fetch \"" url "\"))")))
+               "hello"))))))
+
+(t/deftest ^:slow test-fetch-timeout
+  (with-server
+    (fn [_ _ _ _] (Thread/sleep 2000))
+    (fn [base]
+      (let [error (try (script/fetch-response (str base "/") {:timeout 0.1} nil)
+                       nil
+                       (catch clojure.lang.ExceptionInfo e e))]
+        (t/is (= :transport-error (:type (ex-data error))))))))

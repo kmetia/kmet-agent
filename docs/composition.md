@@ -412,7 +412,7 @@ Only the current session is searchable. One result is capped at 50 KB.
 **Description:**
 
 Persistent Babashka script sandbox (Clojure/SCI). Runs in the session cwd; relative paths and shell commands resolve there (`(cwd)`; bash's :cwd overrides).
-Verbs: (read "p" {:start N :end N :as :lines}), (write "p" text), (edit "p" old new), (bash "cmd" {:timeout N :max-lines N :as :map}), (glob "p"), (grep "p"). Nonzero exits are normal.
+Verbs: (read "p" {:start N :end N :as :lines}), (write "p" text), (edit "p" old new), (bash "cmd" {:timeout N :max-lines N :as :map}), (glob "p"), (grep "p"), (fetch "url" {:as :json}). Nonzero exits are normal.
 Forms run in order; definitions/results persist. (emit v) for output; each form reports one line; println is discarded. Limit 16 KiB (max 50 KiB); timeout (omit/0 = none). Discover: (help) index; (help :core); (sources); (help :library) saved/live; (index "text") saved/live/source; (describe 'name). Source verbs: <id>/verb.
 Example: (-> (read "deps.edn") (edn/read-string) :deps (count)).
 
