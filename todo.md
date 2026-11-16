@@ -1,6 +1,6 @@
 # Eval verb surface — reviewed proposal
 
-Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:stat`), D (json alias and `kmet.libs` removal) and E (prompt/help lines) are implemented; F's automated gates pass, while its fresh-session manual checks and the eval-prompt trim follow-up are pending. The saved `github-issue-summary` migration cannot run here: that file is absent under `~/.kmet/agent`.
+Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:stat`), D (json alias and `kmet.libs` removal), E (prompt/help lines) and F (verification) are implemented. The only open items are the eval-prompt trim follow-up and the blocked saved-definition migration (`github-issue-summary` is absent under `~/.kmet/agent`).
 
 ## Decisions
 
@@ -275,18 +275,19 @@ Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:
 - [x] Extension-context guard: `modules/app/test/kmet/app/extensions/test_resources.clj`
       (~702) still proves an extension context can require `kmet.libs.yaml`;
       run the relevant extension test or `bb test` for it.
-- [ ] Optionally `bb slop --dups` if a test HTTP server is copied
-- [ ] Fresh-session manual checks:
-  - [ ] `(help :surface)` shows `json -> clojure.data.json`,
+- [x] Optionally `bb slop --dups` if a test HTTP server is copied — none was.
+- [x] Fresh-session manual checks:
+  - [x] `(help :surface)` shows `json -> clojure.data.json`,
         `p -> babashka.process`, and no kmet.libs.
-  - [ ] `(fetch ...)` returns status/body; use a local server for the offline
+  - [x] `(fetch ...)` returns status/body; use a local server for the offline
         check.
-  - [ ] `(grep "needle" {:context 2})` and `(glob "**/*.clj" {:stat true})`
+  - [x] `(grep "needle" {:context 2})` and `(glob "**/*.clj" {:stat true})`
         shapes.
-  - [ ] `(read "/absolute/path" {:start 1 :end 3 :as :lines})` returns
+  - [x] `(read "/absolute/path" {:start 1 :end 3 :as :lines})` returns
         `{:n :text}` maps.
-  - [ ] The saved library loads, including the migrated
-        `github-issue-summary`.
+  - [x] The saved library loads the three present definitions (`user/bb`,
+        `user/stat` cwd; `user/signal-send-me` global); the migrated
+        `github-issue-summary` is absent, so that part stays blocked with A.
 
 ## Open questions
 - **fetch timeout**: resolved for v1 — per-call `:timeout` > 120 s script
