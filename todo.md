@@ -1,6 +1,6 @@
 # Eval verb surface — reviewed proposal
 
-Status: reviewed; decisions recorded, implementation not started.
+Status: reviewed; decisions recorded. B (grep `:context`) and C (glob `:stat`) are implemented; A, D, E and F are pending.
 
 ## Decisions
 
@@ -143,10 +143,10 @@ Status: reviewed; decisions recorded, implementation not started.
       file is user state under `~/.kmet/agent`, not a repo file.
 
 ### B. grep context
-- [ ] `modules/app/src/kmet/app/tools/file_search.clj`: add non-negative
+- [x] `modules/app/src/kmet/app/tools/file_search.clj`: add non-negative
       `:context N` only, mirroring pi's grep tool; default 0/nil means no
       context. Do not add `:before`/`:after`.
-- [ ] Shape: keep `:matches` as match-only entries and add `:lines` only when
+- [x] Shape: keep `:matches` as match-only entries and add `:lines` only when
       `:context > 0`, ordered by file/line and formatted exactly like the grep
       tool — `path:line: text` for matches and `path-line- text` for context;
       paths keep the verb's existing display form. Once `:max` is reached, a
@@ -154,26 +154,26 @@ Status: reviewed; decisions recorded, implementation not started.
       context. Reject text-only: eval verbs are values-first, and scripts need
       to filter and count matches; `:lines` gives the model the grep-tool
       rendering without losing the structured result.
-- [ ] `:max` still limits matches, not context lines; `:truncated?` remains
+- [x] `:max` still limits matches, not context lines; `:truncated?` remains
       match-count based; keep the last allowed match's trailing context.
       Document the result-size multiplication.
-- [ ] Extract a `context-lines` helper so `grep` stays inside the CC budget.
-- [ ] Update the `grep` docstring and `grep-verb` `:arglists` in `script.cljc`.
-- [ ] Tests in `modules/app/test/kmet/app/tools/test_file_search.clj`, mirroring
+- [x] Extract a `context-lines` helper so `grep` stays inside the CC budget.
+- [x] Update the `grep` docstring and `grep-verb` `:arglists` in `script.cljc`.
+- [x] Tests in `modules/app/test/kmet/app/tools/test_file_search.clj`, mirroring
       pi's `grep-operations.test.ts`: `context 1` produces the expected
       before/match/after lines; default shape unchanged; boundaries; after
       `:max`, a match inside the last allowed match's trailing context is
       context; `:glob`/`:exclude`; binary skip unchanged.
 
 ### C. glob :stat
-- [ ] `modules/app/src/kmet/app/tools/file_search.clj`: add `:stat` boolean.
+- [x] `modules/app/src/kmet/app/tools/file_search.clj`: add `:stat` boolean.
       When true, add `:entries [{:path :size :modified}]` with the same
       count/order as `:paths`; `:paths` stays strings; `:total` and
       `:truncated?` unchanged.
-- [ ] Stat only the returned/taken paths; `:modified` in epoch milliseconds;
+- [x] Stat only the returned/taken paths; `:modified` in epoch milliseconds;
       nil on a stat failure; do not fail the listing.
-- [ ] Update the `glob` docstring and `glob-verb` `:arglists` in `script.cljc`.
-- [ ] Tests: default shape unchanged; `:stat` entries, size and modified
+- [x] Update the `glob` docstring and `glob-verb` `:arglists` in `script.cljc`.
+- [x] Tests: default shape unchanged; `:stat` entries, size and modified
       time; 0-byte file; `:max` and `:truncated?`; no `:entries` without
       `:stat`; `:entries` order matches `:paths`.
       - For mtime, set an explicit value aligned to 2 s (for example
@@ -289,5 +289,5 @@ Status: reviewed; decisions recorded, implementation not started.
 - **fetch timeout**: resolution is per-call `:timeout` > positive agent
   `:http-total-timeout-ms` > 120 s script default. Confirm whether v1 wires the
   agent setting or ships the script default first.
-- **Grep validation**: reject negative/non-integer `:context` with
-  `:script/bad-argument`; 0/nil means no context.
+- **Grep validation**: resolved in the implementation — negative,
+  non-numeric and nil `:context` clamp to 0 (pi's behavior); no rejection.

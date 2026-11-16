@@ -1113,14 +1113,14 @@
   ([command opts] (bash-text command opts (:cancelled *call-state*))))
 
 (defn- glob-verb
-  "List files matching PATTERN; OPTS: :path, :max, :exclude, :gitignore?. PATTERN is relative to :path (default: the call's cwd). Returns {:paths :total :truncated?} with paths relative to the call's cwd."
-  {:arglists '([pattern] [pattern {:keys [path max exclude gitignore?]}])}
+  "List files matching PATTERN; OPTS: :path, :max, :exclude, :gitignore?, :stat. With :stat the result adds :entries [{:path :size :modified}] in :paths order, modified in epoch milliseconds. PATTERN is relative to :path (default: the call's cwd). Returns {:paths :total :truncated?} with paths relative to the call's cwd."
+  {:arglists '([pattern] [pattern {:keys [path max exclude gitignore? stat]}])}
   ([pattern] (glob-verb pattern nil))
   ([pattern opts] (file-search/glob (call-cwd) pattern opts)))
 
 (defn- grep-verb
-  "Search file contents for PATTERN (regex); OPTS: :path, :glob, :ignore-case?, :max, :max-file-bytes, :exclude, :gitignore?. Returns {:matches [{:path :line :text}] :skipped :skipped-count :truncated? :files}; paths are relative to the call's cwd. Binary and oversized files are skipped."
-  {:arglists '([pattern] [pattern {:keys [path glob ignore-case? max max-file-bytes exclude gitignore?]}])}
+  "Search file contents for PATTERN (regex); OPTS: :path, :glob, :ignore-case?, :max, :max-file-bytes, :exclude, :gitignore?, :context (default 0; lines before and after each match). With :context > 0 the result adds :lines, formatted path:line: text for matches and path-line- text for context. Returns {:matches [{:path :line :text}] :skipped :skipped-count :truncated? :files}; paths are relative to the call's cwd. Binary and oversized files are skipped."
+  {:arglists '([pattern] [pattern {:keys [path glob ignore-case? max max-file-bytes exclude gitignore? context]}])}
   ([pattern] (grep-verb pattern nil))
   ([pattern opts] (file-search/grep (call-cwd) pattern opts)))
 

@@ -60,6 +60,14 @@
   [base file]
   (str/replace (str (fs/relativize base file)) fs/file-separator "/"))
 
+(defn- stat-entry
+  "FILE's `:stat` entry: size in bytes and modified time in epoch milliseconds.
+   Either value is nil when that stat call fails."
+  [file]
+  {:size (try (fs/size file) (catch Exception _ nil))
+   :modified (try (fs/file-time->millis (fs/last-modified-time file))
+                  (catch Exception _ nil))})
+
 (defn- compile-excludes
   "Compiled exclude matcher from EXCLUDE — nil, one pattern, or a seq."
   [exclude]
@@ -118,10 +126,13 @@
 (defn glob
   "List files matching PATTERN. OPTS: :path (default: current directory),
    :max (default 500), :exclude (glob or seq of globs relative to :path),
-   :gitignore? (default true). PATTERN is relative to :path, which may be
-   absolute or `~`. Returns {:paths :total :truncated?}; paths are relative to
-   CWD, `~/...` under home, or absolute, `/`-separated."
-  [cwd pattern {:keys [path max exclude gitignore?]
+   :gitignore? (default true), :stat (when true, add :entries with the same
+   count and order as :paths). PATTERN is relative to :path, which may be
+   absolute or `~`. Returns {:paths :total :truncated?}; with :stat also
+   {:entries [{:path :size :modified}]}, modified in epoch milliseconds and nil
+   when the stat fails. Paths are relative to CWD, `~/...` under home, or
+   absolute, `/`-separated."
+  [cwd pattern {:keys [path max exclude gitignore? stat]
                 :or {path "." max default-max-paths gitignore? true}}]
   (let [base (resolve-path cwd path)
         _ (when-not (fs/directory? base)
@@ -132,31 +143,61 @@
         matcher (glob/compile-pattern pattern)
         excludes (compile-excludes exclude)
         files (vec (filtered-files base matcher excludes gitignore?))
-        total (count files)]
-    {:paths (mapv #(path/display-path cwd %) (take max files))
-     :total total
-     :truncated? (> total max)}))
+        total (count files)
+        taken (vec (take max files))
+        paths (mapv #(path/display-path cwd %) taken)]
+    (cond-> {:paths paths
+             :total total
+             :truncated? (> total max)}
+      stat (assoc :entries
+                  (mapv (fn [file shown]
+                          (assoc (stat-entry file) :path shown))
+                        taken paths)))))
 
-(defn- add-match!
-  "Record one matching LINE at LINE-NUMBER in STATE."
-  [state shown line-number line max]
-  (vswap! state update :matches conj
-          {:path shown :line line-number :text line})
-  (when (> (count (:matches @state)) max)
-    (vswap! state assoc :truncated? true)))
+(defn- record-match!
+  "Add MATCH to STATE while fewer than MAX matches are kept; otherwise mark
+   the result truncated. Returns true when the match was kept."
+  [state match max]
+  (if (< (count (:matches @state)) max)
+    (do (vswap! state update :matches conj match) true)
+    (do (vswap! state assoc :truncated? true) false)))
+
+(defn- context-lines
+  "Render the context windows of ascending MATCH-LINES in LINES, emitted once
+   in line order: a kept match renders `path:line: text`, every other line
+   `path-line- text`. A match past the kept set (for example one beyond :max
+   inside the last kept match's trailing context) renders as context."
+  [shown lines match-lines context]
+  (let [total (count lines)
+        matches (set match-lines)]
+    (->> match-lines
+         (mapcat (fn [line]
+                   (range (max 1 (- line context))
+                          (inc (min total (+ line context))))))
+         distinct
+         (mapv (fn [line]
+                 (let [text (nth lines (dec line))]
+                   (if (contains? matches line)
+                     (str shown ":" line ": " text)
+                     (str shown "-" line "- " text))))))))
 
 (defn- search-content!
-  "Search CONTENT for RE, appending matches to STATE."
-  [state re max shown content]
+  "Search LINES for RE, appending kept matches and their context to STATE."
+  [state re {:keys [max context]} shown lines]
   (vswap! state update :files inc)
-  (doseq [[i line] (map-indexed vector (str/split-lines content))
-          :while (not (:truncated? @state))]
-    (when (re-find re line)
-      (add-match! state shown (inc i) line max))))
+  (let [kept (volatile! [])]
+    (doseq [[i line] (map-indexed vector lines)
+            :while (not (:truncated? @state))]
+      (when (re-find re line)
+        (when (record-match! state {:path shown :line (inc i) :text line} max)
+          (vswap! kept conj (inc i)))))
+    (when (pos? context)
+      (vswap! state update :lines into
+              (context-lines shown lines @kept context)))))
 
 (defn- search-file!
   "Search FILE; skip it when oversized, binary or unreadable."
-  [state re max max-file-bytes cwd file]
+  [state re {:keys [max-file-bytes cwd] :as opts} file]
   (let [shown (path/display-path cwd file)
         size (try (fs/size file) (catch Exception _ nil))]
     (if (and size (> size max-file-bytes))
@@ -165,7 +206,7 @@
         (let [content (slurp (fs/file file) :encoding "UTF-8")]
           (if (str/includes? content "\u0000")
             (skip-file! state shown "binary")
-            (search-content! state re max shown content)))
+            (search-content! state re opts shown (str/split-lines content))))
         (catch Exception t
           (skip-file! state shown (or (ex-message t) (str t))))))))
 
@@ -174,13 +215,20 @@
    current directory; file or directory), :glob (default `**/*`, relative to
    :path), :ignore-case?, :max (default 100), :max-file-bytes (default 5 MiB),
    :exclude (glob or seq of globs relative to :path), :gitignore? (default
-   true).
-   Returns {:matches [{:path :line :text}] :skipped [{:path :reason}]
-   :skipped-count int :truncated? bool :files int}; paths are displayed like
-   `glob`'s. Binary and oversized files are skipped, not read."
-  [cwd pattern {:keys [path glob ignore-case? max max-file-bytes exclude gitignore?]
+   true), :context (default 0; lines shown before and after each match; a
+   negative count means 0). Returns {:matches [{:path :line :text}]
+   :skipped [{:path :reason}] :skipped-count int :truncated? bool :files int};
+   with :context > 0 also :lines, the match and context lines as
+   `path:line: text` and `path-line- text`, ordered by file/line and
+   deduplicated across overlapping windows. :max limits matches, not context
+   lines, so the result can grow to up to :max * (2 * :context + 1) lines.
+   Paths are displayed like `glob`'s. Binary and oversized files are skipped,
+   not read."
+  [cwd pattern {:keys [path glob ignore-case? max max-file-bytes exclude
+                       gitignore? context]
                 :or {path "." glob "**/*" max default-max-matches
-                     max-file-bytes default-max-file-bytes gitignore? true}}]
+                     max-file-bytes default-max-file-bytes gitignore? true
+                     context 0}}]
   (let [base (resolve-path cwd path)
         directory? (fs/directory? base)
         _ (when-not (or directory? (fs/regular-file? base))
@@ -193,19 +241,26 @@
         excludes (compile-excludes exclude)
         max (positive-int max default-max-matches)
         max-file-bytes (positive-int max-file-bytes default-max-file-bytes)
+        context (positive-int context 0)
         files (if directory?
                 (filtered-files base matcher excludes gitignore?)
                 [base])
         state (volatile! {:matches []
+                          :lines []
                           :skipped []
                           :skipped-count 0
                           :files 0
-                          :truncated? false})]
+                          :truncated? false})
+        opts {:max max
+              :max-file-bytes max-file-bytes
+              :context context
+              :cwd cwd}]
     (doseq [file files :while (not (:truncated? @state))]
-      (search-file! state re max max-file-bytes cwd file))
-    (let [{:keys [matches skipped skipped-count files truncated?]} @state]
-      {:matches (vec (take max matches))
-       :skipped (vec skipped)
-       :skipped-count skipped-count
-       :truncated? (boolean truncated?)
-       :files files})))
+      (search-file! state re opts file))
+    (let [{:keys [matches lines skipped skipped-count files truncated?]} @state]
+      (cond-> {:matches (vec matches)
+               :skipped (vec skipped)
+               :skipped-count skipped-count
+               :truncated? (boolean truncated?)
+               :files files}
+        (pos? context) (assoc :lines lines)))))

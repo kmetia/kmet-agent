@@ -144,3 +144,97 @@
       (let [r (search/grep dir "needle" {:path dir :gitignore? false})]
         (t/is (some #(= "ignored.txt" (:path %)) (:matches r)))
         (t/is (some #(= "target/x.clj" (:path %)) (:matches r)))))))
+
+(t/deftest test-grep-context-lines
+  (let [dir (fixture {"src/a.clj" "one\nneedle two\nthree\nneedle four\nfive\n"
+                      "src/b.edn" "needle\n"})]
+    (let [r (search/grep dir "needle" {:path dir :context 1})]
+      (t/is (= [{:path "src/a.clj" :line 2 :text "needle two"}
+                {:path "src/a.clj" :line 4 :text "needle four"}
+                {:path "src/b.edn" :line 1 :text "needle"}]
+               (:matches r)))
+      (t/is (= ["src/a.clj-1- one"
+                "src/a.clj:2: needle two"
+                "src/a.clj-3- three"
+                "src/a.clj:4: needle four"
+                "src/a.clj-5- five"
+                "src/b.edn:1: needle"]
+               (:lines r))))
+    (t/is (not (contains? (search/grep dir "needle" {:path dir}) :lines)))
+    (t/is (not (contains? (search/grep dir "needle" {:path dir :context 0}) :lines)))))
+
+(t/deftest test-grep-context-after-max-stays-context
+  (let [dir (fixture {"edges.txt" "needle one\ntwo\nneedle three\nneedle four\nfive\n"})]
+    (let [r (search/grep dir "needle" {:path dir :context 1 :max 2})]
+      (t/is (= [1 3] (mapv :line (:matches r))))
+      (t/is (:truncated? r))
+      (t/is (= ["edges.txt:1: needle one"
+                "edges.txt-2- two"
+                "edges.txt:3: needle three"
+                "edges.txt-4- needle four"]
+               (:lines r))))
+    (let [r (search/grep dir "needle" {:path dir :context 1 :max 10})]
+      (t/is (not (:truncated? r)))
+      (t/is (= ["edges.txt:1: needle one"
+                "edges.txt-2- two"
+                "edges.txt:3: needle three"
+                "edges.txt:4: needle four"
+                "edges.txt-5- five"]
+               (:lines r))))))
+
+(t/deftest test-grep-context-with-filters-and-skips
+  (let [dir (fixture {"src/a.clj" "x\nneedle\ny\n"
+                      "src/b.edn" "needle\n"
+                      "bin.dat" (str "needle" (char 0) "tail")})]
+    (let [r (search/grep dir "needle" {:path dir :glob "**/*.clj" :context 1})]
+      (t/is (= ["src/a.clj-1- x" "src/a.clj:2: needle" "src/a.clj-3- y"]
+               (:lines r))))
+    (let [r (search/grep dir "needle" {:path dir :exclude "**/*.edn" :context 1})]
+      (t/is (not-any? #(= "src/b.edn" (:path %)) (:matches r)))
+      (t/is (some #(= "bin.dat" (:path %)) (:skipped r))))))
+
+(t/deftest test-glob-stat-entries
+  (let [dir (fixture {"a.txt" "abc" "sub/b.txt" ""})
+        mtime 1609459200000]
+    (fs/set-last-modified-time (fs/path dir "a.txt")
+                               (fs/millis->file-time mtime))
+    (fs/set-last-modified-time (fs/path dir "sub" "b.txt")
+                               (fs/millis->file-time mtime))
+    (let [r (search/glob dir "**/*.txt" {:path dir :stat true})]
+      (t/is (= ["a.txt" "sub/b.txt"] (:paths r)))
+      (t/is (= (mapv :path (:entries r)) (:paths r)))
+      (t/is (= [3 0] (mapv :size (:entries r))))
+      (t/is (every? (fn [{:keys [modified]}]
+                      (<= -2000 (- mtime modified) 2000))
+                    (:entries r)))
+      (t/is (= 2 (:total r)))
+      (t/is (not (:truncated? r))))
+    (let [r (search/glob dir "**/*.txt" {:path dir})]
+      (t/is (not (contains? r :entries)))
+      (t/is (= ["a.txt" "sub/b.txt"] (:paths r))))
+    (let [r (search/glob dir "**/*.txt" {:path dir :stat true :max 1})]
+      (t/is (= ["a.txt"] (:paths r)))
+      (t/is (= ["a.txt"] (mapv :path (:entries r))))
+      (t/is (= 2 (:total r)))
+      (t/is (:truncated? r)))))
+
+(t/deftest test-glob-stat-survives-stat-failures
+  (let [dir (fixture {"a.txt" "abc" "b.txt" "de"})]
+    (with-redefs [fs/size (fn [_] (throw (ex-info "no size" {})))
+                  fs/last-modified-time (fn [_] (throw (ex-info "no mtime" {})))]
+      (let [r (search/glob dir "**/*.txt" {:path dir :stat true})]
+        (t/is (= ["a.txt" "b.txt"] (:paths r)))
+        (t/is (= ["a.txt" "b.txt"] (mapv :path (:entries r))))
+        (t/is (every? #(and (nil? (:size %)) (nil? (:modified %)))
+                      (:entries r)))))))
+
+(t/deftest test-grep-context-clamps-at-file-edges
+  (let [dir (fixture {"edges.txt" "needle one\nmid\nlast needle\n"})]
+    (let [r (search/grep dir "needle" {:path dir :context 3})]
+      (t/is (= ["edges.txt:1: needle one"
+                "edges.txt-2- mid"
+                "edges.txt:3: last needle"]
+               (:lines r))))
+    (let [r (search/grep dir "needle" {:path dir :context -2})]
+      (t/is (not (contains? r :lines)))
+      (t/is (= [1 3] (mapv :line (:matches r)))))))
