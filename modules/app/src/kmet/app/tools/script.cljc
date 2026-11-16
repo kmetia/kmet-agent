@@ -862,9 +862,9 @@
       (= n "babashka.nrepl")
       "the sandbox excludes the host's nREPL server namespace"
       (= n "kmet.libs.json")
-      "the kmet.libs.json port was removed; use the pre-bound json alias (clojure.data.json)"
+      "the kmet.libs.json port was removed; use the json alias"
       (= n "kmet.libs.http")
-      "the kmet.libs.http port was removed; use the fetch verb"
+      "the kmet.libs.http port was removed; use fetch"
       (str/starts-with? n "kmet.libs.")
       "the kmet.libs ports were removed; use the json alias for JSON and fetch for HTTP"
       (str/starts-with? n "kmet.")

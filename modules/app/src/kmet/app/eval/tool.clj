@@ -70,12 +70,12 @@
                      "Verbs: (read \"p\" {:start N :end N :as :lines}), (write \"p\" text), (edit \"p\" old new), (bash \"cmd\" {:timeout N :max-lines N :as :map}), (glob \"p\"), (grep \"p\"), (fetch \"url\" {:as :json}). Nonzero exits are normal.\n"
                      "Forms run in order; definitions/results persist. (emit v) for output; each form reports one line; println is discarded. Limit 16 KiB (max 50 KiB); timeout (omit/0 = none). Discover: (help) index; (help :core); (sources); (help :library) saved/live; (index \"text\") saved/live/source; (describe 'name). Source verbs: <id>/verb.\n"
                      "Example: (-> (read \"deps.edn\") (edn/read-string) :deps (count)).")
-   :prompt-snippet "Runs in cwd as a Babashka script. Verbs: (read), (write), (edit), (bash), (glob), (grep); independent eval calls may be issued together; (emit v); (help)."
+   :prompt-snippet "Runs in cwd as a Babashka script. Verbs: (read), (write), (edit), (bash), (glob), (grep), (fetch); independent eval calls may be issued together; (emit v); (help)."
    :prompt-guidelines
    ["Independent: several eval calls in one message or verbs in one call; one call for dependent forms."
     "Bind intermediate output; keep reads bounded; emit the summary; println is discarded."
-    "`read` takes a file path (absolute or relative); `grep`/`glob` take a `:path`; `:as :lines` returns `{:n :text}` maps, not strings; use them, not `sed`/`head`/`tail`/`cat` or bash `rg/find`."
-    "Pre-bound aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require needed."
+    "`read` takes a path (absolute or relative), `grep`/`glob` a `:path`; `:as :lines` gives `{:n :text}` maps, not strings; prefer them over `sed`/`head`/`tail`/`cat` and bash `rg/find`."
+    "Pre-bound aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require."
     "Use fetch for HTTP."
     "Don't assume host classes or libraries; (help :surface) lists them."]
    :parameters {:type "object"

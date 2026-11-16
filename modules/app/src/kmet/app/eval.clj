@@ -918,9 +918,7 @@
           info)))
 
 (def ^:private system-namespaces
-  #{"core" "clj" "eval" "clojure" "clojure.core"
-    "babashka.process" "kmet.libs.http" "kmet.libs.json"
-    "kmet.libs.markdown" "kmet.libs.yaml"})
+  #{"core" "clj" "eval" "clojure"})
 
 (defn- name-namespace
   [name]
