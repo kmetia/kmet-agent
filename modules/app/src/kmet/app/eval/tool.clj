@@ -74,7 +74,7 @@
    :prompt-guidelines
    ["Independent: several eval calls in one message or verbs in one call; one call for dependent forms."
     "Bind intermediate output; keep reads bounded; emit the summary; println is discarded."
-    "`read` takes a path (absolute or relative), `grep`/`glob` a `:path`; `:as :lines` gives `{:n :text}` maps, not strings; prefer them over `sed`/`head`/`tail`/`cat` and bash `rg/find`."
+    "`read` takes a path, `grep`/`glob` a `:path`; `:as :lines` puts `{:n :text}` maps in `:lines`, not strings; avoid `sed`/`head`/`tail`/`cat` and bash `rg/find`."
     "Pre-bound aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require."
     "Use fetch for HTTP."
     "Don't assume host classes or libraries; (help :surface) lists them."]

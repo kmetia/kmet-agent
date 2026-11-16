@@ -866,7 +866,7 @@
       (= n "kmet.libs.http")
       "the kmet.libs.http port was removed; use fetch"
       (str/starts-with? n "kmet.libs.")
-      "the kmet.libs ports were removed; use the json alias for JSON and fetch for HTTP"
+      "the kmet.libs ports were removed"
       (str/starts-with? n "kmet.")
       "kmet's own namespaces are excluded"
       (or (str/starts-with? n "clojure.")

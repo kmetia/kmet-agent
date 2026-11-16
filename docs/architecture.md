@@ -535,7 +535,7 @@ probe and no real use, and is gone;
   fixed bundled-extension set (`kmet.app.extensions.libs`) is shared by value
   the way an extension context gets it. Scripts pre-bind `fs`, `str`, `set`,
   `edn`, `walk`, `json` (`clojure.data.json`) and `p`
-  (`babashka.process`), and `fetch` is the HTTP verb; the four `kmet.libs`
+  (`babashka.process`), and `fetch` is the HTTP verb; the `kmet.libs`
   ports stay available to extension contexts but are not require-able from a
   script. `:load-fn` refuses the rest, so requiring any other kmet
   namespace is the named boundary error. Classes are the host's whole table
