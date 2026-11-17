@@ -106,3 +106,56 @@
     (with-redefs-fn {mark-validated! (fn [] (reset! marked true))}
       #(summarize! (selection [['fixtures.broken-ns "boom"]]) true))
     (t/is (false? @marked))))
+
+(t/deftest full-run-selection-is-lazy
+  ;; Regression: a full run required every test namespace before running any
+  ;; test. On Jolt that preloaded the extension test namespaces (all ^:bb-only
+  ;; there) and made test-session's native extension loader load the same
+  ;; sources again at 3-4x the cost.
+  (let [loaded (atom [])]
+    (with-redefs-fn {(var runner/ns-vars-of)
+                     (fn [ns-sym]
+                       (swap! loaded conj ns-sym)
+                       {:vars []})}
+      #(let [selection (#'runner/select-vars false)]
+         (t/is (:lazy? selection) "a full run plans the tree instead of loading it")
+         (t/is (= [] @loaded) "select-vars did not require a namespace")
+         (t/is (= [] (:vars selection)))))))
+
+(t/deftest lazy-full-run-loads-and-runs-in-order
+  (let [loaded (atom [])
+        groups (atom nil)
+        fixture-var (with-meta ['fixture-test] {:test true})]
+    (with-redefs-fn {(var runner/all-namespaces)
+                     ['fixtures.a 'fixtures.broken 'fixtures.b]
+                     (var runner/ns-vars-of)
+                     (fn [ns-sym]
+                       (swap! loaded conj ns-sym)
+                       (if (= 'fixtures.broken ns-sym)
+                         {:vars [] :unloaded [ns-sym "boom"]}
+                         {:vars [fixture-var]}))
+                     (var runner/run-groups)
+                     (fn [gs]
+                       (reset! groups (vec gs))
+                       {:counters {:test 1 :pass 1 :fail 0 :error 0}
+                        :agent-dir-writes []})}
+      #(let [result (#'runner/run-all-selected false)]
+         (t/is (= ['fixtures.a 'fixtures.broken 'fixtures.b] @loaded)
+               "namespaces load in run order, one at a time")
+         (t/is (= [['fixtures.a [fixture-var]]
+                   ['fixtures.b [fixture-var]]]
+                  @groups)
+               "an unloadable namespace is skipped, the rest still run")
+         (t/is (= [['fixtures.broken "boom"]] (:unloaded result)))))))
+
+(t/deftest lazy-full-run-uses-run-all-selected
+  (let [slow? (atom nil)]
+    (with-redefs-fn {(var runner/run-all-selected)
+                     (fn [s]
+                       (reset! slow? s)
+                       {:counters {:test 0 :pass 0 :fail 0 :error 0}
+                        :agent-dir-writes []
+                        :unloaded []})}
+      #(let [{:keys [exit]} (summarize! {:lazy? true :slow? true} false)]
+         (t/is (= 0 exit))
+         (t/is (true? @slow?))))))

@@ -184,23 +184,25 @@
 (defn- select-vars
   "Load every namespace (or, with FILTERS, the ones needed to answer them)
    and return {:vars [matching test vars] :unloaded [[ns message] ...]}.
-   Unloadable namespaces are reported, never fatal. With no FILTERS the
-   slow? flag selects ^:slow vs non-slow vars. Whole-namespace filters
-   (a known test ns, a dotted ns name, or ns/ with an empty var part)
-   select by slow?; var filters (plain names or ns/var) ignore slow?.
-   The :unloaded list holds only explicitly requested namespaces (whole
-   ns requests and ns/var filters) — namespaces scanned incidentally for
-   plain var names are never reported. :filters echoes the raw FILTERS."
+   A full run returns {:lazy? true :slow? ...} instead: run-all-selected
+   requires each namespace when its turn comes, so the whole tree is not
+   compiled up front. Unloadable namespaces are reported, never fatal.
+   With no FILTERS the slow? flag selects ^:slow vs non-slow vars.
+   Whole-namespace filters (a known test ns, a dotted ns name, or ns/ with
+   an empty var part) select by slow?; var filters (plain names or ns/var)
+   ignore slow?. The :unloaded list holds only explicitly requested
+   namespaces (whole ns requests and ns/var filters) — namespaces scanned
+   incidentally for plain var names are never reported. :filters echoes
+   the raw FILTERS."
   ([slow?] (select-vars slow? nil))
   ([slow? filters]
    (if-not (seq filters)
-     (reduce (fn [acc ns-sym]
-               (let [{vars :vars unloaded :unloaded} (ns-vars-of ns-sym)]
-                 (cond-> acc
-                   unloaded (update :unloaded conj unloaded)
-                   :always (update :vars into (filter #(test-var? % slow?)) vars))))
-             {:vars [] :unloaded []}
-             all-namespaces)
+     ;; A full run plans the tree instead of requiring it here:
+     ;; run-all-selected loads each namespace just before its tests. Jolt
+     ;; compiles every form at require time, and the eager pass used to load
+     ;; extension test namespaces (all ^:bb-only on Jolt) before the native
+     ;; extension loader test ran, making that load 3-4x slower.
+     {:lazy? true :slow? slow? :vars [] :unloaded [] :filters []}
      (let [strs (map str filters)
            {:keys [named nss plain]} (split-filters strs)
            ns-sel (when (seq nss) (select-requested-nss nss slow?))
@@ -406,16 +408,17 @@
         (keep (fn [f] (when (not= (get before f) (get after f)) f)))
         (sort (distinct (concat (keys before) (keys after))))))
 
-(defn- run-selected
-  "Run selected test vars, grouped by namespace so fixtures apply per ns.
-   Engine-specific: bb runs each var with output capture and per-run ref
-   counters (see run-ns-vars); jolt's port counts into its own process-wide
-   `counters` atom and has no host output capture (see run-ns-vars-jolt).
+(defn- run-groups
+  "Run [ns-sym vars] groups in order, one namespace at a time so fixtures
+   apply per ns. Engine-specific: bb runs each var with output capture and
+   per-run ref counters (see run-ns-vars); jolt's port counts into its own
+   process-wide `counters` atom and has no host output capture (see
+   run-ns-vars-jolt).
 
    Returns {:counters {:test :pass :fail :error} :agent-dir-writes [[ns file]]}
    — the second is the host agent-dir files the run touched, attributed to the
    namespace that was running (see agent-dir-watch)."
-  [vars]
+  [groups]
   (let [dir (host-agent-dir)
         writes (atom [])
         run-ns (fn [ns-sym run]
@@ -433,15 +436,39 @@
       ;; run-ns-vars-jolt's own before/after reads).
       (let [counter-atom (var-get (requiring-resolve (quote clojure.test/counters)))
             before @counter-atom]
-        (doseq [[ns-sym ns-vars] (sort-by key (group-by (comp ns-name :ns meta) vars))]
+        (doseq [[ns-sym ns-vars] groups]
           (run-ns ns-sym #(run-ns-vars-jolt ns-sym ns-vars)))
         {:counters (counter-deltas before @counter-atom)
          :agent-dir-writes @writes})
       {:counters (binding [t/*report-counters* (ref t/*initial-report-counters*)]
-                   (doseq [[ns-sym ns-vars] (sort-by key (group-by (comp ns-name :ns meta) vars))]
+                   (doseq [[ns-sym ns-vars] groups]
                      (run-ns ns-sym #(run-ns-vars ns-sym ns-vars)))
                    @t/*report-counters*)
        :agent-dir-writes @writes})))
+
+(defn- run-selected
+  "Run selected test vars, grouped by namespace so fixtures apply per ns.
+   See run-groups for the engine split and the return value."
+  [vars]
+  (run-groups (sort-by key (group-by (comp ns-name :ns meta) vars))))
+
+(defn- run-all-selected
+  "Run every test namespace in sorted order, requiring each one just before
+   its turn. A full run must not require the whole tree up front: on Jolt
+   the eager pass compiled the extension test namespaces (all ^:bb-only
+   there) before test-session's native extension loader loaded the same
+   sources, making that load 3-4x slower. Returns run-groups' map plus
+   :unloaded."
+  [slow?]
+  (let [load-failures (atom [])
+        groups (map (fn [ns-sym]
+                      (let [{vars :vars unloaded :unloaded} (ns-vars-of ns-sym)]
+                        (when unloaded
+                          (swap! load-failures conj unloaded))
+                        [ns-sym (filter #(test-var? % slow?) vars)]))
+                    all-namespaces)]
+    (assoc (run-groups (filter (comp seq second) groups))
+           :unloaded @load-failures)))
 
 (defn- report-unloaded
   "Print the unloadable-namespace list, prefixed by HEADER when given."
@@ -470,14 +497,15 @@
 
 (defn- run-and-summarize
   "Run the selected test vars, print the summary, exit with status 0/1.
-   SELECTION carries {:vars :unloaded :filters}; :unloaded holds the
-   requested namespaces that failed to load (full run: every unloadable
-   namespace). The skip report prints on a full run and on a filtered run
-   that matched vars; a filtered run that matched no vars names the filters
-   instead and, when a requested namespace failed to load, surfaces its reason.
-   When MARK-VALIDATED? and everything passed, records
-   the changed-files baseline (kmet.tasks.changed — bb only)."
-  [{:keys [vars unloaded filters]} mark-validated?]
+   SELECTION carries {:vars :unloaded :filters}; a full run instead carries
+   {:lazy? true :slow? ...} and run-all-selected loads and runs each namespace
+   when its turn comes. :unloaded holds the requested namespaces that failed
+   to load (full run: every unloadable namespace). The skip report prints on a
+   full run and on a filtered run that matched vars; a filtered run that
+   matched no vars names the filters instead and, when a requested namespace
+   failed to load, surfaces its reason. When MARK-VALIDATED? and everything
+   passed, records the changed-files baseline (kmet.tasks.changed — bb only)."
+  [{:keys [vars unloaded filters lazy? slow?]} mark-validated?]
   (let [start-ns (System/nanoTime)
         cache-vars (into {}
                          (for [sym '[kmet.ai.models/*use-models-cache*
@@ -486,10 +514,15 @@
                                             (catch Throwable _ nil))]
                                :when v]
                            [v false]))
-        {:keys [counters agent-dir-writes]}
-        (if (and (not jolt?) (seq cache-vars))
-          (with-bindings cache-vars (run-selected vars))
-          (run-selected vars))
+        run-selection (fn []
+                        (if lazy?
+                          (run-all-selected slow?)
+                          (run-selected vars)))
+        run-result (if (and (not jolt?) (seq cache-vars))
+                     (with-bindings cache-vars (run-selection))
+                     (run-selection))
+        {:keys [counters agent-dir-writes]} run-result
+        unloaded (or (:unloaded run-result) unloaded)
         results counters
         n-tests (:test results)
         n-assertions (+ (:pass results) (:fail results) (:error results))
