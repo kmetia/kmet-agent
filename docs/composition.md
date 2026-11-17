@@ -412,7 +412,8 @@ Only the current session is searchable. One result is capped at 50 KB.
 
 **Description:**
 
-Babashka/Clojure SCI sandbox in session cwd; paths/shell resolve (`(cwd)`; bash :cwd overrides).
-File/shell/HTTP: (read "p") -> text; (read "p" {:offset N :limit N}); (read "p" {:start N :end N :as :lines}) -> {:lines [{:n :text}] ...}; (write "p" text) -> message; (edit "p" old new|pairs); (bash "cmd" {:timeout N :max-lines N :max-bytes N :as :map}) -> output|map; (glob "p") -> {:paths :total :truncated?}; (grep "p") -> {:matches ...}; (fetch "url" {:as :json}) -> {:status :headers :body}. Nonzero exits are normal.
-Forms run in order; definitions/results persist; (emit v); one line/form; println discarded. Limit 16 KiB (max 50 KiB); timeout (omit/0 = none). Discover: (help) index; (help :core); (sources); (help :library) saved/live; (index "text") saved/live/source; (describe 'name). Source verbs: <id>/verb.
+Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order, definitions persist.
+File/shell/HTTP: (read "p") -> text; (read "p" {:offset N :limit N}); (read "p" {:start N :end N :as :lines}); (write "p" text); (edit "p" old new|pairs); (bash "cmd" {:timeout N :max-lines N :max-bytes N :as :map}); (glob "p"); (grep "p"); (fetch "url" {:as :json}). Nonzero exits are normal.
+Output: (emit v) replaces the form report. Without emit, multi-form calls show one bounded line per non-definition value; a single form shows its full value. stdout/stderr (println/print/prn) are discarded. Limit 16 KiB (50 KiB with :max-output-bytes); timeout seconds, omit/0 = none.
+Discover: (help), (help :core), (sources), (help :library), (index "text"), (describe 'name); source verbs <id>/verb.
 

@@ -783,9 +783,10 @@ and names the read form in its notice; an errored result carries its id
 after the error. Like codemode, eval evaluates a call's top-level forms one
 at a time, so an error begins `ERROR` (after the values of earlier forms) and,
 with several forms, names the failing form and what already ran; a successful
-multi-form call reports every form as one bounded line; use `(emit value)` for
-a full value. The result ring is eval-specific, since it is read back with the
-sandbox's `result` verb.
+multi-form call that does not emit reports every non-definition value as one
+bounded line; `(emit value)` replaces that report and gives a full value. The
+result ring is eval-specific, since it is read back with the sandbox's `result`
+verb.
 `(help :results)` states the emission, cap, truncation and error
 contract. `(help)` is the one-call discovery path: one summary line per
 built-in help topic, one summary/count line per mounted source, every

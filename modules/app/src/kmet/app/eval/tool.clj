@@ -66,13 +66,15 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description (str "Babashka/Clojure SCI sandbox in session cwd; paths/shell resolve (`(cwd)`; bash :cwd overrides).\n"
-                     "File/shell/HTTP: (read \"p\") -> text; (read \"p\" {:offset N :limit N}); (read \"p\" {:start N :end N :as :lines}) -> {:lines [{:n :text}] ...}; (write \"p\" text) -> message; (edit \"p\" old new|pairs); (bash \"cmd\" {:timeout N :max-lines N :max-bytes N :as :map}) -> output|map; (glob \"p\") -> {:paths :total :truncated?}; (grep \"p\") -> {:matches ...}; (fetch \"url\" {:as :json}) -> {:status :headers :body}. Nonzero exits are normal.\n"
-                     "Forms run in order; definitions/results persist; (emit v); one line/form; println discarded. Limit 16 KiB (max 50 KiB); timeout (omit/0 = none). Discover: (help) index; (help :core); (sources); (help :library) saved/live; (index \"text\") saved/live/source; (describe 'name). Source verbs: <id>/verb.")
+   :description (str "Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order, definitions persist.\n"
+                     "File/shell/HTTP: (read \"p\") -> text; (read \"p\" {:offset N :limit N}); (read \"p\" {:start N :end N :as :lines}); (write \"p\" text); (edit \"p\" old new|pairs); (bash \"cmd\" {:timeout N :max-lines N :max-bytes N :as :map}); (glob \"p\"); (grep \"p\"); (fetch \"url\" {:as :json}). Nonzero exits are normal.\n"
+                     "Output: (emit v) replaces the form report. Without emit, multi-form calls show one bounded line per non-definition value; a single form shows its full value. stdout/stderr (println/print/prn) are discarded. Limit 16 KiB (50 KiB with :max-output-bytes); timeout seconds, omit/0 = none.\n"
+                     "Discover: (help), (help :core), (sources), (help :library), (index \"text\"), (describe 'name); source verbs <id>/verb.")
    :prompt-snippet "Runs in cwd; independent eval calls may be issued together."
    :prompt-guidelines
    ["Run several eval calls in one message; keep dependent forms in one call."
-    "Bind intermediate output; bound reads; emit summary; println is discarded."
+    "Use (emit v) for output; println/print produce nothing."
+    "Bind intermediate output; bound reads."
     "`read` returns text; `:as :lines` -> map with `:lines [{:n :text}]`, 1-based; grep/glob take `:path`; avoid sed/head/tail/cat and bash rg/find."
     "Aliases: fs,str,set,edn,walk,json (clojure.data.json),p (babashka.process)."
     "Don't assume libs; (help :surface) lists them."]

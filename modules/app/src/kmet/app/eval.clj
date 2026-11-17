@@ -1323,12 +1323,13 @@
 
 (defn- results-help
   []
-  (str "Results: (emit value) appends curated output; a silent successful "
-       "call reports its final value instead. stdout and stderr are discarded. "
+  (str "Results: (emit value) is the curated output; without emit, a successful "
+       "call reports its form values. stdout and stderr are discarded. "
        "The result is bounded at 16 KiB / 2,000 lines by default; "
        ":max-output-bytes raises it to 50 KiB. A truncated result keeps its "
-       "tail and names its result id. A multi-form call reports one bounded "
-       "line per form; use (emit value) for a full value. The session's "
+       "tail and names its result id. A multi-form call that does not emit "
+       "reports one bounded line per non-definition form; use (emit value) for a full "
+       "value. The session's "
        "recent-result ring keeps each eval call's output/error body: (result) lists "
        "them, (result :last) reads the newest, (result ID) reads the "
        "first 6,000 characters, and (result ID {:offset N :limit M}) "

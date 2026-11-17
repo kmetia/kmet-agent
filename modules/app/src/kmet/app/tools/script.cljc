@@ -2195,13 +2195,13 @@
    kept context's previous successful call ended in — the prelude and the code
    start there and the final namespace is stored back. SPLIT-FORMS? evaluates
    each top-level form separately, so a failure names the form and what ran
-   and a multi-form call reports earlier forms one line each and the last value
-   in full. A split-form call without NS-ATOM gets a call-local one, so a
-   top-level (ns ...) holds for the call's later forms. RESULT-STORE receives
-   the full pre-truncation result map and returns the id used in the
-   truncation notice and error tail. EXTRA-DETAILS merges into the result's :details. `:abort` may supply
-   the timeout/output-limit abort atom `prepare` would create — the eval
-   service shares that atom with its sources."
+   and a multi-form call reports every non-definition value as one bounded
+   line; use emit for a full value. A split-form call without NS-ATOM gets a
+   call-local one, so a top-level (ns ...) holds for the call's later forms.
+   RESULT-STORE receives the full pre-truncation result map and returns the id
+   used in the truncation notice and error tail. EXTRA-DETAILS merges into the
+   result's :details. `:abort` may supply the timeout/output-limit abort atom
+   `prepare` would create — the eval service shares that atom with its sources."
   [{:keys [ctx] :as opts}]
   (require-tool! (:tool opts))
   (let [realm (when-not (false? (:tools? opts)) (sandbox-realm ctx))
