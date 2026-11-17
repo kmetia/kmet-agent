@@ -3,8 +3,8 @@
 `bb bench-tools` measures how much work an agent spends to finish a small
 task, not how fast a function runs. It is the regression loop for prompt,
 guideline and tool-surface changes, especially `--tools eval` versus
-`--tools bash`. `eval` is one declared tool with `read`, `write`, `edit`,
-`bash` and `sh` verbs inside it; `bash` is one declared shell tool. The
+`--tools bash`. `eval` is one declared tool with `read`, `write`, `edit`
+and `bash` verbs inside it; `bash` is one declared shell tool. The
 comparison is between those two model-facing surfaces, not a claim that eval
 has no file or shell access.
 
