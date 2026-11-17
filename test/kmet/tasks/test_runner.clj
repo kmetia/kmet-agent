@@ -6,6 +6,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.tasks.modules :as modules]
             [kmet.tasks.runner :as runner]
             [kmet.test-tmp :as test-tmp]))
 
@@ -126,7 +127,7 @@
   (let [loaded (atom [])
         groups (atom nil)
         fixture-var (with-meta ['fixture-test] {:test true})]
-    (with-redefs-fn {(var runner/all-namespaces)
+    (with-redefs-fn {(var runner/runnable-namespaces)
                      ['fixtures.a 'fixtures.broken 'fixtures.b]
                      (var runner/ns-vars-of)
                      (fn [ns-sym]
@@ -159,3 +160,12 @@
       #(let [{:keys [exit]} (summarize! {:lazy? true :slow? true} false)]
          (t/is (= 0 exit))
          (t/is (true? @slow?))))))
+
+(t/deftest full-run-skips-bb-only-test-projects
+  (let [bb-only (modules/bb-only-test-namespaces)
+        runnable (set @#'runner/runnable-namespaces)]
+    (t/is (seq bb-only) "the manifest marks the bb-only test projects")
+    (if runner/babashka?
+      (t/is (every? runnable bb-only) "bb runs the project's tests")
+      (t/is (every? #(not (contains? runnable %)) bb-only)
+            "off bb the project is skipped instead of loaded"))))

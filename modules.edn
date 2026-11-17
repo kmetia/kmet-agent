@@ -34,10 +34,15 @@
   {:name "tk" :src "modules/tk/src" :test "modules/tk/test" :rank 2}]
 
  :extension-root "extensions"
+ ;; :test-hosts [:bb] marks a test tree whose every test var is ^:bb-only: the
+ ;; runner skips requiring it on Jolt/JVM, where it would select no vars.
  :extensions
- [{:name "clojure" :src "extensions/clojure/src" :test "extensions/clojure/test"}
-  {:name "tree-sitter" :src "extensions/tree-sitter/src" :test "extensions/tree-sitter/test"}
-  {:name "review" :src "extensions/review/src" :test "extensions/review/test"}
+ [{:name "clojure" :src "extensions/clojure/src" :test "extensions/clojure/test"
+   :test-hosts [:bb]}
+  {:name "tree-sitter" :src "extensions/tree-sitter/src" :test "extensions/tree-sitter/test"
+   :test-hosts [:bb]}
+  {:name "review" :src "extensions/review/src" :test "extensions/review/test"
+   :test-hosts [:bb]}
   {:name "mcp-adapter" :src "extensions/mcp-adapter/src" :test "extensions/mcp-adapter/test"}
   {:name "lsp-adapter" :src "extensions/lsp-adapter/src" :test "extensions/lsp-adapter/test"}]
 

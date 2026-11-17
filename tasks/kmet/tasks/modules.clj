@@ -58,6 +58,18 @@
   []
   (vec (mapcat (juxt :src :test) (extensions))))
 
+(defn bb-only-test-roots
+  "Test roots whose manifest entry is restricted to babashka (`:test-hosts
+   [:bb]`). Every test var under one is ^:bb-only, so the runner skips the
+   tree on Jolt and the JVM instead of requiring namespaces that select no
+   vars."
+  []
+  (into []
+        (keep (fn [entry]
+                (when (and (:test entry) (= [:bb] (:test-hosts entry)))
+                  (:test entry))))
+        (concat (modules) (extensions))))
+
 (defn classpath-paths
   "The bb.edn :paths list: module trees, extra roots, extension projects."
   []
@@ -127,9 +139,9 @@
       symbol))
 
 (defn test-namespace-files
-  "Every test-bearing file as {:ns SYM :file PATH}. A test-bearing file is a
-   .clj/.cljc file whose text mentions deftest: the reader cannot know which
-   alias a test macro points at, and a prose mention still loads (it just
+  "Every test-bearing file as {:ns SYM :file PATH :root ROOT}. A test-bearing
+   file is a .clj/.cljc file whose text mentions deftest: the reader cannot know
+   which alias a test macro points at, and a prose mention still loads (it just
    contributes no vars). Sorted by namespace for a stable run order."
   []
   (->> (test-roots)
@@ -137,16 +149,39 @@
                  (->> (concat (fs/glob root "*.{clj,cljc}")
                               (fs/glob root "**/*.{clj,cljc}"))
                       (filter #(str/includes? (slurp (str %)) "deftest"))
-                      (map (fn [f] {:ns (ns-symbol root f) :file (str f)})))))
+                      (map (fn [f]
+                             {:ns (ns-symbol root f)
+                              :file (str f)
+                              :root (str root)})))))
        (sort-by (comp str :ns))
        vec))
 
-(defn test-namespaces
-  "The runner's registry, derived from the tree. Throws when the scan comes
-   back empty — a broken glob must fail the run, not silently run no tests."
+(defn test-registry
+  "The test registry derived from the tree, split by host scoping:
+   {:all [ns ...] :bb-only #{ns ...}}. :bb-only holds the namespaces under a
+   :test-hosts [:bb] root. Throws when the scan comes back empty — a broken
+   glob must fail the run, not silently run no tests."
   []
-  (let [nss (mapv :ns (test-namespace-files))]
+  (let [files (test-namespace-files)
+        nss (mapv :ns files)
+        roots (set (bb-only-test-roots))]
     (when (empty? nss)
       (throw (ex-info "no test namespaces found under the manifest test roots"
                       {:roots (test-roots)})))
-    nss))
+    {:all nss
+     :bb-only (into #{}
+                    (keep (fn [{:keys [ns root]}]
+                            (when (contains? roots root) ns)))
+                    files)}))
+
+(defn test-namespaces
+  "Every test namespace, including host-scoped roots (the runner filters the
+   bb-only ones where it runs). See test-registry."
+  []
+  (:all (test-registry)))
+
+(defn bb-only-test-namespaces
+  "The test namespaces under a :test-hosts [:bb] root — no tests on Jolt or
+   the JVM, so a runner can skip requiring the tree there."
+  []
+  (:bb-only (test-registry)))

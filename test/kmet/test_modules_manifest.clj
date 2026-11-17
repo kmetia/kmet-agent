@@ -25,7 +25,9 @@
         (is (int? (:rank mod)) (str (:name mod) " has a rank")))
       (doseq [ext (modules/extensions)]
         (is (fs/directory? (:src ext)) (str (:name ext) " src tree"))
-        (is (fs/directory? (:test ext)) (str (:name ext) " test tree"))))))
+        (is (fs/directory? (:test ext)) (str (:name ext) " test tree"))
+        (is (or (nil? (:test-hosts ext)) (= [:bb] (:test-hosts ext)))
+            (str (:name ext) " :test-hosts is [:bb] or absent"))))))
 
 (deftest bb-edn-paths-match-the-manifest
   (testing "bb.edn :paths is the manifest classpath list"
@@ -97,3 +99,18 @@
                                      (str (str/replace root "\\" "/") "/"))
                   files)
             (str "no test namespaces found under " root))))))
+
+(deftest ^:bb-only bb-only-test-projects-carry-only-bb-only-vars
+  ;; Jolt and the JVM skip these roots without requiring them, so the skip is
+  ;; only safe while every test var there is ^:bb-only. This guard runs on bb,
+  ;; where the namespaces load, and holds the manifest flag honest.
+  (let [names (modules/bb-only-test-namespaces)]
+    (is (seq names) "the manifest marks at least one bb-only test project")
+    (doseq [ns-sym names]
+      (require ns-sym)
+      (let [test-vars (filter #(:test (meta %)) (vals (ns-interns ns-sym)))
+            non-bb (remove #(:bb-only (meta %)) test-vars)]
+        (is (seq test-vars) (str ns-sym " has no test vars"))
+        (is (empty? non-bb)
+            (str ns-sym " has non-bb-only test vars: "
+                 (vec (sort (map (comp str :name meta) non-bb)))))))))

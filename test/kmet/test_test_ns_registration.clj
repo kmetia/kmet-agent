@@ -1,6 +1,6 @@
 (ns kmet.test-test-ns-registration
   "Guard (global organization): the test registry is derived, not maintained.
-   The runner's all-namespaces comes from kmet.tasks.modules/test-namespaces
+   The runner's all-namespaces comes from kmet.tasks.modules/test-registry
    (a manifest-rooted, content-scanned derivation); this guard re-derives the
    set with an independent walk and checks the two agree, so a broken glob or
    a renamed tree fails loudly instead of silently shrinking the gate."

@@ -62,12 +62,28 @@
    ^:bb-only tests exercise. Those vars are skipped on jolt and on the JVM."
   (host/babashka?))
 
+(def ^:private test-registry
+  "The derived test registry, split by host-scoped test roots (see
+   kmet.tasks.modules/test-registry)."
+  (modules/test-registry))
+
 (def all-namespaces
   "Every test namespace, derived from the tree (kmet.tasks.modules/
-   test-namespaces) — there is no hand-maintained registry to drift. The
-   slow/fast split happens per test var via ^:slow metadata, so no namespace
-   is excluded from either run."
-  (modules/test-namespaces))
+   test-registry) — there is no hand-maintained registry to drift. The
+   slow/fast split happens per test var via ^:slow metadata. A full run
+   additionally skips the bb-only projects off bb (see runnable-namespaces);
+   filtered runs still scan this whole list."
+  (:all test-registry))
+
+(def ^:private runnable-namespaces
+  "The namespaces a full run walks. On Jolt and the JVM a project whose
+   manifest :test-hosts is [:bb] contributes no selected vars; requiring its
+   namespaces only to select none wastes Jolt compilation, so run-all-selected
+   skips them. Filtered runs still scan all-namespaces."
+  (if babashka?
+    all-namespaces
+    (let [bb-only (:bb-only test-registry)]
+      (into [] (remove bb-only) all-namespaces))))
 
 (defn- try-require
   "Require NS-SYM; returns nil on success, the throwable on failure."
@@ -466,7 +482,7 @@
                         (when unloaded
                           (swap! load-failures conj unloaded))
                         [ns-sym (filter #(test-var? % slow?) vars)]))
-                    all-namespaces)]
+                    runnable-namespaces)]
     (assoc (run-groups (filter (comp seq second) groups))
            :unloaded @load-failures)))
 
