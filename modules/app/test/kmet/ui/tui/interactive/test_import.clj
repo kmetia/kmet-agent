@@ -412,6 +412,10 @@
     (commands/clear-commands!)
     (support/install-app-keybindings!)
     ((var builtins/register-builtin-commands!) cfg/default-config)
+    (t/is (= "Export session to HTML or EDNL (JSONL is not supported)"
+             (:description (commands/find-command "export"))))
+    (t/is (= "<path.html|path.ednl>"
+             (:argument-hint (commands/find-command "export"))))
     (let [dir (test-tmp/temp-dir! "test-export-ednl-")
           out (str dir "/exported/session.ednl")]
       (try

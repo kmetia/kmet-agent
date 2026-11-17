@@ -76,3 +76,37 @@
       (let [forms (read-ednl out)]
         (is (= (:header sess) (first forms)))
         (is (= (:id entry) (:id (second forms))))))))
+
+(deftest export-ednl-drops-fork-lineage
+  (testing "an exported session is self-contained: the fork's parent link is
+            not copied into the export"
+    (let [sess (store/create-session (str support/test-dir "/ednl-fork")
+                                     {:parent-session (str support/test-dir "/parent.ednl")})
+          entry (store/append-entry sess {:role :assistant :content "fork"})
+          out (str support/test-dir "/ednl/fork.ednl")]
+      (export/export-to-ednl! sess out)
+      (let [forms (read-ednl out)
+            header (first forms)]
+        (is (= (:id sess) (:id header)))
+        (is (nil? (:parent-session header)))
+        (is (= (:id entry) (:id (second forms))))
+        (is (nil? (:parent-session (:header (store/load-session out)))))))))
+
+(deftest export-ednl-synthesizes-a-header-for-legacy-sessions
+  (testing "a legacy headerless session still exports a valid, importable
+            session header"
+    (let [path (str support/test-dir "/legacy.ednl")
+          entry {:id "legacy-entry" :parent-id nil :role :assistant :content "old"}
+          out (str support/test-dir "/ednl/legacy.ednl")]
+      (spit path (prn-str entry) :encoding "UTF-8")
+      (let [sess (store/load-session path)]
+        (is (nil? (:header sess)))
+        (export/export-to-ednl! sess out)
+        (let [forms (read-ednl out)
+              header (first forms)]
+          (is (= :session (:type header)))
+          (is (= "legacy" (:id header)))
+          (is (= "legacy-entry" (:id (second forms))))
+          (let [loaded (store/load-session out)]
+            (is (= "legacy" (:id loaded)))
+            (is (= ["old"] (mapv :content @(:entries loaded))))))))))

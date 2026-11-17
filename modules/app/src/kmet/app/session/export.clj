@@ -350,17 +350,26 @@
       (throw (ex-info "Nothing to export yet - start a conversation first"
                       {:type :export-error :path file})))
     (let [out (or path (default-export-path session (or cwd (str (fs/cwd)))))]
-      (some-> (fs/parent out) fs/create-dirs)
-      (spit out (session->html session {:system-prompt system-prompt :tools tools}))
+      (kfs/publish! out (session->html session {:system-prompt system-prompt :tools tools}))
       (str out))))
+
+(defn- export-header
+  "The header an EDNL export carries: the stored header without fork
+   lineage, or a minimal header for a legacy headerless session."
+  [session]
+  (-> (or (:header session)
+          {:type :session :version 1 :id (:id session)})
+      (dissoc :parent-session)))
 
 (defn export-to-ednl!
   "Write the session's active branch to PATH as an EDNL session file — the
    format /import reads back. The session need not be persisted yet: the
    in-memory branch is exported (pi: exportSessionToJsonl does not require a
-   file). Creates parent dirs, writes UTF-8 and returns the written path."
+   file). The export is self-contained: fork lineage is dropped and a legacy
+   headerless session gets a minimal header. Creates parent dirs, writes
+   UTF-8 and returns the written path."
   [session path]
   (let [out (str path)]
-    (kfs/publish! out (session/serialize-session (:header session)
+    (kfs/publish! out (session/serialize-session (export-header session)
                                                  (session/get-branch session)))
     out))
