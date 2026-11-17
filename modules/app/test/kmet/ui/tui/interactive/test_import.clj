@@ -406,6 +406,30 @@
                       "not a 'Failed to export session' error")))))
         (finally (fs/delete-tree dir))))))
 
+(deftest test-export-ednl-path
+  (testing "/export <path.ednl> writes the active branch as EDNL, not HTML,
+            and the result loads back as a session"
+    (commands/clear-commands!)
+    (support/install-app-keybindings!)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
+    (let [dir (test-tmp/temp-dir! "test-export-ednl-")
+          out (str dir "/exported/session.ednl")]
+      (try
+        (let [sess (session/create-session (str dir "/sessions") {:cwd dir})
+              _ (append-message! sess "hello")
+              cs (import-test-cs sess)
+              ch (:chat-history cs)]
+          ((:handler (commands/find-command "export")) (support/command-ctx cs) out)
+          (t/is (fs/exists? out))
+          (let [loaded (session/load-session out)]
+            (t/is (= :session (get-in loaded [:header :type]))
+                  "the session header is first, not an HTML document")
+            (t/is (= ["hello" "ok"]
+                     (mapv #(-> % :content first :text) @(:entries loaded)))))
+          (t/is (str/includes? (slash (str (:content (last-message ch)))) (slash out))
+                "the status names the written file"))
+        (finally (fs/delete-tree dir))))))
+
 (deftest test-path-argument-empty-is-none
   (testing "a quoted but empty path argument reads as none (pi:
             getPathCommandArgument) — /export falls back to its default and

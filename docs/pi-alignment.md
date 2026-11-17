@@ -55,7 +55,7 @@ These were deliberate scope decisions. They still stand unless marked
 | Additional run modes | `--mode json`, `--export`, `pi server` / `pi client` / `pi rpc`, `packages/server` / `packages/client` / `packages/protocol` (CBOR — removed in pi 1.3.0), `docs/sdk.md` | *Reopened, no decision recorded* — kmet now ships `--mode rpc` (EDN stdio, `docs/rpc.md`); interactive + print + RPC are the shipped modes. JSON mode, CLI `--export`, the SDK, and any remote/multi-client direction are undecided |
 | Project trust | `core/project-trust.ts`, `core/trust-manager.ts`, `/trust`, `trust-selector.ts`, `--approve`/`--no-approve`, `defaultProjectTrust`, `trust.json` | Not ported — project settings/extensions load unconditionally (`-a`/`-na` parse as no-ops on the package commands). With no trust gate the built-in tool defaults are **fail-closed** (see [Resource selection](../configuration.md#resource-selection)): `codemode` and `eval` need an explicit plain/`+name` entry. It is a default, not a security boundary (`bash` carries the same authority) |
 | Package sources: npm/git | `npm:`/`git:` installs (npm registry + git clone machinery in `core/package-manager.ts`), `pi update`/self-update, temporary `--extension` installs, per-package autoload deltas over npm/git identities | **Git ported, npm not.** kmet installs git repositories as managed checkouts (`kmet install git:github.com/user/repo[@ref]`, `kmet.app.git-packages`, pi's parseGitUrl/clone/updateGit) and `kmet update` updates them (all or one source; no self-update, model refresh, `--force` or `--extension`). npm sources and temporary `--extension` installs are not ported; other remote sources error with "Unsupported package source". **kmet extension beyond pi:** `//subdir` names a package directory inside a repository (`git:host/repo//packages/foo`) — several packages may share one managed checkout, pi's `GitSource` has no subdirectory. The remainder of the package manager IS ported (next section) |
-| Session interop / JSONL | pi JSONL session files, `/export` `.jsonl`, `--export` from JSONL | EDNL-only by design (see [Session storage and alignment](#session-storage-and-alignment)) — `/export` writes standalone HTML |
+| Session interop / JSONL | pi JSONL session files, `/export` `.jsonl`, `--export` from JSONL | EDNL-only by design (see [Session storage and alignment](#session-storage-and-alignment)) — `/export <path.ednl>` writes an EDNL session file that `/import` reads back, `/export <path.html>` writes standalone HTML; JSONL is not supported |
 
 ## pi since 0.87: the new package frontier (analysis only)
 
@@ -95,7 +95,7 @@ cells plan carried as P7.
 
 `kmet.app.session.core` follows pi v3 `SessionManager` semantics in EDN/Clojure,
 rather than importing pi's file format. It is intentionally EDNL-only: there
-is no JSONL codec, import/export, or reading and writing of pi session files,
+is no JSONL codec, JSONL import/export, or reading and writing of pi session files,
 and no v1→v2/v2→v3 migration machinery. The v4 harness concepts (lanes, a
 shared sequence/mutation log, records, writer claims, and session search) are
 out of scope. The EDNL header's `:version` is informational; legacy
@@ -147,11 +147,12 @@ headerless files still load with `:header nil`.
 
 ### Session commands and export
 
-`/session`, `/export`, `/share`, and `/copy` are implemented. Export is a
-standalone, escaped HTML document with session statistics; `/share` exports
-through `gh gist`; `/copy` copies the last assistant text with platform
-clipboard support and an OSC 52 fallback. JSONL export/import remains out of
-scope by the EDNL-only decision.
+`/session`, `/export`, `/share`, and `/copy` are implemented. Export writes
+the active branch as an EDNL session file when the path ends in `.ednl` (the
+format `/import` reads back), and a standalone, escaped HTML document with
+session statistics otherwise; `/share` exports through `gh gist`; `/copy`
+copies the last assistant text with platform clipboard support and an OSC 52
+fallback. JSONL export/import remains out of scope by the EDNL-only decision.
 
 ## Ported: the resource resolution & package manager
 
@@ -301,7 +302,7 @@ Missing, by pi's cli.md groups:
 
 ### 3. Slash commands
 
-kmet covers: settings, model, thinking, scoped-models, export (HTML), import, share, copy, name,
+kmet covers: settings, model, thinking, scoped-models, export (HTML/EDNL), import, share, copy, name,
 session, hotkeys, fork, clone, tree, login, logout, new, compact, resume, continue,
 reload, quit, help, tools, theme — plus the mcp-adapter's `/mcp` and
 `/skill:name` autocomplete. pi 1.3.0's built-in set adds `/bug`, `/changelog`,

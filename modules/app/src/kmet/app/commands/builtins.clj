@@ -72,17 +72,20 @@
 (defn- handle-export
   [{:keys [ui] engine :runtime} args]
   (let [sess (runtime/session engine)
-        arg (session-export/parse-path-argument args)]
+        arg (session-export/parse-path-argument args)
+        arg-lower (str/lower-case (or arg ""))]
     (cond
       (nil? sess)
       (out ui :info "Export" "No active session.")
 
-      (str/ends-with? (str/lower-case (or arg "")) ".jsonl")
-      (out ui :info "Export" "JSONL export is not supported — kmet sessions are EDN-only. Use /export or /export <path.html>.")
+      (str/ends-with? arg-lower ".jsonl")
+      (out ui :info "Export" "JSONL export is not supported — kmet sessions are EDNL. Use /export <path.ednl> or /export <path.html>.")
 
       :else
       (try
-        (let [path (runtime/export-html! engine {:path arg})]
+        (let [path (if (str/ends-with? arg-lower ".ednl")
+                     (session-export/export-to-ednl! sess arg)
+                     (runtime/export-html! engine {:path arg}))]
           (out ui :info "Export" (str "Session exported to: " path)))
         (catch Exception e
           (out ui :info "Export" (str "Failed to export session: "
@@ -190,8 +193,8 @@
   (commands/register-builtin!
 
    {:name "export"
-    :description "Export session to HTML (JSONL is not supported by design)"
-    :argument-hint "<path>"
+    :description "Export session to HTML or EDNL (JSONL is not supported)"
+    :argument-hint "<path.html|path.ednl>"
     :handler handle-export})
   (commands/register-builtin!
 

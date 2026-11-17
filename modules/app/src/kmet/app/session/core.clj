@@ -38,6 +38,7 @@
 (def replace-entries! store/replace-entries!)
 (def reset-leaf! store/reset-leaf!)
 (def sanitize-session-name store/sanitize-session-name)
+(def serialize-session store/serialize-session)
 (def session-cwd store/session-cwd)
 (def session-dir-for-cwd store/session-dir-for-cwd)
 (def session-entry-text store/session-entry-text)

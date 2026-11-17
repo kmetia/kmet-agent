@@ -200,7 +200,7 @@ file) and it applies on the next start.
 | `/clone` | Duplicate the current session at the current position |
 | `/name <name>` | Set the session display name |
 | `/session` | Show session info and stats |
-| `/export [path]` | Export the session to HTML |
+| `/export [path]` | Export the session to HTML, or to an EDNL session file when the path ends in `.ednl` (re-importable with `/import`) |
 | `/import <path>` | Import a session file into the sessions directory and resume it (confirm first; a taken name is suffixed) |
 | `/share` | Share the session as a secret GitHub gist |
 | `/copy` | Copy the last agent message to the clipboard |

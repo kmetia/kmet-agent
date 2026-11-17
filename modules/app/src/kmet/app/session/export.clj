@@ -1,13 +1,16 @@
 (ns kmet.app.session.export
-  "Standalone HTML export of a kmet session (pi: export-html — G22 /export).
-   EDN entries render to a self-contained dark page: user/assistant/tool/
-   bash messages, thinking, tool calls, compaction and branch summaries,
-   custom/custom-message entries, model/thinking changes, and the session
-   name. No JS, no external assets — the file opens anywhere. JSONL export
-   is deliberately not built (no pi interop, §0 of the session plan)."
+  "Session export: the active branch as an EDNL session file (the same line
+   format the store writes, so /import reads it back), and a standalone HTML
+   document (pi: exportToJsonl and export-html — G22 /export). EDN entries
+   render to a self-contained dark page: user/assistant/tool/bash messages,
+   thinking, tool calls, compaction and branch summaries, custom/custom-message
+   entries, model/thinking changes, and the session name. No JS, no external
+   assets — the file opens anywhere. JSONL export is deliberately not built
+   (no pi interop, §0 of the session plan)."
   (:require [clojure.string :as str]
             [babashka.fs :as fs]
-            [kmet.app.session.core :as session]))
+            [kmet.app.session.core :as session]
+            [kmet.libs.fs :as kfs]))
 
 (defn parse-path-argument
   "Pi: getPathCommandArgument — strip surrounding quotes, else take the
@@ -350,3 +353,14 @@
       (some-> (fs/parent out) fs/create-dirs)
       (spit out (session->html session {:system-prompt system-prompt :tools tools}))
       (str out))))
+
+(defn export-to-ednl!
+  "Write the session's active branch to PATH as an EDNL session file — the
+   format /import reads back. The session need not be persisted yet: the
+   in-memory branch is exported (pi: exportSessionToJsonl does not require a
+   file). Creates parent dirs, writes UTF-8 and returns the written path."
+  [session path]
+  (let [out (str path)]
+    (kfs/publish! out (session/serialize-session (:header session)
+                                                 (session/get-branch session)))
+    out))

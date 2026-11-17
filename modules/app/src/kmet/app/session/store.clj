@@ -89,6 +89,13 @@
          :parent-id leaf-id
          :timestamp (str (timestamp))))
 
+(defn serialize-session
+  "Serialized EDNL text for HEADER and ENTRIES: the :session header line
+   followed by one prn-str entry per line. The on-disk session format and
+   the EDNL export share it."
+  [header entries]
+  (apply str (map prn-str (cons header entries))))
+
 (defn- publish-file!
   "Atomically write the session file: the header line followed by the
    entries, via temp file + rename so a crash mid-write can't corrupt the
@@ -96,7 +103,7 @@
    session dir). Callers must hold the session lock."
   [session entries]
   (kfs/publish! (:file session)
-                (apply str (map prn-str (cons (:header session) entries)))))
+                (serialize-session (:header session) entries)))
 
 (defn- persist-if-needed!
   "Lazy file creation (pi: _persist — G4): write the file the first time the
