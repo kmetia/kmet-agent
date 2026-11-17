@@ -412,8 +412,7 @@ Only the current session is searchable. One result is capped at 50 KB.
 
 **Description:**
 
-Persistent Babashka script sandbox (Clojure/SCI) in the session cwd; relative paths and shell commands resolve there (`(cwd)`; bash's :cwd overrides).
-Verbs: (read "p" {:start N :as :lines}), (write "p" text), (edit "p" old new), (bash "cmd" {:timeout N :max-lines N :as :map}), (glob "p"), (grep "p"), (fetch "url" {:as :json}). Nonzero exits are normal.
-Forms run in order; definitions/results persist. (emit v) for output; each form reports one line; println is discarded. Limit 16 KiB (max 50 KiB); timeout (omit/0 = none). Discover: (help) index; (sources); (help :library) saved/live; (index "text") saved/live/source; (describe 'name). Source verbs: <id>/verb.
-Example: (-> (read "deps.edn") (edn/read-string) :deps (count)).
+Babashka/Clojure SCI sandbox in session cwd; paths/shell resolve (`(cwd)`; bash :cwd overrides).
+File/shell/HTTP: (read "p") -> text; (read "p" {:offset N :limit N}); (read "p" {:start N :end N :as :lines}) -> {:lines [{:n :text}] ...}; (write "p" text) -> message; (edit "p" old new|pairs); (bash "cmd" {:timeout N :max-lines N :max-bytes N :as :map}) -> output|map; (glob "p") -> {:paths :total :truncated?}; (grep "p") -> {:matches ...}; (fetch "url" {:as :json}) -> {:status :headers :body}. Nonzero exits are normal.
+Forms run in order; definitions/results persist; (emit v); one line/form; println discarded. Limit 16 KiB (max 50 KiB); timeout (omit/0 = none). Discover: (help) index; (help :core); (sources); (help :library) saved/live; (index "text") saved/live/source; (describe 'name). Source verbs: <id>/verb.
 
