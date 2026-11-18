@@ -321,10 +321,14 @@ Ordered by value/effort.
       (`bb slop --dups` lists the groups). Done with
       `dock/show-panel!` (focus/cover) + `dock/close-atom!`; every selector
       open/close goes through that pair directly.
-- [ ] Split `kmet.app.eval` (3,214 LOC, 226 defns) along the directory seams
-      that already exist (`eval/{tool,files,definitions,command,sources}`):
-      move the result ring, the listing sync, seed! and the persistence fns.
-      Pure moves; the facade surface is pinned by tests.
+- [x] Split `kmet.app.eval` along its directory seams: the result ring
+      (`eval/results.clj`), library listing (`eval/library.clj`), source seed
+      helpers (`eval/seed.clj`) and persistence writes
+      (`eval/persistence.clj`), with the record/scope model in `eval/env.clj`.
+      eval.clj is 2,736 LOC (from 3,214); the facade surface is unchanged and
+      the eval tests pin it. The save path was split into `save-record`,
+      `save-doc`, `save-source` and `save-edit`; the eval directory now has no
+      function over CC 10.
 - [ ] Table-drive `detect-openai-compat` (CC 47 in 89 SLOC,
       `modules/ai/src/kmet/ai/api/shared.clj:465`) and `parse-inline`
       (CC 54, `modules/libs/src/kmet/libs/markdown.clj:289`) — rule tables

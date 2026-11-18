@@ -73,6 +73,23 @@
            (:content (support/eval! env "(describe \"user/pick :x\")"))
            ":defmethod"))))
 
+(t/deftest test-save-refusals-name-the-problem
+  (let [env (support/eval-ctx)]
+    (support/eval! env "(defn loose [] :ok)")
+    (t/is (str/includes? (:content (support/eval! env "(save 'loose)"))
+                         "save needs a docstring for user/loose"))
+    (t/is (str/includes? (:content (support/eval! env "(save 'nope \"Doc.\")"))
+                         "no session-only definition named user/nope"))
+    (support/eval! env "(save 'loose \"Doc.\")")
+    (t/is (str/includes? (:content (support/eval! env "(save 'loose \"Doc.\")"))
+                         "user/loose is already saved; use patch or edit-form"))
+    (support/eval! env "(defmulti pick identity) (defmethod pick :x [_] :x)")
+    (t/is (str/includes? (:content (support/eval! env "(save \"user/pick :x\")"))
+                         "is a defmethod; keep its multimethod first"))
+    (support/eval! env "(ns ext.license) (defn custom \"Doc.\" [] :ok)")
+    (t/is (str/includes? (:content (support/eval! env "(save 'ext.license/custom \"Doc.\")"))
+                         "is an extension definition; extensions stay live-only"))))
+
 (t/deftest test-an-error-names-the-failing-form
   (let [env (support/eval-ctx)
         result (support/eval! env "(+ 1 2) (inc \"a\")")]

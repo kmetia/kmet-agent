@@ -771,7 +771,10 @@ deadline starts after it is taken, and `:dispose!` clears every environment;
 the tool's `:prompt-guidelines` therefore steer a multi-step task into one
 call — one call per phase, many forms per call. A broken library file is
 reported under `:failures` and skipped. The pure parse and address rules
-live in `kmet.app.eval.definitions`.
+live in `kmet.app.eval.definitions`, the library listing in
+`kmet.app.eval.library`, the result ring in `kmet.app.eval.results`, the
+write/save path in `kmet.app.eval.persistence`, the source seeding in
+`kmet.app.eval.seed`, and the record/scope model in `kmet.app.eval.env`.
 
 Eval keeps each call's output/error body in a bounded per-session ring,
 newest first. `(result)` lists the recent ids with status, size and a

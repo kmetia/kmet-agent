@@ -27,16 +27,31 @@
    in a bounded ring read by `(result ...)`.
 
    `kmet.app.eval.tool` owns the model-facing tool; `kmet.app.eval.files`
-   owns the reviewable files and `kmet.app.eval.definitions` the pure parse
-   and address rules."
+   owns the reviewable files, `kmet.app.eval.definitions` the pure parse and
+   address rules, `kmet.app.eval.env` the record/scope model,
+   `kmet.app.eval.library` the listing, `kmet.app.eval.results` the result
+   ring, `kmet.app.eval.persistence` the write/save path and
+   `kmet.app.eval.seed` the source seeding."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.config :as cfg]
             [kmet.app.eval.definitions :as defs]
+            [kmet.app.eval.env :refer [->name active-record add-record! bad-request!
+                                       clear-unwritten! env-ns missing-definition!
+                                       name-namespace put-record! qualify-name record-failure!
+                                       record-scope remove-record! root-for scope-label stack-for
+                                       user-ns]]
             [kmet.app.eval.files :as eval-files]
             [kmet.app.eval.format :as eval-format]
+            [kmet.app.eval.library :refer [failed-entry? library-counts library-entries
+                                           session-only-entries]]
             [kmet.app.eval.patch :as patch]
-            [kmet.app.eval.sources :as eval-sources]
+            [kmet.app.eval.persistence :refer [apply-definition! file-siblings
+                                               save-definition! sibling-names]]
+            [kmet.app.eval.results :as results]
+            [kmet.app.eval.seed :refer [current-source-seed seed-source-value!
+                                        source-known? source-namespaces]]
+            [kmet.app.eval.sources :as eval-sources :refer [source-result-details]]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.resources :as resources]
             [kmet.app.session.store :as session-store]
@@ -100,30 +115,6 @@
 
 ;; ─── Names ────────────────────────────────────────────────────────────────
 
-(defn- ->name [x]
-  (cond
-    (string? x) x
-    (symbol? x) (str x)
-    (keyword? x) (subs (str x) 1)
-    :else nil))
-
-(defn- bad-request! [message data]
-  (throw (ex-info message (assoc data :type :eval/bad-request))))
-
-(defn- env-ns
-  "The namespace the current call ends in; every new call starts again in
-   user."
-  [env]
-  (or (some-> @(:call-ns env) sci/ns-name str) "user"))
-
-(defn- user-ns
-  [env]
-  (or (sci/find-ns (:sci-ctx env) 'user)
-      (sci/create-ns 'user)))
-
-(defn- qualify-name [ns name]
-  (if (str/includes? name "/") name (str ns "/" name)))
-
 (defn- normalize-scope
   "Normalize an optional scope option to `:cwd`, `:global`, or nil."
   [scope]
@@ -139,23 +130,6 @@
         (bad-request! (str "scope must be cwd or global, got " (pr-str scope))
                       {:scope scope})))))
 
-(defn- scope-label [scope]
-  (name (or scope :active)))
-
-(defn- record-scope [record]
-  (or (:scope record) :global))
-
-(defn- stack-for
-  "The loaded records for NAME in precedence order, `[global cwd]`."
-  [env name]
-  (get @(:library env) name))
-
-(defn- active-record [env name]
-  (peek (stack-for env name)))
-
-(defn- root-for [env scope]
-  (get-in env [:roots (or scope :global)]))
-
 (defn- ensure-no-siblings!
   "Refuse a move whose file also defines other addresses."
   [name siblings]
@@ -164,15 +138,6 @@
                        ": its library file also defines "
                        (str/join ", " siblings))
                   {:name name :siblings (vec siblings)})))
-
-(defn- missing-definition!
-  ([name scope] (missing-definition! name scope nil))
-  ([name scope extra]
-   (bad-request! (if scope
-                   (str "no eval library definition named " name
-                        " in the " (scope-label scope) " scope")
-                   (str "no eval library definition named " name))
-                 (merge {:name name :scope scope} extra))))
 
 (defn- target-scopes
   "The scopes a lookup considers, preferred first."
@@ -407,57 +372,6 @@
 
 (declare verb-selected? disabled-verbs filter-source-info builtin-verb-help)
 
-(defn- source-var
-  [ns-name name {:keys [value doc arglists] :as entry} disabled]
-  (let [ns (sci/create-ns ns-name)
-        name-string (str ns-name "/" name)
-        value (if (contains? disabled name-string)
-                (script/disabled-verb-stub name-string)
-                value)]
-    (sci/new-var name value
-                 (cond-> {:ns ns :name name}
-                   (:macro? entry) (assoc :macro true)
-                   (some? doc) (assoc :doc doc)
-                   (some? arglists) (assoc :arglists arglists)))))
-
-(defn- source-namespaces
-  "The SCI vars for VALUES not excluded by SKIP?, with DISABLED keys bound to
-   the error stub so a namespace alias still requires. A source value and a
-   fixed namespace (the core `user` helpers) merge in one map."
-  ([values skip?] (source-namespaces values skip? #{}))
-  ([values skip? disabled]
-   (reduce-kv
-    (fn [acc key entry]
-      (if (skip? key)
-        acc
-        (let [i (str/index-of key "/")
-              ns-name (symbol (subs key 0 i))
-              name (symbol (subs key (inc i)))]
-          (assoc-in acc [ns-name name]
-                    (source-var ns-name name entry disabled)))))
-    {}
-    values)))
-
-(defn- source-known?
-  "Does the model own NAME in this environment (a library definition, an
-   unwritten live definition, or a live shadow of a source key)? A source
-   never overwrites it."
-  [env name]
-  (or (get @(:library env) name)
-      (contains? @(:unwritten env) name)
-      (contains? @(:model-shadows env) name)))
-
-(defn- seed-source-value!
-  "Restore one source value after a model shadow is dropped. Returns an error
-   string or nil."
-  [env name entry]
-  (try
-    (doseq [[ns-name vars] (source-namespaces {name entry} (constantly false)
-                                              @(:disabled-verbs env))]
-      (sci/add-namespace! (:sci-ctx env) ns-name vars))
-    nil
-    (catch Throwable t (ex-message t))))
-
 (defn- refresh-sources!
   "Resolve sources for this call and make the environment's live source layer
    match them: remove keys a now-unloaded source contributed (unless the model
@@ -489,173 +403,7 @@
      :info info
      :errors errors}))
 
-(defn- current-source-seed
-  "The source layer already resolved for ENV, without invoking its fns again.
-   Used by the first call after a rebuild: the build read the source layer to
-   compile the library, so re-reading it immediately would double every
-   source's work (and its side effects)."
-  [env]
-  {:namespaces (source-namespaces @(:source-values env)
-                                  #(source-known? env %)
-                                  @(:disabled-verbs env))
-   :info @(:source-info env)
-   :errors @(:source-errors env)
-   :commands {}})
-
-(defn- source-result-details
-  "The source portion of an eval result's :details: the current source INFO
-   only when its id set differs from the last eval call's, plus any source
-   errors. Returns `[details ids]`; the caller records IDS with the result."
-  [env sources]
-  (let [info (:info sources)
-        ids (mapv :id info)]
-    [(cond-> (if (not= ids @(:reported-source-ids env))
-               {:sources info}
-               {})
-       (seq (:errors sources))
-       (assoc :source-errors (:errors sources)))
-     ids]))
-
 ;; ─── Library index ────────────────────────────────────────────────────────
-
-(defn- library-entry [record]
-  (cond-> (select-keys record [:name :ns :kind :doc :arglists :file :scope])
-    (= :failed (:load-status record))
-    (assoc :load-status :failed :load-error (:load-error record))))
-
-(defn- library-entries
-  "The service's `(eval/library)` value: every loaded record, with `:scope`
-   and `:active` set. A cwd record shadows the global record of the same
-   name."
-  [env]
-  (->> @(:library env)
-       (mapcat (fn [[_ stack]]
-                 (map-indexed (fn [i record]
-                                (assoc (library-entry record)
-                                       :active (= i (dec (count stack)))))
-                              stack)))
-       (sort-by (juxt :name #(if (= :cwd (:scope %)) 0 1)))
-       vec))
-
-(defn- failed-entry?
-  "True when ENTRY is a saved definition whose file failed to load."
-  [entry]
-  (= :failed (:load-status entry)))
-
-(defn- library-counts
-  "The saved/loaded/failed split for library ENTRIES, plus the
-   `N saved (L loaded, K failed)` text."
-  [entries]
-  (let [saved (count entries)
-        failed (count (filter failed-entry? entries))
-        loaded (- saved failed)]
-    {:loaded loaded
-     :failed failed
-     :text (str saved " saved (" loaded " loaded"
-                (when (pos? failed) (str ", " failed " failed")) ")")}))
-
-(def ^:private result-ring-size
-  "How many recent eval results a session keeps for (eval/result)."
-  8)
-
-(def ^:private result-read-default-chars
-  "How much of a stored result (eval/result) returns by default. Kept
-   below the tool's 16 KiB default so a map of escaped text still fits."
-  6000)
-
-(def ^:private result-read-max-chars
-  "The most (eval/result) returns in one slice."
-  50000)
-
-(defn- result-head
-  "The first line of a stored result, clipped for a result list."
-  [content]
-  (let [line (str/trim (or (first (str/split-lines content)) ""))]
-    (if (> (count line) 100)
-      (str (subs line 0 100) "…")
-      line)))
-
-(defn- store-result!
-  "Keep RESULT in ENV's result ring and return its id. The content is the
-   full pre-truncation body; the ring is bounded and oldest-first."
-  [env result]
-  (let [id (swap! (:result-next env) inc)]
-    (swap! (:results env)
-           (fn [results]
-             (let [results (conj (vec results) (assoc result :id id))]
-               (subvec results (max 0 (- (count results) result-ring-size))))))
-    id))
-
-(defn- result-list
-  "The compact (eval/result) listing, newest first."
-  [env]
-  (->> @(:results env)
-       reverse
-       (mapv (fn [{:keys [id content status error? elapsed-ms chars lines truncated?]}]
-               (cond-> {:id id :status status :chars chars :lines lines
-                        :truncated? truncated? :head (result-head content)}
-                 error? (assoc :error? true)
-                 elapsed-ms (assoc :elapsed-ms elapsed-ms))))))
-
-(defn- result-read
-  "Read one stored result, or a slice of it. OPTS is {:offset N :limit N}."
-  [env id & [opts]]
-  (let [entry (first (filter #(= id (:id %)) @(:results env)))]
-    (when-not entry
-      (bad-request! (str "no eval result " id "; (result) lists them")
-                    {:id id}))
-    (let [content (:content entry)
-          total (count content)
-          offset (max 0 (long (or (:offset opts) 0)))
-          limit (max 1 (min result-read-max-chars
-                            (long (or (:limit opts) result-read-default-chars))))
-          start (min offset total)
-          end (min total (+ start limit))]
-      (cond-> {:id id :status (:status entry) :chars total :offset start
-               :content (subs content start end)}
-        (:error? entry) (assoc :error? true)
-        (:truncated? entry) (assoc :truncated? true)
-        (< end total) (assoc :next-offset end)))))
-
-(defn- latest-result-id
-  "The newest stored result id, or nil when the ring is empty."
-  [env]
-  (:id (peek @(:results env))))
-
-(defn- resolve-result-id
-  "Resolve :last, -1, or \"last\" to ENV's newest result id."
-  [env id]
-  (if (or (= id :last)
-          (= id -1)
-          (and (string? id) (= "last" (str/lower-case id))))
-    (latest-result-id env)
-    id))
-
-(defn- result-command
-  "The (eval/result) command: no args lists; ID reads (:last, -1 or
-   \"last\" reads the newest); the remaining args are an opts map or
-   keyword pairs (:offset N :limit M). A call using (eval/result) is not
-   stored back into the ring, so slicing a large result cannot evict it."
-  [env & args]
-  (reset! (:skip-result-store? env) true)
-  (case (count args)
-    0 (result-list env)
-    1 (let [id (resolve-result-id env (first args))]
-        (when (nil? id)
-          (bad-request! "no eval results yet" {:id (first args)}))
-        (result-read env id))
-    (let [[raw-id & more] args
-          id (resolve-result-id env raw-id)
-          opts (cond
-                 (and (= 1 (count more)) (map? (first more))) (first more)
-                 (and (= 1 (count more)) (nil? (first more))) {}
-                 (odd? (count more))
-                 (bad-request! "result needs an opts map or keyword pairs"
-                               {:args (vec args)})
-                 :else (apply hash-map more))]
-      (when (nil? id)
-        (bad-request! "no eval results yet" {:id raw-id}))
-      (result-read env id opts))))
 
 (def ^:private build-report-name-limit
   "Definitions named in the first eval's loaded-set line before `… N more`."
@@ -748,20 +496,8 @@
          " (" (scope-label scope) shadow failed ") — "
          (or doc-line "(no docstring)"))))
 
-(defn- session-only-entries
-  "The session's unwritten live definitions as listing entries: they have no
-   library file, so they are discoverable through (eval/help) and
-   (eval/describe) but not through (eval/library)."
-  [env]
-  (->> @(:unwritten-records env)
-       (map (fn [[name record]]
-              (assoc (library-entry record) :name name :active true)))
-       (sort-by :name)
-       vec))
-
 (declare index-text environment-help describe request-forget!
-         patch-definition! edit-form-definition! move-record-line!
-         save-definition!)
+         patch-definition! edit-form-definition! move-record-line!)
 
 (defn- library-verb
   "List every loaded library definition with its scope; (help :library) also lists session-only definitions."
@@ -807,13 +543,6 @@
   [env-ref]
   (fn [name & [doc]] (save-definition! @env-ref name doc)))
 
-(defn- result-verb
-  "List recent eval results, or read one result or slice (ID may be :last; :offset N :limit M or a map); a call using it is not stored."
-  {:arglists '([] [id] [id {:keys [offset limit]}]
-                  [id & {:keys [offset limit]}])}
-  [env-ref]
-  (fn [& args] (apply result-command @env-ref args)))
-
 (defn- patch-verb
   "Replace one subform of a saved definition and keep it."
   {:arglists '([name old new])}
@@ -854,7 +583,7 @@
    "eval/help" #'help-verb
    "eval/describe" #'describe-verb
    "eval/save" #'save-verb
-   "eval/result" #'result-verb
+   "eval/result" #'results/result-verb
    "eval/patch" #'patch-verb
    "eval/edit-form" #'edit-form-verb
    "eval/move" #'move-verb
@@ -920,10 +649,6 @@
 (def ^:private system-namespaces
   #{"core" "clj" "eval" "clojure"})
 
-(defn- name-namespace
-  [name]
-  (namespace (symbol (str name))))
-
 (defn- system-namespace?
   "Is NAME in a platform-owned namespace? Those definitions are refused:
    user and other model namespaces are the only persisted surface."
@@ -933,11 +658,6 @@
         (str/starts-with? (str ns) "clojure.")
         (str/starts-with? (str ns) "babashka.")
         (str/starts-with? (str ns) "kmet.libs."))))
-
-(defn- extension-name?
-  "Is NAME in an extension-owned namespace? Those definitions stay live-only."
-  [name]
-  (str/starts-with? (str (name-namespace name)) "ext."))
 
 (defn- env-verb-disabled?
   "Is the canonical verb NAME turned off in ENV's selection?"
@@ -1645,9 +1365,6 @@
 
 ;; ─── Environment build ────────────────────────────────────────────────────
 
-(defn- record-failure! [failures failure]
-  (swap! failures conj failure))
-
 (defn- eval-content!
   "Parse and evaluate CONTENT into ENV without indexing it. The original ns
    form runs first (preserving its requires), then the standard aliases, then
@@ -1667,20 +1384,6 @@
           {:parsed parsed})))
     (catch Throwable t
       {:error (ex-message t)})))
-
-(defn- put-record!
-  "Replace NAME's REMOVE-SCOPE record with RECORD, keeping `[global cwd]`
-   order. One record per name and scope; the last load or write wins."
-  [env name remove-scope record]
-  (swap! (:library env) update name
-         (fn [stack]
-           (conj (vec (remove #(= remove-scope (record-scope %)) stack))
-                 record))))
-
-(defn- add-record!
-  "Index RECORD as the newest layer for its name and scope."
-  [env record]
-  (put-record! env (:name record) (record-scope record) record))
 
 (defn- load-library-file!
   "Read, parse and evaluate one library file into ENV at SCOPE. A read or parse
@@ -1855,32 +1558,6 @@
                              :label "edit-form"
                              :verb "edited"})))
 
-(defn- source-siblings
-  "Other names named by RECORD's own source form (a multi-name `declare`)."
-  [record]
-  (->> (:defs (defs/parse (:source record) (:ns record)))
-       (map :name)
-       (remove #{(:name record)})
-       distinct))
-
-(defn- sibling-names
-  "Other names sharing RECORD's file."
-  [record others]
-  (->> others
-       (keep (fn [other]
-               (when (and (= (:file other) (:file record))
-                          (not= (:name other) (:name record)))
-                 (:name other))))
-       distinct))
-
-(defn- file-siblings
-  "Other definitions sharing RECORD's library file or source form — a file or
-   a multi-name form must not be moved for one address."
-  [env record]
-  (distinct
-   (concat (source-siblings record)
-           (sibling-names record (mapcat identity (vals @(:library env)))))))
-
 (defn- check-move!
   "The shared refusals for moving NAME from CURRENT to TARGET: sibling
    definitions, a same-scope move, and a target layer that already has the
@@ -1893,19 +1570,6 @@
   (when target-present?
     (bad-request! (str "the " (scope-label target) " scope already has " name)
                   {:name name :scope target})))
-
-(defn- remove-record!
-  "Remove RECORD's scope from NAME's stack, dissociating the name when the
-   stack is empty."
-  [env name record]
-  (let [scope (record-scope record)]
-    (swap! (:library env)
-           (fn [library]
-             (let [stack (vec (remove #(= scope (record-scope %))
-                                      (get library name)))]
-               (if (seq stack)
-                 (assoc library name stack)
-                 (dissoc library name)))))))
 
 (defn- drop-failed-target!
   "Delete TARGET-RECORD's file and library entry so a move can replace it.
@@ -2035,7 +1699,7 @@
         help-fn (help-verb env-ref)
         describe-fn (describe-verb env-ref)
         save-fn (save-verb env-ref)
-        result-fn (result-verb env-ref)
+        result-fn (results/result-verb env-ref)
         patch-fn (patch-verb env-ref)
         edit-form-fn (edit-form-verb env-ref)
         move-fn (move-verb env-ref)
@@ -2235,12 +1899,6 @@
   (when (active-source-value? env name)
     (seed-source-value! env name (get @(:source-values env) name))))
 
-(defn- clear-unwritten!
-  "Forget NAME's unwritten live-definition record."
-  [env name]
-  (swap! (:unwritten env) disj name)
-  (swap! (:unwritten-records env) dissoc name))
-
 (defn- restore-next-layer!
   "After an active record was removed, re-evaluate the next record for NAME.
    Returns `{:next? bool :error msg}`."
@@ -2363,142 +2021,6 @@
     unwritten? {:name name :scope :unwritten :action :forgot
                 :error (drop-unwritten! env name)}
     :else (missing-definition! name scope)))
-
-(defn- existing-record
-  "The loaded record for NAME in SCOPE, or nil."
-  [env name scope]
-  (some #(when (= scope (record-scope %)) %) (stack-for env name)))
-
-(defn- write-redefinition!
-  "Write a redefinition to its existing file. A file that also defines other
-   addresses is edited structurally so the siblings survive; otherwise the
-   file is replaced with the clean generated content. Returns `[path record]`,
-   where a structural edit's record carries the file's formatted source."
-  [env root record]
-  (let [existing (existing-record env (:name record) (:scope record))
-        path (:file existing)
-        siblings (when existing (file-siblings env existing))]
-    (if (and path (fs/exists? path))
-      (if (seq siblings)
-        (let [content (slurp path)
-              result (try (clj-edit/edit-definition-source
-                           content path existing (:source record))
-                          (catch Throwable t
-                            (bad-request! (ex-message t) {:name (:name record)})))]
-          (when (:is-error result)
-            (bad-request! (:content result) {:name (:name record) :file path}))
-          (let [content (:content result)
-                stored (some #(when (= (:name record) (:name %)) %)
-                             (:defs (defs/parse content "user")))]
-            (eval-files/write-content! root path content)
-            [path (if stored
-                    (assoc record
-                           :source (:source stored)
-                           :doc (:doc stored)
-                           :arglists (:arglists stored)
-                           :kind (:kind stored))
-                    record)]))
-        [(eval-files/write-definition! root record path) record])
-      [(eval-files/write-definition! root record) record])))
-
-(defn- defmethod-multimethod
-  "The multimethod address of a defmethod record name: the part before the
-   printed dispatch."
-  [name]
-  (let [i (str/index-of name " ")]
-    (if i (subs name 0 i) name)))
-
-(defn- documented?
-  "A record may be written when it carries a non-blank docstring, or when it
-   is a defmethod of a loaded multimethod. A method has no docstring slot; it
-   belongs to its documented multimethod."
-  [env record]
-  (or (not (str/blank? (:doc record)))
-      (and (= :defmethod (:kind record))
-           (some? (active-record env (defmethod-multimethod (:name record)))))))
-
-(defn- live-only-line
-  "The result line for a definition that stays live without a library file:
-   an undocumented definition (new or redefining a saved name), or a method
-   whose multimethod is not saved."
-  [record scope saved?]
-  (str "[eval: defined " (:name record) " (" (scope-label scope)
-       "; live-only: "
-       (cond
-         (= :defmethod (:kind record)) "its multimethod is not saved"
-         saved? (str "no docstring; the saved file is unchanged; (save '"
-                     (:name record) " \"doc\") updates it")
-         :else (str "no docstring; (save '" (:name record)
-                    " \"doc\") saves it"))
-       "]"))
-
-(defn- apply-definition! "Write RECORD to its scope's library and index it. A source-provided key\n   stays live but is never written, and is remembered as a model shadow so\n   later source reads do not overwrite it. A definition in an extension\n   namespace is live-only for the same reason. An undocumented definition\n   stays live for the session and is not written, so a saved definition\n   redefined without a docstring keeps its saved file unchanged. A defmethod\n   of a loaded multimethod is written with it. A failed write is recorded and\n   reported; the live definition remains." [env record] (let [name (:name record) scope (or (:scope record) :cwd) record (assoc record :scope scope)] (cond (contains? (clojure.core/deref (:source-keys env)) name) (do (swap! (:model-shadows env) conj name) {:line (str "[eval: redefined " name " (source; not stored)]")}) (extension-name? name) (do (swap! (:model-shadows env) conj name) (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) {:line (str "[eval: defined " name " (extension; live-only)]"), :entry (assoc (library-entry record) :active true)}) (not (documented? env record)) (let [saved? (some? (existing-record env name scope))] (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) {:line (live-only-line record scope saved?), :entry (assoc (library-entry record) :active true)}) :else (try (let [root (root-for env scope) [path record] (write-redefinition! env root record) record (assoc record :file path :root root)] (add-record! env record) (clear-unwritten! env name) {:line (str "[eval: defined " name " (" (scope-label scope) ")]"), :entry (assoc (library-entry record) :active true)}) (catch Throwable t (swap! (:unwritten env) conj name) (swap! (:unwritten-records env) assoc name record) (record-failure! (:failures env) {:name name, :error (ex-message t), :scope scope}) {:line (str "[eval: define failed " name " (" (scope-label scope) "): " (ex-message t) "]"), :error (ex-message t)})))))
-
-(defn- save-definition!
-  "Save RAW-NAME's live-only definition, adding DOC as its docstring when
-   the live form has none. The source is edited structurally; nothing is
-   re-evaluated, because the live definition already runs. A defmethod is
-   saved with its multimethod when that multimethod is already saved.
-   Refuses a name that is already saved, source-provided, an extension, a
-   method whose multimethod is not saved, or a kind with no docstring slot."
-  [env raw-name doc]
-  (let [name (when-let [raw (->name raw-name)]
-               (qualify-name (env-ns env) raw))]
-    (when-not name
-      (bad-request! (str "save needs a definition name, got " (pr-str raw-name))
-                    {:name raw-name}))
-    (cond
-      (contains? @(:source-keys env) name)
-      (bad-request! (str name " is provided by a source; source definitions stay live-only")
-                    {:name name})
-
-      (extension-name? name)
-      (bad-request! (str name " is an extension definition; extensions stay live-only")
-                    {:name name})
-
-      :else
-      (let [record (get @(:unwritten-records env) name)
-            method? (= :defmethod (:kind record))
-            parent-saved? (and method?
-                               (some? (active-record env
-                                                     (defmethod-multimethod name))))]
-        (cond
-          (nil? record)
-          (bad-request! (if (active-record env name)
-                          (str name " is already saved; use patch or edit-form")
-                          (str "no session-only definition named " name))
-                        {:name name})
-
-          (and method? (not parent-saved?))
-          (bad-request! (str name " is a defmethod; keep its multimethod first")
-                        {:name name})
-
-          (and (not method?)
-               (not (defs/docstring-kind? (:kind record))))
-          (bad-request! (str name " is a " (name (:kind record))
-                             "; that form has no docstring slot")
-                        {:name name})
-
-          :else
-          (let [doc (when-not method?
-                      (or (some-> doc str/trim not-empty)
-                          (some-> (:doc record) str/trim not-empty)))]
-            (when (and (not method?) (not doc))
-              (bad-request! (str "save needs a docstring for " name)
-                            {:name name}))
-            (let [source (if (and (not method?) (str/blank? (:doc record)))
-                           (or (defs/add-docstring (:source record) doc)
-                               (bad-request! (str "cannot add a docstring to " name)
-                                             {:name name}))
-                           (:source record))
-                  record (if method?
-                           record
-                           (assoc record :doc doc :source source))
-                  result (apply-definition! env record)]
-              (if-let [error (:error result)]
-                (bad-request! (str "save failed: " error) {:name name})
-                (do (swap! (:change-lines env) conj (:line result))
-                    nil)))))))))
 
 (defn- drop-report-line
   "One drop result line. A restored source value is named as such; a record
@@ -2702,7 +2224,7 @@
                                                  :split-forms? true
                                                  :result-store (fn [result]
                                                                  (when-not @(:skip-result-store? env)
-                                                                   (store-result! env result)))
+                                                                   (results/store-result! env result)))
                                                  :source-namespaces (:namespaces sources)
                                                  :disabled-verbs @(:disabled-verbs env)
                                                  :session-recall session-recall

@@ -4,7 +4,8 @@
    A source is data plus values, read when an eval environment is built and on
    later calls. Validation happens here so `kmet.app.eval` only wires the
    values into SCI: a bad shape, a reserved namespace or key, or a reserved
-   `/eval` verb refuses the whole source, never the eval call."
+   `/eval` verb refuses the whole source, never the eval call. Seeding the
+   values into a live environment lives in `kmet.app.eval.seed`."
   (:require [clojure.string :as str]
             [kmet.app.eval.command-verbs :as command-verbs]))
 
@@ -221,3 +222,17 @@
        :keys keys
        :verbs (mapv verb-info (sort-by key values))
        :commands commands})))
+
+(defn source-result-details
+  "The source portion of an eval result's :details: the current source INFO
+   only when its id set differs from the last eval call's, plus any source
+   errors. Returns `[details ids]`; the caller records IDS with the result."
+  [env sources]
+  (let [info (:info sources)
+        ids (mapv :id info)]
+    [(cond-> (if (not= ids @(:reported-source-ids env))
+               {:sources info}
+               {})
+       (seq (:errors sources))
+       (assoc :source-errors (:errors sources)))
+     ids]))
