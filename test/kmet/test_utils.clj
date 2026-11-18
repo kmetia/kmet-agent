@@ -15,6 +15,20 @@
             [kmet.srce.core :as srce]
             [kmet.tui.utils :as u]))
 
+(defn captured-err
+  "Run F with *err* captured; returns `[result text]` — for tests that assert
+   a diagnostic. Use `with-captured-err` when the output is only noise."
+  [f]
+  (let [writer (java.io.StringWriter.)
+        result (binding [*err* writer] (f))]
+    [result (str writer)]))
+
+(defmacro with-captured-err
+  "Evaluate BODY with *err* captured and discarded. Returns BODY's value."
+  [& body]
+  `(binding [*err* (java.io.StringWriter.)]
+     ~@body))
+
 (defn test-engine
   "A minimal session-runtime Engine for mode-level tests: the given
    :agent-state and :session atoms (exactly as the Engine record holds

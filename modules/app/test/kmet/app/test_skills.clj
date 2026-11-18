@@ -204,7 +204,7 @@
         (io/make-parents skill-file)
         (spit skill-file "---\nname: no-desc-skill\n---\n# No description")
         ;; missing-description diagnostic is printed to stderr — suppress it.
-        (binding [*err* (java.io.StringWriter.)]
+        (tu/with-captured-err
           (skills/load-skills-from-dir  tmp-dir))
         (t/is (nil? (skills/get-skill "no-desc-skill")))
         (finally (fs/delete-tree tmp-dir))))))
@@ -231,7 +231,7 @@
       (try
         (io/make-parents skill-file)
         (spit skill-file "---\n---\n# Empty frontmatter")
-        (let [diags (binding [*err* (java.io.StringWriter.)]
+        (let [diags (tu/with-captured-err
                       (skills/load-skills-from-dir  tmp-dir))]
           (t/is (some #(= "description is required" (:message %)) diags)))
         (t/is (nil? (skills/get-skill "empty-fm")))
@@ -263,7 +263,7 @@
         (io/make-parents f2)
         (spit f1 "---\nname: collision-skill\ndescription: First version.\n---\n# One")
         (spit f2 "---\nname: collision-skill\ndescription: Second version.\n---\n# Two")
-        (let [diags (binding [*err* (java.io.StringWriter.)]
+        (let [diags (tu/with-captured-err
                       (skills/load-skills-from-dir  tmp-dir))
               loaded (skills/get-skill "collision-skill")]
           (t/is (= "First version." (:description loaded)))
@@ -379,7 +379,7 @@
         (spit (str tmp-dir "/s/SKILL.md")
               "---\nname: dup\ndescription: File version.\n---\nFile body")
         (skills/load-skills-from-dir  tmp-dir)
-        (binding [*err* (java.io.StringWriter.)]
+        (tu/with-captured-err
           (skills/register-extension-skill!  "---\nname: dup\ndescription: Ext.\n---\nExt body"
                                              {:location "e:dup/SKILL.md" :extension "e"
                                               :owner [:app :extensions "e"]}))
@@ -391,7 +391,7 @@
                  (skills/clear-skills!)))))
   (t/testing "missing description is rejected"
     (skills/clear-skills!)
-    (binding [*err* (java.io.StringWriter.)]
+    (tu/with-captured-err
       (skills/register-extension-skill!  "---\nname: nodesc\n---\nNo desc"
                                          {:location "e:nodesc/SKILL.md" :extension "e"}))
     (t/is (nil? (skills/get-skill "nodesc")))
@@ -407,7 +407,7 @@
                         "---\nname: dereg-winner\ndescription: Winner.\n---\nW"
                         {:location "a:skills/dereg-winner/SKILL.md" :extension "a"
                          :owner [:app :extensions "a"]})
-          dereg-loser (binding [*err* (java.io.StringWriter.)]
+          dereg-loser (tu/with-captured-err
                         (skills/register-extension-skill!
                          "---\nname: dereg-winner\ndescription: Loser.\n---\nL"
                          {:location "b:skills/dereg-winner/SKILL.md" :extension "b"

@@ -7,7 +7,8 @@
             [clojure.test :refer [deftest is]]
             [kmet.app.debug :as debug]
             [kmet.libs.log :as libs-log]
-            [kmet.test-tmp :as test-tmp]))
+            [kmet.test-tmp :as test-tmp]
+            [kmet.test-utils :as tu]))
 
 (defn- scratch []
   (test-tmp/temp-dir! "kmet-logs-"))
@@ -82,14 +83,13 @@
     (try
       (fs/create-dirs (error-file dir))     ; a directory where the file goes
       (reset! @#'debug/write-failure-reported? false)
-      (let [w (java.io.StringWriter.)]
-        (with-redefs [debug/logs-dir (constantly dir)]
-          (binding [*err* w]
-            (is (nil? (debug/log-error "boom")))
-            (is (nil? (debug/log-error "again")))))
-        (is (str/includes? (str w) "cannot write diagnostics log")
+      (let [[_ w] (tu/captured-err
+                   #(with-redefs [debug/logs-dir (constantly dir)]
+                      (is (nil? (debug/log-error "boom")))
+                      (is (nil? (debug/log-error "again")))))]
+        (is (str/includes? w "cannot write diagnostics log")
             "the first failure names the path")
-        (is (= 1 (count (re-seq #"cannot write diagnostics log" (str w))))
+        (is (= 1 (count (re-seq #"cannot write diagnostics log" w)))
             "later failures stay quiet"))
       (finally
         (fs/delete-tree dir)))))

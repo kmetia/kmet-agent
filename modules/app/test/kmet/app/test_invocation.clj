@@ -6,7 +6,8 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [kmet.ai.models :as models]
-            [kmet.app.invocation :as invocation]))
+            [kmet.app.invocation :as invocation]
+            [kmet.test-utils :as tu]))
 
 (def ^:private catalog
   [{:provider :opencode-go :id "deepseek-v4-flash" :reasoning true}
@@ -55,13 +56,12 @@
 (deftest a-model-scope-resolves-to-ids-with-a-warning-for-what-matches-nothing
   (with-catalog
     (fn []
-      (let [err (java.io.StringWriter.)
-            opts (binding [*err* err]
-                   (invocation/resolve-overrides {:models ["deepseek-v4-flash" "nope"]}))]
+      (let [[opts err] (tu/captured-err
+                        #(invocation/resolve-overrides {:models ["deepseek-v4-flash" "nope"]}))]
         (is (= ["deepseek-v4-flash"] (:models opts))
             "the scope is ids, as kmet1 stores it; the unmatched pattern is not
              invented back")
-        (is (str/includes? (str err) "No models match pattern \"nope\"")
+        (is (str/includes? err "No models match pattern \"nope\"")
             "and it says which pattern it left out")))))
 
 (deftest an-invocation-without-model-flags-never-reads-the-catalog

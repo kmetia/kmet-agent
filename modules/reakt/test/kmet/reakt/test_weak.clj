@@ -7,7 +7,8 @@
    integrations (Stages B/C)."
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
-            [kmet.reakt.weak :as weak]))
+            [kmet.reakt.weak :as weak]
+            [kmet.test-utils :as tu]))
 
 (defn- fresh-key []
   (keyword (gensym "weak-test")))
@@ -131,17 +132,16 @@
   (testing "one throwing on-dead neither stops its siblings nor the sweep"
     (let [k1 (fresh-key)
           k2 (fresh-key)
-          ran (atom [])
-          err (java.io.StringWriter.)]
+          ran (atom [])]
       (weak/register! k1 (Object.) {:n 1}
                       (fn [kk _] (swap! ran conj kk) (throw (ex-info "boom" {}))))
       (weak/register! k2 (Object.) {:n 2} (fn [kk _] (swap! ran conj kk)))
       (collect! k1)
       (collect! k2)
-      (let [n (binding [*err* err] (weak/sweep!))]
+      (let [[n err] (tu/captured-err #(weak/sweep!))]
         (is (>= n 2) "both entries were claimed")
         (is (= #{k1 k2} (set @ran)) "both on-dead fns ran despite the throw")
-        (is (str/includes? (str err) "on-dead error")
+        (is (str/includes? err "on-dead error")
             "the failure was reported on stderr")
         (is (nil? (weak/subject k1)))
         (is (nil? (weak/subject k2)))))))

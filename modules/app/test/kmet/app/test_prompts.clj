@@ -7,7 +7,8 @@
             [kmet.app.prompts :as prompts]
             [kmet.app.registry :as registry]
             [kmet.srce.core :as srce]
-            [kmet.test-tmp :as test-tmp]))
+            [kmet.test-tmp :as test-tmp]
+            [kmet.test-utils :as tu]))
 
 ;; The extension host is the composition's: boot one for the namespace.
 (t/use-fixtures :once support/with-composition)
@@ -169,17 +170,16 @@
   (prompts/clear-prompt-templates!)
   (let [tmp-dir (test-tmp/temp-dir! "test-prompts-warn-")
         good (str tmp-dir "/good.md")
-        missing (str tmp-dir "/missing.md")
-        err (java.io.StringWriter.)]
+        missing (str tmp-dir "/missing.md")]
     (try
       (io/make-parents good)
       (spit good "---\ndescription: Loads fine.\n---\nGood body.")
-      (binding [*err* err]
-        (prompts/load-prompt-template-files!  [good missing]))
-      (t/testing "the valid template still loads"
-        (t/is (= "Loads fine." (:description (prompts/get-prompt-template "good")))))
-      (t/testing "the unreadable template is reported, not silently skipped"
-        (t/is (str/includes? (str err) (str "Warning: prompt template at " missing))))
+      (let [[_ err] (tu/captured-err
+                     #(prompts/load-prompt-template-files! [good missing]))]
+        (t/testing "the valid template still loads"
+          (t/is (= "Loads fine." (:description (prompts/get-prompt-template "good")))))
+        (t/testing "the unreadable template is reported, not silently skipped"
+          (t/is (str/includes? err (str "Warning: prompt template at " missing)))))
       (finally
         (prompts/clear-prompt-templates!)
         (fs/delete-tree tmp-dir)))))

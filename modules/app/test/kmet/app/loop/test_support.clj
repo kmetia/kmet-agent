@@ -223,19 +223,18 @@
   [event extra]
   (let [calls (atom 0)
         opts (atom [])
-        warn (java.io.StringWriter.)
         agent (make-agent-state)]
     (on-event event (fn [_] (assoc extra :continue true)))
     (try
-      (with-redefs [cfg/get-api-key (fn [_] "test-key")
-                    llm/send-message (stub-llm-text-turns calls ["done"] opts)]
-        (binding [*err* warn]
-          @(loop/run-agent-turn agent {:message "run"
-                                       :on-done (fn [_])
-                                       :on-error (fn [_])})))
+      (let [[_ warn] (tu/captured-err
+                      #(with-redefs [cfg/get-api-key (fn [_] "test-key")
+                                     llm/send-message (stub-llm-text-turns calls ["done"] opts)]
+                         @(loop/run-agent-turn agent {:message "run"
+                                                      :on-done (fn [_])
+                                                      :on-error (fn [_])})))]
+        {:calls @calls :warn warn :agent agent})
       (finally
-        (clear-listeners!)))
-    {:calls @calls :warn (str warn) :agent agent}))
+        (clear-listeners!)))))
 
 (defn stub-llm-two-tool-calls-then-text
   "send-message stub: first call streams two bash tool calls (ARGS1/ARGS2,

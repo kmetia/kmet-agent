@@ -13,7 +13,8 @@
             [kmet.app.config :as cfg]
             [kmet.app.events :as events]
             [kmet.app.loop.test-support :as support]
-            [kmet.test-tmp :as test-tmp]))
+            [kmet.test-tmp :as test-tmp]
+            [kmet.test-utils :as tu]))
 
 (t/use-fixtures :each support/with-host)
 
@@ -282,7 +283,7 @@
         (with-redefs [cfg/get-api-key (fn [_] "test-key")
                       llm/send-message (support/stub-llm-text-turns calls ["ok"] opts)]
           ;; the second boundary's rejected continuation warns to stderr
-          (binding [*err* (java.io.StringWriter.)]
+          (tu/with-captured-err
             @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])})))
         (let [requests (mapv :messages @opts)
               boundary (first @boundaries)]
@@ -385,7 +386,7 @@
           agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
       (with-redefs [cfg/get-api-key (fn [_] "test-key")
                     llm/send-message (fn [_] (throw (ex-info "kaboom" {})))]
-        (binding [*err* (java.io.StringWriter.)]
+        (tu/with-captured-err
           @(loop/run-agent-turn agent {:message "hi" :on-error (fn [_])})))
       (t/is (= :error (:outcome (support/event-of events :agent-settled))))))
 

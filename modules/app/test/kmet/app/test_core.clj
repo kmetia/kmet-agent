@@ -15,7 +15,8 @@
             [kmet.app.maintenance :as maintenance]
             [kmet.app.test-support :as support]
             [kmet.app.world :as world]
-            [kmet.test-tmp :as test-tmp]))
+            [kmet.test-tmp :as test-tmp]
+            [kmet.test-utils :as tu]))
 
 (deftest a-process-start-runs-the-entry
   ;; The model catalog is not loaded here: it is part of the process world,
@@ -125,14 +126,14 @@
              (:args (core/parse-args ["before" (str "@" path) "after"])))
           "the text takes the argument's place, in order")
       (finally (io/delete-file path true))))
-  (let [err (java.io.StringWriter.)]
-    (is (= [] (:args (binding [*err* err] (core/parse-args ["@"]))))
+  (let [[args err] (tu/captured-err #(core/parse-args ["@"]))]
+    (is (= [] (:args args))
         "an empty path is not a file and not a message")
-    (is (str/includes? (str err) "Warning: empty path after @")))
-  (let [err (java.io.StringWriter.)]
-    (is (= [""] (:args (binding [*err* err] (core/parse-args ["@target/does-not-exist.md"]))))
+    (is (str/includes? err "Warning: empty path after @")))
+  (let [[args err] (tu/captured-err #(core/parse-args ["@target/does-not-exist.md"]))]
+    (is (= [""] (:args args))
         "an unreadable file is an empty message, as in kmet1")
-    (is (str/includes? (str err) "Warning: could not read target/does-not-exist.md"))))
+    (is (str/includes? err "Warning: could not read target/does-not-exist.md"))))
 
 (deftest parse-args-rejects-bad-flags
   (is (= :kmet.app/bad-args (error-type #(core/parse-args ["--profile"]))))

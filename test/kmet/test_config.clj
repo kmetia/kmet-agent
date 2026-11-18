@@ -8,7 +8,7 @@
             [kmet.app.tools.shell :as shell]
             [kmet.libs.http :as http]
             [kmet.ai.auth :as auth]
-            [kmet.test-utils :refer [slash]]
+            [kmet.test-utils :as tu :refer [slash]]
             [kmet.test-tmp :as test-tmp]))
 
 ;; ─── Defaults ──────────────────────────────────────────────────────────────
@@ -245,13 +245,11 @@
 
 (t/deftest test-retired-dir-keys-warn
   (t/testing "retired :*-dir keys warn with the replacement entry"
-    (let [out (java.io.StringWriter.)]
-      (binding [*err* out]
-        (#'cfg/warn-retired-dir-keys! {:extensions-dir "/x" :theme "dark"} {:skills-dir "/y"}))
-      (let [s (str out)]
-        (t/is (str/includes? s ":extensions entry"))
-        (t/is (str/includes? s ":skills entry"))
-        (t/is (not (str/includes? s ":theme")))))))
+    (let [[_ s] (tu/captured-err
+                 #(#'cfg/warn-retired-dir-keys! {:extensions-dir "/x" :theme "dark"} {:skills-dir "/y"}))]
+      (t/is (str/includes? s ":extensions entry"))
+      (t/is (str/includes? s ":skills entry"))
+      (t/is (not (str/includes? s ":theme"))))))
 
 ;; ─── API key ───────────────────────────────────────────────────────────────
 

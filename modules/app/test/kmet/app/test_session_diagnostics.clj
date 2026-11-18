@@ -9,18 +9,11 @@
             [kmet.app.debug :as debug]
             [kmet.app.session.core :as s]
             [kmet.app.session.store :as store]
-            [kmet.test-tmp :as test-tmp]))
+            [kmet.test-tmp :as test-tmp]
+            [kmet.test-utils :as tu]))
 
 (defn- scratch []
   (test-tmp/temp-dir! "test-"))
-
-(defn- captured-stderr
-  "Run F with stderr captured; `[result text]` — the cases that assert a
-   diagnostic is absent unless the host asked for it."
-  [f]
-  (let [w (java.io.StringWriter.)
-        result (binding [*err* w] (f))]
-    [result (str w)]))
 
 (t/deftest test-the-strict-pass-is-off-by-default-and-data-is-trusted
   ;; A header and an entry that parse as EDN but fail the schema. Off (the
@@ -32,12 +25,12 @@
                              :created-at "2026-01-01T00:00:00Z" :cwd (scratch)}) "\n"))
     (spit file (str (pr-str {:id 7 :role :user}) "\n") :append true)
     (try
-      (let [[loaded out] (captured-stderr #(s/load-session file))]
+      (let [[loaded out] (tu/captured-err #(s/load-session file))]
         (t/is (= "" out) "silent unless the host asked for diagnostics")
         (t/is (= [{:id 7 :role :user}] @(:entries loaded))
               "off, a parseable-but-wrong-shape entry is kept"))
       (store/report-wrong-shapes! true)
-      (let [[loaded out] (captured-stderr #(s/load-session file))]
+      (let [[loaded out] (tu/captured-err #(s/load-session file))]
         (t/is (str/includes? out "Skipping wrong-shape entry") "the entry is reported")
         (t/is (str/includes? out ":id [\"should be a string\"]") "with the reason")
         (t/is (empty? @(:entries loaded)) "and skipped"))

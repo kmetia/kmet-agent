@@ -12,7 +12,8 @@
             [kmet.tui.protocols :as protocols]
             [kmet.tui.hikap :as hicc]
             [kmet.hikap.component :as component :refer [with-let]]
-            [kmet.reakt.core :as r]))
+            [kmet.reakt.core :as r]
+            [kmet.test-utils :as tu]))
 
 (defn- rd
   "Tracked deref for reaction bodies under test."
@@ -362,7 +363,7 @@
     (r/watch-ref rx :good (fn [_ _ _o n] (swap! good conj n)))
     ;; The failing watcher prints to stderr — suppress it (hosts without
     ;; per-var output capture, e.g. jolt, would leak it).
-    (binding [*err* (java.io.StringWriter.)]
+    (tu/with-captured-err
       (t/is (= 1 (reset! a 1))
             "mutator never sees the watcher failure")
       (r/flush!))
@@ -791,7 +792,7 @@
       (component/register-cleanup! 'bad #(throw (ex-info "cleanup boom" {}))))
     ;; The throwing cleanup prints to stderr — suppress it (hosts without
     ;; per-var output capture, e.g. jolt, would leak it).
-    (binding [*err* (java.io.StringWriter.)]
+    (tu/with-captured-err
       (component/destroy-store! store))
     (t/is (= [:good] @log) "throwing cleanup doesn't block the rest")))
 

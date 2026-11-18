@@ -308,7 +308,7 @@ Ordered by value/effort.
       worst) and `render-frame!` (CC 32 / 200 SLOC) into per-case fns in
       `modules/tui/src/kmet/tui/frame.clj` (lines 457, 747). One sitting cuts
       the largest single mass in the tree.
-- [ ] Add a `with-captured-err` test helper and replace the ~50 hand-rolled
+- [x] Add a `with-captured-err` test helper and replace the ~50 hand-rolled
       `(binding [*err* (java.io.StringWriter.)]` blocks — densest in
       `modules/app/test/kmet/app/loop/test_compact.clj`, also
       `test_custom.clj`, `test_models.clj`, `test_boundaries.clj`,

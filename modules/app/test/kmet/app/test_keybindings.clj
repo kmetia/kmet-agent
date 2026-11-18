@@ -6,7 +6,8 @@
             [kmet.tui.keys :as keys]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.libs.theme :as theme]
-            [kmet.test-tmp :as test-tmp]))
+            [kmet.test-tmp :as test-tmp]
+            [kmet.test-utils :as tu]))
 
 (defn- temp-agent-dir
   "Create a throwaway agent dir under target/ (with optional keybindings.edn
@@ -80,7 +81,7 @@
   (t/testing "malformed EDN yields empty bindings, not an exception"
     (let [dir (temp-agent-dir "{not valid edn")]
       (try
-        (t/is (= {} (binding [*err* (java.io.StringWriter.)]
+        (t/is (= {} (tu/with-captured-err
                       (kb/load-user-bindings (kb-file dir)))))
         (finally (cleanup dir))))))
 

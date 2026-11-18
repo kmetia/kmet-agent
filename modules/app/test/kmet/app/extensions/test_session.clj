@@ -18,7 +18,7 @@
             [kmet.app.session.core :as session]
             [kmet.app.skills :as skills]
             [kmet.app.test-support :as support]
-            [kmet.test-utils :refer [spit-plugin]]
+            [kmet.test-utils :as tu :refer [spit-plugin]]
             [kmet.libs.theme :as theme]
             [kmet.app.tools.registry :as tools-registry]
             [kmet.test-tmp :as test-tmp]))
@@ -246,7 +246,7 @@
             u2 (support/on-event :context
                                  (fn [_ev] {:messages ["kept"]}))]
         ;; The throwing listener prints a warning to stderr — suppress it.
-        (binding [*err* (java.io.StringWriter.)]
+        (tu/with-captured-err
           (t/is (= ["kept"] (on-context ["orig"]))))
         (u1) (u2))
       (t/is (= ["orig"] (on-context ["orig"]))
@@ -309,12 +309,11 @@
     (testing "a :context-with-system result is used verbatim, even without the prompt"
       (let [system-msg {:role :system :content [{:type :text :text "prompt"}]}
             user-msg {:role :user :content [{:type :text :text "hi"}]}
-            u (support/on-event :context-with-system (fn [_] {:messages [user-msg]}))
-            err (java.io.StringWriter.)]
+            u (support/on-event :context-with-system (fn [_] {:messages [user-msg]}))]
         (try
-          (let [out (binding [*err* err] (on-context [system-msg user-msg]))]
+          (let [[out err] (tu/captured-err #(on-context [system-msg user-msg]))]
             (t/is (= [user-msg] out) "honored as returned (pi: report, honor)")
-            (t/is (str/includes? (str err) "removed the leading system message")
+            (t/is (str/includes? err "removed the leading system message")
                   "and reported as an extension error"))
           (finally (u)))))))
 
@@ -369,7 +368,7 @@
                (support/on-event :resources-discover
                                  (fn [_] (throw (ex-info "boom" {})))))
         ;; The throwing listener prints a warning to stderr — suppress it.
-        (binding [*err* (java.io.StringWriter.)]
+        (tu/with-captured-err
           (extensions/discover-resources! (support/composition-ctx) :reload))
         (t/is (some? (skills/get-skill "ext-skill"))
               "the good handler's paths were already applied")
@@ -782,12 +781,11 @@
           (t/is (not-any? #(= "ld-jvm" (:name %)) (extensions/get-loaded-extensions))))
         (extensions/unload-all-extensions!))
       (testing "a legacy manifest (no :loader) defaults to both backends with a warning"
-        (let [err-w (java.io.StringWriter.)
-              r (binding [*err* err-w]
-                  (extensions/load-extension! (mk "legacy" (manifest "ld-legacy" nil))))]
+        (let [[r err-w] (tu/captured-err
+                         #(extensions/load-extension! (mk "legacy" (manifest "ld-legacy" nil))))]
           (t/is (nil? (:error r)) (str "loaded: " (:error r)))
           (t/is (= (if (host/jolt?) :jolt :sci) (:loader-kind r)))
-          (t/is (str/includes? (str err-w) "no :loader")))
+          (t/is (str/includes? err-w "no :loader")))
         (extensions/unload-all-extensions!))
       (testing "a malformed :loader is an error result, not a throw"
         (let [r (extensions/load-extension! (mk "bad" (manifest "ld-bad" "\"sci\"")))]

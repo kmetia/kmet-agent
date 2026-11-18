@@ -8,7 +8,8 @@
             [kmet.app.loop.state :as state]
             [kmet.app.loop :as loop]
             [kmet.app.config :as cfg]
-            [kmet.app.loop.test-support :as support]))
+            [kmet.app.loop.test-support :as support]
+            [kmet.test-utils :as tu]))
 
 (t/use-fixtures :each support/with-host)
 
@@ -130,7 +131,7 @@
         (t/is (= [] @(:scoped-models agent))))
       ;; unresolved patterns are skipped with a stderr warning — suppress it
       ;; (hosts without per-var output capture, e.g. jolt, would leak it)
-      (let [agent (binding [*err* (java.io.StringWriter.)]
+      (let [agent (tu/with-captured-err
                     (state/init-scoped-models!
                      (support/make-agent-state)
                      {:enabled-models ["test-prov/a" "ghost/model"]}))]

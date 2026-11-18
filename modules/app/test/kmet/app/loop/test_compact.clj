@@ -63,7 +63,7 @@
                               (when-let [on-done (:on-done opts)]
                                 (on-done :stop))))
                         :done))]
-        (binding [*err* (java.io.StringWriter.)]
+        (tu/with-captured-err
           @(loop/run-agent-turn agent {:message "hi" :on-error (fn [_])})))
       (t/is (= 2 @main-call-count) "overflow triggers one compaction then a retry")
       (t/is (some #(and (= :compaction (:role %))
@@ -172,7 +172,7 @@
                           (when-let [on-error (:on-error opts)]
                             (on-error "summary stream failed")))
                         :done))]
-        (binding [*err* (java.io.StringWriter.)]
+        (tu/with-captured-err
           @(loop/run-agent-turn agent {:message "hi"
                                        :on-error (fn [e] (swap! errors conj e))})))
       (t/is (= 1 @main-call-count) "no retry after the compaction could not run")
@@ -205,7 +205,7 @@
                                  "easily exceeds the small test threshold.")}]}]
           (swap! (:messages agent) conj m)
           (session/append-entry sess m)))
-      (t/is (true? (binding [*err* (java.io.StringWriter.)]
+      (t/is (true? (tu/with-captured-err
                      (support/with-summarization-stub #(compact/maybe-compact! agent))))
             "token estimate above threshold triggers compaction")
       (t/is (some #(and (= :compaction (:role %))
@@ -362,7 +362,7 @@
                               (when-let [on-done (:on-done opts)]
                                 (on-done :stop))))
                         :done))]
-        (binding [*err* (java.io.StringWriter.)]
+        (tu/with-captured-err
           @(loop/run-agent-turn agent {:message "go" :on-error (fn [_])})))
       (let [types (mapv :type @events)
             idx (fn [t] (.indexOf types t))]
@@ -414,7 +414,7 @@
                               (session/append-context-edit! sess (:id u) nil))
                             (with-redefs [cfg/get-api-key (fn [_] "test-key")
                                           llm/send-message stub]
-                              (binding [*err* (java.io.StringWriter.)]
+                              (tu/with-captured-err
                                 @(loop/run-agent-turn agent {:message "go"
                                                              :on-error (fn [_])}))))
                           (count (filter #(= :compaction-start (:type %)) @events))
@@ -458,7 +458,7 @@
                           (when-let [on-error (:on-error opts)]
                             (on-error "summary stream failed")))
                         :done))]
-        (binding [*err* (java.io.StringWriter.)]
+        (tu/with-captured-err
           @(loop/run-agent-turn agent {:message "go" :on-error (fn [_])})))
       (t/is (= 1 (count (filter #(= :compaction-start (:type %)) @events)))
             "the failed pre-run compaction is not retried by the post-run check")
@@ -496,7 +496,7 @@
                             (when-let [on-error (:on-error opts)]
                               (on-error "Stream idle timeout after 60000ms")))
                           :done))]
-          (binding [*err* (java.io.StringWriter.)]
+          (tu/with-captured-err
             @(loop/run-agent-turn agent {:message "go" :on-error (fn [_])})))
         (let [end (first (filter #(= :compaction-end (:type %)) @events))
               failed (first (filter #(= :session-compact-failed (:type %)) @events))]
@@ -530,7 +530,7 @@
                             (on-error "provider exploded"))
                           :done))]
           (t/is (= :failed
-                   (binding [*err* (java.io.StringWriter.)]
+                   (tu/with-captured-err
                      (compact/compact-context! agent "focus on tests" :manual))))
           (t/is (= "Compaction failed: Summarization failed: provider exploded"
                    (:error-message (first (filter #(= :compaction-end (:type %))
@@ -563,7 +563,7 @@
                       (throw (ex-info (str "network error: Proxy request failed: curl: (97) "
                                            "Failed to receive SOCKS response, proxy closed connection")
                                       {:type :transport-error})))]
-        (let [result (binding [*err* (java.io.StringWriter.)]
+        (let [result (tu/with-captured-err
                        (compact/compact-context! agent nil :manual))]
           (t/is (= :failed result) "the throw is a compaction failure")
           (t/is (= (str "Compaction failed: Summarization failed: network error: "
@@ -593,7 +593,7 @@
                         (reset! (:compaction-signal agent) true)
                         (throw (ex-info "aborted transport" {:type :transport-error})))]
           (t/is (= :aborted
-                   (binding [*err* (java.io.StringWriter.)]
+                   (tu/with-captured-err
                      (compact/compact-context! agent nil :manual))))
           (t/is (true? (:aborted (support/event-of events :compaction-end)))
                 "an aborted call reports :aborted, not a failure")
@@ -620,7 +620,7 @@
       (with-redefs [session/get-branch (fn [_] (throw (ex-info "session read failed" {})))
                     debug/log-error (fn [& parts] (reset! err-logged (apply str parts)))]
         (t/is (= :failed
-                 (binding [*err* (java.io.StringWriter.)]
+                 (tu/with-captured-err
                    (compact/compact-context! agent nil :manual))))
         (t/is (= "Compaction failed: session read failed"
                  (:error-message (support/event-of events :compaction-end)))
@@ -664,7 +664,7 @@
                               (do (when-let [on-text (:on-text opts)] (on-text "the summary"))
                                   (when-let [on-done (:on-done opts)] (on-done :stop)))))
                           :done))]
-          (binding [*err* (java.io.StringWriter.)]
+          (tu/with-captured-err
             @(loop/run-agent-turn agent {:message "go" :on-error (fn [_])})))
         (t/is (= 2 @attempts) "the summarization was attempted twice")
         (t/is (some #(and (= :summarization-retry-scheduled (:type %))
@@ -724,7 +724,7 @@
                             (do (when-let [on-text (:on-text opts)] (on-text "the summary"))
                                 (when-let [on-done (:on-done opts)] (on-done :stop)))))
                         :done))]
-        (binding [*err* (java.io.StringWriter.)]
+        (tu/with-captured-err
           @(loop/run-agent-turn agent {:message "go" :on-error (fn [_])})))
       (t/is (= 2 @attempts) "the mount's budget ran the summarization retry")
       (t/is (some #(and (= :summarization-retry-scheduled (:type %))
@@ -766,7 +766,7 @@
                           (when-let [on-text (:on-text opts)] (on-text "summary"))
                           (when-let [on-done (:on-done opts)] (on-done :stop))
                           :done))]
-          (binding [*err* (java.io.StringWriter.)]
+          (tu/with-captured-err
             (compact/maybe-compact! agent)))
         (t/is (= 1 (count @seen)) "one summarization call")
         (t/is (= :xhigh (:thinking (first @seen)))
@@ -828,7 +828,7 @@
                             (when-let [on-text (:on-text opts)] (on-text "summary"))
                             (when-let [on-done (:on-done opts)] (on-done :stop))
                             :done))]
-            (binding [*err* (java.io.StringWriter.)]
+            (tu/with-captured-err
               (t/is (true? (compact/compact-context! agent nil :manual)))))
           (t/is (= {:enabled true :reserve-tokens 8000 :keep-recent-tokens 40
                     :compactor :llm
@@ -859,7 +859,7 @@
                                   {:role :user :content [{:type :text :text (str "msg " i)}]}))
           (session/append-entry sess {:role :assistant :content [{:type :text :text "ok"}]
                                       :usage {:prompt_tokens 2000 :completion_tokens 50}})
-          (t/is (true? (binding [*err* (java.io.StringWriter.)]
+          (t/is (true? (tu/with-captured-err
                          (support/with-summarization-stub #(compact/maybe-compact! agent))))
                 "measured 2050 >= window-reserve 2000 — the override triggers earlier")))
       (t/testing "a non-matching entry leaves the ordinary settings"
@@ -898,7 +898,7 @@
                                        :cost {:total 0.001}}))
                           (when-let [on-done (:on-done opts)] (on-done :stop))
                           :done))]
-          (binding [*err* (java.io.StringWriter.)]
+          (tu/with-captured-err
             (compact/maybe-compact! agent)))
         (let [end (support/event-of events :compaction-end)
               compact (support/event-of events :session-compact)
@@ -944,7 +944,7 @@
                                   :details {:artifact 42}}}))
             (with-redefs [cfg/get-api-key (fn [_] "test-key")
                           llm/send-message (fn [_] (swap! calls inc) (future :done))]
-              (binding [*err* (java.io.StringWriter.)]
+              (tu/with-captured-err
                 (compact/compact-context! agent "focus" :manual)))
             (let [end (support/event-of events :compaction-end)
                   compact (support/event-of events :session-compact)
@@ -974,7 +974,7 @@
                                                   :tokens-before 1}}))
           (with-redefs [cfg/get-api-key (fn [_] "test-key")
                         llm/send-message (fn [_] (future :done))]
-            (t/is (= :failed (binding [*err* (java.io.StringWriter.)]
+            (t/is (= :failed (tu/with-captured-err
                                (compact/compact-context! agent "x" :manual)))))
           (t/is (str/includes? (:error-message (support/event-of events :compaction-end))
                                "no longer in the session"))
@@ -995,7 +995,7 @@
                         (future
                           (when-let [on-done (:on-done opts)] (on-done :stop))
                           :done))]
-          (binding [*err* (java.io.StringWriter.)]
+          (tu/with-captured-err
             (t/is (true? (compact/maybe-compact! agent)) "the compaction ran")))
         (t/is (= "" (:summary (first (filter #(= :compaction (:role %))
                                              @(:entries sess))))))
@@ -1015,11 +1015,11 @@
                           (when-let [on-text (:on-text opts)] (on-text "summary"))
                           (when-let [on-done (:on-done opts)] (on-done :stop))
                           :done))]
-          (t/is (true? (binding [*err* (java.io.StringWriter.)]
+          (t/is (true? (tu/with-captured-err
                          (compact/compact-context! agent nil :manual)))
                 "the first manual compaction runs")
           (reset! events [])
-          (t/is (= :failed (binding [*err* (java.io.StringWriter.)]
+          (t/is (= :failed (tu/with-captured-err
                              (compact/compact-context! agent nil :manual)))
                 "the second fails — the newest entry is the compaction")
           (t/is (= "Compaction failed: Already compacted"
@@ -1154,7 +1154,7 @@
                             {:role :tool
                              :content [{:type :tool_result :tool_use_id "tc1" :content "file body"}]
                              :tool-name "read" :is-error false})
-      (t/is (true? (binding [*err* (java.io.StringWriter.)]
+      (t/is (true? (tu/with-captured-err
                      (support/with-summarization-stub #(compact/maybe-compact! agent))))
             "token threshold triggers compaction")
       (let [replaced (first (filter #(= :context-replaced (:type %)) @events))]
@@ -1214,7 +1214,7 @@
           (session/append-entry sess {:role :assistant :content [{:type :text :text "ok"}]
                                       :usage {:prompt_tokens 20000 :completion_tokens 50
                                               :prompt_tokens_details {:cached_tokens 500}}})
-          (t/is (true? (binding [*err* (java.io.StringWriter.)]
+          (t/is (true? (tu/with-captured-err
                          (support/with-summarization-stub #(compact/maybe-compact! agent))))
                 "measured 20050 tokens >= window-reserve 9000 → compaction")))
       (t/testing "no window and no explicit thresholds → never compacts"
@@ -1250,7 +1250,7 @@
           (session/append-entry sess {:role :assistant :content [{:type :text :text "ok"}]
                                       :usage {:prompt_tokens 20000 :completion_tokens 50
                                               :prompt_tokens_details {:cached_tokens 500}}})
-          (t/is (true? (binding [*err* (java.io.StringWriter.)]
+          (t/is (true? (tu/with-captured-err
                          (support/with-summarization-stub #(compact/maybe-compact! agent))))
                 "measured usage near the window compacts once")
           (t/is (false? (compact/maybe-compact! agent))
@@ -1276,7 +1276,7 @@
                                                "easily exceeds the small test threshold.")}]}]
             (swap! (:messages agent) conj m)
             (session/append-entry sess m)))
-        (t/is (true? (binding [*err* (java.io.StringWriter.)]
+        (t/is (true? (tu/with-captured-err
                        (support/with-summarization-stub #(compact/maybe-compact! agent))))
               "token threshold triggers the first compaction")
         (t/is (false? (compact/maybe-compact! agent))
@@ -1528,7 +1528,7 @@
       ;; — the stale abort must not cancel it.
       (support/with-summarization-stub
         (fn []
-          (t/is (true? (binding [*err* (java.io.StringWriter.)]
+          (t/is (true? (tu/with-captured-err
                          (compact/compact-context! agent nil :threshold)))
                 "the next compaction starts with a fresh abort state")))
       (t/is (false? @(:compaction-signal agent)) "the stale abort signal is cleared")
@@ -1558,7 +1558,7 @@
       (t/is (true? @(:signal agent)) "precondition: Escape leaves the cancel signal set")
       (support/with-summarization-stub
         (fn []
-          (binding [*err* (java.io.StringWriter.)]
+          (tu/with-captured-err
             (t/is (= :aborted (compact/compact-context! agent nil :threshold))
                   "the auto path still aborts on the cancel signal")
             (t/is (true? @(:signal agent)) "the auto path keeps the signal")
@@ -1649,7 +1649,7 @@
                                          (when-let [on-error (:on-error opts)]
                                            (on-error "upstream failure"))
                                          :done))]
-        (let [result (binding [*err* (java.io.StringWriter.)]
+        (let [result (tu/with-captured-err
                        (compact/compact-context! agent nil :threshold))]
           (t/is (= :failed result) "summarization failure reports :failed")
           (let [end (support/event-of events :compaction-end)

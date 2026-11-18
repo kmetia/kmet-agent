@@ -10,7 +10,7 @@
             [kmet.app.session.core :as s]
             [kmet.app.session.test-support :as support]
             [kmet.libs.fs :as kfs]
-            [kmet.test-utils :refer [slash]]
+            [kmet.test-utils :as tu :refer [slash]]
             [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures :once support/with-clean-test-dir)
@@ -296,7 +296,7 @@
     (spit file "{:id \"1\" :role :user :content \"hello\"}\n")
     (spit file "{:bad \"entry\"\n" :append true)  ;; unclosed map → parse error
     (spit file "{:id \"3\" :role :assistant :content \"world\"}\n" :append true)
-    (let [loaded (support/silent-stderr #(s/load-session file))
+    (let [loaded (tu/with-captured-err (s/load-session file))
           entries @(:entries loaded)]
       (t/is (= 2 (count entries)) "Should skip corrupt entry, keep both valid ones")
       (t/is (= "1" (:id (first entries))))
@@ -313,7 +313,7 @@
     (spit file "{:id \"3\" :role :user :content \"b\"}\n" :append true)
     (spit file "{{:id \"4\"}\n" :append true)     ;; double brace → parse error
     (spit file "{:id \"5\" :role :assistant :content \"c\"}\n" :append true)
-    (let [loaded (support/silent-stderr #(s/load-session file))
+    (let [loaded (tu/with-captured-err (s/load-session file))
           entries @(:entries loaded)]
       (t/is (= 3 (count entries)) "Should skip all corrupt entries, keep all valid ones")
       (t/is (= "1" (:id (nth entries 0))))
@@ -325,7 +325,7 @@
         file (:file session)]
     (spit file "{{{{{{\n")
     (spit file "[invalid}^&*\n" :append true)
-    (let [loaded (support/silent-stderr #(s/load-session file))
+    (let [loaded (tu/with-captured-err (s/load-session file))
           entries @(:entries loaded)]
       (t/is (empty? entries) "Should return empty entries when all lines are corrupt"))))
 
@@ -385,7 +385,7 @@
       (spit file "{:type :session :version 1 :id \"abc\" :created-at \"2025-01-01T00:00:00Z\" :cwd \"/tmp\"}\n")
       (spit file "{:id \"1\" :role :user :content \"hello\"}\n" :append true)
       (spit file "{:id \"2\" :role :assistant :content \"wor" :append true)  ;; torn
-      (let [loaded (support/silent-stderr #(s/load-session file))
+      (let [loaded (tu/with-captured-err (s/load-session file))
             entries @(:entries loaded)]
         (t/is (= 1 (count entries)) "torn entry dropped")
         (t/is (= "1" (:id (first entries))))
@@ -407,7 +407,7 @@
     (try
       (fs/create-dirs dir)
       (spit file "{:id \"1\" :role :user")
-      (let [loaded (support/silent-stderr #(s/load-session file))]
+      (let [loaded (tu/with-captured-err (s/load-session file))]
         (t/is (empty? @(:entries loaded)))
         (t/is (nil? (:header loaded))))
       (t/is (= "\n" (slurp file)) "file repaired to an empty session file")
@@ -424,7 +424,7 @@
       (spit file "{:id \"1\" :role :user :content \"a\"}\n")
       (spit file "garbage!@\n" :append true)  ;; malformed middle line
       (spit file "{:id \"2\" :role :assistant :content \"b" :append true)  ;; torn
-      (let [loaded (support/silent-stderr #(s/load-session file))
+      (let [loaded (tu/with-captured-err (s/load-session file))
             entries @(:entries loaded)]
         (t/is (= 1 (count entries)))
         (t/is (= "1" (:id (first entries)))))

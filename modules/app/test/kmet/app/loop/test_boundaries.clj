@@ -16,7 +16,8 @@
             [kmet.app.config :as cfg]
             [kmet.app.loop.test-support :as support]
             [kmet.srce.core :as srce]
-            [kmet.test-tmp :as test-tmp]))
+            [kmet.test-tmp :as test-tmp]
+            [kmet.test-utils :as tu]))
 
 (t/use-fixtures :each support/with-host)
 
@@ -423,7 +424,6 @@
   (let [dir (test-tmp/temp-dir! "test-loop-turn-end-bad-edit-")
         calls (atom 0)
         opts (atom [])
-        warn (java.io.StringWriter.)
         agent (support/make-agent-state :session (session/create-session dir))]
     (try
       (support/on-event
@@ -431,17 +431,17 @@
        (fn [_]
          {:entries [{:role :context-edit :target-id "missing" :replacement nil}
                     {:role :custom :custom-type "state" :data {}}]}))
-      (with-redefs [cfg/get-api-key (fn [_] "test-key")
-                    llm/send-message (support/stub-llm-text-turns calls ["done"] opts)]
-        (binding [*err* warn]
-          @(loop/run-agent-turn agent {:message "run"
-                                       :on-done (fn [_])
-                                       :on-error (fn [_])})))
-      (t/is (str/includes? (str warn) "context edit")
-            "the bad edit is reported, not fatal")
-      (t/is (some #(= "state" (:custom-type %)) (session/get-branch (:session agent)))
-            "the rest of the batch still commits")
-      (t/is (= 1 @calls) "the prompt settled normally")
+      (let [[_ warn] (tu/captured-err
+                      #(with-redefs [cfg/get-api-key (fn [_] "test-key")
+                                     llm/send-message (support/stub-llm-text-turns calls ["done"] opts)]
+                         @(loop/run-agent-turn agent {:message "run"
+                                                      :on-done (fn [_])
+                                                      :on-error (fn [_])})))]
+        (t/is (str/includes? warn "context edit")
+              "the bad edit is reported, not fatal")
+        (t/is (some #(= "state" (:custom-type %)) (session/get-branch (:session agent)))
+              "the rest of the batch still commits")
+        (t/is (= 1 @calls) "the prompt settled normally"))
       (finally
         (support/clear-listeners!)
         (fs/delete-tree dir)))))

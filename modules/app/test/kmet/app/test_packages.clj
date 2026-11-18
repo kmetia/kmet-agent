@@ -78,6 +78,13 @@
                   fs/cwd (fn [] empty-cwd)]
       (f))))
 
+(defn- resolve-with-warnings
+  "Resolve PACKAGES with stderr captured; returns `[result text]`. Callers
+   that need an isolated agent/cwd wrap this in `with-stubbed-cwd`."
+  [packages]
+  (tu/captured-err
+   #(pkgs/resolve-package-items {:packages packages} nil)))
+
 ;; ─── Resolution over a package directory ───────────────────────────────────
 
 (t/deftest test-resolve-conventional-package
@@ -122,20 +129,17 @@
     (t/is (empty? (:extensions res)))))
 
 (t/deftest test-remote-package-warns-and-skips
-  (let [out (java.io.StringWriter.)]
-    (binding [*err* out]
-      (let [res (with-stubbed-cwd #(pkgs/resolve-package-items {:packages ["npm:@foo/bar"]} nil))]
-        (t/is (empty? (:extensions res)))
-        (t/is (str/includes? (str out) "remote source"))))))
+  (let [[res out] (with-stubbed-cwd
+                    #(resolve-with-warnings ["npm:@foo/bar"]))]
+    (t/is (empty? (:extensions res)))
+    (t/is (str/includes? out "remote source"))))
 
 (t/deftest test-git-package-not-installed-warns
-  (let [out (java.io.StringWriter.)]
-    (binding [*err* out]
-      (let [res (with-stubbed-cwd
-                  #(pkgs/resolve-package-items {:packages ["git:github.com/user/repo"]} nil))]
-        (t/is (empty? (:extensions res)))
-        (t/is (str/includes? (str out) "is not installed"))
-        (t/is (str/includes? (str out) "kmet install git:github.com/user/repo"))))))
+  (let [[res out] (with-stubbed-cwd
+                    #(resolve-with-warnings ["git:github.com/user/repo"]))]
+    (t/is (empty? (:extensions res)))
+    (t/is (str/includes? out "is not installed"))
+    (t/is (str/includes? out "kmet install git:github.com/user/repo"))))
 
 (t/deftest test-resolve-installed-git-package
   (with-stubbed-cwd
@@ -355,14 +359,12 @@
 (t/deftest test-git-subdirectory-missing-dir-warns
   (with-stubbed-cwd
     (fn []
-      (let [checkout (str (fs/path (cfg/get-agent-dir) "git" "github.com" "user" "repo"))
-            out (java.io.StringWriter.)]
+      (let [checkout (str (fs/path (cfg/get-agent-dir) "git" "github.com" "user" "repo"))]
         (fs/create-dirs checkout)
-        (binding [*err* out]
-          (let [res (pkgs/resolve-package-items
-                     {:packages ["git:github.com/user/repo//packages/a"]} nil)]
-            (t/is (empty? (:extensions res)))
-            (t/is (str/includes? (str out) "has no \"packages/a\" in its checkout"))))))))
+        (let [[res out] (resolve-with-warnings
+                         ["git:github.com/user/repo//packages/a"])]
+          (t/is (empty? (:extensions res)))
+          (t/is (str/includes? out "has no \"packages/a\" in its checkout")))))))
 
 (t/deftest test-list-empty
   (with-isolated-settings
