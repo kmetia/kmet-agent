@@ -89,7 +89,7 @@
         rewrite-clj/rewrite-clj {:mvn/version "1.3.58"}
         parinferish/parinferish {:mvn/version "0.8.0"}
         borkdude/edamame {:mvn/version "1.6.44"}
-        org.clojure/spec.alpha {:mvn/version "0.5.238"}
+        org.clojure/spec.alpha {:mvn/version "0.6.249"}
         org.clojure/tools.reader {:mvn/version "1.6.0"}
         ;; script.cljc requires clojure.data.json directly for the json alias
         ;; and fetch; libs declares it too, but a direct require needs its own
