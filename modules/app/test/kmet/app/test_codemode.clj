@@ -1,6 +1,6 @@
 (ns kmet.app.test-codemode
   "The codemode tool: per-call SCI sandbox with the full babashka namespace/
-   class surface, curated output (emit, or a silent success's value), async
+   class surface, additive output (emit plus the form report), async
    tools bridge and deadline behavior (design: docs/architecture.md § Tools and
    the script sandbox)."
   (:require [babashka.fs :as fs]
@@ -136,15 +136,15 @@
   (t/is (= "(no output)" (:content (run "nil")))))
 
 (t/deftest test-codemode-final-value-fallback
-  ;; a silent success reports its final value; emit wins when used
+  ;; a silent success reports its final value; emit adds with its form
   (t/is (= "42" (:content (run "(+ 40 2)"))))
   (t/is (= "plain" (:content (run "\"plain\"")))
         "a string value prints raw, like emit")
   (t/is (= "{:a 1}" (:content (run "{:a 1}"))))
   (t/is (= "42" (:content (run "(println \"hello\") 42")))
         "stdout stays out while the final value is reported")
-  (t/is (= ":emitted" (:content (run "(core/emit :emitted) (+ 1 2)")))
-        "emit wins over the final value")
+  (t/is (= ":emitted\n3" (:content (run "(core/emit :emitted) (+ 1 2)")))
+        "emitted text stays with its form")
   (let [r (run "(range)")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (str/includes? (:content r) "...")
@@ -158,8 +158,8 @@
            (:content (run "(+ 1 2)\n(+ 3 4)"))))
   (t/is (= "3" (:content (run "(+ 1 2)")))
         "a single form keeps the final-value rule")
-  (t/is (= ":a" (:content (run "(core/emit :a)\n(+ 1 2)")))
-        "emit stays the curated channel")
+  (t/is (= ":a\n3" (:content (run "(core/emit :a)\n(+ 1 2)")))
+        "emitted text stays with its form")
   (let [r (run "(+ 1 2)\n(throw (ex-info \"boom\" {}))\n(+ 3 4)")]
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "1 => 3"))
@@ -180,7 +180,7 @@
     (t/is (str/includes? (:description tool)
                          "Batch independent reads, commands, and tests"))
     (t/is (str/includes? (:description tool)
-                         "Multi-form calls report one line per form"))
+                         "emitted text and form values are interleaved in order"))
     (t/is (str/includes? (:description tool)
                          "json (clojure.data.json)"))
     (t/is (str/includes? (:description tool) "(fetch"))

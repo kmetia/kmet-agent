@@ -81,9 +81,9 @@ separate runtime retired into this engine):
   never been connected has no cache entry yet, so connect it once
   (`mcp({connect: "name"})`) before scripting it.
 - Report results with `(core/emit value)`: it prints one compact result and
-  returns `nil`. `core/emit` is the curated channel,
-  and a script that emits nothing reports its final value instead;
-  stdout/stderr are captured but not returned.
+  returns `nil`. `core/emit` is the curated channel; emitted text and form
+  values are interleaved in order, and stdout/stderr are captured but not
+  returned.
 - `timeout` (seconds; omit or 0 = no deadline, like bash) bounds the whole
   script; calls still in
   flight appear in `:details :calls` as `incomplete` with their elapsed

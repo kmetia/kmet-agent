@@ -552,14 +552,21 @@
               *print-level* print-level-limit]
       (pr-str v))))
 
+(defn- mark-event!
+  "Mark the next output event for this call and return its sequence, or nil
+   outside a call."
+  []
+  (when-let [event-seq (:event-seq *call-state*)]
+    (swap! event-seq inc)))
+
 (defn- emit!
   "Append one value to the call's reported output and stream it. `emit` is
-   the curated text channel: stdout/stderr are captured but never reported,
-   and a script that emits nothing reports its final value instead
-   (assemble-result). The buffer is bounded at the capture budget — past it
+   the curated text channel: its text is reported at its sequence in the
+   result (assemble-result); stdout/stderr are captured but never reported.
+   The buffer is bounded at the capture budget — past it
    the abort is set to :output-limit and emit throws, so a runaway emit loop
    cannot grow the buffer without bound. Returns nil."
-  [{:keys [tool emitted emitted-bytes on-update abort capture-limit]} v]
+  [{:keys [tool emit-events event-seq emitted-bytes on-update abort capture-limit]} v]
   (let [s (format-value v)
         total (swap! emitted-bytes + (bash-out/byte-length s))]
     (when (and capture-limit (> total capture-limit))
@@ -567,7 +574,7 @@
       (throw (ex-info (str tool " output limit exceeded")
                       {:type (tool-error-type tool "output-limit")
                        :reason :output-limit})))
-    (swap! emitted conj s)
+    (swap! emit-events conj [(swap! event-seq inc) s])
     (when on-update
       (on-update {:content s :is-partial true}))
     nil))
@@ -1256,7 +1263,7 @@
   ([query & opts] (recall! (into [query] opts))))
 
 (defn- emit-verb
-  "Report VALUE as the call's result; without emit, a silent success reports its final value."
+  "Add VALUE to the call's output."
   [value]
   (emit-with-state value))
 
@@ -1755,30 +1762,28 @@
         (str (subs line 0 form-value-line-chars) "…")
         :else line))))
 
-(defn- form-value-text
-  "Earlier non-silent values as `INDEX => LINE`, the last on success as one
-   bounded line (the final-value rule, never in full) or labeled on failure.
-   Every form gets one line, so no value can crowd out the rest; use emit
-   when a full value is needed. TOTAL is the call's top-level form count, so
-   a failure still reports the forms that ran; a single-form call keeps the
-   final-value rule, so returns nil."
-  [forms total ok?]
-  (when (and (seq forms) (> (or total (count forms)) 1))
-    (let [entries (vec (keep-indexed
-                        (fn [i {:keys [form value]}]
-                          (when (and (some? value) (not (silent-form? form)))
-                            [(inc i) value]))
-                        forms))]
-      (when (seq entries)
-        (let [[last-index last-value] (peek entries)
-              earlier (butlast entries)
-              last-text (if ok?
-                          (form-value-line last-value)
-                          (str last-index " => " (form-value-line last-value)))]
-          (str/join "\n"
-                    (conj (mapv (fn [[i v]] (str i " => " (form-value-line v)))
-                                earlier)
-                          last-text)))))))
+(defn- form-value-events
+  "The value events for FORM-RESULTS: earlier reportable values as one
+   bounded line, the last on success in full. A single form keeps the
+   REPL rule even when it is a definition; a failed form has no value."
+  [form-results ok?]
+  (let [single? (= 1 (count form-results))
+        reportable? (fn [{:keys [form value failed?]}]
+                      (and (not failed?)
+                           (some? value)
+                           (or single? (not (silent-form? form)))))
+        entries (vec (keep-indexed (fn [i result]
+                                     (when (reportable? result) [i (:value result)]))
+                                   form-results))
+        last-index (when (and ok? (seq entries)) (first (peek entries)))]
+    (for [i (range (count form-results))
+          :let [result (nth form-results i)]
+          :when (reportable? result)]
+      [(:value-seq result)
+       (if (= i last-index)
+         (try (format-value (:value result))
+              (catch Throwable _ (form-value-line (:value result))))
+         (str (inc i) " => " (form-value-line (:value result))))])))
 
 (defn- form-progress-text
   "What ran and what did not around the failed form INDEX of TOTAL."
@@ -1804,39 +1809,50 @@
            " [" (form-preview form) "]: " message
            "; " (form-progress-text index total)))))
 
+(defn- eval-whole
+  "Evaluate CODE as one source and mark its value event."
+  [eval-form code]
+  (let [value (eval-form code)]
+    {:value value :value-seq (mark-event!)}))
 (defn- eval-forms
   "Evaluate CODE one top-level form at a time, so a failure names the form
-   and what already ran. Returns `{:value LAST :form-values TEXT}`; a reader
-   failure or an empty form list falls back to EVAL-FORM's whole-source
-   verdict."
+   and what already ran. Returns `{:value LAST :form-results [...]}`; a
+   reader failure or an empty form list falls back to EVAL-FORM's
+   whole-source verdict. Each result carries the form's value and the
+   value event's sequence; a failed form records the error event."
   [eval-form code]
   (if-let [forms (top-level-forms code)]
     (let [forms (vec forms)
           total (count forms)]
       (if (zero? total)
-        {:value (eval-form code)}
+        (eval-whole eval-form code)
         (loop [index 1
                remaining forms
                value nil
                acc []]
           (if-let [form (first remaining)]
-            (let [value (try
-                          (eval-form form)
-                          (catch Throwable t
-                            (if (contains? (ex-data t) :reason)
-                              (throw t)
-                              (throw (ex-info "form failed"
-                                              {:form index
-                                               :total total
-                                               :form-text form
-                                               :cause t
-                                               :form-values (form-value-text
-                                                             acc total false)})))))]
-              (recur (inc index) (rest remaining) value
-                     (conj acc {:form form :value value})))
+            (let [outcome (try
+                            (let [value (eval-form form)]
+                              {:value value :value-seq (mark-event!)})
+                            (catch Throwable t
+                              (if (contains? (ex-data t) :reason)
+                                (throw t)
+                                (throw (ex-info "form failed"
+                                                {:form index
+                                                 :total total
+                                                 :form-text form
+                                                 :cause t
+                                                 :error-seq (mark-event!)
+                                                 :form-results
+                                                 (conj acc {:form form
+                                                            :failed? true})})))))]
+              (recur (inc index) (rest remaining) (:value outcome)
+                     (conj acc {:form form
+                                :value (:value outcome)
+                                :value-seq (:value-seq outcome)})))
             {:value value
-             :form-values (form-value-text acc total true)}))))
-    {:value (eval-form code)}))
+             :form-results acc}))))
+    (eval-whole eval-form code)))
 
 (defn eval-source!
   "Evaluate one SOURCE string in a kept SCI context during an environment
@@ -1880,26 +1896,33 @@
                                                               (eval-form prelude))
                                                             (if split-forms?
                                                               (eval-forms eval-form code)
-                                                              {:value (eval-form code)}))))]
+                                                              (eval-whole eval-form code)))))]
                               (reset! result
                                       (cond-> {:status :ok :value (:value outcome)}
-                                        (:form-values outcome)
-                                        (assoc :form-values (:form-values outcome)))))
+                                        (:value-seq outcome)
+                                        (assoc :value-seq (:value-seq outcome))
+                                        (:form-results outcome)
+                                        (assoc :form-results (:form-results outcome)))))
                             (catch Throwable t
                               (let [data (ex-data t)
-                                    reason (:reason data)]
+                                    reason (:reason data)
+                                    error-seq (or (:error-seq data)
+                                                  (swap! (:event-seq state) inc))]
                                 (reset! result
                                         (cond
-                                          reason {:status reason}
+                                          reason {:status reason
+                                                  :error-seq error-seq}
                                           (:form data)
                                           {:status :error
                                            :error (form-error-message (:form data)
                                                                       (:total data)
                                                                       (:form-text data)
                                                                       (:cause data))
-                                           :form-values (:form-values data)}
+                                           :form-results (:form-results data)
+                                           :error-seq error-seq}
                                           :else {:status :error
-                                                 :error (error-message t)}))))
+                                                 :error (error-message t)
+                                                 :error-seq error-seq}))))
                             (finally
                               (try (.close (:out-w capture)) (catch Throwable _ nil))
                               (try (.close (:err-w capture)) (catch Throwable _ nil))
@@ -1933,20 +1956,21 @@
         :else (recur)))))
 
 (defn- assemble-result
-  "Build the tool result from the eval outcome and the emitted output. `emit`
-   is the curated text channel; when a successful script emitted nothing its
-   final value is reported instead (the REPL rule), while captured stdout and
-   stderr stay absent. Emitted images travel beside the text as the result's
+  "Build the tool result from the evaluation outcome and output events.
+   Emitted text and form values are reported in event order: earlier
+   reportable values one bounded line each and the last value in full
+   (the REPL rule), or a single form's value. Captured stdout and stderr
+   stay absent. Emitted images travel beside the text as the result's
    :images (the transcript's count line reads :details :images). ABORT-REASON
    wins when set: a script unwound by the interrupt (however it reports, e.g. a
    catch that rethrows) cannot outlive its deadline. TIMEOUT-MS nil = no
    deadline (bash parity) and the result's :timeout is nil; ELAPSED-MS is the
-   measured wall clock. A multi-form call reports every non-definition
-   form as one bounded line, before an error. RESULT-STORE, when given,
-   keeps the full body and returns the id the truncation notice, TUI warning
-   and error tail name."
-  [{:keys [tool res emitted images timeout-ms trace abort-reason elapsed-ms
-           output-bytes output-lines capture-bytes extra-details result-store]}]
+   measured wall clock. An error is reported at its event sequence.
+   RESULT-STORE, when given, keeps the full body and returns the id the
+   truncation notice, TUI warning and error tail name."
+  [{:keys [tool res emit-events event-seq images timeout-ms trace abort-reason
+           elapsed-ms output-bytes output-lines capture-bytes extra-details
+           result-store]}]
   (let [status (or abort-reason (:status res))
         error-text (when status
                      (let [text (case status
@@ -1960,19 +1984,25 @@
                                   nil)]
                        (when text
                          (if (str/starts-with? text "ERROR") text (str "ERROR: " text)))))
-        form-text (when (empty? emitted) (:form-values res))
-        parts (cond-> (vec emitted)
-                form-text (conj form-text)
-                error-text (conj error-text))
-        ;; a silent success reports its final value (the REPL rule); emit is
-        ;; the curated channel, so a non-empty emit never adds it
-        value-text (when (and (empty? parts) (= :ok status) (some? (:value res)))
-                     (try (format-value (:value res))
-                          (catch Throwable _ nil)))
-        body (cond
-               (seq parts) (str/join "\n" parts)
-               value-text value-text
-               :else "(no output)")
+        form-results (:form-results res)
+        value-events (vec (when form-results
+                            (form-value-events form-results (= :ok status))))
+        fallback-value (when (and (= :ok status)
+                                  (empty? value-events)
+                                  (some? (:value res)))
+                         (try (format-value (:value res))
+                              (catch Throwable _ nil)))
+        fallback-seq (or (when (seq form-results) (:value-seq (peek form-results)))
+                         (:value-seq res)
+                         (inc (or event-seq 0)))
+        error-seq (or (:error-seq res) (inc (or event-seq 0)))
+        events (concat emit-events
+                       value-events
+                       (when fallback-value [[fallback-seq fallback-value]])
+                       (when error-text [[error-seq error-text]]))
+        body (if-let [parts (seq (map second (sort-by first events)))]
+               (str/join "\n" parts)
+               "(no output)")
         {:keys [content truncation]} (bound-content body output-bytes output-lines)
         result-id (when result-store
                     (try
@@ -2041,13 +2071,15 @@
                                   (when *enabled-tools-fn* (*enabled-tools-fn*))))
         abort (or abort (atom nil))
         cancelled (combined-signal signal abort)
-        emitted (atom [])
+        emit-events (atom [])
+        event-seq (atom 0)
         emitted-bytes (atom 0)
         images (atom [])
         trace (atom [])
         writers (atom nil)
         emit-state {:tool tool
-                    :emitted emitted
+                    :emit-events emit-events
+                    :event-seq event-seq
                     :emitted-bytes emitted-bytes
                     :images images
                     :on-update on-update
@@ -2082,7 +2114,8 @@
      :disabled-verbs (set disabled-verbs)
      :session-recall session-recall
      :abort abort
-     :emitted emitted
+     :emit-events emit-events
+     :event-seq event-seq
      :emitted-bytes emitted-bytes
      :images images
      :trace trace
@@ -2161,7 +2194,8 @@
         (let [res (or @result {:status (or @(:abort state) :timeout)})]
           (assemble-result {:tool tool
                             :res res
-                            :emitted @(:emitted state)
+                            :emit-events @(:emit-events state)
+                            :event-seq @(:event-seq state)
                             :images @(:images state)
                             :timeout-ms timeout-ms
                             :output-bytes (:bytes (:limits state))
@@ -2195,8 +2229,8 @@
    kept context's previous successful call ended in — the prelude and the code
    start there and the final namespace is stored back. SPLIT-FORMS? evaluates
    each top-level form separately, so a failure names the form and what ran
-   and a multi-form call reports every non-definition value as one bounded
-   line; use emit for a full value. A split-form call without NS-ATOM gets a
+   and a multi-form call reports earlier non-definition values one line each
+   and the last value in full. A split-form call without NS-ATOM gets a
    call-local one, so a top-level (ns ...) holds for the call's later forms.
    RESULT-STORE receives the full pre-truncation result map and returns the id
    used in the truncation notice and error tail. EXTRA-DETAILS merges into the

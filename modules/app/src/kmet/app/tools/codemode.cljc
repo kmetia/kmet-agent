@@ -26,9 +26,9 @@
        "Shell: (bash \"cmd\" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.\n"
        "Aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require needed. HTTP: (fetch \"url\" {:as :json}) -> {:status :headers :body}.\n"
        "Tools: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; @(tools/read {…}) is the per-tool shorthand, while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) lists the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one declaration. Inner results never enter the conversation.\n"
-       "Batch independent reads, commands, and tests into one call; (emit v) for full output. Multi-form calls report one line per form.\n"
+       "Batch independent reads, commands, and tests into one call; emitted text and form values are interleaved in order (earlier values one line each, the last full).\n"
        "Example: (emit {:spec (read \"SPEC-v2.txt\") :tests (bash \"bash test-v1.sh; bash test-v2.sh\")}).\n"
-       "Return the final value or (emit v); println is discarded. Prefer (slurp path), (spit path text), fs/*, and (p/sh ...) for whole-file and shell work. (emit-image path) attaches an image. Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB."))
+       "Form values and (emit v) are both reported; println is discarded. Prefer (slurp path), (spit path text), fs/*, and (p/sh ...) for whole-file and shell work. (emit-image path) attaches an image. Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB."))
 
 (defn title
   "Quiet one-liner body for the codemode tool: `codemode $ ` and the first
@@ -54,7 +54,7 @@
    :name "codemode"
    :label "Codemode"
    :description description
-   :prompt-snippet "Fresh Clojure sandbox with tools; one script per phase. Files: (read \"p\"), (write \"p\" text), (edit \"p\" old new) or (edit \"p\" pairs); shell: (bash \"cmd\" {:timeout N}); tools: @(tools/call \"name\" args). Batch independent reads/tests in one call; (emit v) for full output; (tools/list)."
+   :prompt-snippet "Fresh Clojure sandbox with tools; one script per phase. Files: (read \"p\"), (write \"p\" text), (edit \"p\" old new) or (edit \"p\" pairs); shell: (bash \"cmd\" {:timeout N}); tools: @(tools/call \"name\" args). Batch independent reads/tests in one call; (emit v) adds full output; (tools/list)."
    :prompt-guidelines
    ["Use codemode for Clojure — including one-liners — instead of writing bb -e/bb -f scripts through bash, unless the code needs the project classpath or its tests."
     "Use codemode when a fresh context matters: definitions do not persist between calls."
@@ -62,7 +62,7 @@
     "Use codemode when a command's output would flood the context: compute inside the script and (emit) only the digest — counts, matches, the lines that matter — instead of chaining bash cat/head/rg; println is discarded (emit the digest, or end on the value you want reported)."
     "Inside a script prefer (slurp path), fs/* and (p/sh ...) for local work over the bash and read tools — they return values, not rendered text — and call a tool only when its result is too large to read (a web fetch, an MCP call), emitting the filtered part: @(tools/call \"name\" args), or its per-tool var @(tools/read {…}). The bare read, write, edit and bash wrappers (also core/*) are available when you need the matching implementation's behavior."
     "Use (fetch \"url\" {:as :json}) for HTTP; it returns {:status :headers :body}."
-    "A multi-form call reports one line per form; use (emit value) for a full result. Return the final value or (emit value); println is discarded."
+    "A multi-form call interleaves emitted text and values: earlier values one line each and the last in full. println is discarded."
     "When the answer is an image (a screenshot, a chart, a rendered page), attach it with (emit-image path) rather than describing it."]
    :params {:code {:type :string :description "One Clojure script (one or more top-level forms), evaluated in order; definitions do not persist."}
             :timeout {:type :number

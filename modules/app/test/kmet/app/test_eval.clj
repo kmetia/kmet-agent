@@ -143,6 +143,8 @@
 (t/deftest test-the-eval-prompt-covers-work-and-discovery
   (t/is (str/includes? (:description eval-tool/definition) "sandbox in cwd"))
   (t/is (str/includes? (:description eval-tool/definition) "(emit v)"))
+  (t/is (str/includes? (:description eval-tool/definition) "last value full"))
+  (t/is (str/includes? (:description eval-tool/definition) "adds full output"))
   (t/is (str/includes? (:description eval-tool/definition) "(grep"))
   (t/is (str/includes? (:description eval-tool/definition) "(fetch"))
   (t/is (str/includes? (:description eval-tool/definition) ":max-lines N"))
@@ -193,10 +195,21 @@
     (let [r (support/eval! env "(+ 1 2)\n(apply str (repeat 1000 \"x\"))")]
       (t/is (not (:is-error r)) (:content r))
       (t/is (str/includes? (:content r) "1 => 3"))
-      (t/is (< (count (:content r)) 1000)
-            "a multi-form result clips the last value instead of letting it crowd out earlier ones"))
-    (t/is (= ":a" (:content (support/eval! env "(emit :a)\n(+ 1 2)")))
-          "emit stays the curated channel")
+      (t/is (str/includes? (:content r) (apply str (repeat 1000 "x")))
+            "a multi-form result keeps the last value in full"))
+    (t/is (= ":a\n3" (:content (support/eval! env "(emit :a)\n(+ 1 2)")))
+          "emitted text stays with its form")
+    (t/is (= ":a\n:b" (:content (support/eval! env "(do (emit :a) :b)")))
+          "emitted text precedes a single form's value")
+    (t/is (= ":a\n:b\n:c" (:content (support/eval! env "(do (emit :a) (emit :b) :c)")))
+          "multiple emits stay before the form's value")
+    (t/is (= ":a\n2 => 3\n:b\n7"
+             (:content (support/eval! env "(emit :a)\n(+ 1 2)\n(emit :b)\n(+ 3 4)")))
+          "each form's emitted text stays with its value")
+    (let [r (support/eval! env "(emit :a)\n(throw (ex-info \"boom\" {}))")]
+      (t/is (:is-error r))
+      (t/is (str/includes? (:content r) ":a"))
+      (t/is (str/includes? (:content r) "ERROR")))
     (let [r (support/eval! env "(defn f \"F.\" [] 1)\n(+ 1 2)")]
       (t/is (not (:is-error r)))
       (t/is (str/starts-with? (:content r) "3"))

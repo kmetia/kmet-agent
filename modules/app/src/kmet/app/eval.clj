@@ -1323,13 +1323,13 @@
 
 (defn- results-help
   []
-  (str "Results: (emit value) is the curated output; without emit, a successful "
-       "call reports its form values. stdout and stderr are discarded. "
+  (str "Results: (emit value) adds curated output; every call interleaves "
+       "emitted text and form values. stdout and stderr are discarded. "
        "The result is bounded at 16 KiB / 2,000 lines by default; "
        ":max-output-bytes raises it to 50 KiB. A truncated result keeps its "
-       "tail and names its result id. A multi-form call that does not emit "
-       "reports one bounded line per non-definition form; use (emit value) for a full "
-       "value. The session's "
+       "tail and names its result id. A multi-form call interleaves emitted "
+       "text and values: earlier values one line each and the last in full. The "
+       "session's "
        "recent-result ring keeps each eval call's output/error body: (result) lists "
        "them, (result :last) reads the newest, (result ID) reads the "
        "first 6,000 characters, and (result ID {:offset N :limit M}) "
@@ -1438,8 +1438,8 @@
        "session-created ones; (ns-publics 'ns) lists a namespace's vars, including session-only "
        "definitions; (help :surface) names the host's aliases, classes and "
        "exact surface. A patch or edit-form result must keep a docstring."
-       "\nReporting: (emit value) or end on the final value; stdout and stderr "
-       "are discarded; (help :results) has the result contract."))
+       "\nReporting: (emit value) adds output in call order; stdout and "
+       "stderr are discarded; (help :results) has the result contract."))
 
 (defn- doc-field
   "The help detail's doc field: one line when DOC is one line, otherwise the

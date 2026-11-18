@@ -579,18 +579,19 @@ probe and no real use, and is gone;
   joins the table undeclared and becomes declared once `tool_search` loads a
   tool (`kmet.app.tools.registry/register-tool-source!`). Listing and dispatch
   therefore cannot drift.
-- **Output is `emit` (or a silent script's value).** `(emit v)`, also
-  `(emit v)`, is the curated text channel: strings print raw, other data
-  `pr-str`, and it returns nil. A script that emits nothing and finishes
-  normally reports its final value instead (the REPL rule, bounded like
-  emit); with several top-level forms, each non-definition value is reported
-  as one bounded line and an error names the failing form and what ran;
-  stdout and stderr are captured for the budget but never reported.
+- **Output is emitted text and form values in event order.** `(emit v)`, also
+  `(emit v)`, adds curated text: strings print raw, other data `pr-str`, and
+  it returns nil. Emitted text and form values are reported in event order: a
+  single form reports its value in full (the REPL rule, bounded like emit);
+  with several top-level forms, earlier non-definition values are one bounded
+  line each and the last value is reported in full; an error names the failing
+  form and what ran. stdout and stderr are captured for the budget but never
+  reported.
   `(emit-image path-or-block)`
   is the second channel, capped at 4 MiB of base64 per image and 8 images per
   call, accepting exactly what `read` accepts. Capture is bounded at 1 MiB
   (exceeding it aborts with `:output-limit`), printing is bounded
-  (`*print-length*`/`*print-level*`), and the emitted body is truncated to
+  (`*print-length*`/`*print-level*`), and the result body is truncated to
   16 KiB / 2,000 lines by default (`:max-output-bytes` may raise it to the
   shared 50 KiB tool cap).
 - **Deadlines and cancellation are one signal.** Eval runs on a daemon thread
@@ -613,8 +614,8 @@ probe and no real use, and is gone;
   capture drain) and the call trace `{:calls [...]}` — one entry per inner
   call, `:incomplete` when a tool ignored the abort. Inner results never enter
   the transcript, the session or the context, and no tool-execution event is
-  emitted for them; the only things the model sees are the emitted text (or a
-  silent success's final value), the images and the result map.
+  emitted for them; the only things the model sees are emitted text and form
+  values, the images and the result map.
 
 **`eval`** (`kmet.app.eval.tool`, mounted by the `kmet.app.eval.plugin` row)
 is the persistent counterpart. It shares `kmet.app.tools.script` — capability namespaces, capture,
@@ -783,10 +784,10 @@ and names the read form in its notice; an errored result carries its id
 after the error. Like codemode, eval evaluates a call's top-level forms one
 at a time, so an error begins `ERROR` (after the values of earlier forms) and,
 with several forms, names the failing form and what already ran; a successful
-multi-form call that does not emit reports every non-definition value as one
-bounded line; `(emit value)` replaces that report and gives a full value. The
-result ring is eval-specific, since it is read back with the sandbox's `result`
-verb.
+multi-form call interleaves emitted text and values: earlier non-definition
+values one line each and the last value in full; an error is reported at its
+event. The result ring is eval-specific, since it is read
+back with the sandbox's `result` verb.
 `(help :results)` states the emission, cap, truncation and error
 contract. `(help)` is the one-call discovery path: one summary line per
 built-in help topic, one summary/count line per mounted source, every

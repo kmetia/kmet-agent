@@ -360,9 +360,9 @@ Files: (read "p") or (read "p" {:offset N :limit N :footer false :tail N}); (wri
 Shell: (bash "cmd" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.
 Aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require needed. HTTP: (fetch "url" {:as :json}) -> {:status :headers :body}.
 Tools: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; @(tools/read {…}) is the per-tool shorthand, while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) lists the callable tools with their descriptions and parameters; (tools/describe "name") returns one declaration. Inner results never enter the conversation.
-Batch independent reads, commands, and tests into one call; (emit v) for full output. Multi-form calls report one line per form.
+Batch independent reads, commands, and tests into one call; emitted text and form values are interleaved in order (earlier values one line each, the last full).
 Example: (emit {:spec (read "SPEC-v2.txt") :tests (bash "bash test-v1.sh; bash test-v2.sh")}).
-Return the final value or (emit v); println is discarded. Prefer (slurp path), (spit path text), fs/*, and (p/sh ...) for whole-file and shell work. (emit-image path) attaches an image. Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB.
+Form values and (emit v) are both reported; println is discarded. Prefer (slurp path), (spit path text), fs/*, and (p/sh ...) for whole-file and shell work. (emit-image path) attaches an image. Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB.
 
 ---
 
@@ -414,6 +414,6 @@ Only the current session is searchable. One result is capped at 50 KB.
 
 Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order, definitions persist.
 File/shell/HTTP: (read "p") -> text; (read "p" {:offset N :limit N}); (read "p" {:start N :end N :as :lines}); (write "p" text); (edit "p" old new|pairs); (bash "cmd" {:timeout N :max-lines N :max-bytes N :as :map}); (glob "p"); (grep "p"); (fetch "url" {:as :json}). Nonzero exits are normal.
-Output: (emit v) replaces the form report. Without emit, multi-form calls show one bounded line per non-definition value; a single form shows its full value. stdout/stderr (println/print/prn) are discarded. Limit 16 KiB (50 KiB with :max-output-bytes); timeout seconds, omit/0 = none.
+Output: emitted text and form values are interleaved in order (earlier values one line each, last value full); (emit v) adds full output. stdout/stderr (println/print/prn) discarded. Limit 16 KiB (50 KiB with :max-output-bytes); timeout seconds, omit/0 = none.
 Discover: (help), (help :core), (sources), (help :library), (index "text"), (describe 'name); source verbs <id>/verb.
 
