@@ -296,3 +296,49 @@ Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:
   eval/codemode state yet; wire it later if the setting should bound fetch.
 - **Grep validation**: resolved in the implementation — negative,
   non-numeric and nil `:context` clamp to 0 (pi's behavior); no rejection.
+
+## Architecture review quick wins (2026-11-18)
+
+Measured with `bb slop` over 360 files / 90,877 SLOC: verbosity 0.011,
+erosion 0.317, both below the human reference means. The wins below target
+the CC>10 hotspots and the clone groups the metric correctly fingers.
+Ordered by value/effort.
+
+- [ ] Extract `diff-frame!` (CC 79 / 230 SLOC, mass 1198 — 2x the next
+      worst) and `render-frame!` (CC 32 / 200 SLOC) into per-case fns in
+      `modules/tui/src/kmet/tui/frame.clj` (lines 457, 747). One sitting cuts
+      the largest single mass in the tree.
+- [ ] Add a `with-captured-err` test helper and replace the ~50 hand-rolled
+      `(binding [*err* (java.io.StringWriter.)]` blocks — densest in
+      `modules/app/test/kmet/app/loop/test_compact.clj`, also
+      `test_custom.clj`, `test_models.clj`, `test_boundaries.clj`,
+      `extensions/test_session.clj`. Removes raw interop from the test tree.
+- [ ] Unify the selector family's open/close/escape wiring into one shared
+      helper (extend the existing dock/state helper, do not copy):
+      `settings_selector.clj` is 18.1% clone-flagged, `tree_selector.clj`,
+      `fork_selector.clj`, `thinking_selector.clj` and `interactive/auth.clj`
+      duplicate the same close/escape/restore blocks
+      (`bb slop --dups` lists the groups).
+- [ ] Split `kmet.app.eval` (3,214 LOC, 226 defns) along the directory seams
+      that already exist (`eval/{tool,files,definitions,command,sources}`):
+      move the result ring, the listing sync, seed! and the persistence fns.
+      Pure moves; the facade surface is pinned by tests.
+- [ ] Table-drive `detect-openai-compat` (CC 47 in 89 SLOC,
+      `modules/ai/src/kmet/ai/api/shared.clj:465`) and `parse-inline`
+      (CC 54, `modules/libs/src/kmet/libs/markdown.clj:289`) — rule tables
+      instead of nested conditionals in two high-traffic files. Also merge the
+      two near-identical `cond` tables in `modules/libs/src/kmet/libs/ranking.clj`
+      (18.1% flagged).
+- [ ] Add a file-budget guard (e.g. `kmet.test-file-budget`: no src file over
+      ~1,500 LOC / ~150 defns) so god files cannot regrow — matches the repo's
+      guard-test style; `eval.clj` and `tui/core.clj` would fail it today, so
+      land it with the splits above or grandfather once.
+- [ ] Close design.md §3 (the compaction queue records no fact): decide to
+      record at submit or at the flush, and settle it either way — it is the
+      one named residual in the delivery path
+      (`modules/app/src/kmet/design.md` § Open at HEAD 3).
+
+Not wins (deliberate, recorded): live recomposition stays open (design.md
+§1); the sandbox's cooperative abort and the process-isolation tier stay
+open (§5); the app-module mass concentration and the doc-sync tax are
+structural, addressed only by the file-budget guard and the eval split.
