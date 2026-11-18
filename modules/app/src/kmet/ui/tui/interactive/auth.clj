@@ -48,7 +48,7 @@
           ;; restore mount, no mount handle to go stale (issue #5)
           sel-atom (atom nil)
           finish! (fn [result]
-                    (state/close-selector! cs sel-atom)
+                    (dock/close-atom! cs sel-atom)
                     (deliver p result))
           sel (auth-selector/make-auth-method-selector
                (:message prompt) labels
@@ -58,7 +58,7 @@
                (fn []
                  (finish! (ex-info "Login cancelled" {:type :login-cancelled}))))]
       (reset! prompt-state {:promise p})
-      (state/cover-selector! cs sel-atom sel)
+      (dock/show-panel! cs sel-atom sel {:cover? true})
       (login-dialog/await-prompt! p))
 
     :manual-code
@@ -286,10 +286,11 @@
                           (:name (first provider-options)) ":")
                      "Select authentication method:")
              sel-atom (atom nil)
+             close! (fn [] (dock/close-atom! cs sel-atom))
              sel (auth-selector/make-auth-method-selector
                   title options
                   (fn [label]
-                    (state/close-selector! cs sel-atom)
+                    (close!)
                     (let [auth-type (if (= label subscription-label)
                                       :oauth :api-key)]
                       (if provider-options
@@ -297,10 +298,8 @@
                                                provider-options)]
                           (start-provider-login! cs entry))
                         (show-login-provider-selector! cs auth-type))))
-                  (fn []
-                    (state/close-selector! cs sel-atom)
-                    (tui/tui-request-render (:tui cs))))]
-         (state/mount-selector! cs sel-atom sel))))))
+                  (fn [] (close!)))]
+         (dock/show-panel! cs sel-atom sel))))))
 
 (defn- show-login-provider-selector!
   "pi showLoginProviderSelector: the searchable provider selector over the
@@ -319,23 +318,22 @@
                                                            :api-key "No API key providers available."
                                                            "No login providers available.")})
        (let [sel-atom (atom nil)
+             close! (fn [] (dock/close-atom! cs sel-atom))
              sel (auth-selector/make-auth-selector
                   :login entries
                   (fn [provider-id selected-type]
-                    (state/close-selector! cs sel-atom)
-                    (if-let [entry (some #(when (and (= provider-id (:id %))
-                                                     (= selected-type (:auth-type %)))
-                                            %)
-                                         entries)]
-                      (start-provider-login! cs entry)
-                      (tui/tui-request-render (:tui cs))))
+                    (close!)
+                    (when-let [entry (some #(when (and (= provider-id (:id %))
+                                                       (= selected-type (:auth-type %)))
+                                              %)
+                                           entries)]
+                      (start-provider-login! cs entry)))
                   (fn []
-                    (state/close-selector! cs sel-atom)
-                    (if auth-type
-                      (show-login-auth-type-selector! cs)
-                      (tui/tui-request-render (:tui cs))))
+                    (close!)
+                    (when auth-type
+                      (show-login-auth-type-selector! cs)))
                   search)]
-         (state/mount-selector! cs sel-atom sel))))))
+         (dock/show-panel! cs sel-atom sel))))))
 
 (defn login-argument-completions
   "pi getArgumentCompletions for /login (getLoginProviderCompletionOptions +
@@ -484,11 +482,12 @@
                                               {:role :assistant
                                                :content "No stored credentials to remove. /logout only removes credentials saved by /login; environment variables are unchanged."})
       (let [sel-atom (atom nil)
+            close! (fn [] (dock/close-atom! cs sel-atom))
             sel (auth-selector/make-auth-selector
                  :logout entries
                  (fn [provider-id _selected-type]
-                   (state/close-selector! cs sel-atom)
-                   (if-let [entry (some #(when (= provider-id (:id %)) %) entries)]
+                   (close!)
+                   (when-let [entry (some #(when (= provider-id (:id %)) %) entries)]
                      (try
                        (auth/remove-credential! (keyword provider-id))
                        (when (and (:session (:engine cs)) (:footer-comp cs)
@@ -502,9 +501,6 @@
                                                                                 ". Environment variables are unchanged."))})
                        (catch Exception e
                          (chat-history/show-warning! (:chat-history cs)
-                                                     (str "Logout failed: " (ex-message e)))))
-                     (tui/tui-request-render (:tui cs))))
-                 (fn []
-                   (state/close-selector! cs sel-atom)
-                   (tui/tui-request-render (:tui cs))))]
-        (state/mount-selector! cs sel-atom sel)))))
+                                                     (str "Logout failed: " (ex-message e)))))))
+                 (fn [] (close!)))]
+        (dock/show-panel! cs sel-atom sel)))))

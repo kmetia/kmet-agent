@@ -278,7 +278,7 @@
 
 (deftest show-panel-records-before-publishing-the-stack
   (testing "a stack watch that closes the recorded panel during the mount
-            finds it — the record lands first, as in state/mount-selector!"
+            finds it — the record lands first, as in show-panel!"
     (let [cs (test-cs)
           disposed (atom [])
           p (panel disposed "panel")
@@ -296,6 +296,103 @@
       (t/is (true? @closed?) "the watch closed the panel during the mount")
       (t/is (nil? (top cs)))
       (t/is (= ["panel"] @disposed)))))
+
+(deftest show-panel-forwards-focus-and-cover
+  (testing "the recorded-panel open passes mount!'s focus target and can
+            cover the current top instead of replacing it"
+    (let [{:keys [cs ui]} (focus-cs)
+          disposed (atom [])
+          dlg (panel disposed "dialog")
+          sel (panel disposed "selector")
+          target (panel disposed "list")
+          sel-atom (atom nil)]
+      (dock/mount! cs dlg {:borrowed? true})
+      (dock/show-panel! cs sel-atom sel
+                        {:focus-target target :cover? true})
+      (t/is (identical? sel @sel-atom) "the panel is recorded")
+      (t/is (= [dlg sel] (mounted cs)) "the covered dialog stays")
+      (t/is (identical? target (tui/tui-focused-component ui))
+            "the focus target receives keys")
+      (t/is (empty? @disposed) "covering disposes nothing"))))
+
+(deftest close-atom-runs-dispose-fn-and-is-idempotent
+  (testing "the recorded-panel close releases, disposes, runs the foreign
+            dispose fn once, and requests a repaint"
+    (let [cs (test-cs)
+          disposed (atom [])
+          foreign (atom 0)
+          renders (atom 0)
+          p (panel disposed "panel")
+          panel-atom (atom nil)]
+      (with-redefs [tui/tui-set-focus (fn [_ _] nil)
+                    tui/tui-request-render (fn [_] (swap! renders inc))]
+        (dock/show-panel! cs panel-atom p)
+        (t/is (pos? @renders) "the open requests a frame")
+        (let [before @renders]
+          (dock/close-atom! cs panel-atom #(swap! foreign inc))
+          (t/is (> @renders before) "the close requests a repaint"))
+        (t/is (nil? (top cs)) "the editor is restored")
+        (t/is (nil? @panel-atom) "the record is cleared")
+        (t/is (= ["panel"] @disposed) "the panel is disposed")
+        (t/is (= 1 @foreign) "the foreign child is disposed after it")
+        (dock/close-atom! cs panel-atom #(swap! foreign inc))
+        (t/is (= ["panel"] @disposed) "a second close is inert")
+        (t/is (= 1 @foreign) "and does not dispose the child twice")))))
+
+(deftest close-atom-survives-a-reentrant-close
+  (testing "a panel disposed during dispose cannot re-enter the close: the
+            record is cleared first, so its own close is inert"
+    (let [cs (test-cs)
+          disposed (atom [])
+          foreign (atom 0)
+          panel-atom (atom nil)
+          reentered (atom false)
+          p (assoc (panel disposed "panel")
+                   :dispose (fn []
+                              (swap! disposed conj "panel")
+                              (when (compare-and-set! reentered false true)
+                                (dock/close-atom! cs panel-atom
+                                                  #(swap! foreign inc)))))]
+      (with-redefs [tui/tui-set-focus (fn [_ _] nil)
+                    tui/tui-request-render (fn [_] nil)]
+        (dock/show-panel! cs panel-atom p)
+        (dock/close-atom! cs panel-atom #(swap! foreign inc))
+        (t/is (true? @reentered) "the dispose re-entered close")
+        (t/is (= ["panel"] @disposed) "the panel is disposed once")
+        (t/is (= 1 @foreign) "the foreign child is disposed once")))))
+
+(deftest close-atom-skips-a-displaced-panel
+  (testing "a panel replaced by a newer mount was already disposed; a late
+            close clears the record without disposing it twice"
+    (let [cs (test-cs)
+          disposed (atom [])
+          p (panel disposed "old")
+          q (panel disposed "new")
+          panel-atom (atom nil)]
+      (tui-stubs #(dock/show-panel! cs panel-atom p))
+      (tui-stubs #(dock/mount! cs q))
+      (t/is (= ["old"] @disposed) "the displaced panel is disposed once")
+      (tui-stubs #(dock/close-atom! cs panel-atom))
+      (t/is (= ["old"] @disposed) "the late close does not dispose it again")
+      (t/is (nil? @panel-atom) "the record is cleared")
+      (t/is (= q (top cs)) "the newer panel stays mounted"))))
+
+(deftest close-atom-repaints-when-dispose-fn-throws
+  (testing "a throwing foreign dispose still leaves the repaint requested
+            and propagates the error"
+    (let [cs (test-cs)
+          disposed (atom [])
+          renders (atom 0)
+          p (panel disposed "panel")
+          panel-atom (atom nil)]
+      (with-redefs [tui/tui-set-focus (fn [_ _] nil)
+                    tui/tui-request-render (fn [_] (swap! renders inc))]
+        (dock/show-panel! cs panel-atom p)
+        (let [before @renders]
+          (t/is (thrown? Exception
+                         (dock/close-atom! cs panel-atom
+                                           (fn [] (throw (Exception. "dispose failed"))))))
+          (t/is (> @renders before) "the repaint is still requested"))))))
 
 ;; ─── dispose! (the owner's ordered close) ──────────────────────────────────
 

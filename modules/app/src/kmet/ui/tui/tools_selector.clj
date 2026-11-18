@@ -10,7 +10,6 @@
   (:require [kmet.app.session.runtime :as runtime]
             [kmet.hikap.core :as engine]
             [kmet.libs.theme :as th]
-            [kmet.tui.core :as tui]
             [kmet.tui.hikap :as h]
             [kmet.ui.tui.dock :as dock]))
 
@@ -44,9 +43,7 @@
         table (or (runtime/tool-table engine) {})
         enabled-atom (atom (or (runtime/enabled-tool-names engine) #{}))
         frame-atom (atom nil)
-        close! (fn []
-                 (dock/close-atom! cs frame-atom)
-                 (tui/tui-request-render (:tui cs)))
+        close! (fn [] (dock/close-atom! cs frame-atom))
         sl-ref (engine/ref)
         frame (h/compile-tree
                [:container {}
@@ -67,5 +64,4 @@
                                  :on-escape close!}]
                 [:dynamic-border {:color-fn #(th/fg (th/get-current-theme) :accent %)}]])
         settings @sl-ref]
-    (reset! frame-atom frame)
-    (dock/mount! cs frame {:focus-target settings})))
+    (dock/show-panel! cs frame-atom frame {:focus-target settings})))

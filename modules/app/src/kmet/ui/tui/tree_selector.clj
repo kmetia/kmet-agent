@@ -1118,9 +1118,7 @@
              term-height (or (when-let [term (:terminal (:tui cs))]
                                (terminal/rows @term))
                              40)
-             ;; late binding: the list callbacks close through this — the
-             ;; panel + list they must unwind are built after the callbacks
-             close-ref (atom nil)
+             panel-atom (atom nil)
              tl (make-tree-list (selector-tree sess)
                                 :leaf-id leaf-id
                                 :max-visible-lines (max 5 (quot term-height 2))
@@ -1131,24 +1129,8 @@
                                 :size-ref (tui/tui-terminal-size-ref (:tui cs))
                                 :initial-filter-mode (cfg/get-tree-filter-mode (runtime/config (:engine cs)))
                                 :initial-selected-id initial-selected-id
-                                :on-select (fn [entry]
-                                             (@close-ref)
-                                             (cond
-                                               (= (:id entry) leaf-id)
-                                               (chat-history/chat-history-add-message!
-                                                (:chat-history cs)
-                                                {:role :assistant
-                                                 :content "Already at this point."})
-
-                                               (runtime/turn-running? (:engine cs))
-                                               (chat-history/chat-history-add-message!
-                                                (:chat-history cs)
-                                                {:role :assistant
-                                                 :content "Wait for the current response to finish before navigating the session tree."})
-
-                                               :else
-                                               (on-navigate entry)))
-                                :on-cancel (fn [] (@close-ref))
+                                :on-select nil
+                                :on-cancel nil
                                 :on-copy (fn [text]
                                            (chat-history/chat-history-add-message!
                                             (:chat-history cs)
@@ -1161,6 +1143,30 @@
                                                 {:role :assistant
                                                  :content "No clipboard tool available on this system."}))))
                                 :on-label-edit nil)
+             close! (fn []
+                      (dock/close-atom! cs panel-atom
+                                        #(protocols/dispose tl)))
+             ;; Attach the closing callbacks after TL exists: they need the
+             ;; list they dispose, and make-tree-list takes them at construction.
+             _ (reset! (:on-select-atom tl)
+                       (fn [entry]
+                         (close!)
+                         (cond
+                           (= (:id entry) leaf-id)
+                           (chat-history/chat-history-add-message!
+                            (:chat-history cs)
+                            {:role :assistant
+                             :content "Already at this point."})
+
+                           (runtime/turn-running? (:engine cs))
+                           (chat-history/chat-history-add-message!
+                            (:chat-history cs)
+                            {:role :assistant
+                             :content "Wait for the current response to finish before navigating the session tree."})
+
+                           :else
+                           (on-navigate entry))))
+             _ (reset! (:on-cancel-atom tl) (fn [] (close!)))
              ;; The inline label editor (pi: TreeSelectorComponent's
              ;; LabelInput): the panel body swaps the tree list for an Input
              ;; instead of floating an overlay over the panel.
@@ -1220,13 +1226,4 @@
                      area
                      [:spacer {:lines 1}]
                      [:dynamic-border {:color-fn #(th/fg (th/get-current-theme) :accent %)}]])]
-         (reset! close-ref
-                 (fn []
-                   ;; restore the editor and unwind the panel: the compiled
-                   ;; frame's DSL chrome via dock/dispose! (leave then
-                   ;; dispose), the spliced tree-list explicitly (the tree
-                   ;; does not own it)
-                   (dock/close! cs panel)
-                   (protocols/dispose tl)))
-         (dock/mount! cs panel {:focus-target area})
-         (tui/tui-request-render (:tui cs)))))))
+         (dock/show-panel! cs panel-atom panel {:focus-target area}))))))

@@ -222,13 +222,6 @@
       (runtime/refresh-resources! (:engine cs) changed)))
   (grouped/screen-refresh! screen))
 
-(defn- close!
-  "Close the docked selector and request a repaint."
-  [cs frame-atom]
-  (dock/close-atom! cs frame-atom)
-  (when-let [tui (:tui cs)]
-    (tui/tui-request-render tui)))
-
 (defn- screen-spec
   "The grouped-selector spec for the `/config` screen over SERVICE."
   [cs service frame-atom]
@@ -240,7 +233,7 @@
      :rows (or (:rows size) 24)
      :size-ref (when tui (tui/tui-terminal-size-ref tui))
      :request-render! (when tui #(tui/tui-request-render tui true))
-     :on-close #(close! cs frame-atom)
+     :on-close #(dock/close-atom! cs frame-atom)
      :read (fn [scope] (items service scope (verb-catalog (:engine cs))))
      :groups groups
      :filter-match query-match?
@@ -283,5 +276,4 @@
                                     {:type ::no-resources-service})))
         frame-atom (atom nil)
         screen (grouped/make-screen (screen-spec cs service frame-atom))]
-    (reset! frame-atom screen)
-    (dock/mount! cs screen {:focus-target screen})))
+    (dock/show-panel! cs frame-atom screen {:focus-target screen})))

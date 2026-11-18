@@ -1037,9 +1037,10 @@ only extension `ui-custom` overlays float in practice.
 component argument it removes that component's entries wherever they sit
 (identity, not topmost) and returns true when one was removed. Hiding
 never disposes — the owner does (§5.1) — and the app's ordered close
-(`kmet.ui.tui.dock/close!`, or `close-atom!` for a panel held in an atom)
-leaves the stack before disposing on both surfaces, so the frame can never
-composite a disposed component.
+(`kmet.ui.tui.dock/close!`; for a panel held in an atom `close-atom!`,
+which also repaints and unwinds a spliced child's dispose) leaves the
+stack before disposing on both surfaces, so the frame can never composite
+a disposed component.
 
 Floating overlays get chrome **by default** so they can never read as text
 over text (pi leaves this to the component; kmet makes it the default):

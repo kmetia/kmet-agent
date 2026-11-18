@@ -313,12 +313,14 @@ Ordered by value/effort.
       `modules/app/test/kmet/app/loop/test_compact.clj`, also
       `test_custom.clj`, `test_models.clj`, `test_boundaries.clj`,
       `extensions/test_session.clj`. Removes raw interop from the test tree.
-- [ ] Unify the selector family's open/close/escape wiring into one shared
+- [x] Unify the selector family's open/close/escape wiring into one shared
       helper (extend the existing dock/state helper, do not copy):
       `settings_selector.clj` is 18.1% clone-flagged, `tree_selector.clj`,
       `fork_selector.clj`, `thinking_selector.clj` and `interactive/auth.clj`
       duplicate the same close/escape/restore blocks
-      (`bb slop --dups` lists the groups).
+      (`bb slop --dups` lists the groups). Done with
+      `dock/show-panel!` (focus/cover) + `dock/close-atom!`; every selector
+      open/close goes through that pair directly.
 - [ ] Split `kmet.app.eval` (3,214 LOC, 226 defns) along the directory seams
       that already exist (`eval/{tool,files,definitions,command,sources}`):
       move the result ring, the listing sync, seed! and the persistence fns.

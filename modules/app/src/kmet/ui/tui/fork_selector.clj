@@ -155,12 +155,12 @@
                             [:spacer {:lines 1}]
                             [:dynamic-border {:color-fn border-fn}]])))
                 ;; pi: close — restore the editor and unwind the panel: the
-                ;; frame's DSL chrome via dock/dispose! (leave then
-                ;; dispose), the spliced list explicitly (the tree does not
-                ;; own it)
+                ;; frame's DSL chrome via close-atom!, the spliced list
+                ;; explicitly (the tree does not own it)
+                panel-atom (atom nil)
                 close! (fn []
-                         (dock/close! cs panel)
-                         (protocols/dispose list))]
+                         (dock/close-atom! cs panel-atom
+                                           #(protocols/dispose list)))]
             (reset! on-select-atom
                     (fn [entry-id]
                       (close!)
@@ -169,4 +169,4 @@
                     (fn [] (close!)))
             ;; pi: showSelector — mount the panel, focus the list
             ;; (focus: selector.getMessageList())
-            (dock/mount! cs panel {:focus-target list})))))))
+            (dock/show-panel! cs panel-atom panel {:focus-target list})))))))

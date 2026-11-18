@@ -209,11 +209,28 @@
   nil)
 
 (defn close-atom!
-  "close! whatever COMP-ATOM holds — the recorded-panel shape, where the
-   never-mounted / already-closed case is a no-op. Returns nil."
-  [cs comp-atom]
-  (when-let [component @comp-atom]
-    (close! cs component)))
+  "Close the panel recorded on COMP-ATOM and request a repaint — the leave
+   side of the show-panel! pair. A panel no longer in the dock (displaced
+   by a newer mount or already closed) is not disposed again. DISPOSE-FN,
+   when given, runs after the dock close for a foreign child spliced into a
+   compiled frame (the frame does not own it); the repaint still happens if
+   it throws. The record is cleared first, so a reentrant or repeated close
+   is inert. Never-mounted and already-closed atoms are no-ops. Returns
+   nil."
+  ([cs comp-atom] (close-atom! cs comp-atom nil))
+  ([cs comp-atom dispose-fn]
+   (when-let [component @comp-atom]
+     (reset! comp-atom nil)
+     (try
+       (when (release! cs component)
+         (dispose! cs component))
+       (finally
+         (try
+           (when dispose-fn (dispose-fn))
+           (finally
+             (when-let [tui (:tui cs)]
+               (tui/tui-request-render tui)))))))
+   nil))
 
 (defn- enter!
   "The shared mount!/cover! path: take focus before publishing the stack
@@ -289,11 +306,15 @@
       (tui/tui-reset-screen-fill! (:tui cs)))))
 
 (defn show-panel!
-  "Record PANEL in COMP-ATOM and mount it in place of the editor. The
-   record lands before the mount — the stack write can run a watch or input
+  "Record PANEL in COMP-ATOM and open it in the editor dock. The record
+   lands before the mutation — the stack write can run a watch or input
    handler that closes the panel synchronously, and it must find the panel
-   then. The mount requests the frame."
-  [cs comp-atom panel]
-  (reset! comp-atom panel)
-  (mount! cs panel)
-  nil)
+   then. OPTS: :focus-target (defaults to PANEL, as in mount!) and
+   :cover? true to push over the current top instead of replacing it (the
+   auth method selector over its dialog). The open requests the frame;
+   close-atom! is the recorded-panel leave side."
+  ([cs comp-atom panel] (show-panel! cs comp-atom panel {}))
+  ([cs comp-atom panel {:keys [focus-target cover?]}]
+   (reset! comp-atom panel)
+   ((if cover? cover! mount!) cs panel {:focus-target focus-target})
+   nil))

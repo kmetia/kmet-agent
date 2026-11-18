@@ -267,8 +267,6 @@
    the footer provider count updates live."
   [cs]
   (let [sel-atom (atom nil)
-        ;; leave, then dispose: dispose unwinds the selector's root
-        ;; reaction and foreign input
         close! (fn [] (dock/close-atom! cs sel-atom))
         available (models/get-available)
         session-scoped (runtime/scoped-models (:engine cs))

@@ -77,6 +77,62 @@
   [value]
   (= value "true"))
 
+(defn- value-handler
+  "Build a row handler: PARSE the row value, then hand the result to APPLY!
+   and SAVE!."
+  ([parse f] (fn [value] (f (parse value))))
+  ([parse apply! save!]
+   (fn [value]
+     (let [v (parse value)]
+       (apply! v)
+       (save! v)))))
+
+(defn- bool-handler
+  "Build a row handler for pi's \"true\"/\"false\" rows: F receives the
+   boolean; the 3-arity parses once for APPLY! and SAVE!."
+  ([f] (value-handler enabled-value? f))
+  ([apply! save!] (value-handler enabled-value? apply! save!)))
+
+(defn- keyword-handler
+  "Build a row handler for a keyword-valued row: F receives the keyword; the
+   3-arity parses once for APPLY! and SAVE!."
+  ([f] (value-handler keyword f))
+  ([apply! save!] (value-handler keyword apply! save!)))
+
+(defn- swap-save-handler
+  "Build a handler that stores the parsed value at KEY in STATE-ATOM and
+   persists it under PATH."
+  ([state-atom key path save!]
+   (swap-save-handler state-atom key path save! identity))
+  ([state-atom key path save! parse]
+   (value-handler parse
+                  #(swap! state-atom assoc key %)
+                  #(save! path %))))
+
+(defn- editor-setting-handler
+  "Build a handler that applies VALUE with SETTER to every mounted editor
+   and persists it under PATH."
+  [cs setter path]
+  (value-handler identity
+                 (fn [value]
+                   (set-editor-setting! cs #(setter % value)))
+                 #(cfg/save-setting! path %)))
+
+(defn- timeout-handler
+  "Build a handler that maps a timeout label to its :ms choice and applies
+   and persists the result."
+  [choices apply! path]
+  (value-handler (fn [value]
+                   (:ms (some #(when (= value (:label %)) %) choices)))
+                 apply!
+                 #(cfg/save-setting! path %)))
+
+(defn- save-setting-and-apply!
+  "Persist PATH=VALUE, then re-apply the dependent runtime state with APPLY!."
+  [apply! path value]
+  (cfg/save-setting! path value)
+  (apply!))
+
 (defn- bool-row
   "A true/false toggle row (pi: values [\"true\" \"false\"]).
    DESCRIPTION is the muted line pi shows under the selected row."
@@ -109,184 +165,149 @@
    rendering, padding, and the hardware cursor."
   [{:keys [cs engine]}]
   {:show-images
-   (fn [value]
-     (let [on? (enabled-value? value)]
-       (swap! subs/image-settings-atom assoc :show-images on?)
-       (cfg/save-setting! [:terminal :show-images] on?)))
+   (swap-save-handler subs/image-settings-atom :show-images
+                      [:terminal :show-images] cfg/save-setting! enabled-value?)
 
    :image-width-cells
-   (fn [value]
-     (let [w (parse-long value)]
-       (swap! subs/image-settings-atom assoc :image-width-cells w)
-       (cfg/save-setting! [:terminal :image-width-cells] w)))
+   (swap-save-handler subs/image-settings-atom :image-width-cells
+                      [:terminal :image-width-cells] cfg/save-setting! parse-long)
 
    :block-images
-   (fn [value]
-     (let [blocked? (enabled-value? value)]
-       (runtime/set-block-images! engine blocked?)
-       (cfg/save-setting! [:images :block-images] blocked?)))
+   (bool-handler #(runtime/set-block-images! engine %)
+                 #(cfg/save-setting! [:images :block-images] %))
 
    :skill-commands
    ;; the autocomplete provider reads the setting live when it opens
    ;; (pi: setupAutocompleteProvider on change)
-   (fn [value]
-     (cfg/set-enable-skill-commands! (enabled-value? value)))
+   (bool-handler cfg/set-enable-skill-commands!)
 
    :clear-on-shrink
-   (fn [value]
-     (let [on? (enabled-value? value)]
-       (tui/tui-set-clear-on-shrink! (:tui cs) on?)
-       (cfg/set-clear-on-shrink! on?)))
+   (bool-handler #(tui/tui-set-clear-on-shrink! (:tui cs) %)
+                 cfg/set-clear-on-shrink!)
 
    :terminal-progress
-   (fn [value]
-     (cfg/set-show-terminal-progress! (enabled-value? value)))
+   (bool-handler cfg/set-show-terminal-progress!)
 
    :thinking-mode
-   (fn [value]
-     (let [mode (keyword value)]
-       (chat-history/chat-history-set-thinking-mode!
-        (:chat-history cs) mode)
-       (cfg/set-thinking-mode! mode)))
+   (keyword-handler
+    #(chat-history/chat-history-set-thinking-mode! (:chat-history cs) %)
+    cfg/set-thinking-mode!)
 
    :tool-display-mode
-   (fn [value]
-     (let [mode (keyword value)]
-       (chat-history/chat-history-set-tool-display-mode!
-        (:chat-history cs) mode)
-       (cfg/set-tool-display-mode! mode)
-       (when-let [hdr (:header-comp cs)]
-         (expandable-text/expandable-text-set-expanded!
-          hdr (= :expanded mode)))
-       (when-let [lr (:loaded-resources-comp cs)]
-         (loaded-resources/loaded-resources-set-expanded!
-          lr (= :expanded mode)))
-       (when (:tui cs)
-         (tui/tui-request-render (:tui cs) true))))
+   (keyword-handler
+    #(chat-history/chat-history-set-tool-display-mode! (:chat-history cs) %)
+    (fn [mode]
+      (cfg/save-setting! [:tool-display-mode] mode)
+      (when-let [hdr (:header-comp cs)]
+        (expandable-text/expandable-text-set-expanded!
+         hdr (= :expanded mode)))
+      (when-let [lr (:loaded-resources-comp cs)]
+        (loaded-resources/loaded-resources-set-expanded!
+         lr (= :expanded mode)))
+      (when (:tui cs)
+        (tui/tui-request-render (:tui cs) true))))
 
    :editor-padding
-   (fn [value]
-     (set-editor-setting! cs #(protocols/editor-set-padding-x! % value))
-     (cfg/save-setting! [:editor-padding-x] value))
+   (editor-setting-handler cs protocols/editor-set-padding-x!
+                           [:editor-padding-x])
 
    :output-padding
-   (fn [value]
-     (chat-history/chat-history-set-output-pad! (:chat-history cs) value)
-     (cfg/save-setting! [:output-pad] value))
+   (value-handler
+    identity
+    #(chat-history/chat-history-set-output-pad! (:chat-history cs) %)
+    #(cfg/save-setting! [:output-pad] %))
 
    :autocomplete-max-visible
-   (fn [value]
-     (set-editor-setting!
-      cs #(protocols/editor-set-autocomplete-max-visible! % value))
-     (cfg/save-setting! [:autocomplete-max-visible] value))
+   (editor-setting-handler cs protocols/editor-set-autocomplete-max-visible!
+                           [:autocomplete-max-visible])
 
    :show-hardware-cursor
-   (fn [value]
-     (let [on? (enabled-value? value)]
-       (tui/tui-set-show-hardware-cursor! (:tui cs) on?)
-       (cfg/set-show-hardware-cursor! on?)))
+   (bool-handler #(tui/tui-set-show-hardware-cursor! (:tui cs) %)
+                 cfg/set-show-hardware-cursor!)
 
    ;; read live at emit time — no runtime state needed
    :cache-miss-notices
-   (fn [value]
-     (cfg/save-setting! [:show-cache-miss-notices] (enabled-value? value)))})
+   (bool-handler #(cfg/save-setting! [:show-cache-miss-notices] %))})
 
 (defn- agent-row-handlers
   "Settings rows that change the agent runtime's live options."
   [{:keys [cs engine]}]
   {:auto-compact
-   (fn [value]
-     (let [on? (enabled-value? value)]
-       (runtime/set-auto-compact! engine on?)
-       (cfg/save-setting! [:auto-compact] on?)
-       (when-let [f (:footer-comp cs)]
-         (footer/footer-set-auto-compact! f on?))))
+   (bool-handler
+    #(runtime/set-auto-compact! engine %)
+    (fn [on?]
+      (cfg/save-setting! [:auto-compact] on?)
+      (when-let [f (:footer-comp cs)]
+        (footer/footer-set-auto-compact! f on?))))
 
    :compactor
-   (fn [value]
-     (let [compactor (keyword value)]
-       (runtime/set-compactor! engine compactor)
-       (cfg/save-setting! [:compactor] compactor)))
+   (keyword-handler #(runtime/set-compactor! engine %)
+                    #(cfg/save-setting! [:compactor] %))
 
    :steering-mode
-   (fn [value]
-     (let [mode (keyword value)]
-       (runtime/set-steering-mode! engine mode)
-       (cfg/save-setting! [:steering-mode] mode)))
+   (keyword-handler #(runtime/set-steering-mode! engine %)
+                    #(cfg/save-setting! [:steering-mode] %))
 
    :follow-up-mode
-   (fn [value]
-     (let [mode (keyword value)]
-       (runtime/set-follow-up-mode! engine mode)
-       (cfg/save-setting! [:follow-up-mode] mode)))
+   (keyword-handler #(runtime/set-follow-up-mode! engine %)
+                    #(cfg/save-setting! [:follow-up-mode] %))
 
    :tree-filter-mode
-   (fn [value]
-     (cfg/save-setting! [:tree-filter-mode] (keyword value)))
+   (keyword-handler #(cfg/save-setting! [:tree-filter-mode] %))
 
    :thinking
-   (fn [value]
-     (let [level (keyword value)]
-       (runtime/set-thinking-level! engine level)
-       (cfg/save-setting! [:thinking] level)
-       (model-selector/sync-footer-model! cs)))
+   (keyword-handler
+    #(runtime/set-thinking-level! engine %)
+    (fn [level]
+      (cfg/save-setting! [:thinking] level)
+      (model-selector/sync-footer-model! cs)))
 
    :thinking-loop-guard-enabled
-   (fn [value]
-     (runtime/set-run-options! engine {:thinking-loop-guard-enabled (boolean value)})
-     (cfg/save-setting! [:thinking-loop-guard-enabled] (boolean value)))})
+   (value-handler boolean
+                  #(runtime/set-run-options!
+                    engine {:thinking-loop-guard-enabled %})
+                  #(cfg/save-setting! [:thinking-loop-guard-enabled] %))})
 
 (defn- http-row-handlers
   "The HTTP transport rows: the timeouts and the transport mode."
   [{:keys [engine]}]
   {:http-idle-timeout
-   (fn [value]
-     (let [ms (:ms (some #(when (= value (:label %)) %)
-                         http-idle-timeout-choices))]
-       (runtime/set-http-idle-timeout-ms! engine ms)
-       (cfg/save-setting! [:http-idle-timeout-ms] ms)))
+   (timeout-handler http-idle-timeout-choices
+                    #(runtime/set-http-idle-timeout-ms! engine %)
+                    [:http-idle-timeout-ms])
 
    :http-total-timeout
-   (fn [value]
-     (let [ms (:ms (some #(when (= value (:label %)) %)
-                         http-total-timeout-choices))]
-       (runtime/set-http-total-timeout-ms! engine ms)
-       (cfg/save-setting! [:http-total-timeout-ms] ms)))
+   (timeout-handler http-total-timeout-choices
+                    #(runtime/set-http-total-timeout-ms! engine %)
+                    [:http-total-timeout-ms])
 
    :http-transport
-   (fn [value]
-     (let [mode (keyword value)]
-       (http/set-transport! mode)
-       (cfg/save-setting! [:http-transport] mode)))})
+   (keyword-handler http/set-transport!
+                    #(cfg/save-setting! [:http-transport] %))})
 
 (defn- retry-row-handlers
   "The retry and repeat-loop-guard rows: the panel's volatiles hold the
    edited block, its saver applies and persists it."
   [{:keys [retry-atom save-retry! lg-atom save-lg!]}]
   {:auto-retry
-   (fn [value]
-     (swap! retry-atom assoc :enabled (boolean value))
-     (save-retry! [:retry :enabled] (boolean value)))
+   (swap-save-handler retry-atom :enabled [:retry :enabled]
+                      save-retry! boolean)
 
    :max-retries
-   (fn [value]
-     (swap! retry-atom assoc :max-retries value)
-     (save-retry! [:retry :max-retries] value))
+   (swap-save-handler retry-atom :max-retries [:retry :max-retries]
+                      save-retry!)
 
    :base-delay-ms
-   (fn [value]
-     (swap! retry-atom assoc :base-delay-ms value)
-     (save-retry! [:retry :base-delay-ms] value))
+   (swap-save-handler retry-atom :base-delay-ms [:retry :base-delay-ms]
+                      save-retry!)
 
    :loop-guard-enabled
-   (fn [value]
-     (swap! lg-atom assoc :enabled (boolean value))
-     (save-lg! [:loop-guard :enabled] (boolean value)))
+   (swap-save-handler lg-atom :enabled [:loop-guard :enabled]
+                      save-lg! boolean)
 
    :loop-guard-threshold
-   (fn [value]
-     (swap! lg-atom assoc :threshold value)
-     (save-lg! [:loop-guard :threshold] value))})
+   (swap-save-handler lg-atom :threshold [:loop-guard :threshold]
+                      save-lg!)})
 
 (defn- theme-row-handlers
   "pi: onThemeChange — persist the setting (a name or the automatic
@@ -294,9 +315,10 @@
    sync."
   [{:keys [cs]}]
   {:theme
-   (fn [value]
-     (theme-ctrl/set-theme-setting! (:theme-controller cs) value)
-     (cfg/save-setting! [:theme] value))})
+   (value-handler
+    identity
+    #(theme-ctrl/set-theme-setting! (:theme-controller cs) %)
+    #(cfg/save-setting! [:theme] %))})
 
 (defn- row-handlers
   "The settings panel's per-row change handlers (pi: SettingsSelector's
@@ -342,9 +364,7 @@
                       (runtime/set-run-options! engine
                                                 {:loop-guard-enabled (:enabled lg)
                                                  :loop-guard-threshold (:threshold lg)})))
-        save-lg! (fn [path value]
-                   (cfg/save-setting! path value)
-                   (apply-lg!))
+        save-lg! (partial save-setting-and-apply! apply-lg!)
 
         ;; or-guard: an explicit nil in settings.edn must not reach quot
         idle-ms (or (cfg/get-setting-live config :http-idle-timeout-ms 120000) 120000)
@@ -357,9 +377,7 @@
                           {:max-retries (if (:enabled r) (:max-retries r) 0)
                            :base-delay-ms (:base-delay-ms r)
                            :max-agent-delay-ms (:max-agent-delay-ms r)})))
-        save-retry! (fn [path value]
-                      (cfg/save-setting! path value)
-                      (apply-retry!))
+        save-retry! (partial save-setting-and-apply! apply-retry!)
         ;; image rows (pi: after autocompact, only with terminal support)
         img-rows (image-rows)
         ;; the clear-on-shrink row needs the live tui (tests build a cs
@@ -522,13 +540,7 @@
                                 :lg-atom lg-atom
                                 :save-lg! save-lg!})
         on-change (fn [id value] (apply-row-change! handlers id value))
-        on-escape (fn []
-                    ;; restore the editor and unwind the panel: the tree owns
-                    ;; the chrome AND the settings list, so one dock/dispose!
-                    ;; (leave then dispose) releases both (the frame is
-                    ;; late-bound — built below)
-                    (dock/close-atom! cs frame-atom)
-                    (tui/tui-request-render (:tui cs)))
+        on-escape (fn [] (dock/close-atom! cs frame-atom))
         ;; Frame the list like pi's SettingsSelectorComponent (DynamicBorder +
         ;; SettingsList + DynamicBorder); the list is the focus target (pi:
         ;; showSelector's focus) since the frame container is inert chrome.
@@ -549,7 +561,6 @@
                                  :on-escape on-escape}]
                 [:dynamic-border {:color-fn #(th/fg (th/get-current-theme) :accent %)}]])
         sl @sl-ref]
-    (reset! frame-atom frame)
     ;; pi: showSelector — mount the framed panel, focus the list
     ;; (focus: the interactive child)
-    (dock/mount! cs frame {:focus-target sl})))
+    (dock/show-panel! cs frame-atom frame {:focus-target sl})))

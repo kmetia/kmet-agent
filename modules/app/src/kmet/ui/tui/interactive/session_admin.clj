@@ -437,12 +437,7 @@
         chat (:chat-history cs)
         ;; late binding: close! disposes the dialog it was built for
         dlg-atom (atom nil)
-        close! (fn []
-                 ;; leave, then dispose (the invariant dispose! checks):
-                 ;; a late close cannot touch a newer occupant, and the
-                 ;; frame's dispose cascades to its chrome + the list
-                 (dock/close-atom! cs dlg-atom)
-                 (tui/tui-request-render tui))
+        close! (fn [] (dock/close-atom! cs dlg-atom))
         cancelled! (fn []
                      (chat-history/chat-history-show-status! chat "Import cancelled")
                      (tui/tui-request-render tui))
@@ -718,15 +713,13 @@
         dlg (dialogs/make-input-dialog
              "Custom branch summarization instructions"
              (fn [instructions]
-               (state/close-selector! cs sel-atom)
-               (tui/tui-request-render (:tui cs))
+               (dock/close-atom! cs sel-atom)
                (navigate-tree! cs sess entry true (str/trim instructions) false nil))
              (fn []
-               (state/close-selector! cs sel-atom)
+               (dock/close-atom! cs sel-atom)
                (ask-branch-summary cs sess entry))
              (th/get-current-theme))]
-    (state/mount-selector! cs sel-atom dlg)
-    (tui/tui-request-render (:tui cs))))
+    (dock/show-panel! cs sel-atom dlg)))
 
 (defn ask-branch-summary
   "Ask whether to summarize the abandoned branch before branching (pi:
@@ -740,14 +733,13 @@
     (navigate-tree! cs sess entry false nil false nil)
     (let [sel-atom (atom nil)
           on-select (fn [choice]
-                      (state/close-selector! cs sel-atom)
-                      (tui/tui-request-render (:tui cs))
+                      (dock/close-atom! cs sel-atom)
                       (case choice
                         "No summary" (navigate-tree! cs sess entry false nil false nil)
                         "Summarize" (navigate-tree! cs sess entry true nil false nil)
                         "Summarize with custom prompt" (prompt-custom-summary! cs sess entry)))
           on-escape (fn []
-                      (state/close-selector! cs sel-atom)
+                      (dock/close-atom! cs sel-atom)
                       ;; re-open with the highlight on the entry being
                       ;; navigated to (pi showTreeSelector initialSelectedId)
                       (show-session-tree cs
@@ -760,8 +752,7 @@
                on-select
                on-escape
                (th/get-current-theme))]
-      (state/mount-selector! cs sel-atom dlg)
-      (tui/tui-request-render (:tui cs)))))
+      (dock/show-panel! cs sel-atom dlg))))
 
 ;; ─── Fork / clone (pi: /fork, /clone) ─────────────────────────────────────
 

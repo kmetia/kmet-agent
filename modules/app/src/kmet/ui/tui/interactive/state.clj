@@ -10,7 +10,6 @@
             [kmet.app.session.runtime :as runtime]
             [kmet.app.keybindings :as app-kb]
             [kmet.ui.tui.footer-data-provider :as fdp]
-            [kmet.ui.tui.dock :as dock]
             [kmet.libs.theme :as th]
             [kmet.tui.terminal :as term]
             [kmet.libs.host :as host]))
@@ -250,43 +249,3 @@
                    " - " (fs/file-name (runtime-cwd cs)))]
     (when-let [term (:terminal (:tui cs))]
       (term/set-title! @term title))))
-
-;; ─── Selector mounting (shared by the login and session-tree flows) ────────
-
-(defn- install-selector!
-  [dock-fn cs sel-atom sel]
-  (reset! sel-atom sel)
-  (dock-fn cs sel))
-
-(defn mount-selector!
-  "Replace CS's editor dock top with SEL, recording it on SEL-ATOM so
-   close-selector! can dispose it. dock/mount! disposes the selector it
-   displaces; cover-selector! leaves what is below alive instead.
-
-   SEL is recorded BEFORE the dock mutation: the dock publishes the stack
-   by swap!, and any watch — or an input handler the render/handle cycle
-   runs the moment the stack lands — can close the selector synchronously.
-   close-selector! must find it then to release + dispose it (kmetia/
-   kmet-agent#5's cover round trip is exactly this shape)."
-  [cs sel-atom sel]
-  (install-selector! dock/mount! cs sel-atom sel))
-
-(defn cover-selector!
-  "Push SEL on top of CS's editor dock — the auth method selector over its
-   login dialog (pi showAuthSelect); closing reveals the covered surface
-   again. Records SEL on SEL-ATOM so close-selector! can dispose it.
-
-   As in mount-selector!, SEL is recorded BEFORE the dock mutation: the
-   cover publishes the stack and a watch (or the input path) can close the
-   selector synchronously, and close-selector! must find it to release +
-   dispose — the login flow's finally only releases its dialog."
-  [cs sel-atom sel]
-  (install-selector! dock/cover! cs sel-atom sel))
-
-(defn close-selector!
-  "Leave the dock and dispose the selector recorded on SEL-ATOM: release!
-   removes it by identity (wherever it sits) and dispose! checks the
-   remove-before-dispose invariant before unwinding its root reaction and
-   foreign inputs."
-  [cs sel-atom]
-  (dock/close-atom! cs sel-atom))

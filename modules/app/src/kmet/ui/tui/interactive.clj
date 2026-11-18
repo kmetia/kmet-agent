@@ -156,9 +156,7 @@
   [cs make opts]
   (let [dlg-atom (atom nil)
         result (promise)
-        close! (fn []
-                 (dock/close-atom! cs dlg-atom)
-                 (tui/tui-request-render (:tui cs)))
+        close! (fn [] (dock/close-atom! cs dlg-atom))
         answer! (fn [value]
                   (close!)
                   (deliver result value))
