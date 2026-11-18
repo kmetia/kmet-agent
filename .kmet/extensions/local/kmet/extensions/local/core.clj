@@ -9,9 +9,9 @@
 
 (defn- eval-source
   [ctx]
-  (let [root (str (or (:project-dir ctx) (:cwd ctx) "."))]
+  (let [cwd (str (or (:cwd ctx) "."))]
     {:doc source-description
-     :ns {'ext.local {'gate (gate/gate-verb root)}}}))
+     :ns {'ext.local {'gate (gate/gate-verb cwd)}}}))
 
 (defn init
   "Register the local gate eval source."
