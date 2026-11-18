@@ -255,8 +255,9 @@
    blocks (pi: steer/followUp are text), so reject `:images` rather than drop
    them, and answer with the disposition the send produced — `:queued` while a
    run is live, `:started` when an idle agent began one (kmet2's delivery rule;
-   kmet1 queued and waited). The command's own `:type` is the behavior it
-   queues for."
+   kmet1 queued and waited). A compaction in flight is refused: kmet's
+   start-or-queue rule would otherwise start a run beside the compaction. The
+   command's own `:type` is the behavior it queues for."
   [state command]
   (let [type (:type command)
         resources (some-> (:handle state) runtime/resources)
@@ -268,6 +269,9 @@
 
       (nil? text)
       (failed type (str (name type) " requires a non-empty :message string"))
+
+      (runtime/compacting? (:handle state))
+      (failed type "Wait for compaction to finish before queueing a message")
 
       :else
       (ok type {:disposition (enqueue! state type text)}))))

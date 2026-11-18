@@ -143,6 +143,39 @@
       (finally
         (fs/delete-tree dir)))))
 
+(t/deftest test-compaction-flushes-after-its-listeners
+  ;; The stage flushes the compaction queue only once every completion event
+  ;; has been dispatched, so an extension's :compaction-end handler runs before
+  ;; any run the flush starts.
+  (let [dir (test-tmp/temp-dir! "test-compaction-flush-order-")
+        sess (session/create-session dir)
+        order (atom [])
+        agent (support/make-agent-state
+               :session sess
+               :keep-recent-tokens 30
+               :on-event (fn [e]
+                           (when (= :compaction-end (:type e))
+                             (swap! order conj :end)))
+               :flush-compaction-queue (fn [will-retry]
+                                         (swap! order conj [:flush will-retry])))]
+    (try
+      (doseq [c "01234"]
+        (session/append-entry
+         sess {:role :user
+               :content [{:type :text :text (apply str (repeat 100 c))}]}))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [opts]
+                      (future
+                        (when-let [ot (:on-text opts)] (ot "summary"))
+                        (when-let [od (:on-done opts)] (od :stop))
+                        :done))]
+        (t/is (true? (compact/compact-context! agent nil :manual))))
+      (t/is (= [:end [:flush false]] @order)
+            "the end event is dispatched before the flush callback runs")
+      (finally
+        (fs/delete-tree dir)))))
+
 (t/deftest test-loop-overflow-compaction-failure-settles-terminal
   ;; pi: when the overflow-recovery compaction cannot run (the summarization
   ;; failed or was aborted), _checkCompaction returns false and the prompt

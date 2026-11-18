@@ -40,6 +40,7 @@
   (dissoc (case (:type event)
             :message-update (dissoc event :message)
             :error (update-error-slot event :message)
+            :compaction-flush-failed (update-error-slot event :error)
             :auto-retry-end (update-error-slot event :final-error)
             event)
           :signal))

@@ -83,6 +83,7 @@
    :auto-retry-end ignore
    :compaction-start ignore
    :compaction-end ignore
+   :compaction-flush-failed ignore
    :context-replaced ignore
    :error on-error
    :loop-guard ignore
@@ -162,6 +163,10 @@
   (t/is (= "boom" (:message (wire/wire-event {:type :error
                                               :message (ex-info "boom" {})})))
         "an exception error payload becomes its message string")
+  (t/is (= "boom" (:error (wire/wire-event
+                           {:type :compaction-flush-failed
+                            :error (ex-info "boom" {})})))
+        "a failed compaction flush stringifies its error for the wire")
   (t/is (= "boom" (get (wire/wire-event
                         {:type :auto-retry-end :final-error (Exception. "boom")})
                        :final-error)))

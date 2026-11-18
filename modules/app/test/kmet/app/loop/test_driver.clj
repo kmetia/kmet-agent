@@ -12,6 +12,7 @@
             [kmet.app.session.backend :as backend]
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]
+            [kmet.app.session.submission :as submission]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.registry :as tools]
             [kmet.app.tools.shell :as shell]
@@ -858,6 +859,71 @@
             (finally
               ((:dispose! agents) handle))))))))
 
+(deftest a-durable-compaction-submission-is-recorded-and-flushed
+  ;; A `:record?` prompt accepted while compaction runs is durable from the
+  ;; moment it is queued: the enqueue fact lands at submit, the engine-owned
+  ;; compaction-end flush delivers it, and the delivery fact folds it.
+  (let [{:keys [root agents]} (mounted)]
+    (with-stubbed-llm
+      (fn [_]
+        (let [handle (create! {:root root :agents agents})]
+          (try
+            (reset! (:compacting? (runtime/agent-state handle)) true)
+            (let [{:keys [action]} ((:submit! agents) handle "durable queued"
+                                                      {:record? true :mode :rpc})]
+              (is (= :compaction-queued action))
+              (is (= ["durable queued"]
+                     (mapv :text (runtime/compaction-queued handle)))
+                  "the text is in the engine's compaction queue")
+              (is (= 1 (count (get-in ((:inbox agents) root handle) [:next-step])))
+                  "the enqueue fact is recorded at submit, not at flush"))
+            (reset! (:compacting? (runtime/agent-state handle)) false)
+            ((:flush-compaction-queue (:agent handle)) false)
+            ((:when-idle agents) handle)
+            (is (= ["durable queued"] (user-texts (:agent handle)))
+                "the engine's compaction-end flush started the prompt")
+            (is (empty? (get-in ((:inbox agents) root handle) [:next-step]))
+                "the delivery fact folded the queued entry")
+            (finally ((:dispose! agents) handle))))))))
+
+(deftest clearing-the-compaction-queue-drops-recorded-facts
+  ;; Restoring queued text to the editor (or moving the session) discards the
+  ;; queue; the drop fact is what keeps the durable inbox from holding it.
+  (let [{:keys [root agents]} (mounted)]
+    (with-stubbed-llm
+      (fn [_]
+        (let [handle (create! {:root root :agents agents})]
+          (try
+            (reset! (:compacting? (runtime/agent-state handle)) true)
+            ((:submit! agents) handle "discard me" {:record? true :mode :rpc})
+            (is (= 1 (count (get-in ((:inbox agents) root handle) [:next-step]))))
+            ((:clear-compaction-queue! agents) handle)
+            (is (= [] (runtime/compaction-queued handle)) "the queue is empty")
+            (is (empty? (get-in ((:inbox agents) root handle) [:next-step]))
+                "the drop folded the enqueue fact")
+            (finally ((:dispose! agents) handle))))))))
+
+(deftest a-failed-compaction-flush-reports-the-error
+  (let [{:keys [root agents]} (mounted)
+        failures (atom [])
+        off (events/on! root :compaction-flush-failed #(swap! failures conj %))]
+    (try
+      (with-stubbed-llm
+        (fn [_]
+          (let [handle (create! {:root root :agents agents})]
+            (try
+              ((:queue-compaction-message! agents) handle "keep me" :steer)
+              (with-redefs [submission/flush-compaction-queue!
+                            (fn [& _] {:error (ex-info "boom" {}) :count 1})]
+                ((:flush-compaction-queue (:agent handle)) false))
+              (is (= 1 (count @failures))
+                  "the failed flush is an event, not a silent drop")
+              (is (= "boom" (ex-message (:error (first @failures)))))
+              (is (= 1 (:count (first @failures)))
+                  "the event carries how many messages the queue keeps")
+              (finally ((:dispose! agents) handle))))))
+      (finally (off)))))
+
 (deftest a-handle-moves-its-own-session
   (let [{:keys [root agents]} (mounted)]
     (with-stubbed-llm
@@ -867,8 +933,14 @@
           (try
             ((:send! agents) a "hi" {:target :next-turn})
             ((:when-idle agents) a)
-            (let [a-session (runtime/session a)
+            (let [projections (srce/get root :projections)
+                  a-session (runtime/session a)
                   b-session (runtime/session b)
+                  _ (reset! (:compacting? (runtime/agent-state a)) true)
+                  _ ((:submit! agents) a "old queued" {:record? true :mode :rpc})
+                  _ (reset! (:compacting? (runtime/agent-state a)) false)
+                  _ (is (= 1 (count (get-in ((:inbox projections) a-session) [:next-step])))
+                        "the old session holds the queued fact")
                   result ((:new-session! agents) a)
                   started (:session result)]
               (is (fs/exists? (:file a-session)) "the run wrote its log")
@@ -878,6 +950,9 @@
                   "and the handle's live session moved")
               (is (identical? b-session (runtime/session b))
                   "a sibling handle keeps its own session")
+              (is (empty? (get-in ((:inbox projections) a-session) [:next-step]))
+                  "the move dropped the queue fact on the old session")
+              (is (= [] (runtime/compaction-queued a)) "and the engine's queue is empty")
               (is (not (identical? (runtime/session a) (extensions/get-session)))
                   "no process-wide extension install: a handle is not a front end")
               ;; resume! loads the session the handle started with

@@ -79,6 +79,9 @@
                     process default
    :on-event        the run's event sink, or nil (the loop reports; the front
                     end decides what to do with it)
+   :flush-compaction-queue a function of will-retry the compaction stage calls
+                    after the completion events, to deliver the messages
+                    queued during the compaction
    :model/:provider overrides; the config's when absent
    :cwd             the runtime cwd override; the session's, else the process's
    :agent-opts      extra/overriding make-agent-state options (the escape
@@ -87,7 +90,7 @@
    Returns {:state <AgentState> :cwd <runtime cwd>} — the cwd is the engine's
    to keep for the next prompt rebuild, and the state carries the rest."
   [config ctx {:keys [session model provider cwd system-prompt-fn on-event
-                      agent-opts]}]
+                      flush-compaction-queue agent-opts]}]
   ;; no default is the rule, so a missing builder is a named failure here
   ;; rather than an NPE where the prompt is built
   (when-not (fn? system-prompt-fn)
@@ -155,6 +158,7 @@
                                :thinking-loop-guard-enabled
                                (get config :thinking-loop-guard-enabled false)
                                :tool-hook extension-tool-hook
+                               :flush-compaction-queue flush-compaction-queue
                                :on-event on-event}
                               timeout-opts
                               agent-opts
@@ -290,6 +294,10 @@
                          (or approvals-memory
                              (permissions/memory (atom #{}))))
         engine-ref (atom nil)
+        ;; the compaction stage calls the state's flush after the completion
+        ;; events; it closes over functions defined below, so the reference is
+        ;; filled in once the handle exists
+        flush-ref (atom nil)
         {:keys [state] runtime-cwd :cwd}
         (agent-state config child
                      {:session session
@@ -298,6 +306,12 @@
                       ;; starts when the prompt settles (the handle's
                       ;; `:request-compaction!`, rpc's `compact`); the loop's
                       ;; own post-run check has run by then
+                      ;; the compaction stage calls this after it has emitted
+                      ;; :compaction-end (and the failure event), so listeners see
+                      ;; the completed compaction before the flush starts a run
+                      :flush-compaction-queue (fn [will-retry]
+                                                (when-let [flush! @flush-ref]
+                                                  (flush! will-retry)))
                       :on-event (fn [ev]
                                   (when (= :agent-settled (:type ev))
                                     (manual/start-pending-compactions! @engine-ref)))})
@@ -358,6 +372,20 @@
             (record-delivery! [run-opts]
               (when-let [entry (:entry run-opts)]
                 ((:deliver! projections) (:session @live) [(:id entry)])))
+            (flush-compaction-queue! [will-retry]
+              (let [result (submission/flush-compaction-queue!
+                            engine will-retry
+                            {:start! (fn [text] (start! text nil))
+                             :record-delivered!
+                             (fn [entries]
+                               (when (seq entries)
+                                 ((:deliver! projections) (:session @live)
+                                                          (mapv :id entries))))})]
+                (when-let [error (:error result)]
+                  (loop-state/emit @live {:type :compaction-flush-failed
+                                          :error error
+                                          :count (:count result)}))
+                result))
             (refused-images! [target]
               (ex-info (str "images can only start a prompt: a queued message ("
                             (name target) ") carries text")
@@ -481,6 +509,7 @@
                      (catch Throwable t
                        (settle! token)
                        (throw t)))))))]
+      (reset! flush-ref flush-compaction-queue!)
       (-> engine
           (assoc
            :id id
@@ -500,10 +529,7 @@
            ;; durable.
            :submit! (fn [text opts]
                       (submission/submit! engine text (assoc opts :deliver! deliver!)))
-           :flush-compaction-queue! (fn [will-retry]
-                                      (submission/flush-compaction-queue!
-                                       engine will-retry
-                                       {:start! (fn [text] (start! text nil))}))
+           :flush-compaction-queue! flush-compaction-queue!
            :send! (fn [msg opts]
                     (let [text (if (map? msg) (:text msg) msg)
                           target (:target opts :next-turn)
@@ -529,6 +555,7 @@
            :dispose! (fn []
                        (reset! disposed? true)
                        (lifecycle/cancel-run! engine)
+                       (manual/clear-compaction-queue! engine)
                        (when-let [dispose (:dispose! eval-service)]
                          (dispose))))
           ;; the rest is the front end's settings and compaction surface: each

@@ -389,11 +389,11 @@
     (testing "without :record? the submit appends nothing"
       ((:submit! agents) handle "typed locally" {})
       (is (= 0 (count ((:entries log) session))))
-      (is (nil? (:on-deliver! (:opts @submitted)))
+      (is (nil? (:enqueue! (:opts @submitted)))
           "the chain is given no callback to record with"))
     (testing "with :record? the enqueue fact is written where delivery happens"
       ((:submit! agents) handle "from the wire" {:record? true})
-      ((:on-deliver! (:opts @submitted)) "from the wire" :next-step)
+      ((:enqueue! (:opts @submitted)) "from the wire" :next-step)
       (let [entry (last ((:entries log) session))]
         (is (= {:op :enqueue :target :next-step :text "from the wire"}
                (:data entry))
@@ -403,7 +403,7 @@
       (reset! submitted nil)
       ((:submit! agents) handle "with an image"
                          {:record? true :run-opts {:images [{:type :image :data "eA=="}]}})
-      (is (nil? (:on-deliver! (:opts @submitted))))
+      (is (nil? (:enqueue! (:opts @submitted))))
       (is (= 1 (count ((:entries log) session)))
           "the log still holds only the text prompt's fact"))))
 

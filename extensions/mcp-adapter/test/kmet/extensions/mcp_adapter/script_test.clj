@@ -76,12 +76,13 @@
             (let [r (script-exec reg "(core/emit (:name (tools/describe \"read\")))")]
               (is (= "read" (:content r)))))
 
-          (testing "only emit is reported, not stdout or the return value"
+          (testing "form values and emit are reported; stdout is discarded"
             (let [r (script-exec reg "(println \"captured\") (+ 1 2) (core/emit :emitted)")]
               (is (not (:is-error r)))
-              (is (= ":emitted" (:content r)))
-              (is (not (str/includes? (:content r) "captured")))
-              (is (not (str/includes? (:content r) "3")))))
+              (is (= "3\n:emitted" (:content r))
+                  "the form value and the emit are interleaved in order")
+              (is (not (str/includes? (:content r) "captured"))
+                  "println stays discarded")))
 
           (testing "a script timeout is reported in seconds"
             (let [r (script-exec reg "(loop [] (recur))" {:timeout 1.5})]

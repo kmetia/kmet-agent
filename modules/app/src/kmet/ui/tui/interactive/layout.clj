@@ -444,8 +444,8 @@
 
 (defn- on-compaction
   "Compaction events: the terminal progress flag, the compaction indicator,
-   the rebuilt transcript after a context replacement, and the queued-message
-   flush a finished compaction unblocks."
+   the rebuilt transcript after a context replacement, and the engine flush's
+   failure report (the flush itself runs after these listeners)."
   [{:keys [chat-history tui cs-ref]} evt]
   (case (:type evt)
     :compaction-start
@@ -470,7 +470,10 @@
     ;; full turn cancel ("(cancelled)") — no double
     ;; report.
     (do (when-let [cs @cs-ref]
-          (turn/set-terminal-progress! cs false)
+          ;; the engine flushes after this event reaches its listeners, so a
+          ;; live run here is an overflow retry that already owns the flag
+          (when-not (runtime/turn-running? (:engine cs))
+            (turn/set-terminal-progress! cs false))
           (status/clear-status-indicator! cs :compaction)
           (when (:aborted evt)
             ;; pi: compaction_end aborted — manual: error line; auto:
@@ -488,10 +491,21 @@
               (chat-history/chat-history-add-message!
                chat-history {:role :error :content err})
               (chat-history/chat-history-show-status! chat-history err)))
-          ;; pi: compaction_end → flushCompactionQueue — messages queued
-          ;; during compaction are delivered now (queued into the retrying
-          ;; turn when will-retry, else the first prompts a fresh run).
-          (turn/flush-compaction-queue! cs (:will-retry evt)))
+          ;; the compaction stage flushes after this event reaches listeners;
+          ;; only refresh what the front end displays here.
+          (status/update-pending-messages! cs))
+        (tui/tui-request-render tui))
+
+    :compaction-flush-failed
+    ;; The engine restored the queue after a failed flush; the error is the
+    ;; front end's to show (pi's flushCompactionQueue restoreQueue shows it).
+    (do (when-let [cs @cs-ref]
+          (status/update-pending-messages! cs)
+          (chat-history/chat-history-show-status!
+           chat-history
+           (str "Failed to send queued message"
+                (when (> (:count evt 1) 1) "s")
+                ": " (or (ex-message (:error evt)) "unknown error"))))
         (tui/tui-request-render tui))
 
     :context-replaced
@@ -559,7 +573,8 @@
                          :summarization-retry-attempt-start :summarization-retry-finished)
       (on-retry deps evt)
 
-      (:compaction-start :compaction-end :context-replaced :session-compact
+      (:compaction-start :compaction-end :compaction-flush-failed
+                         :context-replaced :session-compact
                          :session-compact-failed :session-before-compact)
       (on-compaction deps evt)
 

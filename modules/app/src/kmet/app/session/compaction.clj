@@ -119,14 +119,37 @@
 
 (defn queue-compaction-message!
   "Queue TEXT typed during compaction for delivery after it
-   (pi: queueCompactionMessage); MODE is :steer or :follow-up."
-  [engine text mode]
-  (swap! (:compaction-queued engine) conj {:text text :mode mode})
-  nil)
+   (pi: queueCompactionMessage); MODE is :steer or :follow-up.
 
-(defn clear-compaction-queue!
-  "Drop all compaction-queued messages; returns the dropped messages."
+   OPTS carry what the eventual delivery needs:
+     :entry      the durable enqueue fact a `:record?` submission appended, so
+                 the flush can fold it; absent for a front end's best-effort
+                 queue entry
+     :hook-mode  the input-hook mode the flush applies (defaults to
+                 :interactive)"
+  ([engine text mode]
+   (queue-compaction-message! engine text mode nil))
+  ([engine text mode opts]
+   (swap! (:compaction-queued engine) conj
+          (merge opts {:text text :mode mode}))
+   nil))
+
+(defn take-compaction-queue!
+  "Remove and return the compaction queue without recording a drop: the caller
+   owns the messages (a flush delivers them, so its delivery fact folds the
+   enqueues)."
   [engine]
   (let [q (runtime/compaction-queued engine)]
     (reset! (:compaction-queued engine) [])
+    q))
+
+(defn clear-compaction-queue!
+  "Drop all compaction-queued messages; returns the dropped messages. Recorded
+   enqueue facts are folded with a drop, so the inbox does not keep a message
+   the user got back in the editor or the session move discarded."
+  [engine]
+  (let [q (take-compaction-queue! engine)
+        entries (vec (keep :entry q))]
+    (when-let [projections (and (seq entries) (runtime/projections engine))]
+      ((:drop! projections) (runtime/session engine) (mapv :id entries)))
     q))

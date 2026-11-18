@@ -409,6 +409,11 @@
                         summarization failure's cause), :will-retry
                         (true for a successful overflow compaction — the interrupted turn
                         retries; pi: compaction_end willRetry)."}
+    :compaction-flush-failed {:mode :emit :domain :loop
+                              :doc "Fired when delivering the messages queued during a
+                        compaction fails; the queue was restored for a later flush.
+                        Payload: :error (the throwable, stringified on the wire), :count
+                        (the number of messages restored)."}
     :agent-settled {:mode :emit :domain :loop
                     :doc "Fired when the prompt is fully settled — after the last attempt's
                         :agent-end, once per prompt, after any retries, overflow recovery,

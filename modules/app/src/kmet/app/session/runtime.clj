@@ -68,6 +68,13 @@
   [engine]
   (some-> (agent-ctx engine) (srce/get :resources)))
 
+(defn projections
+  "The `:projections` service value on the engine's ctx, or nil when the
+   composition did not mount the row. The session queue facts are appended
+   through it; a bare test engine without one keeps its queues in memory."
+  [engine]
+  (some-> (agent-ctx engine) (srce/get :projections)))
+
 (defn tool-table
   "The engine's tool table (name → Tool record) — the one its agent resolves
    through, from the ctx's `:tools` service. Front ends read tools here; the
@@ -258,7 +265,8 @@
 
 (defn compaction-queued
   "Messages queued while a compaction was running, in order
-   ({:text s :mode :steer|:follow-up} — pi: compactionQueuedMessages);
+   ({:text s :mode :steer|:follow-up, plus the delivery metadata a submission
+   carries: :entry and :hook-mode} — pi: compactionQueuedMessages);
    flushed by flush-compaction-queue! when the compaction ends."
   [engine]
   (or (some-> engine :compaction-queued deref) []))

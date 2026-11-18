@@ -609,4 +609,5 @@ pi events (`core/extensions/types.ts`) → kmet status (`kmet.app.events` `event
 | `project_trust` | — | out of scope (historical decision) |
 
 kmet-only additions: `:status`, `:error`, `:queue-update`, `:context-replaced`,
-`:auto-retry-start`, `:auto-retry-end`, `:compaction-start`, `:compaction-end`.
+`:auto-retry-start`, `:auto-retry-end`, `:compaction-start`, `:compaction-end`,
+`:compaction-flush-failed`.

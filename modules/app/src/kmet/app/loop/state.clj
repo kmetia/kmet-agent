@@ -49,6 +49,10 @@
                        signal        ;; atom for cancellation
                        thinking      ;; :off :low :medium :high :max
                        on-event      ;; callback for state updates
+                       flush-compaction-queue ;; fn of will-retry: deliver the messages queued during a compaction.
+                                             ;; The compaction stage calls it after :compaction-end and
+                                             ;; :session-compact-failed have been dispatched, so listeners
+                                             ;; see the end of the compaction before any run the flush starts.
                        base-url      ;; full endpoint URL override (default: derived from the Model record)
                        api-type      ;; wire api override (:openai-completions | :openai-responses | :anthropic-messages | :google-generative-ai)
                        steering      ;; atom of vector of queued steer messages
@@ -125,6 +129,8 @@
 (defn make-agent-state
   "Create a new agent state.
    opts: :model, :provider, :system, :session, :on-event,
+         :flush-compaction-queue (fn of will-retry, called by the compaction
+         stage after the event's listeners ran),
          :thinking, :base-url, :api-type, :steering-mode, :follow-up-mode,
          :max-retries (default 3), :base-delay-ms (default 2000),
      :max-agent-delay-ms (default 60000 — pi maxAgentDelayMs, the backoff cap),
@@ -159,7 +165,7 @@
          has no tool table; an agent's run passes its own child ctx, which
          carries its own :loop-guard and :retry-policy stages, and a process
          run passes the app root)"
-  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms branch-summary-reserve-tokens tool-hook system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts system-prompt-fn compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens compact-model-overrides http-idle-timeout-ms http-total-timeout-ms auto-compact compactor loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images enabled-tool-names ctx]
+  [& {:keys [model provider system session on-event flush-compaction-queue thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms branch-summary-reserve-tokens tool-hook system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts system-prompt-fn compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens compact-model-overrides http-idle-timeout-ms http-total-timeout-ms auto-compact compactor loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images enabled-tool-names ctx]
       :or {provider :opencode-go
            thinking :off
            steering-mode :all
@@ -194,6 +200,7 @@ Be precise and concise in your responses."}}]
                     :active-tools (atom nil)
                     :enabled-tool-names enabled-tool-names
                     :on-event on-event
+                    :flush-compaction-queue flush-compaction-queue
                     :base-url base-url
                     :api-type api-type
                     :steering (atom [])

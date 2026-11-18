@@ -126,7 +126,7 @@
                     state/update-footer! (fn [_] nil)
                     tui/tui-request-render (fn [_] nil)
                     chat-history/chat-history-start-streaming! (fn [_] nil)]
-        ((var turn/flush-compaction-queue!) cs false))
+        ((:flush-compaction-queue! (:engine cs)) false))
       (t/is (seq @started) "a run started for the first message")
       (t/is (= "first" (get-in @started [1 :message])) "run carries the first message")
       (t/is (empty? (runtime/compaction-queued (:engine cs))) "queue drained")
@@ -143,7 +143,7 @@
               [{:text "steer-msg" :mode :steer}
                {:text "follow-msg" :mode :follow-up}])
       (with-redefs [tui/tui-request-render (fn [_] nil)]
-        ((var turn/flush-compaction-queue!) cs true))
+        ((:flush-compaction-queue! (:engine cs)) true))
       (let [{:keys [steering follow-up]} (loop-state/queued-messages (runtime/agent-state (:engine cs)))]
         (t/is (= ["steer-msg"] steering) "steer-mode queued into steering")
         (t/is (= ["follow-msg"] follow-up) "follow-up-mode queued into follow-up"))
@@ -181,24 +181,25 @@
               "messages combined with current editor text")
         (t/is (empty? (runtime/compaction-queued (:engine cs))) "compaction queue cleared")))))
 
-(deftest test-compaction-end-handler-flushes
-  (testing "the :compaction-end event handler flushes the queue"
+(deftest test-compaction-flush-failure-is-shown
+  (testing "a failed flush leaves the queue in place and shows the error"
     (let [cs (support/compaction-cs)
+          shown (atom nil)
           h ((var layout/make-agent-event-handler)
              {:chat-history (:chat-history cs)
               :tui {:render-requested? (atom false)}
               :cs-ref (atom cs)
-              :pending-tool-comps (atom {})})
-          started (atom [])]
-      (reset! (:compaction-queued (:engine cs)) [{:text "after" :mode :steer}])
-      (with-redefs [agent/run-agent-turn (fn [a opts] (reset! started [a opts]) (future))
-                    status/activate-working-indicator! (fn [_] nil)
-                    status/start-anim-timer! (fn [_] nil)
-                    state/update-footer! (fn [_] nil)
-                    tui/tui-request-render (fn [_] nil)
-                    chat-history/chat-history-start-streaming! (fn [_] nil)]
-        (h {:type :compaction-end :reason :threshold :result true :will-retry false}))
-      (t/is (seq @started) "queued message prompted a run after compaction"))))
+              :pending-tool-comps (atom {})})]
+      (reset! (:compaction-queued (:engine cs)) [{:text "kept" :mode :steer}])
+      (with-redefs [chat-history/chat-history-show-status! (fn [_ m] (reset! shown m))
+                    status/update-pending-messages! (fn [_] nil)
+                    tui/tui-request-render (fn [_] nil)]
+        (h {:type :compaction-flush-failed
+            :error (ex-info "boom" {})
+            :count 2}))
+      (t/is (= "Failed to send queued messages: boom" @shown))
+      (t/is (= ["kept"] (mapv :text (runtime/compaction-queued (:engine cs))))
+            "the display handler leaves the queue to the engine"))))
 
 (deftest test-ui-compact-defers-while-a-turn-runs
   (testing "the extension UI's compact defers mid-turn — pi's compact() aborts

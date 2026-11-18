@@ -454,19 +454,19 @@
                      (dispatch handle :submit!
                                [text
                                 ;; `:record?` is the caller saying its queue is
-                                ;; durable (the wire's): the enqueue fact lands
-                                ;; where the message is delivered, and the
-                                ;; handle appends the delivery when it gets
-                                ;; there. An image prompt starts a run — the
+                                ;; durable (the wire's): `:enqueue!` records the
+                                ;; fact where the message is accepted — at
+                                ;; delivery normally, at submit when compaction
+                                ;; queues it. An image prompt starts a run — the
                                 ;; user entry is the log's own — so it records
                                 ;; nothing (see `send!`).
                                 (if (and (:record? opts)
                                          (not (seq (get-in opts [:run-opts :images]))))
-                                  (assoc opts
-                                         :on-deliver! (fn [text target]
-                                                        ((:enqueue! projections)
-                                                         (session! handle) text
-                                                         {:target target})))
+                                  (let [record! (fn [text target]
+                                                  ((:enqueue! projections)
+                                                   (session! handle) text
+                                                   {:target target}))]
+                                    (assoc opts :enqueue! record!))
                                   opts)])))
         :flush-compaction-queue! (fn [handle will-retry]
                                    (dispatch handle :flush-compaction-queue! [will-retry]))

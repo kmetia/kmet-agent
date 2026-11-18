@@ -8,10 +8,10 @@
    - **the inbox** — the messages queued for an agent's next turn
      (`:next-turn`, delivered after the run settles) or its next step
      (`:next-step`, injected between tool batches). The queue is *the log*, not
-     a second in-memory list: enqueueing appends a fact, delivering appends the
-     fact that consumes it, and the pending set is the fold of the two. That is
-     the durability change this row carries — a queued message survives a
-     restart because it was never only in memory.
+     a second in-memory list: enqueueing appends a fact, delivering (or
+     dropping) appends the fact that consumes it, and the pending set is the
+     fold of the three. That is the durability change this row carries — a
+     queued message survives a restart because it was never only in memory.
    - **the turn boundaries** — the entries at which a turn ended (an assistant
      entry with no tool calls) and its outcome, so a front end or a wire client
      can resume from the last one instead of scanning the log.
@@ -28,8 +28,8 @@
    moves it. `:extended` on the projection is how many entries this call folded,
    so the cache's behaviour is observable rather than assumed.
 
-   **The two entry conventions are in this namespace, both directions.** An
-   enqueue and a deliver are `:custom` entries with
+   **The queue-entry conventions are in this namespace, both directions.** An
+   enqueue, a deliver and a drop are `:custom` entries with
    `:custom-type :queued-message` and an `:op` in `:data`; `:custom` is
    metadata to the context projection (`kmet.app.session.context`) and never
    reaches the model, so the queue cannot leak into a prompt. The loop's own
@@ -89,6 +89,16 @@
     (throw (ex-info "a delivery names at least one queued message"
                     {:type :kmet.app/bad-delivery :ids ids})))
   (queue-entry :deliver {:ids (vec ids)}))
+
+(defn drop-entry
+  "The log entry that consumes the queued entries IDS without delivering them:
+   the queue was discarded (a session move or an editor restore), so the inbox
+   stops listing them while the delivery fact stays truthful."
+  [ids]
+  (when (empty? ids)
+    (throw (ex-info "a drop names at least one queued message"
+                    {:type :kmet.app/bad-drop :ids ids})))
+  (queue-entry :drop {:ids (vec ids)}))
 
 (defn- queued-op [entry]
   (when (and (= :custom (:role entry))
@@ -162,13 +172,13 @@
                  (if (contains? targets target)
                    (update-in state [:pending target] conj (inbox-item entry))
                    state))
-      ;; a delivery can only name entries earlier on the same branch (the
-      ;; append order and the parent chain guarantee it), so filtering the
-      ;; pending set is the whole of it — there is no delivered set to keep
-      :deliver (let [ids (set (get-in entry [:data :ids]))]
-                 (-> state
-                     (update-in [:pending :next-turn] remove-ids ids)
-                     (update-in [:pending :next-step] remove-ids ids)))
+      ;; a delivery or drop can only name entries earlier on the same branch
+      ;; (the append order and the parent chain guarantee it), so filtering
+      ;; the pending set is the whole of it — there is no delivered set to keep
+      (:deliver :drop) (let [ids (set (get-in entry [:data :ids]))]
+                         (-> state
+                             (update-in [:pending :next-turn] remove-ids ids)
+                             (update-in [:pending :next-step] remove-ids ids)))
       state)))
 
 (defn- materialize
@@ -218,10 +228,11 @@
 ;; ── the service ───────────────────────────────────────────────────────────
 
 (defn service
-  "A `:projections` value over LOG (the `:sessions` service): `:enqueue!` and
-   `:deliver!` append the queue facts, `:project` answers the derived state and
-   `:inbox` just its inbox. Each service value owns its own cache, so composing
-   twice yields two caches and a disposed composition takes its cache with it.
+  "A `:projections` value over LOG (the `:sessions` service): `:enqueue!`,
+   `:deliver!` and `:drop!` append the queue facts, `:project` answers the
+   derived state and `:inbox` just its inbox. Each service value owns its own
+   cache, so composing twice yields two caches and a disposed composition takes
+   its cache with it.
 
    `:forget!` drops a session's cache entry: a deleted session is one this
    service no longer sees, so nothing would ever fold it again, and the entry
@@ -233,6 +244,8 @@
                  (append! session (enqueue-entry msg opts)))
      :deliver! (fn [session ids]
                  (append! session (deliver-entry ids)))
+     :drop! (fn [session ids]
+              (append! session (drop-entry ids)))
      :project (fn [session] (project cache session))
      :inbox (fn [session] (:inbox (project cache session)))
      :forget! (fn [session]

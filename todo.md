@@ -335,10 +335,10 @@ Ordered by value/effort.
       ~1,500 LOC / ~150 defns) so god files cannot regrow — matches the repo's
       guard-test style; `eval.clj` and `tui/core.clj` would fail it today, so
       land it with the splits above or grandfather once.
-- [ ] Close design.md §3 (the compaction queue records no fact): decide to
-      record at submit or at the flush, and settle it either way — it is the
-      one named residual in the delivery path
-      (`modules/app/src/kmet/design.md` § Open at HEAD 3).
+- [x] Close design.md §3 (the compaction queue records no fact): record at
+      submit, fold at flush, drop on a clear; the engine now owns the flush.
+      (`modules/app/src/kmet/design.md` § Decisions that still constrain a
+      change).
 
 Not wins (deliberate, recorded): live recomposition stays open (design.md
 §1); the sandbox's cooperative abort and the process-isolation tier stay

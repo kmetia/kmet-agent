@@ -375,19 +375,6 @@
       (tui/tui-request-render (:tui cs)))
     action))
 
-(defn flush-compaction-queue!
-  "Deliver messages queued during compaction: the handle owns the queue and
-   the delivery (steer/follow-up/prompt per message mode); a failed delivery
-   is reported as a transcript status line like before."
-  [cs will-retry]
-  (when-let [{:keys [error count]} ((:flush-compaction-queue! (:engine cs)) will-retry)]
-    (chat-history/chat-history-show-status!
-     (:chat-history cs)
-     (str "Failed to send queued message"
-          (when (> count 1) "s")
-          ": " (ex-message error))))
-  (status/update-pending-messages! cs))
-
 (defn- queue-compaction-message!
   "Queue a message typed during compaction in the handle's queue and refresh
    the pending display (pi: queueCompactionMessage →
@@ -483,8 +470,8 @@
         ;; Queue input during compaction (pi: onSubmit → isCompacting →
         ;; queueCompactionMessage(text, "steer") — addToHistory + queue;
         ;; extension commands and builtins already dispatched above, so
-        ;; only plain messages land here). Flushed by the :compaction-end
-        ;; handler.
+        ;; only plain messages land here). The compaction stage flushes
+        ;; them once :compaction-end has been dispatched.
         (if compacting?
           (do (tui/editor-add-to-history! @(:current-editor-atom cs) trimmed)
               (queue-compaction-message! cs trimmed :steer))

@@ -35,6 +35,15 @@ These are load-bearing and not obvious from the code:
 - **`:per-agent true` is declined, not deferred.** A preset composes a
   per-agent world, `setup` shadows a service, `isolate` names a realm. A row
   flag nobody reads is exactly what the kernel refuses to ship for `:inject`.
+- **The compaction queue records at submit and folds at flush.** A durable
+  (`:record?`) submission accepted while a compaction runs appends its enqueue
+  fact immediately; the compaction stage flushes after `:compaction-end` is
+  dispatched and appends one delivery fact after the whole queue is delivered,
+  and a session or branch
+  move (or the editor restore) appends a drop. Because the engine owns the
+  flush, a headless mode flushes too; the fact left by a crash during
+  compaction is the
+  inbox's normal pending entry, not a phantom.
 - **The code tools are opt-in.** pi's `defaultToolNames` ships every built-in
   on. kmet marks `codemode` and `eval` `:default-enabled? false`: both stay
   mounted rows (`/config` and `/tools` enable them live), but an unset or
@@ -94,15 +103,7 @@ replace the gate's *shape* the way it replaces `:retry-policy` or `:loop-guard`.
 The policy and the approvals seam are services; the gate's placement is not
 yet.
 
-### 3. The compaction queue records no fact
-
-A prompt submitted while a compaction runs lands in the compaction queue, which
-records no fact. Recording at submit time would leave a queue fact the delivery
-never folds, so whether to record at the flush is still open. It is the one named
-residual in the delivery path; every other queue fact is recorded where the
-message is actually delivered (`:on-deliver!`, the handle's `:record?`).
-
-### 4. No per-connection command surface on the server
+### 3. No per-connection command surface on the server
 
 The server serves rpc's command language but has no per-connection command
 surface: it registers the builtins and refuses a slash command by name rather
@@ -111,7 +112,7 @@ per-connection `:ui` port, and the host's single process atom does not provide
 one. Neither is scheduled; the per-agent extension UI port is out for the same
 reason.
 
-### 5. The script sandbox's evaluator, and process isolation
+### 4. The script sandbox's evaluator, and process isolation
 
 `codemode` evaluates on SCI on every host (`docs/architecture.md` § Tools and
 the script sandbox). On Jolt, the native loader's `eval-in` (landed upstream)
@@ -134,7 +135,7 @@ need (boot cost per call) or a second consumer
 per-call context would also retain one loader per call until the upstream
 eviction fix lands.
 
-### 6. A limit that is part of the design
+### 5. A limit that is part of the design
 
 **A command handler outside a run reads the process front-end install.** A run
 publishes its surface into the handle's `:front-end` slot and the host reads

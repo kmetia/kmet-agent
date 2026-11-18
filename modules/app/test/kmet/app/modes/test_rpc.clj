@@ -550,6 +550,16 @@
             (is (false? (get-in (by-id records "cm") [:data :scoped?]))
                 "nothing scoped it, so the catalog drove the cycle")))))))
 
+(deftest queue-commands-refuse-during-compaction
+  ;; A steer/follow-up must not reach the start-or-queue rule while a
+  ;; compaction is in flight: an idle agent would start a run beside it.
+  (let [handle {:agent-state (atom {:compacting? (atom true)})}
+        response ((var rpc/command-queue)
+                  {:handle handle}
+                  {:type :steer :message "wait"})]
+    (is (false? (:success response)))
+    (is (str/includes? (:error response) "compaction"))))
+
 (deftest clear-queue-answers-the-texts-it-dropped
   ;; pi: clear_queue — the queues are the loop's, and a client that clears them
   ;; gets the texts back. The run stalls, so the follow-up queued behind it is

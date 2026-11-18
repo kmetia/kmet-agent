@@ -734,7 +734,7 @@ Event types: `:agent-start` `:agent-end` `:agent-settled` `:turn-start`
 `:thinking-level-select` `:context-replaced` `:auto-retry-start`
 `:auto-retry-end` `:summarization-retry-scheduled`
 `:summarization-retry-attempt-start` `:summarization-retry-finished`
-`:compaction-start` `:compaction-end`
+`:compaction-start` `:compaction-end` `:compaction-flush-failed`
 `:session-compact` `:session-compact-failed` `:context` `:context-with-system`
 `:before-provider-request` `:before-provider-headers`
 `:after-provider-response` `:resources-discover` `:resources-change`

@@ -100,11 +100,13 @@
                 `:run-opts` as given: the caller's own additions to the start
                 (rpc's images), which a queue cannot carry.
      :run-opts  the start's additions, forwarded to :deliver!.
-     :on-deliver! (fn [text target] → entry) — optional; called once, just
-                before a delivery happens, so a caller that records the
-                queue fact (the wire's durable inbox) records it only where
-                a message is actually delivered, and never for input a hook
-                consumed. The returned entry rides :run-opts to :deliver!.
+     :enqueue! (fn [text target] → entry) — optional; appends the durable
+                enqueue fact for the text. It is called where the message is
+                accepted: after the input hooks and expansion on a normal
+                submit, or when a compaction queues the raw text. A hook that
+                consumes the input records nothing. The returned entry rides
+                :run-opts or the compaction entry so the delivery/drop folds
+                it.
      :expand?   run the expansion chain (pi: the unknown-slash-command path).
      :mode      the front end kind the input hooks see; defaults :interactive.
 
@@ -112,18 +114,29 @@
    :text <hook-transformed text>} — the front end records :text in its editor
    history."
   ([engine text opts]
-   (let [{:keys [deliver! expand? mode run-opts on-deliver!]
+   (let [{:keys [deliver! expand? mode run-opts enqueue!]
           :or {mode :interactive}} opts]
      (when-not (fn? deliver!)
        (throw (ex-info "a submission needs a delivery fn: name one (:deliver!)"
                        {:type :kmet.app/no-delivery})))
      (if (runtime/compacting? engine)
-       (do (manual/queue-compaction-message! engine text :steer)
-           {:action :compaction-queued :text text})
+       (do
+         ;; images can only start a prompt; a queue entry carries text, so
+         ;; accepting one here would drop the images silently
+         (when (seq (:images run-opts))
+           (throw (ex-info (str "images can only start a prompt: a queued message ("
+                                "next-step) carries text")
+                           {:type :kmet.app/unsupported-images
+                            :target :next-step})))
+         (manual/queue-compaction-message!
+          engine text :steer
+          (cond-> {:hook-mode mode}
+            enqueue! (assoc :entry (enqueue! text :next-step))))
+         {:action :compaction-queued :text text})
        (if-let [hooked (apply-input-hooks engine text mode)]
          (let [out (if expand? (expand-text engine hooked) hooked)
-               run-opts (if on-deliver!
-                          (assoc run-opts :entry (on-deliver! out :next-step))
+               run-opts (if enqueue!
+                          (assoc run-opts :entry (enqueue! out :next-step))
                           run-opts)]
            {:action (deliver! out :next-step run-opts) :text hooked})
          {:action :handled})))))
@@ -131,20 +144,28 @@
 (defn- deliver-queued-message!
   "Deliver one compaction-queued M: extension commands execute immediately;
    otherwise the message queues into the run per its mode (steer/follow-up,
-   with skill/template expansion). With :allow-prompt? and no run active, the
-   idle path runs the input hooks and starts a prompt instead (pi:
-   flushCompactionQueue → session.prompt); the overflow-retry flush never
-   prompts — every message queues via steer/followUp."
-  [engine m {:keys [allow-prompt? start!] :as opts}]
+   with skill/template expansion). With
+   :allow-prompt? and no run active, the idle path runs the input hooks in the
+   entry's :hook-mode and starts a prompt instead (pi: flushCompactionQueue →
+   session.prompt); the overflow-retry flush never prompts — every message
+   queues via steer/followUp."
+  [engine m {:keys [allow-prompt? start!]}]
   (if (extension-command? (:text m))
     (execute-extension-command! (:text m))
-    (if (and allow-prompt? (not (runtime/turn-running? engine)))
-      (when-let [text (apply-input-hooks engine (:text m) (:mode opts :interactive))]
-        (start! (expand-text engine text)))
-      (let [text (expand-text engine (:text m))]
-        (if (= :follow-up (:mode m))
-          (loop-state/follow-up! (runtime/agent-state engine) text)
-          (loop-state/steer! (runtime/agent-state engine) text))))))
+    (let [queue! (fn [txt]
+                   (if (= :follow-up (:mode m))
+                     (loop-state/follow-up! (runtime/agent-state engine) txt)
+                     (loop-state/steer! (runtime/agent-state engine) txt)))]
+      (if (and allow-prompt? (not (runtime/turn-running? engine)))
+        (when-let [hooked (apply-input-hooks engine (:text m)
+                                             (:hook-mode m :interactive))]
+          (let [expanded (expand-text engine hooked)]
+            ;; a run may have claimed the turn between the check and the
+            ;; start; the loser queues behind it rather than dropping the
+            ;; message
+            (when-not (start! expanded)
+              (queue! expanded))))
+        (queue! (expand-text engine (:text m)))))))
 
 (defn flush-compaction-queue!
   "Deliver messages queued during compaction (pi: flushCompactionQueue — runs
@@ -153,13 +174,13 @@
    steer/follow-up per its mode. Otherwise the first non-extension message
    starts a prompt when idle, extension commands execute immediately, and the
    rest queue per mode. OPTS: :start! (fn [text]) for a prompt this starts,
-   :mode for the input hooks. A failure restoring the queue re-queues the
-   messages so they are not lost; returns nil, or {:error e} for the front end
-   to report."
+   :record-delivered! (fn [entries]) for the enqueue facts the flush folded
+   (called once after every message was delivered). A failure restoring the
+   queue re-queues the messages so they are not lost; returns nil, or
+   {:error e} for the caller to report."
   [engine will-retry opts]
-  (let [msgs (runtime/compaction-queued engine)]
+  (let [msgs (manual/take-compaction-queue! engine)]
     (when (seq msgs)
-      (manual/clear-compaction-queue! engine)
       (let [restore! (fn []
                        ;; pi: restoreQueue — the session queue is cleared too,
                        ;; so messages already delivered by the failed flush are
@@ -191,6 +212,8 @@
                     (deliver-queued-message! engine m opts)))
                 ;; all extension commands — execute them all
                 (doseq [m msgs] (execute-extension-command! (:text m))))))
+          (when-let [record-delivered! (:record-delivered! opts)]
+            (record-delivered! (vec (keep :entry msgs))))
           nil
           (catch Exception e
             (restore!)

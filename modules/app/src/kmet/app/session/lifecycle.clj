@@ -24,6 +24,7 @@
    [kmet.app.extensions.core :as extensions]
    [kmet.app.loop :as agent]
    [kmet.app.loop.state :as loop-state]
+   [kmet.app.session.compaction :as manual]
    [kmet.app.session.core :as session]
    [kmet.app.session.runtime :as runtime]
    [kmet.app.skills :as skills]
@@ -96,12 +97,15 @@
   ([engine sess] (switch-session! engine sess nil))
   ([engine sess {:keys [apply-settings? install!]}]
    (let [new-ag (assoc (runtime/agent-state engine) :session sess)]
+     ;; the queue belongs to the outgoing session: record its drop before the
+     ;; session slot moves, so the facts land on the branch that holds the
+     ;; enqueues
+     (manual/clear-compaction-queue! engine)
      ;; a thunk-held session follows the state record below; an atom-held one
      ;; must move before anything reads it
      (when-not (fn? (:session engine))
        (reset! (:session engine) sess))
      (when install! (install! sess))
-     (reset! (:compaction-queued engine) [])
      (reset! (:pending-compaction engine) [])
      (reset! (:agent-state engine) new-ag)
      ;; the incoming session's recorded loadout starts from its own live tools,
@@ -301,6 +305,9 @@
    emit :session-tree. Returns the branch-summary entry or nil; the front
    end keeps the tree UI and replays the new branch into its view."
   [engine {:keys [old-leaf target-leaf summary-result label from-extension?]}]
+  ;; the queue's enqueue facts are on the outgoing branch: fold them before the
+  ;; branch moves, or the drop would land on the branch the user switched to
+  (manual/clear-compaction-queue! engine)
   (let [sess (runtime/session engine)
         summary-entry (if summary-result
                         (session/branch-with-summary!
@@ -317,7 +324,6 @@
     ;; a different leaf is a resume of that branch's recorded loadout
     (reset! (:seen-tools (runtime/agent-state engine)) nil)
     (loop-state/restore-session-context! (runtime/agent-state engine))
-    (reset! (:compaction-queued engine) [])
     (reset! (:pending-compaction engine) [])
     (events/emit! (runtime/agent-ctx engine)
                   (cond-> {:type :session-tree

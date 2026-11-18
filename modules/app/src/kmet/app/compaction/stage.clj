@@ -390,34 +390,40 @@
      :entry entry}))
 
 (defn- finish-compaction!
-  "Emit compact-context! completion events and return its terminal value."
+  "Emit compact-context! completion events, then flush the messages queued
+   during the compaction, and return its terminal value. The flush runs after
+   every event was dispatched: a listener's :compaction-end work happens before
+   the run the flush may start."
   [agent reason result from-extension? aborted? failed? succeeded? error-message]
-  (reset! (:compaction-error agent) error-message)
-  (when succeeded?
-    (state/emit agent {:type :session-compact
-                       :compaction-entry (:entry result)
-                       :from-extension from-extension?
+  (let [will-retry (and succeeded? (= reason :overflow))]
+    (reset! (:compaction-error agent) error-message)
+    (when succeeded?
+      (state/emit agent {:type :session-compact
+                         :compaction-entry (:entry result)
+                         :from-extension from-extension?
+                         :reason reason
+                         :will-retry (= reason :overflow)}))
+    (state/emit agent {:type :compaction-end
                        :reason reason
-                       :will-retry (= reason :overflow)}))
-  (state/emit agent {:type :compaction-end
-                     :reason reason
-                     :from-extension from-extension?
-                     :aborted aborted?
-                     :result (when succeeded? (dissoc result :entry))
-                     :error-message error-message
-                     :will-retry (and succeeded? (= reason :overflow))})
-  (when (or failed? aborted?)
-    (state/emit agent {:type :session-compact-failed
-                       :reason reason
-                       :error-message error-message
                        :from-extension from-extension?
                        :aborted aborted?
-                       :will-retry false})
-    (reset! (:compaction-blocked agent) true))
-  (cond
-    (= result ::cancelled) false
-    succeeded? true
-    :else result))
+                       :result (when succeeded? (dissoc result :entry))
+                       :error-message error-message
+                       :will-retry will-retry})
+    (when (or failed? aborted?)
+      (state/emit agent {:type :session-compact-failed
+                         :reason reason
+                         :error-message error-message
+                         :from-extension from-extension?
+                         :aborted aborted?
+                         :will-retry false})
+      (reset! (:compaction-blocked agent) true))
+    (when-let [flush! (:flush-compaction-queue agent)]
+      (flush! will-retry))
+    (cond
+      (= result ::cancelled) false
+      succeeded? true
+      :else result)))
 
 (defn- selected-strategy
   "The compactor selected by SETTINGS' :compactor (:llm by default)."

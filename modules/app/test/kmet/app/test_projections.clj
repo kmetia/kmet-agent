@@ -59,6 +59,18 @@
       (is (= 4 (count ((:entries log) session)))
           "two enqueues and two deliveries are four log entries"))))
 
+(deftest a-drop-consumes-a-queue-fact-without-delivering-it
+  (let [{:keys [log projections session]} (fixture)
+        a ((:enqueue! projections) session "a" {:target :next-turn})
+        b ((:enqueue! projections) session "b" {:target :next-step})]
+    ((:drop! projections) session [(:id a)])
+    (is (= [(:id b)] (map :id (get-in ((:inbox projections) session) [:next-step])))
+        "only the dropped id leaves the inbox")
+    (is (= [] (get-in ((:inbox projections) session) [:next-turn]))
+        "and the dropped fact is not a delivery")
+    (is (= 3 (count ((:entries log) session)))
+        "two enqueues and one drop are three log entries")))
+
 (deftest the-inbox-follows-the-active-branch
   (let [{:keys [log projections session]} (fixture)
         f {:log log :session session}
@@ -211,7 +223,7 @@
     (is (= :active (:state @row)) "the log mounting activates the projection row")
     (let [service (srce/get ctx :projections)]
       (is (map? service))
-      (is (every? #(fn? (get service %)) [:enqueue! :deliver! :project :inbox])))
+      (is (every? #(fn? (get service %)) [:enqueue! :deliver! :drop! :project :inbox])))
     (srce/dispose! row)
     (is (nil? (srce/get ctx :projections)) "disposing the row withdraws the service")))
 
