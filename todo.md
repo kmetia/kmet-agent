@@ -328,9 +328,10 @@ Ordered by value/effort.
 - [ ] Table-drive `detect-openai-compat` (CC 47 in 89 SLOC,
       `modules/ai/src/kmet/ai/api/shared.clj:465`) and `parse-inline`
       (CC 54, `modules/libs/src/kmet/libs/markdown.clj:289`) — rule tables
-      instead of nested conditionals in two high-traffic files. Also merge the
-      two near-identical `cond` tables in `modules/libs/src/kmet/libs/ranking.clj`
-      (18.1% flagged).
+      instead of nested conditionals in two high-traffic files.
+- [x] Merge the two near-identical `cond` tables in
+      `modules/libs/src/kmet/libs/ranking.clj` (18.1% flagged) into one
+      `score-values!` helper; clone and rule flags are now 0.
 - [ ] Add a file-budget guard (e.g. `kmet.test-file-budget`: no src file over
       ~1,500 LOC / ~150 defns) so god files cannot regrow — matches the repo's
       guard-test style; `eval.clj` and `tui/core.clj` would fail it today, so

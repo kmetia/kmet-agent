@@ -34,38 +34,38 @@
        (remove str/blank?)
        vec))
 
-(defn- score-keywords
-  "Bonus for configured keyword phrases (pi: per-phrase bonus). Keywords are
-   discrete phrases, not document text: an exact phrase match dominates."
-  [score flags phrases normalized-query query-tokens]
-  (let [weight (field-weights :keywords)]
-    (doseq [phrase phrases]
+(defn- score-values!
+  "Add the phrase and token scores for VALUES at WEIGHT: a value matching the
+   whole query dominates, then each query token scores on the combined tokens
+   and substrings and joins :matched."
+  [score flags weight values normalized-query query-tokens]
+  (doseq [value values]
+    (cond
+      (= value normalized-query)
+      (do (swap! score + (* weight 14))
+          (swap! flags assoc :phrase true :exact true))
+      (str/starts-with? value normalized-query)
+      (do (swap! score + (* weight 9))
+          (swap! flags assoc :phrase true))
+      (str/includes? value normalized-query)
+      (do (swap! score + (* weight 6))
+          (swap! flags assoc :phrase true))))
+  (let [tokens (vec (mapcat tokenize values))]
+    (doseq [token query-tokens]
       (cond
-        (= phrase normalized-query)
-        (do (swap! score + (* weight 14))
-            (swap! flags assoc :phrase true :exact true))
-        (str/starts-with? phrase normalized-query)
-        (do (swap! score + (* weight 9))
-            (swap! flags assoc :phrase true))
-        (str/includes? phrase normalized-query)
-        (do (swap! score + (* weight 6))
-            (swap! flags assoc :phrase true))))
-    (let [keyword-tokens (vec (mapcat tokenize phrases))]
-      (doseq [token query-tokens]
-        (cond
-          (some #{token} keyword-tokens)
-          (do (swap! score + (* weight 4))
-              (swap! flags update :matched conj token))
-          (some (fn [keyword-token]
-                  (or (str/starts-with? keyword-token token)
-                      (and (>= (count keyword-token) min-stem-length)
-                           (str/starts-with? token keyword-token))))
-                keyword-tokens)
-          (do (swap! score + (* weight 2))
-              (swap! flags update :matched conj token))
-          (some #(str/includes? % token) phrases)
-          (do (swap! score + weight)
-              (swap! flags update :matched conj token)))))))
+        (some #{token} tokens)
+        (do (swap! score + (* weight 4))
+            (swap! flags update :matched conj token))
+        (some (fn [t]
+                (or (str/starts-with? t token)
+                    (and (>= (count t) min-stem-length)
+                         (str/starts-with? token t))))
+              tokens)
+        (do (swap! score + (* weight 2))
+            (swap! flags update :matched conj token))
+        (some #(str/includes? % token) values)
+        (do (swap! score + weight)
+            (swap! flags update :matched conj token))))))
 
 (defn- score
   "Weighted match score for DOCUMENT against QUERY, or nil when it does not
@@ -83,38 +83,14 @@
             flags (atom {:matched #{} :phrase false :exact false})
             score (atom 0)]
         (doseq [[field value] fields]
-          (let [weight (field-weights field)
-                field-tokens (tokenize value)]
-            (cond
-              (= value normalized-query)
-              (do (swap! score + (* weight 14))
-                  (swap! flags assoc :phrase true :exact true))
-              (str/starts-with? value normalized-query)
-              (do (swap! score + (* weight 9))
-                  (swap! flags assoc :phrase true))
-              (str/includes? value normalized-query)
-              (do (swap! score + (* weight 6))
-                  (swap! flags assoc :phrase true)))
-            (doseq [token query-tokens]
-              (cond
-                (some #{token} field-tokens)
-                (do (swap! score + (* weight 4))
-                    (swap! flags update :matched conj token))
-                (some (fn [field-token]
-                        (or (str/starts-with? field-token token)
-                            (and (>= (count field-token) min-stem-length)
-                                 (str/starts-with? token field-token))))
-                      field-tokens)
-                (do (swap! score + (* weight 2))
-                    (swap! flags update :matched conj token))
-                (str/includes? value token)
-                (do (swap! score + weight)
-                    (swap! flags update :matched conj token))))))
+          (score-values! score flags (field-weights field) [value]
+                         normalized-query query-tokens))
         (when (seq keywords)
-          (let [phrases (->> keywords
-                             (map #(str/trim (normalize-search-text %)))
-                             (remove str/blank?))]
-            (score-keywords score flags phrases normalized-query query-tokens)))
+          (score-values! score flags (field-weights :keywords)
+                         (->> keywords
+                              (map #(str/trim (normalize-search-text %)))
+                              (remove str/blank?))
+                         normalized-query query-tokens))
         (let [{:keys [matched phrase exact]} @flags
               coverage (/ (count matched) (count query-tokens))
               coverage-ok? (if (<= (count query-tokens) 2)
