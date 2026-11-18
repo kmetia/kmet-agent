@@ -28,7 +28,8 @@
      legacy-session-dir-for-cwd list-sessions list-sessions-info load-session
      make-bash-entry plan-session-import project-context project-entries
      record-bash-result! replace-entries! reset-leaf! resolve-session-path
-     sanitize-session-name session-cwd session-dir-for-cwd session-entry-text
+     sanitize-session-name serialize-session session-cwd session-dir-for-cwd
+     session-entry-text
      session-tool-state set-label! tool-sources-custom-type tool-state
      tool-state-changes tool-usage tool-usage-report
      usage-breakdown usage-totals})

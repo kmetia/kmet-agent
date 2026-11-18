@@ -106,10 +106,12 @@
         ;; jolt path loads (jolt-lang/time#19) — and escapes the quotes in
         ;; locale-data's ns docstring, which an unescaped pair turns into an
         ;; invalid reference clause (51de696, after the previous pin). This
-        ;; main revision also honors DateTimeFormatter/withZone and follows
+        ;; revision also honors DateTimeFormatter/withZone and follows
         ;; TimeZone/getDefault for ZoneId/systemDefault (PRs #25/#26).
+        ;; v0.0.18 (ec750bb) adds Locale display names, OffsetTime field
+        ;; access, offset/zoned date-time parsing and ZoneId/of fixes.
         io.github.jolt-lang/time {:git/url "https://github.com/jolt-lang/time.git"
-                                  :git/sha "753905d0e694600f593b9904e880a8a8379fb7b1"}
+                                  :git/sha "ec750bbe1f02050389258292bcc35b95b9eca756"}
         ;; jolt-lang/jolt-crypto — the OpenSSL-backed java.security /
         ;; javax.crypto shims (MessageDigest, Mac, Cipher, SecureRandom, EC +
         ;; RSA, RFC 0014; inert on bb/JVM) — arrives through http-client
