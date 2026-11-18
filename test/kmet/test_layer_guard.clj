@@ -64,6 +64,25 @@
            (filter #(str/starts-with? % "kmet."))
            distinct))))
 
+(defn- dynamic-requires
+  "Qualified symbols PATH resolves lazily through requiring-resolve or resolve,
+   read from both reader views. A var-held source is not included: this guard
+   judges literal edges only."
+  [path]
+  (->> sr/reader-views
+       (mapcat #(sr/read-forms path % "layer guard"))
+       (tree-seq coll? seq)
+       (keep (fn [form]
+               (when (and (seq? form)
+                          (symbol? (first form))
+                          (#{'requiring-resolve 'resolve} (first form)))
+                 (let [arg (second form)]
+                   (when (and (seq? arg)
+                              (= 'quote (first arg))
+                              (symbol? (second arg)))
+                     (str (second arg)))))))
+       set))
+
 (defn- path->ns
   "The namespace named by a source file path under a module's src tree."
   [path]
@@ -110,19 +129,41 @@
    TUI."
   ["kmet.app.modes."])
 
+(def ^:private front-end-prefixes
+  "The front-end layers a business namespace must not reach, directly or
+   lazily."
+  (into ["kmet.tui." "kmet.tk." "kmet.ui."] mode-prefixes))
+
+(defn- front-end-ns? [dependency]
+  (some #(str/starts-with? dependency %) front-end-prefixes))
+
 (deftest app-layer-does-not-require-front-ends
   (testing "no app business namespace reaches the TUI/Tk/UI layers or a mode"
     (doseq [f (app-source-files)
             :let [ns-name (path->ns f)
                   deps (required-kmet f)
-                  forbidden (filter (fn [d]
-                                      (or (str/starts-with? d "kmet.tui.")
-                                          (str/starts-with? d "kmet.tk.")
-                                          (str/starts-with? d "kmet.ui.")
-                                          (some #(str/starts-with? d %) mode-prefixes)))
+                  forbidden (filter front-end-ns?
                                     deps)]]
       (is (empty? forbidden)
           (str ns-name " requires forbidden namespaces: " (vec (sort forbidden)))))))
+
+(def ^:private dynamic-front-end-edges
+  "The one business file allowed to resolve a front end lazily, and the exact
+   symbols: the entry injects the plugins screen into the headless package CLI."
+  {"modules/app/src/kmet/app/core.clj"
+   #{"kmet.ui.tui.plugins-command/run-plugins!"}})
+
+(deftest app-business-does-not-dynamically-reach-front-ends
+  (testing "a lazy require is the same layer edge as a require"
+    (doseq [f (app-source-files)
+            :let [allowed (get dynamic-front-end-edges f #{})
+                  forbidden (remove allowed
+                                    (filter front-end-ns?
+                                            (dynamic-requires f)))]]
+      (is (empty? forbidden)
+          (str f " dynamically requires front-end namespaces: "
+               (vec (sort forbidden)))))))
+
 (def ^:private front-end-forbidden
   "Prefixes a front end must not require, and the files the rule binds — the
    scope is the point:

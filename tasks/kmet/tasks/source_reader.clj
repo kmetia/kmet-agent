@@ -10,7 +10,8 @@
    \"Conditional read not allowed\" on the JVM for any #? source, and the
    :read-cond default resolves to #{:clj} on every host, which would silently
    check the :default branch instead of bb's on babashka."
-  (:require [kmet.libs.host :as host]))
+  (:require [clojure.java.io :as io]
+            [kmet.libs.host :as host]))
 
 (defn reader-features
   "The reader-conditional features of the running host."
@@ -19,6 +20,11 @@
     (host/jolt?) #{:jolt :clj}
     (host/babashka?) #{:bb :clj}
     :else #{:clj}))
+
+(def reader-views
+  "Both reader views a source guard must inspect when a #? branch can define
+   behavior: babashka/JVM and Jolt."
+  [#{:bb :clj} #{:jolt :clj}])
 
 (defn read-ns-form
   "The ns form of the source file at PATH, or nil when the first form is not
@@ -42,3 +48,29 @@
                   (throw (ex-info (str context " cannot read " path)
                                   {:type ::unreadable :path (str path)} e))))]
      (when (and (seq? form) (= 'ns (first form))) form))))
+
+(defn read-forms
+  "Every top-level form of the source file at PATH, read with the running
+   host's reader branches. Throws (::unreadable, carrying PATH) when the file
+   cannot be read or parsed — the same contract as read-ns-form.
+
+   FEATURES and CONTEXT are read-ns-form's: pass a feature set to read another
+   host's view, and two disjoint sets when a guard must see every branch."
+  ([path] (read-forms path (reader-features) "source reader"))
+  ([path context] (read-forms path (reader-features) context))
+  ([path features context]
+   (try
+     (with-open [r (java.io.PushbackReader. (io/reader path))]
+       (let [eof (Object.)]
+         (binding [*read-eval* false]
+           (loop [forms []]
+             (let [form (read {:read-cond :allow
+                               :features features
+                               :eof eof}
+                              r)]
+               (if (identical? form eof)
+                 forms
+                 (recur (conj forms form))))))))
+     (catch Exception e
+       (throw (ex-info (str context " cannot read " path)
+                       {:type ::unreadable :path (str path)} e))))))

@@ -4,11 +4,11 @@
    The session record is passed in the tool context by the loop; the EDN
    entries are already in memory, so no file reader is needed."
   (:require [babashka.fs :as fs]
-            [clojure.edn :as edn]
             [clojure.string :as str]
             [kmet.app.session.core :as session]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.tool :as tool]
+            [kmet.app.tools.util :as tool-util]
             [kmet.libs.text :as text]
             [kmet.srce.core :as srce]))
 
@@ -49,32 +49,11 @@
   (let [s (str s)]
     (if (<= (count s) n) s (str (subs s 0 (max 1 (- n 3))) "..."))))
 
-(defn- args-map [tc]
-  (let [a (:arguments tc)]
-    (cond (map? a) a
-          (string? a) (try (edn/read-string a) (catch Exception _ {}))
-          :else {})))
-
-(defn- arg [tc k]
-  (let [a (args-map tc)]
-    (or (get a k) (get a (name k)))))
-
-(defn- tool-name [tc]
-  (str/lower-case (str (or (:name tc) ""))))
-
-(defn- tool-paths [tc]
-  (let [one (some #(let [v (arg tc %)] (when (string? v) v))
-                  [:path :file_path :filePath :file])
-        many (arg tc :paths)]
-    (cond one [one]
-          (sequential? many) (vec (filter #(and (string? %) (seq %)) many))
-          :else [])))
-
 (defn- tool-calls-text [entry recall?]
   (str/join "\n"
             (keep (fn [tc]
-                    (when-not (and recall? (= "session_recall" (tool-name tc)))
-                      (let [a (args-map tc)]
+                    (when-not (and recall? (= "session_recall" (tool-util/tool-name tc)))
+                      (let [a (tool-util/args-map tc)]
                         (str (:name tc) "("
                              (str/join ", " (map (fn [[k v]] (str (name k) "=" v)) a))
                              ")"))))
@@ -90,7 +69,7 @@
                :bash (str "$ " (:command entry) "\n" (:output entry))
                "")
         files (when (= :assistant (:role entry))
-                (vec (distinct (mapcat tool-paths (:tool-calls entry)))))]
+                (vec (distinct (mapcat tool-util/tool-paths (:tool-calls entry)))))]
     {:index index
      :role (case (:role entry) :tool "tool_result" (name (:role entry)))
      :text text
@@ -369,8 +348,8 @@
                     (let [raw (:raw e)
                           tcs (when (= :assistant (:role raw)) (:tool-calls raw))]
                       (reduce (fn [m tc]
-                                (let [args (args-map tc)
-                                      paths (tool-paths tc)
+                                (let [args (tool-util/args-map tc)
+                                      paths (tool-util/tool-paths tc)
                                       drillable (content-bearing? args)
                                       code-paths (and (string? (:code args))
                                                       (sequential? (:paths args)))]
@@ -458,10 +437,10 @@
                 (when (vector? (:content entry))
                   (filter #(= :toolCall (:type %)) (:content entry))))]
     (keep (fn [tc]
-            (let [args (args-map tc)]
+            (let [args (tool-util/args-map tc)]
               (when (content-bearing? args)
                 {:name (:name tc)
-                 :path (first (tool-paths tc))
+                 :path (first (tool-util/tool-paths tc))
                  :content (:content args)
                  :edits (:edits args)
                  :oldText (:oldText args)

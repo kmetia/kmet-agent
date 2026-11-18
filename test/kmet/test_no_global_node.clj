@@ -8,7 +8,8 @@
    a name that no longer exists is exactly what a reintroduction has to type.
    The ban is by name, in the modules that share the ctx tree — the kernel,
    the app and the front ends. Only the process-state edges are listed, not a
-   prefix."
+   prefix. A new process atom or dynamic var is not banned, but it must be
+   entered with a reason in kmet.test-process-state."
 
   (:require [babashka.fs :as fs]
             [clojure.string :as str]

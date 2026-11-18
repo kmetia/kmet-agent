@@ -1,7 +1,8 @@
 (ns kmet.app.tools.test-util
   "Unit tests for the tools' shared helpers — the quiet-title path forms, the
    one-line title bodies (the quiet transcript line and the approval question),
-   and the shell-command display normalization."
+   the shell-command display normalization, and the tool-call argument/path
+   grammar shared with compaction and session recall."
   (:require [clojure.test :as t]
             [kmet.app.tools.util :as util]
             [kmet.test-utils :refer [slash]]))
@@ -60,3 +61,21 @@
   (t/is (nil? (util/title-body (fn [_] (throw (ex-info "boom" {}))) {}))
         "a throwing title degrades to no body, never to an exception")
   (t/is (nil? (util/title-body (fn [_] :not-a-string) {}))))
+
+(t/deftest test-tool-call-arguments
+  (t/testing "arguments are a map, EDN text, or nothing"
+    (t/is (= {:path "x"} (util/args-map {:arguments {:path "x"}})))
+    (t/is (= {:path "x"} (util/args-map {:arguments "{:path \"x\"}"})))
+    (t/is (= {} (util/args-map {:arguments "not edn"})))
+    (t/is (= {} (util/args-map {}))))
+  (t/testing "an argument accepts keyword and string keys"
+    (t/is (= "x" (util/arg {:arguments {:path "x"}} :path)))
+    (t/is (= "x" (util/arg {:arguments {"path" "x"}} :path))))
+  (t/testing "the tool name is lower-cased and defaults empty"
+    (t/is (= "read" (util/tool-name {:name "Read"})))
+    (t/is (= "" (util/tool-name {}))))
+  (t/testing "paths prefer the single path arg, then the :paths list"
+    (t/is (= ["a"] (util/tool-paths {:arguments {:path "a"}})))
+    (t/is (= ["a" "b"] (util/tool-paths {:arguments {:paths ["a" "" nil "b"]}})))
+    (t/is (= ["a"] (util/tool-paths {:arguments {:file_path "a"}})))
+    (t/is (= [] (util/tool-paths {})))))

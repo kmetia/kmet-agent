@@ -13,13 +13,13 @@
    LLM compactor's Goal/Progress checkpoint) is preserved verbatim in
    [Previous Summary] rather than discarded."
   (:require [babashka.fs :as fs]
-            [clojure.edn :as edn]
             [clojure.string :as str]
             [kmet.app.compaction.core :as core]
             [kmet.app.config :as cfg]
             [kmet.app.debug :as debug]
             [kmet.app.session.context :as context]
             [kmet.app.session.core :as session]
+            [kmet.app.tools.util :as tool-util]
             [kmet.libs.json :as json]
             [kmet.srce.core :as srce]))
 
@@ -327,31 +327,6 @@
 
 ;; ─── Tool calls ──────────────────────────────────────────────────────────
 
-(defn- args-map [tc]
-  (let [a (:arguments tc)]
-    (cond
-      (map? a) a
-      (string? a) (try (edn/read-string a) (catch Exception _ {}))
-      :else {})))
-
-(defn- arg [tc k]
-  (let [a (args-map tc)]
-    (or (get a k) (get a (name k)))))
-
-(defn- tool-name [tc]
-  (str/lower-case (str (or (:name tc) ""))))
-
-(defn- tool-paths
-  "Every file a tool call names: its single path arg, else a `paths` list."
-  [tc]
-  (let [one (some #(let [v (arg tc %)] (when (string? v) v))
-                  [:path :file_path :filePath :file])
-        many (arg tc :paths)]
-    (cond
-      one [one]
-      (sequential? many) (vec (filter #(and (string? %) (seq %)) many))
-      :else [])))
-
 (def ^:private read-tools #{"read" "read_file" "view"})
 (def ^:private edit-tools
   #{"edit" "write" "edit_file" "write_file" "multiedit" "quick_edit"
@@ -365,16 +340,16 @@
   "One tool-call line, marked when its result failed (pi-vcc: toolOneLiner)."
   [tc result]
   (let [name (or (:name tc) "tool")
-        lname (tool-name tc)
-        paths (tool-paths tc)
+        lname (tool-util/tool-name tc)
+        paths (tool-util/tool-paths tc)
         field (tool-summary-fields lname)
-        field-value (when field (arg tc (keyword field)))
+        field-value (when field (tool-util/arg tc (keyword field)))
         v (cond
             (string? field-value) field-value
             (seq paths) (first paths)
-            (= "bash" lname) (compress-bash (or (arg tc :command) ""))
-            :else (or (arg tc :query) (arg tc :command)
-                      (arg tc :pattern)))
+            (= "bash" lname) (compress-bash (or (tool-util/arg tc :command) ""))
+            :else (or (tool-util/arg tc :query) (tool-util/arg tc :command)
+                      (tool-util/arg tc :pattern)))
         more (when (> (count paths) 1) (str " +" (dec (count paths))))
         line (str "* " name
                   (when (seq (str v))
@@ -532,8 +507,8 @@
             commands (for [b blocks
                            :when (= :assistant (:role b))
                            tc (:tool-calls b)
-                           :when (= "bash" (tool-name tc))
-                           :let [cmd (arg tc :command)]
+                           :when (= "bash" (tool-util/tool-name tc))
+                           :let [cmd (tool-util/arg tc :command)]
                            :when (and (string? cmd) (seq cmd))]
                        cmd)
             state (atom (zipmap names (repeat [])))]
@@ -611,7 +586,7 @@
                 :assistant
                 (let [t (sanitize (content-summary (:content m)))
                       tcs (->> (:tool-calls m)
-                               (remove #(contains? noise-tool-names (tool-name %)))
+                               (remove #(contains? noise-tool-names (tool-util/tool-name %)))
                                vec)]
                   (if (or (seq t) (seq tcs))
                     (conj acc {:role :assistant :text t :tool-calls tcs
@@ -697,9 +672,9 @@
         (reduce (fn [acc b]
                   (if (= :assistant (:role b))
                     (reduce (fn [acc tc]
-                              (let [name (tool-name tc)
+                              (let [name (tool-util/tool-name tc)
                                     result (get results (:id tc))
-                                    paths (tool-paths tc)]
+                                    paths (tool-util/tool-paths tc)]
                                 (if (and (seq paths)
                                          (some? result)
                                          (not (:is-error result)))
@@ -880,8 +855,8 @@
               :assistant
               (into acc
                     (mapcat (fn [tc]
-                              (when (= "bash" (tool-name tc))
-                                (let [cmd (or (arg tc :command) "")
+                              (when (= "bash" (tool-util/tool-name tc))
+                                (let [cmd (or (tool-util/arg tc :command) "")
                                       result (get results (:id tc))]
                                   (when (and (git-commit? cmd)
                                              (some? result)
@@ -1417,11 +1392,11 @@
 (defn- block-commands [b]
   (if (= :bash (:role b))
     (when-let [cmd (:command b)] [cmd])
-    (keep #(arg % :command) (:tool-calls b))))
+    (keep #(tool-util/arg % :command) (:tool-calls b))))
 
 (defn- block-paths [b]
   (cond
-    (= :assistant (:role b)) (mapcat tool-paths (:tool-calls b))
+    (= :assistant (:role b)) (mapcat tool-util/tool-paths (:tool-calls b))
     (= :bash (:role b))
     (when-let [m (re-find #"(?:^|\s)([\w./-]+\.[\w-]+)(?:\s|$)"
                           (or (:command b) ""))]
@@ -1434,8 +1409,8 @@
          (every? #(re-find trivial-bash-line-pattern %) lines))))
 
 (defn- tool-call-score [tc]
-  (let [name (tool-name tc)
-        cmd (arg tc :command)]
+  (let [name (tool-util/tool-name tc)
+        cmd (tool-util/arg tc :command)]
     (cond
       (re-find edit-tool-pattern name) 34
       (and cmd (re-find test-command-pattern cmd)) 26
@@ -1494,8 +1469,8 @@
 
       (= :assistant (:role b))
       (when-let [tc (first (:tool-calls b))]
-        (when-let [path (first (tool-paths tc))]
-          (str "tool:" (tool-name tc) ":" path)))
+        (when-let [path (first (tool-util/tool-paths tc))]
+          (str "tool:" (tool-util/tool-name tc) ":" path)))
 
       :else nil)))
 
@@ -1509,7 +1484,7 @@
         tcs (:tool-calls b)
         commands (block-commands b)]
     (or (>= (:score r) 34)
-        (some #(re-find edit-tool-pattern (tool-name %)) tcs)
+        (some #(re-find edit-tool-pattern (tool-util/tool-name %)) tcs)
         (some #(re-find test-command-pattern %) commands)
         (and (= :bash (:role b))
              (some? (:exit-code b))
@@ -1749,8 +1724,8 @@
           (reduce (fn [ops e]
                     (if (= :assistant (:role e))
                       (reduce (fn [ops tc]
-                                (let [name (tool-name tc)
-                                      paths (tool-paths tc)]
+                                (let [name (tool-util/tool-name tc)
+                                      paths (tool-util/tool-paths tc)]
                                   (if (seq paths)
                                     (cond
                                       (contains? read-tools name)

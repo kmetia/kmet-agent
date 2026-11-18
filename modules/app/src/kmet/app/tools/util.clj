@@ -2,6 +2,7 @@
   "Shared utilities for tool implementations — safe file traversal,
    quiet-title path shortening, the one-line call names a title supplies, etc."
   (:require [babashka.fs :as fs]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [kmet.libs.path :as path]))
 
@@ -27,6 +28,43 @@
   (and (string? entry)
        (or (str/starts-with? entry "+")
            (str/starts-with? entry "-"))))
+
+;; ─── Tool-call arguments ────────────────────────────────────────────────
+
+(defn args-map
+  "A tool call's :arguments as a map: a map as-is, EDN text when it parses to
+   a map, else {}."
+  [tool-call]
+  (let [a (:arguments tool-call)]
+    (cond
+      (map? a) a
+      (string? a) (try (let [v (edn/read-string a)]
+                         (if (map? v) v {}))
+                       (catch Exception _ {}))
+      :else {})))
+
+(defn arg
+  "TOOL-CALL's argument under K, accepting the string spelling too."
+  [tool-call k]
+  (let [a (args-map tool-call)]
+    (or (get a k) (get a (name k)))))
+
+(defn tool-name
+  "TOOL-CALL's :name, lower-cased; empty when absent."
+  [tool-call]
+  (str/lower-case (str (or (:name tool-call) ""))))
+
+(defn tool-paths
+  "Every file a tool call names: its single path arg, else a :paths list."
+  [tool-call]
+  (let [one (some #(let [v (arg tool-call %)]
+                     (when (string? v) v))
+                  [:path :file_path :filePath :file])
+        many (arg tool-call :paths)]
+    (cond
+      one [one]
+      (sequential? many) (vec (filter #(and (string? %) (seq %)) many))
+      :else [])))
 
 ;; ─── Runtime working directory ────────────────────────────────────────────
 

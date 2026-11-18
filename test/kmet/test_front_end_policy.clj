@@ -17,9 +17,9 @@
    the front ends, so this runs in the full suite (`bb test`), not in the
    changed-file loop of a front-end edit."
   (:require [babashka.fs :as fs]
-            [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :as t]))
+            [clojure.test :as t]
+            [kmet.tasks.source-reader :as sr]))
 
 (def ^:private handle-front-ends
   "The policy's two halves where a handle front end names them: the layout
@@ -28,18 +28,10 @@
   {"modules/app/src/kmet/ui/tui/interactive/layout.clj" 'packages/load-resources!
    "modules/app/src/kmet/app/loop/driver.clj" 'packages/expand-input})
 
-(defn- read-forms
-  "Every top-level form of PATH, read once."
-  [path]
-  (with-open [r (java.io.PushbackReader. (io/reader path))]
-    (loop [forms []]
-      (let [form (read {:eof ::eof :read-cond :allow} r)]
-        (if (= ::eof form) forms (recur (conj forms form)))))))
-
 (defn- ns-requires
   "The namespaces PATH's ns form requires."
   [path]
-  (->> (tree-seq coll? seq (first (read-forms path)))
+  (->> (tree-seq coll? seq (first (sr/read-forms path "front-end policy guard")))
        (filter vector?)
        (map first)
        (filter symbol?)
@@ -76,5 +68,5 @@
   (doseq [[path value] handle-front-ends]
     (t/testing path
       (t/is (fs/exists? path) "the front end is where the table says")
-      (t/is (some #(= value %) (tree-seq coll? seq (read-forms path)))
+      (t/is (some #(= value %) (tree-seq coll? seq (sr/read-forms path "front-end policy guard")))
             (str "it names " value)))))

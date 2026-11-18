@@ -443,6 +443,19 @@
         "the package subcommands the entry dispatches are listed too")
     (is (str/includes? out "plugins            Compose built-in tool and extension rows (TUI)"))))
 
+(deftest help-lists-every-parsed-flag
+  ;; The parser's flag table is the source of truth: every flag it accepts must
+  ;; appear in --help. `retired-flags` are rejected by name, not offered.
+  (let [{:keys [code out]} (support/run-main ["--help"])
+        retired (set @#'core/retired-flags)
+        flags (->> (keys @#'core/flag-rows)
+                   (remove retired)
+                   sort)
+        missing (remove #(str/includes? out %) flags)]
+    (is (zero? code))
+    (is (empty? missing)
+        (str "parsed flags missing from --help: " (vec missing)))))
+
 (deftest package-subcommands-run-the-shared-cli
   ;; `plugins` is a command, not a profile: the entry hands the args to the
   ;; package CLI kmet1 uses, and injects the plugin screen it cannot require.
