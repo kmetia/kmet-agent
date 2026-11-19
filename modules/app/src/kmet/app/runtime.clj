@@ -6,7 +6,9 @@
    rather than sequenced. It is the only place kmet2 mounts a plugin, and it
    fails loudly — a fiber that is not `:active` once the mounts settle is a
    composition bug (a name nothing provides, an `apply` that threw), not a run
-   to start.
+   to start. The row language, cards and the mount primitive live in
+   `kmet.app.compose`; this namespace supplies the app's source resolver and its
+   boot/teardown policy.
 
    The kernel is synchronous and single-threaded by rule (`srce.md` §8): plugin
    code runs on the thread that owns the root, and the one concurrency
@@ -22,6 +24,7 @@
    ctx reaches it by `srce/attr` and nothing holds a pointer back to the
    root."
   (:require [clojure.string :as str]
+            [kmet.app.compose :as compose]
             [kmet.app.events :as events]
             [kmet.app.extensions.rows :as extension-rows]
             [kmet.libs.concurrent :as concurrent]
@@ -107,7 +110,7 @@
 (def startup-timeout-ms
   "How long a mount waits for a plugin whose `apply` handed back a promise
    (the fiber's `:setup`). A row that has not settled by then is a boot error,
-   not a hang — `inactive-rows` shows it as `:starting`. One budget for the
+   not a hang — `compose/inactive-rows` shows it as `:starting`. One budget for the
    whole boot, and `teardown-timeout-ms` is the exit counterpart."
   5000)
 
@@ -173,47 +176,15 @@
                            (pr-str source))
                       {:type :kmet.app/bad-row :row row})))))
 
-(defn await-setups!
-  "Wait for the row setups that ran asynchronously and re-settle, so the caller
-   sees decided fibers. A setup that starts another one (a dependent's own
-   `apply`) is waited for in the next round, and every round spends what is left
-   of one `startup-timeout-ms` budget. Expiry is the caller's to report: the
-   fiber is still `:starting` and `inactive-rows` names it."
-  [ctx]
-  (let [deadline (+ (concurrent/monotonic-ms) startup-timeout-ms)]
-    (loop [round 0]
-      (let [handles (into [] (keep :setup) (srce/fibers ctx))]
-        (when (and (seq handles) (< round max-rounds))
-          (concurrent/await-all handles (max 0 (- deadline (concurrent/monotonic-ms))))
-          (srce/settle! ctx)
-          (recur (inc round))))))
-  nil)
-
 (defn mount-rows!
-  "Mount ROWS under CTX and return one fiber per row, in composition order —
-   mounted, settled, and with any asynchronous setup awaited, so every caller
-   reads decided fibers (`inactive-rows`, `check-mounts!`).
-
-   `boot` is this on a fresh root; a **preset** is this on an agent's child ctx
-   (`kmet.app.presets`). The mount point, not the row shape, is what a profile
-   and a preset differ in — one composition language, two places to compose."
+  "Mount ROWS under CTX with the app's source resolution and setup budget:
+   vars and `:ext/<id>` rows resolve as the composition declares, and an
+   asynchronous setup gets `startup-timeout-ms`. The generic primitive is
+   `kmet.app.compose/mount-rows!`; `boot` is this on a fresh root, a **preset**
+   is this on an agent's child ctx (`kmet.app.presets`)."
   [ctx rows]
-  (let [fibers (mapv (fn [row] (srce/plugin! ctx (row-source row) (:config row))) rows)]
-    (srce/settle! ctx)
-    (await-setups! ctx)
-    fibers))
-
-(defn inactive-rows
-  "ROWS whose fiber is not `:active` after the mounts settled, as plain data:
-   what a failed mount is reported in terms of."
-  [rows fibers]
-  (into []
-        (keep (fn [[row fiber]]
-                (let [{:keys [state error waiting-for]} (srce/fiber-info fiber)]
-                  (when-not (= :active state)
-                    {:id (:id row) :state state :error error
-                     :waiting-for (vec (sort waiting-for))}))))
-        (map vector rows fibers)))
+  (compose/mount-rows! ctx rows {:resolve-source row-source
+                                 :timeout-ms startup-timeout-ms}))
 
 (defn- declaration-conflicts
   "Event names that two mounted fibers declare differently, as
@@ -252,7 +223,7 @@
    thrown when there is one. `boot` and `mount-deferred!` share the rules, so a
    mode mounted after the boot fails the same way a world row does."
   [ctx rows fibers all-fibers diagnose?]
-  (let [failed (inactive-rows rows fibers)]
+  (let [failed (compose/inactive-rows rows fibers)]
     (when (and (seq failed) (not diagnose?))
       (doseq [f failed]
         (srce/log! ctx :error "plugin did not mount" f))

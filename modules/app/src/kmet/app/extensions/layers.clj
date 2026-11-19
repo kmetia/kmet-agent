@@ -20,7 +20,7 @@
    (and the file saved) before the composition reads it, with the remove and
    config patches left dangling.
 
-   The composition mirrors `kmet.app.profile/compose` for extension rows:
+   The composition mirrors `kmet.app.compose/compose` for extension rows:
    rows add, a patch with a `:plugin` adds or replaces by id, and a `:remove`
    patch drops the row with that id. Other rows and patches are ignored here;
    the run's own compose still sees them. Built-in rows are tracked by id: the
@@ -39,7 +39,7 @@
             [babashka.fs :as fs]
             [kmet.app.config :as cfg]
             [kmet.app.extensions.rows :as rows]
-            [kmet.app.profile :as profile]
+            [kmet.app.compose :as compose]
             [kmet.libs.edn-store :as eds]))
 
 (defn- layer-error
@@ -54,7 +54,7 @@
     {:path path :data {}}
     (try
       (let [data (edn/read-string (slurp path))]
-        (if (profile/layer? data)
+        (if (compose/layer? data)
           {:path path :data data}
           {:path path :data {}
            :error (layer-error path
@@ -158,7 +158,7 @@
 
 (defn- row-present?
   "Whether LAYER leaves ID composed, starting from PRESENT?. All rows of a
-   layer are appended before its patches, as in `kmet.app.profile/compose`:
+   layer are appended before its patches, as in `kmet.app.compose/compose`:
    a row restores ID, a `:plugin` patch inserts or replaces it, and a
    `:remove` patch drops it."
   [present? layer id]
@@ -221,11 +221,11 @@
    id none of them declares (a retired row, a typo) can never apply. Data
    only."
   []
-  (let [table (profile/builtin)]
+  (let [table (compose/builtin)]
     (into #{}
           (comp (mapcat :rows) (keep :id))
           (concat (vals (:bundles table))
-                  (mapcat #(profile/layers table %) (keys (:profiles table)))))))
+                  (mapcat #(compose/layers table %) (keys (:profiles table)))))))
 
 (defn- target-ids
   "The row ids a remove or config patch in the two ambient LAYER-DATAS may

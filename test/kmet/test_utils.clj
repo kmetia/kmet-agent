@@ -5,7 +5,7 @@
             [kmet.app.commands :as commands]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.prompts :as prompts]
-            [kmet.app.profile :as profile]
+            [kmet.app.compose :as compose]
             [kmet.app.registries :as registries]
             [kmet.app.registry :as registry]
             [kmet.app.runtime :as runtime]
@@ -118,7 +118,7 @@
   [ctx]
   (when-not (srce/get ctx :commands)
     (srce/provide! ctx :commands (registry/atom-registry)))
-  (let [rows (->> (:rows (profile/bundle (profile/builtin) :bundle/minimal))
+  (let [rows (->> (:rows (compose/bundle (compose/builtin) :bundle/minimal))
                   (filter #(tools/tool-row-name (:id %))))]
     (runtime/mount-rows! ctx rows)
     (srce/settle! ctx)

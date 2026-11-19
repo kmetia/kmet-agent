@@ -1,69 +1,33 @@
-(ns kmet.app.profile
-  "Profiles are composition data: ordered plugin rows plus patches, layered.
+(ns kmet.app.compose
+  "The composition engine: rows, bundles, profiles, patches, cards and mounts.
 
-   A **bundle** is a reusable row list — the analog of dsh's `dsh.bundle` —
-   and a **profile** is the app entry: it stacks bundles in order, then adds
-   its own rows and patches (`docs/architecture.md` § Composition). A row names
-   a plugin **source** (`:plugin`) — a var, or an `:ext/<id>` for an installed
-   extension (resolved before composition by `kmet.app.extensions.rows`) —
-   never a keyword registry entry:
-   `{:id :tool/bash :plugin kmet.app.tools.bash/plugin :config {}}`. `:id`
-   is the row identity a patch targets and `--dump-config` prints; it defaults
-   to the plugin's `:name`, which the catalog resolves before composition.
+   This is the app's reusable assembly layer: data in, a mounted srce subtree
+   out. It knows the row language (a row names a plugin source and carries
+   config; a bundle is a reusable row list; a profile stacks bundles and
+   patches) and the mount contract (`srce/plugin!`), not the app's source
+   policy. A caller supplies the policy:
 
-   A patch targets one row by `:id`:
+   - `:describe-source` turns a row into a card (`describe`, `describe-layer`),
+     which is how a var source, an `:ext/…` id or a plain map is read without
+     mounting it;
+   - `:resolve-source` turns a row into the source `srce/plugin!` takes
+     (`mount-rows!`);
+   - `:timeout-ms` is the budget for a mount's asynchronous setups.
 
-     {:id :permissions :config {:policy :allow-all}}   ; deep-merge :config
-     {:id :permissions :remove true}                   ; drop the row
-     {:id :tool/ls :plugin … :after :tool/read}         ; insert (unknown id)
-
-   Five row keys are not composition data:
-
-   - `:mode true` marks the row `kmet.app.core` runs as the profile's mode,
-     handing it the command line (`docs/architecture.md` § Composition). It travels with
-     the row rather than with the profile so a patch that *replaces* the mode's
-     plugin — an extension's own print mode — replaces what runs and not that it
-     runs.
-   - `:prompt true` says the mode takes the command line's remaining arguments
-     as its input, so an empty one is a usage error before anything boots
-     (print mode). A mode that reads nothing from the command line — rpc, a
-     server — omits it, and a bare invocation of that profile is legal.
-   - `:session-lifecycle true` says the mode opens the session itself, so
-     kmet1's `-c`/`--continue`, `-r`/`--resume` and `--session <id>` are handed
-     to it (the TUI row, which passes them to `interactive/run`). Every other
-     mode creates its agent through `:agents`, whose factory takes no session
-     option yet, and the entry point refuses those flags by name there rather
-     than silently starting the fresh session the flag exists to prevent.
-   - `:defer true` says a generic boot must not mount the row: only its owner
-     can, once it has what the row waits for. The process world
-     (`kmet.app.world`) is the one today — the entry mounts it with the
-     invocation, and a diagnostic or test boot must not read the machine's
-     settings. `kmet.app.runtime/boot` leaves such rows in `:deferred`, and the
-     row marker travels with the row so a patch that replaces the plugin keeps
-     the timing.
-   - `:default-enabled? false` marks a tool row that is mounted but off until
-     a selection names it (`registry/default-tool-names` is the bundle without
-     those rows). The row stays mounted, so `/config` and `/tools` can enable
-     it live; only the built-in default changes. `codemode` and `eval` opt out.
-
-   Config *values* deep-merge; composition does not — a bundle's rows are
-   appended as they are, and later layers patch by id. A patch that names an
-   unknown id without a `:plugin` is an error, not a silent no-op — unless
-   the layer is flagged `:lenient? true` (how `kmet.app.core` reads the two
-   ambient user layers), in which case the patch is dropped and reported in
-   `:dropped` for the entry to warn about: a patch.edn written for an older
-   composition heals instead of failing the boot. The built-in layers and an
-   explicit `--patch` file stay strict.
-
-   This namespace is data only: it never loads a plugin and never reads a
-   process value. `kmet.app.catalog` turns rows into cards, `kmet.app.core`
-   prints the composed result."
+   `kmet.app.catalog` is the app's describe-source (vars and `:ext/…` rows);
+   `kmet.app.runtime` is the app's resolver plus boot and teardown policy. The
+   language is data only: `compose` never loads a plugin and never reads a
+   process value. `builtin` reads kmet's committed table; another app calls
+   `read-table` or passes its own table to `profile`, `bundle`, `layers` and
+   `compose`."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [kmet.libs.concurrent :as concurrent]
+            [kmet.srce.core :as srce]))
 
 (def resource
-  "The committed built-in composition table (bundles + profiles)."
+  "kmet's committed composition table (bundles + profiles)."
   "kmet/app/profiles.edn")
 
 (def default-profile
@@ -89,14 +53,21 @@
        (or (nil? (:rows x)) (sequential? (:rows x)))
        (or (nil? (:patch x)) (sequential? (:patch x)))))
 
-(defn builtin
-  "The built-in composition table: `{:bundles {name bundle} :profiles {name
-   profile}}`. A missing resource is a packaging bug, not an empty table."
-  []
+(defn read-table
+  "The composition table at classpath RESOURCE: `{:bundles {name bundle}
+   :profiles {name profile}}`. A missing resource is a packaging bug, not an
+   empty table."
+  [resource]
   (if-let [r (io/resource resource)]
     (edn/read-string (slurp r))
-    (throw (ex-info (str "missing built-in profile resource " resource)
+    (throw (ex-info (str "missing composition resource " resource)
                     {:type :kmet.app/missing-profiles}))))
+
+(defn builtin
+  "kmet's built-in composition table, read from `resource`. Another app calls
+   `read-table` with its own resource."
+  []
+  (read-table resource))
 
 (defn profile
   "The named PROFILE from TABLE; throws :kmet.app/unknown-profile."
@@ -257,7 +228,7 @@
 (defn compose
   "Apply LAYERS in order to an empty composition → `{:rows [row …] :patches
    n :dropped [entry …]}`. Every row must carry an `:id` (a card's, resolved
-   by the catalog); duplicate ids across stacked bundles are an error. A patch
+   by the caller's describe policy); duplicate ids across stacked bundles are an error. A patch
    targeting an id an earlier patch removed is a no-op (remove or config), so
    a project layer's disable of a globally disabled row does not dangle; an id
    that was never there is an error.
@@ -313,3 +284,104 @@
                               " rows=" (count rows) " patches=" patches)
                          (map (partial render-row id-w src-w) rows)))
          \newline)))
+
+;; ── cards ─────────────────────────────────────────────────────────────────
+
+(defn- bad-row [row message]
+  (throw (ex-info message {:type :kmet.app/bad-row :row row})))
+
+(defn describe
+  "The card for ROW: the row plus :id, :name, :inject and :provide.
+   DESCRIBE-SOURCE is the caller's source policy: it receives ROW and returns
+   the source's card (`{:name :inject :provide}`, plus :id when the policy has
+   one). A row without a :plugin, or a source that does not describe as a
+   card, is `:kmet.app/bad-row`."
+  [row {:keys [describe-source]}]
+  (when-not (fn? describe-source)
+    (bad-row row "a card needs a :describe-source fn"))
+  (when-not (:plugin row)
+    (bad-row row (str "a row needs a :plugin source, got " (pr-str row))))
+  (let [card (describe-source row)]
+    (when-not (and (map? card) (keyword? (:name card)))
+      (bad-row row (str "source " (pr-str (:plugin row))
+                        " did not describe as a plugin card")))
+    (let [described (merge card row)]
+      (-> described
+          (update :id #(or % (:id card) (:name card)))
+          (update :inject srce/normalize-inject)))))
+
+(defn describe-layer
+  "Describe LAYER's rows and its insert/replace patches through
+   DESCRIBE-SOURCE; config-only and remove patches pass through."
+  [layer {:keys [describe-source]}]
+  (cond-> layer
+    (:rows layer) (update :rows #(mapv (fn [row]
+                                         (describe row {:describe-source describe-source}))
+                                       %))
+    (:patch layer) (update :patch #(mapv (fn [patch]
+                                           (if (:plugin patch)
+                                             (describe patch {:describe-source describe-source})
+                                             patch))
+                                         %))))
+
+;; ── mounts ────────────────────────────────────────────────────────────────
+
+(def ^:private setup-max-rounds
+  "The setup wait's round budget: a setup that starts another one is waited
+   for in the next round; after this many rounds the wait returns, and the
+   caller's inactive-row check reports what is still starting."
+  8)
+
+(defn await-setups!
+  "Wait for the row setups that ran asynchronously and re-settle, so the
+   caller sees decided fibers. TIMEOUT-MS is the caller's budget for the whole
+   wait, spent in monotonic slices; it is required so the policy stays with
+   the composition. A setup that has not settled by the deadline is left as
+   it is: the fiber is still :starting and `inactive-rows` names it."
+  [ctx {:keys [timeout-ms]}]
+  (when-not (number? timeout-ms)
+    (throw (ex-info "await-setups! needs a :timeout-ms"
+                    {:type :kmet.app/bad-mount})))
+  (let [deadline (+ (concurrent/monotonic-ms) timeout-ms)]
+    (loop [round 0]
+      (let [handles (into [] (keep :setup) (srce/fibers ctx))]
+        (when (and (seq handles) (< round setup-max-rounds))
+          (concurrent/await-all handles
+                                (max 0 (- deadline (concurrent/monotonic-ms))))
+          (srce/settle! ctx)
+          (recur (inc round))))))
+  nil)
+
+(defn mount-rows!
+  "Mount ROWS under CTX and return one fiber per row, in composition order —
+   mounted, settled, and with any asynchronous setup awaited against
+   TIMEOUT-MS. RESOLVE-SOURCE is the caller's source policy: it receives ROW
+   and returns what `srce/plugin!` takes (a var, a plugin map, or a keyword a
+   resolver understands); the row's :config is passed as is. A fiber that is
+   not :active is not an error here; `inactive-rows` reports it for the
+   caller's policy."
+  [ctx rows {:keys [resolve-source timeout-ms]}]
+  (when-not (fn? resolve-source)
+    (throw (ex-info "mount-rows! needs a :resolve-source fn"
+                    {:type :kmet.app/bad-mount :rows (count rows)})))
+  (when-not (number? timeout-ms)
+    (throw (ex-info "mount-rows! needs a :timeout-ms"
+                    {:type :kmet.app/bad-mount :rows (count rows)})))
+  (let [fibers (mapv (fn [row]
+                       (srce/plugin! ctx (resolve-source row) (:config row)))
+                     rows)]
+    (srce/settle! ctx)
+    (await-setups! ctx {:timeout-ms timeout-ms})
+    fibers))
+
+(defn inactive-rows
+  "ROWS whose fiber is not :active after the mounts settled, as plain data:
+   what a failed mount is reported in terms of."
+  [rows fibers]
+  (into []
+        (keep (fn [[row fiber]]
+                (let [{:keys [state error waiting-for]} (srce/fiber-info fiber)]
+                  (when-not (= :active state)
+                    {:id (:id row) :state state :error error
+                     :waiting-for (vec (sort waiting-for))}))))
+        (map vector rows fibers)))

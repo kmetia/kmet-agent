@@ -58,7 +58,7 @@
             [kmet.app.catalog :as catalog]
             [kmet.app.inspect :as inspect]
             [kmet.app.invocation :as invocation]
-            [kmet.app.profile :as profile]
+            [kmet.app.compose :as compose]
             [kmet.app.runtime :as runtime]
             [kmet.srce.core :as srce]))
 
@@ -360,7 +360,7 @@
    flags, so every mode sees one answer."
   [opts]
   (let [opts (-> (resolve-mode opts)
-                 (update :profile #(or % profile/default-profile))
+                 (update :profile #(or % compose/default-profile))
                  explicit-session-wins)]
     (when (> (count (filter opts [:dump-config? :dump-default-config?
                                   :dump-state?]))
@@ -377,7 +377,7 @@
    :session str :debug :generate-models :list-models str-or-true
    :token str :socket path :max-sessions long :queue-depth long
    :idle-timeout long :ext-flags {name value-or-true}}`.
-   `:profile` defaults to `profile/default-profile`; `--mode` is kmet1's spelling
+   `:profile` defaults to `compose/default-profile`; `--mode` is kmet1's spelling
    of it (`resolve-mode`), and the run flags are kmet1's: `--model`/`--provider`
    are the agent's overrides, `--thinking`/`--system-prompt`/
    `--append-system-prompt`/`--models`/`--tools`/`--session-dir` the run's
@@ -408,7 +408,7 @@
                 (catch Exception e
                   (throw (ex-info (str "cannot read patch file " path ": " (ex-message e))
                                   {:type :kmet.app/bad-patch-file :path path} e))))]
-    (if (profile/layer? layer)
+    (if (compose/layer? layer)
       layer
       (throw (ex-info (str "a patch file holds {:rows […] :patch […]}: " path)
                       {:type :kmet.app/bad-patch-file :path path :content layer})))))
@@ -437,12 +437,12 @@
    composition errors are `:kmet.app/*` ex-infos."
   [opts]
   (let [chosen (:profile opts)
-        table (profile/builtin)
+        table (compose/builtin)
         ambient (fn [path] (assoc (read-layer path) :lenient? true :path path))
-        layers (concat (profile/layers table chosen)
+        layers (concat (compose/layers table chosen)
                        (map ambient (:user-layer-paths opts))
                        (map read-layer (:patch opts)))
-        composed (profile/compose (map catalog/describe-layer layers))]
+        composed (compose/compose (map catalog/describe-layer layers))]
     (warn-dropped-patches! (:dropped composed))
     (assoc composed :profile chosen)))
 
@@ -476,7 +476,7 @@
    booting anything."
   [opts]
   (let [{:keys [rows patches profile]} (compose-config opts)]
-    (profile/render profile {:rows rows :patches patches})))
+    (compose/render profile {:rows rows :patches patches})))
 
 (defn- deferred-note
   "One line naming the rows a dump held back, or `\"\"`. `--dump-state` does

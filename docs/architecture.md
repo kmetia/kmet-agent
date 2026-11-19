@@ -176,11 +176,12 @@ root `AGENTS.md` topic map.
 The app is assembled from EDN composition data, not code. `kmet/app/profiles.edn`
 is the built-in table of **bundles** (reusable rows plus patches) and
 **profiles** (the app entry: bundles stacked in order, then its own rows and
-patches); `kmet.app.profile` resolves and patches it — data only, it never loads
-a plugin or reads a process value; `kmet.app.catalog` describes rows as cards
-for `--dump-config`; and `kmet.app.core` mounts the composed result. The
-generated catalog of what the shipped profiles mount, rows and model-facing tool
-text included, is [`composition.md`](composition.md) (`bb generate-catalog` /
+patches); `kmet.app.compose` owns the row language and the mount primitives —
+the language is data only, it never loads a plugin or reads a process value;
+`kmet.app.catalog` supplies the app's source policy for cards, and
+`kmet.app.runtime` mounts the composed result and owns boot/teardown;
+`kmet.app.core` is the entry. The generated catalog of what the shipped profiles
+mount, rows and model-facing tool text included, is [`composition.md`](composition.md) (`bb generate-catalog` /
 `bb check-catalog`; `bb test-changed` runs the check, so a stale page cannot
 pass).
 

@@ -1,6 +1,5 @@
 (ns kmet.app.catalog
-  "Row cards — what a profile row's plugin declares, for composition and
-   `--dump-config`.
+  "The app's row-source policy for `kmet.app.compose` cards.
 
    A profile row names a plugin **source** (a var, or an `:ext/…` id the
    extension host resolves). Describing a row resolves the source and reads the
@@ -9,6 +8,10 @@
    in the path. `defplugin` defines a valid map and dereferencing it mounts
    nothing, so this is inspection, not boot.
 
+   The card merge, patch walking and inject normalization live in
+   `kmet.app.compose`; this namespace is the app's `:describe-source`: it says
+   what a var and an `:ext/…` source mean and what an unknown source reports.
+
    A source that does not resolve is a composition error, reported by
    `--dump-config` as well as by boot: a var source that is not there is
    `:kmet.app/unknown-plugin`, an extension id that is not installed is
@@ -16,15 +19,14 @@
    entry heals the two ambient layers first
    (`kmet.app.extensions.layers/prune-unknown-extensions!`), so an unknown id
    reaches this description only from a profile row or an explicit `--patch`
-   file. A var
-   whose namespace **fails to load** is not a typo, so the load error travels
-   with the report (the message names its file:line, `:load-error` holds it,
-   and it stays the cause) instead of the row reading as absent. An `:ext/…`
-   source is resolved from the installed extensions by name
+   file. A var whose namespace **fails to load** is not a typo, so the load
+   error travels with the report (the message names its file:line, `:load-error`
+   holds it, and it stays the cause) instead of the row reading as absent. An
+   `:ext/…` source is resolved from the installed extensions by name
    (`kmet.app.extensions.rows`) without loading it, so the dump names a real
    row."
-  (:require [kmet.app.extensions.rows :as extension-rows]
-            [kmet.srce.core :as srce]))
+  (:require [kmet.app.compose :as compose]
+            [kmet.app.extensions.rows :as extension-rows]))
 
 (defn- unknown-plugin
   "The composition error for a row's plugin SOURCE. CAUSE, when the source
@@ -63,39 +65,35 @@
 (defn- bad-row [row message]
   (throw (ex-info message {:type :kmet.app/bad-row :row row})))
 
-(defn describe
-  "The composition card for ROW: the row plus `:id`, `:name`, `:inject` and
-   `:provide`. A var `:plugin` is loaded and read; an `:ext/…` keyword is
-   resolved from the installed extensions without loading it. Any other keyword
-   is a bad row: a built-in source is a var, never a registry key."
+(defn- describe-source
+  "The app's source policy for a composition row: an `:ext/…` id is resolved
+   from the installed extensions without loading it; a var symbol is loaded and
+   read as a plugin map; any other keyword or a missing source is a bad row."
   [row]
-  (let [source (:plugin row)
-        described
-        (cond
-          (extension-rows/source? source)
-          (extension-rows/card row)
+  (let [source (:plugin row)]
+    (cond
+      (extension-rows/source? source)
+      (extension-rows/card row)
 
-          (keyword? source)
-          (bad-row row (str "a keyword :plugin source must be an :ext/… extension"
-                            " id; a built-in source is a var symbol — got "
-                            (pr-str source)))
+      (keyword? source)
+      (bad-row row (str "a keyword :plugin source must be an :ext/… extension"
+                        " id; a built-in source is a var symbol — got "
+                        (pr-str source)))
 
-          (symbol? source)
-          (let [c (card source)]
-            (merge c row {:id (or (:id row) (:name c))}))
+      (symbol? source)
+      (card source)
 
-          :else
-          (bad-row row (str "a row needs a :plugin source (a var symbol or an"
-                            " :ext/… keyword), got " (pr-str row))))]
-    (update described :inject srce/normalize-inject)))
+      :else
+      (bad-row row (str "a row needs a :plugin source (a var symbol or an"
+                        " :ext/… keyword), got " (pr-str row))))))
 
-(defn- describe-patch [patch]
-  (if (:plugin patch) (describe patch) patch))
+(defn describe
+  "The composition card for ROW, through the app's source policy."
+  [row]
+  (compose/describe row {:describe-source describe-source}))
 
 (defn describe-layer
   "Describe a layer's rows, and its insert/replace patches (the ones carrying
    a `:plugin` source); config-only and remove patches pass through."
   [layer]
-  (cond-> layer
-    (:rows layer) (update :rows #(mapv describe %))
-    (:patch layer) (update :patch #(mapv describe-patch %))))
+  (compose/describe-layer layer {:describe-source describe-source}))

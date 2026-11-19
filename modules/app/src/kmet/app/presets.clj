@@ -5,7 +5,7 @@
    patches, a **profile** stacks bundles at the root, and a **preset** mounts
    one under an agent's child ctx. The machinery is the same on purpose — one
    composition language, two mount points — so a preset is named like a bundle
-   and composed by `kmet.app.profile`, never re-declared here.
+   and composed by `kmet.app.compose`, never re-declared here.
 
    What a preset is *for*: per-agent composition (`docs/architecture.md` § Multi-session
    server mode). The agent's child ctx inherits root services through the
@@ -25,9 +25,9 @@
    releases the child ctx on top of that, which is the belt to this
    suspenders: a caller mounting onto a ctx it keeps is the case only this can
    undo."
-  (:require [kmet.app.events :as events]
+  (:require [kmet.app.compose :as compose]
+            [kmet.app.events :as events]
             [kmet.app.extensions.rows :as extension-rows]
-            [kmet.app.profile :as profile]
             [kmet.app.runtime :as runtime]
             [kmet.srce.core :as srce]))
 
@@ -35,7 +35,7 @@
   "The built-in table, read once. A preset mount is per agent and a server
    creates one agent per connection, so a resource read per mount would be a
    parse of a jar entry for data that cannot change while the process lives."
-  (delay (profile/builtin)))
+  (delay (compose/builtin)))
 
 (defn- check-extension-rows!
   "Refuse an `:ext/…` row in a preset: the extension's plugin mounts under the
@@ -58,10 +58,10 @@
    `:agents/create!`'s `:setup` — and the fibers live and die with it."
   ([ctx preset-name] (mount! ctx @builtin preset-name))
   ([ctx table preset-name]
-   (let [{:keys [rows]} (profile/compose [(profile/bundle table preset-name)])
+   (let [{:keys [rows]} (compose/compose [(compose/bundle table preset-name)])
          _ (check-extension-rows! preset-name rows)
          fibers (runtime/mount-rows! ctx rows)]
-     (if-let [failed (seq (runtime/inactive-rows rows fibers))]
+     (if-let [failed (seq (compose/inactive-rows rows fibers))]
        (do
          ;; a preset is a set: half of it is not this preset. `create!`'s
          ;; rollback would release the whole child ctx, but a caller that

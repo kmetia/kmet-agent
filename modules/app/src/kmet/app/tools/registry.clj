@@ -33,7 +33,7 @@
    kmet1's arity-less façade does while it survives."
   (:require [clojure.string :as str]
             [kmet.libs.json :as json]
-            [kmet.app.profile :as profile]
+            [kmet.app.compose :as compose]
             [kmet.app.registry :as registry]
             [kmet.app.tools.tool :as tool]
             [kmet.app.tools.util :as tool-util]
@@ -484,7 +484,7 @@
 (def ^:private minimal-bundle
   "The composition bundle a run mounts first; its tool rows are the built-in
    tool declarations."
-  (profile/bundle (profile/builtin) :bundle/minimal))
+  (compose/bundle (compose/builtin) :bundle/minimal))
 
 (defn builtin-tool-rows
   "The `:bundle/minimal` rows whose ids are tool rows (`:tool/<name>`), in
@@ -503,7 +503,7 @@
    Derived from `:bundle/minimal`'s rows, not restated beside them: the
    composition is where a built-in tool is declared, so adding a tool row adds
    its name here and patching one out of the bundle takes it away, with no
-   second list to keep in step. Reading the table is static (`kmet.app.profile`
+   second list to keep in step. Reading the table is static (`kmet.app.compose`
    is composition data and resolves no plugin), so the settings layer can still
    ask which names exist before any composition mounts."
   (bundle-tool-names minimal-bundle))

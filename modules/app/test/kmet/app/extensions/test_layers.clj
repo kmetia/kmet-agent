@@ -10,7 +10,7 @@
             [kmet.app.config :as cfg]
             [kmet.app.extensions.layers :as layers]
             [kmet.app.packages :as packages]
-            [kmet.app.profile :as profile]
+            [kmet.app.compose :as compose]
             [kmet.test-tmp :as test-tmp]))
 
 (defn- tmp-dir []
@@ -219,7 +219,7 @@
         (is (= [{:id :tool/bash :plugin 'kmet.app.tools.bash/plugin}]
                (:patch (read-layer project))))
         (let [parsed (layers/layers)
-              composed (profile/compose
+              composed (compose/compose
                         [{:rows [{:id :tool/bash
                                   :plugin 'kmet.app.tools.bash/plugin}]}
                          (:data (:global parsed))
@@ -237,7 +237,7 @@
         (layers/apply-project-state! :ext/a :unload)
         (layers/disable-global! :ext/a)
         (let [parsed (layers/layers)
-              composed (profile/compose [(:data (:global parsed))
+              composed (compose/compose [(:data (:global parsed))
                                          (:data (:project parsed))])]
           (is (empty? (:rows composed))
               "a project remove of a globally disabled row does not dangle")))
@@ -245,12 +245,12 @@
         (fs/delete project)
         (spit project (pr-str {:patch [{:id :ext/a :config {:x 1}}]}))
         (let [parsed (layers/layers)
-              composed (profile/compose [(:data (:global parsed))
+              composed (compose/compose [(:data (:global parsed))
                                          (:data (:project parsed))])]
           (is (empty? (:rows composed))))
         (layers/enable-global! :ext/a)
         (let [parsed (layers/layers)
-              composed (profile/compose [(:data (:global parsed))
+              composed (compose/compose [(:data (:global parsed))
                                          (:data (:project parsed))])]
           (is (= {:x 1} (:config (first (:rows composed))))
               "re-enabling the row applies the project config again")))
@@ -258,7 +258,7 @@
         (layers/disable-global! :ext/a)
         (layers/apply-project-state! :ext/a :load)
         (let [parsed (layers/layers)
-              composed (profile/compose [(:data (:global parsed))
+              composed (compose/compose [(:data (:global parsed))
                                          (:data (:project parsed))])]
           (is (= [:ext/a] (mapv :plugin (:rows composed)))))))))
 
@@ -272,7 +272,7 @@
         (is (= [] (:patch (read-layer project))))
         (let [parsed (layers/layers)]
           (is (= {:rows [] :patches 0 :dropped []}
-                 (profile/compose [(:data (:global parsed))
+                 (compose/compose [(:data (:global parsed))
                                    (:data (:project parsed))])))))
       (testing "a config patch on an id the global layer still composes stays"
         (write-layer! global {:rows [{:id :ext/x :plugin :ext/x}] :patch []})
@@ -283,7 +283,7 @@
             "it now configures the global row")
         (let [parsed (layers/layers)]
           (is (= [{:id :ext/x :plugin :ext/x :config {:a 1}}]
-                 (:rows (profile/compose [(:data (:global parsed))
+                 (:rows (compose/compose [(:data (:global parsed))
                                           (:data (:project parsed))]))))))
       (testing "a project row's config patch follows the same rule"
         (write-layer! project {:rows [{:id :ext/x :plugin :ext/x}]
@@ -303,7 +303,7 @@
           "the row and the config patch that only targeted it are gone")
       (let [parsed (layers/layers)]
         (is (= {:rows [] :patches 0 :dropped []}
-               (profile/compose [(:data (:global parsed))
+               (compose/compose [(:data (:global parsed))
                                  (:data (:project parsed))])))))))
 
 (deftest an-unknown-project-state-is-refused
