@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-12T19:53:32Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :cloudflare-ai-gateway
             :name "Cloudflare AI Gateway"
             :env-vars ["CLOUDFLARE_API_KEY" "CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_GATEWAY_ID"]
@@ -633,6 +633,52 @@
            :output 5
            :cache-read 0.05
            :cache-write 1.25}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true :supports-openai-grammar-tools true}}
+   "gpt-6.2-astra"
+   {:id "gpt-6.2-astra"
+    :name "GPT-6.2 Astra"
+    :provider :cloudflare-ai-gateway
+    :api :openai-responses
+    :base-url "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/openai"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off "none"
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 8
+           :tiers [{:input 12 :input-tokens-above 272000 :output 60 :cache-read 0.6 :cache-write 15}]
+           :output 40
+           :cache-read 0.4
+           :cache-write 10}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true :supports-openai-grammar-tools true}}
+   "gpt-6.2-sol"
+   {:id "gpt-6.2-sol"
+    :name "GPT-6.2 Sol"
+    :provider :cloudflare-ai-gateway
+    :api :openai-responses
+    :base-url "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/openai"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off "none"
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2
+           :tiers [{:input 3 :input-tokens-above 272000 :output 15 :cache-read 0.15 :cache-write 3.75}]
+           :output 10
+           :cache-read 0.1
+           :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-strict-mode true :supports-openai-grammar-tools true}}

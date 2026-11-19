@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-02T16:00:51Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :mistral
             :name "Mistral"
             :env-vars ["MISTRAL_API_KEY"]
@@ -35,7 +35,7 @@
     :api :mistral-conversations
     :base-url "https://api.mistral.ai"
     :reasoning true
-    :input [:text]
+    :input [:text :image]
     :cost {:input 0.3 :output 1.2 :cache-read 0.007 :cache-write 0}
     :context-window 1048576
     :max-tokens 128000}
@@ -137,7 +137,7 @@
     :input [:text :image]
     :cost {:input 0.1 :output 0.1 :cache-read 0.01 :cache-write 0}
     :context-window 131072
-    :max-tokens 262144}
+    :max-tokens 131072}
    "ministral-3b-latest"
    {:id "ministral-3b-latest"
     :name "Ministral 3B (latest)"
@@ -210,10 +210,10 @@
     :provider :mistral
     :api :mistral-conversations
     :base-url "https://api.mistral.ai"
-    :reasoning false
+    :reasoning true
     :input [:text :image]
-    :cost {:input 0.5 :output 1.5 :cache-read 0.05 :cache-write 0}
-    :context-window 262144
+    :cost {:input 0.7 :output 2.1 :cache-read 0.07 :cache-write 0}
+    :context-window 1048576
     :max-tokens 262144}
    "mistral-medium-2505"
    {:id "mistral-medium-2505"

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-09T15:41:34Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :baseten
             :name "Baseten"
             :env-vars ["BASETEN_API_KEY"]
@@ -190,7 +190,7 @@
     :reasoning true
     :input [:text :image]
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 0}
-    :context-window 1000000
+    :context-window 1048576
     :max-tokens 262144
     :compat {:supports-store false
              :supports-developer-role false

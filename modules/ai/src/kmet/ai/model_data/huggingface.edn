@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-27T10:40:46Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :huggingface
             :name "Hugging Face"
             :env-vars ["HF_TOKEN"]
@@ -155,6 +155,18 @@
     :input [:text]
     :cost {:input 0.12 :output 0.5 :cache-read 0 :cache-write 0}
     :context-window 40960
+    :max-tokens 16384
+    :compat {:supports-developer-role false :supports-strict-mode true}}
+   "Qwen/Qwen3-30B-A3B-Instruct-2507"
+   {:id "Qwen/Qwen3-30B-A3B-Instruct-2507"
+    :name "Qwen3 30B-A3B Instruct 2507"
+    :provider :huggingface
+    :api :openai-completions
+    :base-url "https://router.huggingface.co/v1"
+    :reasoning false
+    :input [:text]
+    :cost {:input 0.09 :output 0.3 :cache-read 0 :cache-write 0}
+    :context-window 262144
     :max-tokens 16384
     :compat {:supports-developer-role false :supports-strict-mode true}}
    "Qwen/Qwen3-32B"
@@ -714,6 +726,18 @@
     :context-window 262144
     :max-tokens 32768
     :compat {:supports-developer-role false :supports-strict-mode true}}
+   "meta-llama/Llama-3.1-70B-Instruct"
+   {:id "meta-llama/Llama-3.1-70B-Instruct"
+    :name "Llama-3.1-70B-Instruct"
+    :provider :huggingface
+    :api :openai-completions
+    :base-url "https://router.huggingface.co/v1"
+    :reasoning false
+    :input [:text]
+    :cost {:input 0.72 :output 0.72 :cache-read 0 :cache-write 0}
+    :context-window 131072
+    :max-tokens 4096
+    :compat {:supports-developer-role false :supports-strict-mode true}}
    "meta-llama/Llama-3.1-8B-Instruct"
    {:id "meta-llama/Llama-3.1-8B-Instruct"
     :name "Llama-3.1-8B-Instruct"
@@ -725,6 +749,30 @@
     :cost {:input 0.06 :output 0.06 :cache-read 0 :cache-write 0}
     :context-window 131072
     :max-tokens 4096
+    :compat {:supports-developer-role false :supports-strict-mode true}}
+   "meta-llama/Llama-3.2-1B-Instruct"
+   {:id "meta-llama/Llama-3.2-1B-Instruct"
+    :name "Llama 3.2 1B Instruct"
+    :provider :huggingface
+    :api :openai-completions
+    :base-url "https://router.huggingface.co/v1"
+    :reasoning false
+    :input [:text]
+    :cost {:input 0.027 :output 0.201 :cache-read 0 :cache-write 0}
+    :context-window 60000
+    :max-tokens 32000
+    :compat {:supports-developer-role false :supports-strict-mode true}}
+   "meta-llama/Llama-3.2-3B-Instruct"
+   {:id "meta-llama/Llama-3.2-3B-Instruct"
+    :name "Llama 3.2 3B Instruct"
+    :provider :huggingface
+    :api :openai-completions
+    :base-url "https://router.huggingface.co/v1"
+    :reasoning false
+    :input [:text]
+    :cost {:input 0.0509 :output 0.335 :cache-read 0 :cache-write 0}
+    :context-window 80000
+    :max-tokens 80000
     :compat {:supports-developer-role false :supports-strict-mode true}}
    "meta-llama/Llama-3.3-70B-Instruct"
    {:id "meta-llama/Llama-3.3-70B-Instruct"
@@ -827,7 +875,26 @@
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0 :cache-write 0}
     :context-window 1000000
-    :max-tokens 131072
+    :max-tokens 1000000
+    :compat {:supports-developer-role false :supports-strict-mode true}}
+   "moonshotai/Kimi-K3.1-Pro"
+   {:id "moonshotai/Kimi-K3.1-Pro"
+    :name "Kimi K3.1 Pro"
+    :provider :huggingface
+    :api :openai-completions
+    :base-url "https://router.huggingface.co/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium nil
+                         :minimal nil
+                         :off nil
+                         :xhigh nil}
+    :input [:text :image]
+    :cost {:input 2 :output 10 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 1048576
     :compat {:supports-developer-role false :supports-strict-mode true}}
    "openai/gpt-oss-120b"
    {:id "openai/gpt-oss-120b"
@@ -846,7 +913,7 @@
     :input [:text]
     :cost {:input 0.25 :output 0.69 :cache-read 0 :cache-write 0}
     :context-window 131072
-    :max-tokens 32768
+    :max-tokens 131072
     :compat {:supports-developer-role false :supports-strict-mode true}}
    "openai/gpt-oss-20b"
    {:id "openai/gpt-oss-20b"
@@ -865,7 +932,7 @@
     :input [:text]
     :cost {:input 0.1 :output 0.5 :cache-read 0 :cache-write 0}
     :context-window 131072
-    :max-tokens 32768
+    :max-tokens 131072
     :compat {:supports-developer-role false :supports-strict-mode true}}
    "stepfun-ai/Step-3.5-Flash"
    {:id "stepfun-ai/Step-3.5-Flash"
@@ -917,6 +984,25 @@
     :context-window 262144
     :max-tokens 128000
     :compat {:supports-developer-role false :supports-strict-mode true}}
+   "tencent/Hy4-flash"
+   {:id "tencent/Hy4-flash"
+    :name "Hy4 flash"
+    :provider :huggingface
+    :api :openai-completions
+    :base-url "https://router.huggingface.co/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low nil
+                         :max nil
+                         :medium nil
+                         :minimal nil
+                         :off "none"
+                         :xhigh nil}
+    :input [:text :image]
+    :cost {:input 0.035 :output 0.1405 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 65536
+    :compat {:supports-developer-role false :supports-strict-mode true}}
    "tencent/Hy4-preview"
    {:id "tencent/Hy4-preview"
     :name "Hy4 preview"
@@ -955,6 +1041,25 @@
     :context-window 1048576
     :max-tokens 1048576
     :compat {:supports-developer-role false :supports-strict-mode true}}
+   "thinkingmachines/Inkling-2-Small"
+   {:id "thinkingmachines/Inkling-2-Small"
+    :name "Inkling 2 Small"
+    :provider :huggingface
+    :api :openai-completions
+    :base-url "https://router.huggingface.co/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal "minimal"
+                         :off "none"
+                         :xhigh nil}
+    :input [:text :image]
+    :cost {:input 0.3 :output 1 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:supports-developer-role false :supports-strict-mode true}}
    "thinkingmachines/Inkling-Small"
    {:id "thinkingmachines/Inkling-Small"
     :name "Inkling Small"
@@ -965,7 +1070,19 @@
     :input [:text :image]
     :cost {:input 0.5 :output 1.2 :cache-read 0 :cache-write 0}
     :context-window 524288
-    :max-tokens 1048576
+    :max-tokens 524288
+    :compat {:supports-developer-role false :supports-strict-mode true}}
+   "zai-org/GLM-4.5"
+   {:id "zai-org/GLM-4.5"
+    :name "GLM-4.5"
+    :provider :huggingface
+    :api :openai-completions
+    :base-url "https://router.huggingface.co/v1"
+    :reasoning true
+    :input [:text]
+    :cost {:input 0.6 :output 2.2 :cache-read 0 :cache-write 0}
+    :context-window 131072
+    :max-tokens 98304
     :compat {:supports-developer-role false :supports-strict-mode true}}
    "zai-org/GLM-4.5-Air"
    {:id "zai-org/GLM-4.5-Air"
@@ -1002,6 +1119,18 @@
     :cost {:input 0.55 :output 2.2 :cache-read 0 :cache-write 0}
     :context-window 204800
     :max-tokens 131072
+    :compat {:supports-developer-role false :supports-strict-mode true}}
+   "zai-org/GLM-4.6V"
+   {:id "zai-org/GLM-4.6V"
+    :name "GLM-4.6V"
+    :provider :huggingface
+    :api :openai-completions
+    :base-url "https://router.huggingface.co/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.3 :output 0.9 :cache-read 0 :cache-write 0}
+    :context-window 131072
+    :max-tokens 32768
     :compat {:supports-developer-role false :supports-strict-mode true}}
    "zai-org/GLM-4.6V-Flash"
    {:id "zai-org/GLM-4.6V-Flash"

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-12T19:53:32Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :github-copilot
             :name "GitHub Copilot"
             :env-vars ["COPILOT_GITHUB_TOKEN"]
@@ -266,6 +266,44 @@
              :supports-developer-role false
              :supports-reasoning-effort false
              :supports-strict-mode true}}
+   "gemini-4-hydrogen"
+   {:id "gemini-4-hydrogen"
+    :name "Gemini 4 Hydrogen"
+    :provider :github-copilot
+    :api :openai-completions
+    :base-url "https://api.individual.githubcopilot.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 1.5 :output 7.5 :cache-read 0.075 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 65536
+    :headers {"Copilot-Integration-Id" "vscode-chat"
+              "Editor-Plugin-Version" "copilot-chat/0.35.0"
+              "Editor-Version" "vscode/1.107.0"
+              "User-Agent" "GitHubCopilotChat/0.35.0"}
+    :compat {:supports-store false
+             :supports-developer-role false
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
+   "gemini-4-neon"
+   {:id "gemini-4-neon"
+    :name "Gemini 4 Neon"
+    :provider :github-copilot
+    :api :openai-completions
+    :base-url "https://api.individual.githubcopilot.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 3 :output 15 :cache-read 0.15 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 65536
+    :headers {"Copilot-Integration-Id" "vscode-chat"
+              "Editor-Plugin-Version" "copilot-chat/0.35.0"
+              "Editor-Version" "vscode/1.107.0"
+              "User-Agent" "GitHubCopilotChat/0.35.0"}
+    :compat {:supports-store false
+             :supports-developer-role false
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "grok-4.6"
    {:id "grok-4.6"
     :name "Grok 4.6"
@@ -322,7 +360,7 @@
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :headers {"Copilot-Integration-Id" "vscode-chat"
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
@@ -601,6 +639,60 @@
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
     :compat {:supports-openai-grammar-tools true}}
+   "gpt-6.2-astra"
+   {:id "gpt-6.2-astra"
+    :name "GPT-6.2 Astra"
+    :provider :github-copilot
+    :api :openai-responses
+    :base-url "https://api.individual.githubcopilot.com"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 8
+           :tiers [{:input 16 :input-tokens-above 272000 :output 60 :cache-read 0.8 :cache-write 20}]
+           :output 40
+           :cache-read 0.4
+           :cache-write 10}
+    :context-window 1050000
+    :max-tokens 128000
+    :headers {"Copilot-Integration-Id" "vscode-chat"
+              "Editor-Plugin-Version" "copilot-chat/0.35.0"
+              "Editor-Version" "vscode/1.107.0"
+              "User-Agent" "GitHubCopilotChat/0.35.0"}
+    :compat {:supports-openai-grammar-tools true}}
+   "gpt-6.2-sol"
+   {:id "gpt-6.2-sol"
+    :name "GPT-6.2 Sol"
+    :provider :github-copilot
+    :api :openai-responses
+    :base-url "https://api.individual.githubcopilot.com"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2
+           :tiers [{:input 4 :input-tokens-above 272000 :output 15 :cache-read 0.2 :cache-write 5}]
+           :output 10
+           :cache-read 0.1
+           :cache-write 2.5}
+    :context-window 1050000
+    :max-tokens 128000
+    :headers {"Copilot-Integration-Id" "vscode-chat"
+              "Editor-Plugin-Version" "copilot-chat/0.35.0"
+              "Editor-Version" "vscode/1.107.0"
+              "User-Agent" "GitHubCopilotChat/0.35.0"}
+    :compat {:supports-openai-grammar-tools true}}
    "grok-4.5"
    {:id "grok-4.5"
     :name "Grok 4.5"
@@ -644,6 +736,50 @@
     :input [:text :image]
     :cost {:input 0.2 :output 1.2 :cache-read 0.02 :cache-write 0}
     :context-window 256000
+    :max-tokens 128000
+    :headers {"Copilot-Integration-Id" "vscode-chat"
+              "Editor-Plugin-Version" "copilot-chat/0.35.0"
+              "Editor-Version" "vscode/1.107.0"
+              "User-Agent" "GitHubCopilotChat/0.35.0"}}
+   "mai-code-2"
+   {:id "mai-code-2"
+    :name "MAI Code 2"
+    :provider :github-copilot
+    :api :openai-responses
+    :base-url "https://api.individual.githubcopilot.com"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 0.5 :output 2.5 :cache-read 0.025 :cache-write 0}
+    :context-window 1050000
+    :max-tokens 128000
+    :headers {"Copilot-Integration-Id" "vscode-chat"
+              "Editor-Plugin-Version" "copilot-chat/0.35.0"
+              "Editor-Version" "vscode/1.107.0"
+              "User-Agent" "GitHubCopilotChat/0.35.0"}}
+   "mai-code-2-flash"
+   {:id "mai-code-2-flash"
+    :name "MAI Code 2 Flash"
+    :provider :github-copilot
+    :api :openai-responses
+    :base-url "https://api.individual.githubcopilot.com"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 0.05 :output 0.25 :cache-read 0.005 :cache-write 0}
+    :context-window 1050000
     :max-tokens 128000
     :headers {"Copilot-Integration-Id" "vscode-chat"
               "Editor-Plugin-Version" "copilot-chat/0.35.0"

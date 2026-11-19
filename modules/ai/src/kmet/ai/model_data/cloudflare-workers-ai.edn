@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-02T16:00:51Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :cloudflare-workers-ai
             :name "Cloudflare Workers AI"
             :env-vars ["CLOUDFLARE_API_KEY" "CLOUDFLARE_ACCOUNT_ID"]
@@ -308,6 +308,29 @@
     :cost {:input 0.45 :output 3.2 :cache-read 0.05 :cache-write 0}
     :context-window 262144
     :max-tokens 262144
+    :compat {:supports-store false
+             :supports-developer-role false
+             :supports-long-cache-retention false
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
+   "@cf/thinkingmachines/inkling-2-small"
+   {:id "@cf/thinkingmachines/inkling-2-small"
+    :name "Inkling 2 Small"
+    :provider :cloudflare-workers-ai
+    :api :openai-completions
+    :base-url "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal "minimal"
+                         :off "none"
+                         :xhigh nil}
+    :input [:text :image]
+    :cost {:input 0.3 :output 1 :cache-read 0.1 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 1048576
     :compat {:supports-store false
              :supports-developer-role false
              :supports-long-cache-retention false

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-09T15:41:34Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :fireworks
             :name "Fireworks AI"
             :env-vars ["FIREWORKS_API_KEY"]
@@ -301,7 +301,7 @@
     :input [:text :image]
     :cost {:input 4.5 :output 22.5 :cache-read 0.45 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :compat {:supports-long-cache-retention false
              :send-session-affinity-headers true
              :supports-cache-control-on-tools false
@@ -314,9 +314,9 @@
     :base-url "https://api.fireworks.ai/inference"
     :reasoning true
     :input [:text :image]
-    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
+    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :compat {:supports-long-cache-retention false
              :send-session-affinity-headers true
              :supports-cache-control-on-tools false
@@ -369,7 +369,7 @@
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :compat {:supports-store false
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
@@ -397,7 +397,7 @@
     :input [:text :image]
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :compat {:supports-store false
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
@@ -425,7 +425,7 @@
     :input [:text :image]
     :cost {:input 4.5 :output 22.5 :cache-read 0.45 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :compat {:supports-store false
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
@@ -453,7 +453,7 @@
     :input [:text :image]
     :cost {:input 2.1 :output 10.5 :cache-read 0.21 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :compat {:supports-store false
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true

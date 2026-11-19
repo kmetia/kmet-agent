@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-27T10:40:46Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :kimi-coding
             :name "Kimi For Coding"
             :env-vars ["KIMI_API_KEY"]
@@ -16,7 +16,7 @@
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :headers {"User-Agent" "KimiCLI/1.5"}
     :compat {:force-adaptive-thinking true :allow-empty-signature true}}
    "k3-256k"
@@ -29,7 +29,7 @@
     :input [:text :image]
     :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
     :context-window 262144
-    :max-tokens 131072
+    :max-tokens 262144
     :headers {"User-Agent" "KimiCLI/1.5"}
     :compat {:force-adaptive-thinking true}}
    "k3.1-pro"
@@ -42,7 +42,7 @@
     :input [:text :image]
     :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :headers {"User-Agent" "KimiCLI/1.5"}
     :compat {:force-adaptive-thinking true}}
    "k3.1-pro-highspeed"
@@ -55,7 +55,7 @@
     :input [:text :image]
     :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :headers {"User-Agent" "KimiCLI/1.5"}
     :compat {:force-adaptive-thinking true}}
    "kimi-for-coding"

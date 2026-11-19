@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-12T19:53:32Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :google-vertex
             :name "Google Vertex AI"
             :env-vars ["GOOGLE_CLOUD_API_KEY"]
@@ -76,7 +76,7 @@
     :reasoning true
     :thinking-level-map {:off nil}
     :input [:text :image]
-    :cost {:input 0.25 :output 30 :cache-read 0.025 :cache-write 0}
+    :cost {:input 0.25 :output 1.5 :cache-read 0.025 :cache-write 0}
     :context-window 65536
     :max-tokens 4096}
    "gemini-3.1-pro-preview"
@@ -210,5 +210,16 @@
     :reasoning true
     :input [:text :image]
     :cost {:input 1.5 :output 7.5 :cache-read 0.075 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 65536}
+   "gemini-4-neon"
+   {:id "gemini-4-neon"
+    :name "Gemini 4 Neon"
+    :provider :google-vertex
+    :api :google-vertex
+    :base-url "https://{location}-aiplatform.googleapis.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 3 :output 15 :cache-read 0.15 :cache-write 0}
     :context-window 1048576
     :max-tokens 65536}}}}

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-09T15:41:34Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :together
             :name "Together AI"
             :env-vars ["TOGETHER_API_KEY"]
@@ -150,7 +150,7 @@
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :compat {:supports-store false
              :supports-developer-role false
              :supports-reasoning-effort false
@@ -169,7 +169,7 @@
     :input [:text :image]
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :compat {:supports-store false
              :supports-developer-role false
              :supports-reasoning-effort false

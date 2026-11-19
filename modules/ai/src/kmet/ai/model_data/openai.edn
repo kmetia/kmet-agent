@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-04T11:08:57Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :openai
             :name "OpenAI"
             :env-vars ["OPENAI_API_KEY"]
@@ -624,6 +624,56 @@
            :output 5
            :cache-read 0.05
            :cache-write 1.25}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true
+             :supports-openai-grammar-tools true
+             :supports-explicit-prompt-cache-mode true}}
+   "gpt-6.2-astra"
+   {:id "gpt-6.2-astra"
+    :name "GPT-6.2 Astra"
+    :provider :openai
+    :api :openai-responses
+    :base-url "https://api.openai.com/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 8
+           :tiers [{:input 16 :input-tokens-above 272000 :output 60 :cache-read 0.8 :cache-write 20}]
+           :output 40
+           :cache-read 0.4
+           :cache-write 10}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true
+             :supports-openai-grammar-tools true
+             :supports-explicit-prompt-cache-mode true}}
+   "gpt-6.2-sol"
+   {:id "gpt-6.2-sol"
+    :name "GPT-6.2 Sol"
+    :provider :openai
+    :api :openai-responses
+    :base-url "https://api.openai.com/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2
+           :tiers [{:input 4 :input-tokens-above 272000 :output 15 :cache-read 0.2 :cache-write 5}]
+           :output 10
+           :cache-read 0.1
+           :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-strict-mode true

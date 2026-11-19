@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-12T19:53:32Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :opencode-go
             :name "OpenCode Go"
             :env-vars ["OPENCODE_API_KEY"]
@@ -72,7 +72,18 @@
     :input [:text :image]
     :cost {:input 2 :output 6 :cache-read 0.25 :cache-write 2.5}
     :context-window 1000000
-    :max-tokens 131072}}
+    :max-tokens 131072}
+   "qwen4-max"
+   {:id "qwen4-max"
+    :name "Qwen4 Max"
+    :provider :opencode-go
+    :api :anthropic-messages
+    :base-url "https://opencode.ai/zen/go"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 1.5 :output 4.5 :cache-read 0.075 :cache-write 1.875}
+    :context-window 1000000
+    :max-tokens 262144}}
   :google-generative-ai
   {"gemini-4-argon"
    {:id "gemini-4-argon"
@@ -154,28 +165,6 @@
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :deepseek
-             :max-tokens-field :max-tokens
-             :supports-strict-mode true}}
-   "glm-5.2"
-   {:id "glm-5.2"
-    :name "GLM-5.2"
-    :provider :opencode-go
-    :api :openai-completions
-    :base-url "https://opencode.ai/zen/go/v1"
-    :reasoning true
-    :thinking-level-map {:high "high"
-                         :low nil
-                         :max "max"
-                         :medium nil
-                         :minimal nil
-                         :off nil
-                         :xhigh nil}
-    :input [:text]
-    :cost {:input 1.4 :output 4.4 :cache-read 0.26 :cache-write 0}
-    :context-window 1000000
-    :max-tokens 131072
-    :compat {:supports-store false
-             :supports-developer-role false
              :max-tokens-field :max-tokens
              :supports-strict-mode true}}
    "glm-5.3"
@@ -266,6 +255,28 @@
              :supports-developer-role false
              :max-tokens-field :max-tokens
              :supports-strict-mode true}}
+   "hy4-flash-free"
+   {:id "hy4-flash-free"
+    :name "Hy4 flash Free"
+    :provider :opencode-go
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/go/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low nil
+                         :max nil
+                         :medium nil
+                         :minimal nil
+                         :off "none"
+                         :xhigh nil}
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 65536
+    :compat {:supports-store false
+             :supports-developer-role false
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "hy4-preview"
    {:id "hy4-preview"
     :name "Hy4 preview"
@@ -336,7 +347,7 @@
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens
@@ -360,7 +371,7 @@
     :input [:text :image]
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 1048576
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens

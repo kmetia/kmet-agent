@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-12T19:53:34Z"
+ :generated-at "2026-11-19T11:11:46Z"
  :provider {:id :openrouter :name "OpenRouter"}
  :models
  {"black-forest-labs/flux-3-image"
@@ -86,6 +86,15 @@
   "bytedance-seed/seedream-5-0-pro"
   {:id "bytedance-seed/seedream-5-0-pro"
    :name "ByteDance Seed: Seedream 5.0 Pro"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
+   :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
+  "bytedance-seed/seedream-5-5"
+  {:id "bytedance-seed/seedream-5-5"
+   :name "ByteDance Seed: Seedream 5.5"
    :provider :openrouter
    :api :openrouter-images
    :base-url "https://openrouter.ai/api/v1"
@@ -230,6 +239,24 @@
   "microsoft/mai-image-2.6-flash"
   {:id "microsoft/mai-image-2.6-flash"
    :name "Microsoft AI: MAI-Image-2.6 Flash"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
+   :cost {:input 1.75 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
+  "microsoft/mai-image-2.7"
+  {:id "microsoft/mai-image-2.7"
+   :name "Microsoft AI: MAI-Image-2.7"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
+   :cost {:input 5 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
+  "microsoft/mai-image-2.7-flash"
+  {:id "microsoft/mai-image-2.7-flash"
+   :name "Microsoft AI: MAI-Image-2.7 Flash"
    :provider :openrouter
    :api :openrouter-images
    :base-url "https://openrouter.ai/api/v1"
@@ -506,6 +533,24 @@
    :input [:text]
    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
    :output [:image]}
+  "recraft/recraft-v4.1-flash-v2"
+  {:id "recraft/recraft-v4.1-flash-v2"
+   :name "Recraft: Recraft V4.1 Flash V2"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text]
+   :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
+  "recraft/recraft-v4.1-flash-v2:free"
+  {:id "recraft/recraft-v4.1-flash-v2:free"
+   :name "Recraft: Recraft V4.1 Flash V2 (free)"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text]
+   :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
   "recraft/recraft-v4.1-pro"
   {:id "recraft/recraft-v4.1-pro"
    :name "Recraft: Recraft V4.1 Pro"
@@ -603,6 +648,15 @@
    :api :openrouter-images
    :base-url "https://openrouter.ai/api/v1"
    :input [:text :image]
+   :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
+  "tencent/hy-world-2.1-panorama"
+  {:id "tencent/hy-world-2.1-panorama"
+   :name "Tencent: HY-World 2.1 Panorama"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text]
    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
    :output [:image]}
   "x-ai/grok-imagine-image-2.0"

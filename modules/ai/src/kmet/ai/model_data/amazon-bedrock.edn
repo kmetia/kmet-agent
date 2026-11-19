@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-12T19:53:32Z"
+ :generated-at "2026-11-19T11:11:44Z"
  :provider {:id :amazon-bedrock
             :name "Amazon Bedrock"
             :env-vars []
@@ -1078,6 +1078,40 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
+   "global.openai.gpt-6.2-astra"
+   {:id "global.openai.gpt-6.2-astra"
+    :name "GPT-6.2 Astra (Global)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 8
+           :tiers [{:input 16 :input-tokens-above 272000 :output 60 :cache-read 0.8 :cache-write 20}]
+           :output 40
+           :cache-read 0.4
+           :cache-write 10}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
+   "global.openai.gpt-6.2-sol"
+   {:id "global.openai.gpt-6.2-sol"
+    :name "GPT-6.2 Sol (Global)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2
+           :tiers [{:input 4 :input-tokens-above 272000 :output 15 :cache-read 0.2 :cache-write 5}]
+           :output 10
+           :cache-read 0.1
+           :cache-write 2.5}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
    "global.xai.grok-4.6"
    {:id "global.xai.grok-4.6"
     :name "Grok 4.6 (Global)"
@@ -1794,6 +1828,40 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
+   "openai.gpt-6.2-astra"
+   {:id "openai.gpt-6.2-astra"
+    :name "GPT-6.2 Astra"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 8.8
+           :tiers [{:input 17.6 :input-tokens-above 272000 :output 66 :cache-read 0.88 :cache-write 22}]
+           :output 44
+           :cache-read 0.44
+           :cache-write 11}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
+   "openai.gpt-6.2-sol"
+   {:id "openai.gpt-6.2-sol"
+    :name "GPT-6.2 Sol"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2.2
+           :tiers [{:input 4.4 :input-tokens-above 272000 :output 16.5 :cache-read 0.22 :cache-write 5.5}]
+           :output 11
+           :cache-read 0.11
+           :cache-write 2.75}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
    "openai.gpt-oss-120b"
    {:id "openai.gpt-oss-120b"
     :name "gpt-oss-120b"
@@ -2469,6 +2537,40 @@
            :output 5.5
            :cache-read 0.055
            :cache-write 1.375}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
+   "us.openai.gpt-6.2-astra"
+   {:id "us.openai.gpt-6.2-astra"
+    :name "GPT-6.2 Astra (US)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 8.8
+           :tiers [{:input 17.6 :input-tokens-above 272000 :output 66 :cache-read 0.88 :cache-write 22}]
+           :output 44
+           :cache-read 0.44
+           :cache-write 11}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
+   "us.openai.gpt-6.2-sol"
+   {:id "us.openai.gpt-6.2-sol"
+    :name "GPT-6.2 Sol (US)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2.2
+           :tiers [{:input 4.4 :input-tokens-above 272000 :output 16.5 :cache-read 0.22 :cache-write 5.5}]
+           :output 11
+           :cache-read 0.11
+           :cache-write 2.75}
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
