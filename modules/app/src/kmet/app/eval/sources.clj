@@ -14,9 +14,7 @@
    `user`, the system `core`, `clj` and `eval`, and the fixed host
    namespaces the sandbox installs around them."
   #{"user" "core" "clj" "eval" "clojure" "clojure.core"
-    "babashka.process"
-    "kmet.libs.http" "kmet.libs.json"
-    "kmet.libs.markdown" "kmet.libs.yaml"})
+    "babashka.process"})
 
 (def reserved-source-keys
   "Built-in keys refused even when a namespace check would allow them. A

@@ -118,7 +118,7 @@
       (t/is (str/includes? (pr-str (:details result)) "may not contribute to clj"))
       (t/is (str/includes? (pr-str (:details result)) "may not contribute to eval"))
       (t/is (str/includes? (pr-str (:details result))
-                           "may not contribute to kmet.libs.http"))
+                           "may contribute only to ext.bad-http"))
       (t/is (= "false" (:content (support/eval! env "(some? (resolve 'user/nope))"))))
       (t/is (nil? (get (support/eval! env "(eval/sources)") :id))))))
 

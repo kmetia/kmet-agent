@@ -659,8 +659,7 @@ from the help listings.
 - Values must live under `ext.<source-id>` or a subnamespace of it:
   `ext.license`, `ext.license.internal`. The model's `user`, the system
   `core`, `clj` and `eval`, and the fixed host namespaces (`clojure.core`,
-  `clojure`, `babashka.process`, `kmet.libs.http`, `kmet.libs.json`,
-  `kmet.libs.markdown`, `kmet.libs.yaml`) are reserved. `read`, `write`,
+  `clojure`, `babashka.process`) are reserved. `read`, `write`,
   `edit` and `bash` (also `core/...`) call the tool implementations
   directly; `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` call
   `kmet.libs.clj-edit` directly; `clj/nrepl-eval` calls

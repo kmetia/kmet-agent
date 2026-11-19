@@ -481,9 +481,8 @@ do not become `/config` rows for the user library.
   timeout. Keep it fast; a slow source delays every eval call.
 - System surfaces are not writable by a source: `core` (runtime verbs),
   `clj` (structure verbs), `eval` (library API), the model's `user`, and the
-  fixed host namespaces (`clojure.core`, `clojure`, `babashka.process`,
-  `kmet.libs.http`, `kmet.libs.json`, `kmet.libs.markdown`,
-  `kmet.libs.yaml`). Contribute under `ext.<id>`; the call surface is
+  fixed host namespaces (`clojure.core`, `clojure`, `babashka.process`).
+  Contribute under `ext.<id>`; the call surface is
   `<id>/verb` (e.g. `license/add!`). A source that uses another namespace,
   a built-in key, or a built-in `/eval` verb is refused as a whole.
 - A source-provided key is never written to the eval library. A model can
