@@ -417,50 +417,103 @@
                        values)]
     (when (seq resolved) resolved)))
 
-(defn- zai-provider? [provider url]
-  (or (contains? #{"zai" "zai-coding-cn"} provider)
-      (str/includes? url "api.z.ai")
-      (str/includes? url "open.bigmodel.cn")))
+(def ^:private compat-families
+  "The openai-completions compat families: provider ids and lower-case
+   base-URL markers (pi detectOpenAICompletionsCompat). A family's membership
+   in the derived policy sets below decides the flags, so adding a provider
+   to a known family is a row edit."
+  {:zai {:providers #{"zai" "zai-coding-cn"}
+         :urls ["api.z.ai" "open.bigmodel.cn"]}
+   :together {:providers #{"together"}
+              :urls ["api.together.ai" "api.together.xyz"]}
+   :moonshot {:providers #{"moonshotai" "moonshotai-cn"}
+              :urls ["api.moonshot."]}
+   :openrouter {:providers #{"openrouter"}
+                :urls ["openrouter.ai"]}
+   :cloudflare-workers-ai {:providers #{"cloudflare-workers-ai"}
+                           :urls ["api.cloudflare.com"]}
+   :cloudflare-ai-gateway {:providers #{"cloudflare-ai-gateway"}
+                           :urls ["gateway.ai.cloudflare.com"]}
+   :nvidia {:providers #{"nvidia"}
+            :urls ["integrate.api.nvidia.com"]}
+   :ant-ling {:providers #{"ant-ling"}
+              :urls ["api.ant-ling.com"]}
+   :cerebras {:providers #{"cerebras"}
+              :urls ["cerebras.ai"]}
+   :deepseek {:providers #{"deepseek"}
+              :urls ["deepseek.com"]}
+   :xai {:providers #{"xai"}
+         :urls ["api.x.ai"]}
+   :opencode {:providers #{"opencode"}
+              :urls ["opencode.ai"]}
+   :chutes {:providers #{}
+            :urls ["chutes.ai"]}})
 
-(defn- together-provider? [provider url]
-  (or (= provider "together")
-      (str/includes? url "api.together.ai")
-      (str/includes? url "api.together.xyz")))
+(def ^:private non-standard-families
+  "No store and no developer role (pi's non-standard group)."
+  #{:nvidia :cerebras :xai :together :chutes :deepseek :zai :moonshot
+    :opencode :cloudflare-workers-ai :cloudflare-ai-gateway :ant-ling})
 
-(defn- moonshot-provider? [provider url]
-  (or (contains? #{"moonshotai" "moonshotai-cn"} provider)
-      (str/includes? url "api.moonshot.")))
+(def ^:private max-tokens-families
+  "Families that take max_tokens instead of max_completion_tokens."
+  #{:chutes :deepseek :moonshot :cloudflare-ai-gateway :together :nvidia
+    :ant-ling :zai})
+
+(def ^:private no-reasoning-effort-families
+  #{:xai :zai :moonshot :together :cloudflare-ai-gateway :nvidia
+    :ant-ling})
+
+(def ^:private no-long-cache-retention-families
+  #{:together :cloudflare-workers-ai :cloudflare-ai-gateway :nvidia
+    :ant-ling})
+
+(def ^:private thinking-formats
+  "Family -> wire thinking format, in precedence order."
+  [[:deepseek :deepseek]
+   [:zai :zai]
+   [:together :together]
+   [:ant-ling :ant-ling]
+   [:openrouter :openrouter]])
+
+(defn- matches-family?
+  "Whether PROVIDER or URL belongs to the family RULE."
+  [{:keys [providers urls]} provider url]
+  (or (contains? providers provider)
+      (some #(str/includes? url %) urls)))
+
+(defn- detected-families
+  "The compat families PROVIDER (a provider-family name) and URL belong to."
+  [provider url]
+  (set (keep (fn [[family rule]]
+               (when (matches-family? rule provider url) family))
+             compat-families)))
+
+(defn- any-family?
+  "Whether any of KS is in the FAMILIES set."
+  [families ks]
+  (boolean (some families ks)))
+
+(defn- developer-role?
+  "pi's developer-role rule: OpenRouter's anthropic/openai models, and
+   every standard family that is not OpenRouter."
+  [families openrouter? id]
+  (or (and openrouter?
+           (some #(str/starts-with? id %) ["anthropic/" "openai/"]))
+      (and (not (any-family? families non-standard-families))
+           (not openrouter?))))
+
+(defn- detected-thinking-format
+  "The highest-precedence thinking format among FAMILIES, else :openai."
+  [families]
+  (or (some (fn [[family format]] (when (contains? families family) format))
+            thinking-formats)
+      :openai))
 
 (defn openrouter-provider?
   "OpenRouter by provider family id or base URL (pi: provider === \"openrouter\"
    || baseUrl.includes(\"openrouter.ai\")); shared by the compat detectors."
   [provider url]
-  (or (= provider "openrouter")
-      (str/includes? (or url "") "openrouter.ai")))
-
-(defn- cloudflare-workers-provider? [provider url]
-  (or (= provider "cloudflare-workers-ai")
-      (str/includes? url "api.cloudflare.com")))
-
-(defn- cloudflare-gateway-provider? [provider url]
-  (or (= provider "cloudflare-ai-gateway")
-      (str/includes? url "gateway.ai.cloudflare.com")))
-
-(defn- nvidia-provider? [provider url]
-  (or (= provider "nvidia")
-      (str/includes? url "integrate.api.nvidia.com")))
-
-(defn- ant-ling-provider? [provider url]
-  (or (= provider "ant-ling")
-      (str/includes? url "api.ant-ling.com")))
-
-(defn- deepseek-provider? [provider url]
-  (or (= provider "deepseek")
-      (str/includes? url "deepseek.com")))
-
-(defn- grok-provider? [provider url]
-  (or (= provider "xai")
-      (str/includes? url "api.x.ai")))
+  (matches-family? (:openrouter compat-families) provider (or url "")))
 
 (defn detect-openai-compat
   "pi detectCompat (packages/ai/src/api/openai-completions.ts): auto-detected
@@ -486,78 +539,41 @@
   (let [provider (some-> (models/provider-family model) name)
         url (str/lower-case (or base-url ""))
         id-str (or id "")
-        zai? (zai-provider? provider url)
-        together? (together-provider? provider url)
-        moonshot? (moonshot-provider? provider url)
-        openrouter? (openrouter-provider? provider url)
-        cf-workers? (cloudflare-workers-provider? provider url)
-        cf-gateway? (cloudflare-gateway-provider? provider url)
-        nvidia? (nvidia-provider? provider url)
-        ant-ling? (ant-ling-provider? provider url)
-        deepseek? (deepseek-provider? provider url)
-        grok? (grok-provider? provider url)
-        non-standard? (or nvidia?
-                          (= provider "cerebras")
-                          (str/includes? url "cerebras.ai")
-                          (= provider "xai")
-                          (str/includes? url "api.x.ai")
-                          together?
-                          (str/includes? url "chutes.ai")
-                          deepseek?
-                          zai?
-                          moonshot?
-                          (= provider "opencode")
-                          (str/includes? url "opencode.ai")
-                          cf-workers?
-                          cf-gateway?
-                          ant-ling?)
-        use-max-tokens? (or (str/includes? url "chutes.ai")
-                            deepseek?
-                            moonshot?
-                            cf-gateway?
-                            together?
-                            nvidia?
-                            ant-ling?
-                            zai?)
-        openrouter-dev-role? (and openrouter?
-                                  (some #(str/starts-with? id-str %)
-                                        ["anthropic/" "openai/"]))]
-    {:supports-store (not non-standard?)
-     :supports-developer-role (or openrouter-dev-role?
-                                  (and (not non-standard?) (not openrouter?)))
-     :supports-reasoning-effort (and (not grok?) (not zai?) (not moonshot?)
-                                     (not together?) (not cf-gateway?) (not nvidia?)
-                                     (not ant-ling?))
+        families (detected-families provider url)
+        openrouter? (contains? families :openrouter)]
+    {:supports-store (not (any-family? families non-standard-families))
+     :supports-developer-role (developer-role? families openrouter? id-str)
+     :supports-reasoning-effort
+     (not (any-family? families no-reasoning-effort-families))
      :supports-usage-in-streaming true
      :supports-finish-reason true
-     :max-tokens-field (if use-max-tokens? :max-tokens :max-completion-tokens)
+     :max-tokens-field (if (any-family? families max-tokens-families)
+                         :max-tokens
+                         :max-completion-tokens)
      :requires-tool-result-name false
      :requires-assistant-after-tool-result false
      :requires-thinking-as-text false
-     :requires-reasoning-content-on-assistant-messages deepseek?
+     :requires-reasoning-content-on-assistant-messages
+     (contains? families :deepseek)
      ;; kmet extension (no pi counterpart): the value a provider needs on
      ;; every assistant message when no same-model reasoning exists. "" for
      ;; the DeepSeek/opencode-go fill; endpoints that turn the field into a
      ;; thinking block reject an empty one, so their models set a non-empty
      ;; placeholder here.
      :reasoning-content-fill ""
-     :thinking-format (cond
-                        deepseek? :deepseek
-                        zai? :zai
-                        together? :together
-                        ant-ling? :ant-ling
-                        openrouter? :openrouter
-                        :else :openai)
+     :thinking-format (detected-thinking-format families)
      :chat-template-kwargs {}
      :chat-template-args {}
      :supports-thinking-token-budget false
      :supports-strict-mode false
-     :cache-control-format (when (and openrouter? (str/starts-with? id-str "anthropic/"))
+     :cache-control-format (when (and openrouter?
+                                      (str/starts-with? id-str "anthropic/"))
                              :anthropic)
      ;; pi detectCompat: OpenRouter asks for the session-affinity headers
      :send-session-affinity-headers openrouter?
      :session-affinity-format (if openrouter? :openrouter :openai)
-     :supports-long-cache-retention (not (or together? cf-workers? cf-gateway? nvidia? ant-ling?))}))
+     :supports-long-cache-retention
+     (not (any-family? families no-long-cache-retention-families))}))
 
 (defn resolved-openai-compat
   "pi getCompat: the model's explicit :compat overlaid on

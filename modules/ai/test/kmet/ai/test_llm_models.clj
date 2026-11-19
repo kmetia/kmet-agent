@@ -430,6 +430,52 @@
       (t/is (false? (:supports-strict-mode moonshot)))
       (t/is (= :max-tokens (:max-tokens-field moonshot))))))
 
+(t/deftest test-detect-openai-compat-family-table
+  ;; Every family here is non-standard (no store, no developer role);
+  ;; the per-row map pins the flags that distinguish it.
+  (doseq [[label m expected]
+          [["chutes (url only)"
+            (cmodel :base-url "https://llm.chutes.ai/v1")
+            {:supports-reasoning-effort true
+             :max-tokens-field :max-tokens
+             :supports-long-cache-retention true}]
+           ["cerebras (provider)"
+            (cmodel :provider :cerebras)
+            {:supports-reasoning-effort true
+             :max-tokens-field :max-completion-tokens}]
+           ["xai (url)"
+            (cmodel :base-url "https://api.x.ai/v1")
+            {:supports-reasoning-effort false
+             :max-tokens-field :max-completion-tokens}]
+           ["opencode (url)"
+            (cmodel :base-url "https://opencode.ai/zen/v1")
+            {:supports-reasoning-effort true
+             :max-tokens-field :max-completion-tokens}]
+           ["nvidia (provider)"
+            (cmodel :provider :nvidia)
+            {:supports-reasoning-effort false
+             :max-tokens-field :max-tokens
+             :supports-long-cache-retention false}]
+           ["ant-ling (provider)"
+            (cmodel :provider :ant-ling)
+            {:supports-reasoning-effort false
+             :max-tokens-field :max-tokens
+             :supports-long-cache-retention false}]
+           ["cloudflare workers (provider)"
+            (cmodel :provider :cloudflare-workers-ai)
+            {:supports-reasoning-effort true
+             :max-tokens-field :max-completion-tokens
+             :supports-long-cache-retention false}]
+           ["cloudflare gateway (url)"
+            (cmodel :base-url "https://gateway.ai.cloudflare.com/v1/x")
+            {:supports-reasoning-effort false
+             :max-tokens-field :max-tokens
+             :supports-long-cache-retention false}]]]
+    (let [d (shared/detect-openai-compat m)]
+      (t/is (false? (:supports-store d)) label)
+      (t/is (false? (:supports-developer-role d)) label)
+      (t/is (= expected (select-keys d (keys expected))) label))))
+
 (t/deftest test-resolved-openai-compat
   (t/testing "explicit compat wins key-wise over detection (models.edn partial entries)"
     (let [r (shared/resolved-openai-compat
