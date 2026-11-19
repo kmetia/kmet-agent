@@ -329,7 +329,7 @@ Ordered by value/effort.
       the eval tests pin it. The save path was split into `save-record`,
       `save-doc`, `save-source` and `save-edit`; the eval directory now has no
       function over CC 10.
-- [ ] Table-drive `detect-openai-compat` (CC 47 in 89 SLOC,
+- [x] Table-drive `detect-openai-compat` (CC 47 in 89 SLOC,
       `modules/ai/src/kmet/ai/api/shared.clj:465`) and `parse-inline`
       (CC 54, `modules/libs/src/kmet/libs/markdown.clj:289`) — rule tables
       instead of nested conditionals in two high-traffic files.
