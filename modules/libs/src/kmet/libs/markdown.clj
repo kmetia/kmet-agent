@@ -286,6 +286,17 @@
         (recur (inc k))
         (min n (inc k))))))
 
+(def ^:private delimiter-rules
+  "Delimiter markers keyed by first char: :double when the next char repeats
+   the marker, :single otherwise. :marker is both the opening and closing
+   marker, so its length is the advance past the close; :min-content is the
+   smallest allowed content length; :content? rows recurse into parse-inline.
+   A lone ~ has no :single row and falls through to the autolink branch."
+  {\* {:double {:type :strong :marker "**" :min-content 1 :content? true}
+       :single {:type :em :marker "*" :min-content 1 :content? true}}
+   \~ {:double {:type :del :marker "~~" :min-content 1 :content? true}}
+   \` {:single {:type :code :marker "`" :min-content 0 :content? false}}})
+
 (defn parse-inline
   "Parse inline Markdown into pure-data tokens. The one-argument form parses
    ordinary text; the private second argument disables nested links/autolinks
@@ -370,86 +381,70 @@
                              (recur (+ i 2)))
                          (do (.append sb ch) (recur (inc i))))
 
-                       (= ch \`)
-                       (let [end (str/index-of line "`" (inc i))]
-                         (if end
-                           (do (push-token out sb {:type :code
-                                                   :s (subs line (inc i) end)})
-                               (recur (inc end)))
-                           (do (.append sb ch) (recur (inc i)))))
-
-                       (and (= ch \*) (< (inc i) n) (= (nth line (inc i)) \*))
-                       (let [end (str/index-of line "**" (+ i 2))]
-                         (if (and end (> end (+ i 2)))
-                           (do (push-token out sb {:type :strong
-                                                   :content (parse-inline
-                                                             (subs line (+ i 2) end)
-                                                             in-link?)})
-                               (recur (+ end 2)))
-                           (do (.append sb ch) (recur (inc i)))))
-
-                       (= ch \*)
-                       (let [end (str/index-of line "*" (inc i))]
-                         (if (and end (> end (inc i)))
-                           (do (push-token out sb {:type :em
-                                                   :content (parse-inline
-                                                             (subs line (inc i) end)
-                                                             in-link?)})
-                               (recur (inc end)))
-                           (do (.append sb ch) (recur (inc i)))))
-
-                       (and (= ch \~)
-                            (>= n (+ i 2))
-                            (= (nth line (inc i)) \~))
-                       (let [end (str/index-of line "~~" (+ i 2))]
-                         (if (and end (> end (+ i 2)))
-                           (do (push-token out sb {:type :del
-                                                   :content (parse-inline
-                                                             (subs line (+ i 2) end)
-                                                             in-link?)})
-                               (recur (+ end 2)))
-                           (do (.append sb ch) (recur (inc i)))))
-
-                       (not in-link?)
-                       ;; Perf gates (jolt irregex is ~25x bb on a miss): the
-                       ;; email regex only runs where an earlier miss has not
-                       ;; ruled the local-part run out (EMAIL-FROM) and the
-                       ;; first char can begin its local part; the url regex
-                       ;; only runs when the literal scheme prefix follows
-                       ;; the start char. Both gates fail only calls the
-                       ;; regex would.
-                       (if-let [matched (or (when (and at? (>= i @email-from)
-                                                       (contains? bare-email-start-chars ch))
-                                              (let [m (re-find bare-email-re (subs line i))]
-                                                (when-not m
-                                                  (vreset! email-from (email-attempt-limit line i)))
-                                                m))
-                                            (when-let [prefixes (get bare-url-prefixes ch)]
-                                              (when (ci-prefix-any-at? line (inc i) prefixes)
-                                                (re-find bare-url-re (subs line i)))))]
-                         (let [raw (loop [s matched]
-                                     (if (or (re-find #"[!?.,:;*_~]$" s)
-                                             (and (str/ends-with? s ")")
-                                                  (> (count (re-seq #"\)" s))
-                                                     (count (re-seq #"\(" s)))))
-                                       (recur (subs s 0 (dec (count s))))
-                                       s))
-                               lower (str/lower-case raw)
-                               url (if (str/includes? raw "@")
-                                     (str "mailto:" raw)
-                                     (if (str/starts-with? lower "www.")
-                                       (str "http://" raw)
-                                       raw))
-                               label (if (str/starts-with? url "mailto:")
-                                       (subs url (count "mailto:"))
-                                       raw)]
-                           (push-token out sb (with-meta (link-token label url)
-                                                {:raw-label raw}))
-                           (recur (+ i (count raw))))
-                         (do (.append sb ch) (recur (inc i))))
-
                        :else
-                       (do (.append sb ch) (recur (inc i)))))))))))))))
+                       (let [rules (get delimiter-rules ch)
+                             repeated? (and rules (< (inc i) n)
+                                            (= (nth line (inc i)) ch))
+                             rule (if repeated?
+                                    (get rules :double (get rules :single))
+                                    (get rules :single))]
+                         (cond
+                           rule
+                           (let [marker (:marker rule)
+                                 marker-len (count marker)
+                                 content-start (+ i marker-len)
+                                 end (str/index-of line marker content-start)]
+                             (if (and end (>= (- end content-start)
+                                              (:min-content rule)))
+                               (let [content (subs line content-start end)
+                                     type (:type rule)]
+                                 (push-token out sb (if (:content? rule)
+                                                      {:type type
+                                                       :content (parse-inline content in-link?)}
+                                                      {:type type :s content}))
+                                 (recur (+ end marker-len)))
+                               (do (.append sb ch) (recur (inc i)))))
+
+                           (not in-link?)
+                           ;; Perf gates (jolt irregex is ~25x bb on a miss): the
+                           ;; email regex only runs where an earlier miss has not
+                           ;; ruled the local-part run out (EMAIL-FROM) and the
+                           ;; first char can begin its local part; the url regex
+                           ;; only runs when the literal scheme prefix follows
+                           ;; the start char. Both gates fail only calls the
+                           ;; regex would.
+                           (if-let [matched (or (when (and at? (>= i @email-from)
+                                                           (contains? bare-email-start-chars ch))
+                                                  (let [m (re-find bare-email-re (subs line i))]
+                                                    (when-not m
+                                                      (vreset! email-from (email-attempt-limit line i)))
+                                                    m))
+                                                (when-let [prefixes (get bare-url-prefixes ch)]
+                                                  (when (ci-prefix-any-at? line (inc i) prefixes)
+                                                    (re-find bare-url-re (subs line i)))))]
+                             (let [raw (loop [s matched]
+                                         (if (or (re-find #"[!?.,:;*_~]$" s)
+                                                 (and (str/ends-with? s ")")
+                                                      (> (count (re-seq #"\)" s))
+                                                         (count (re-seq #"\(" s)))))
+                                           (recur (subs s 0 (dec (count s))))
+                                           s))
+                                   lower (str/lower-case raw)
+                                   url (if (str/includes? raw "@")
+                                         (str "mailto:" raw)
+                                         (if (str/starts-with? lower "www.")
+                                           (str "http://" raw)
+                                           raw))
+                                   label (if (str/starts-with? url "mailto:")
+                                           (subs url (count "mailto:"))
+                                           raw)]
+                               (push-token out sb (with-meta (link-token label url)
+                                                    {:raw-label raw}))
+                               (recur (+ i (count raw))))
+                             (do (.append sb ch) (recur (inc i))))
+
+                           :else
+                           (do (.append sb ch) (recur (inc i)))))))))))))))))
 
 ;; ─── List nesting state ──────────────────────────────────────────────────────
 ;; Lists are built on an indent-based stack: each entry is {:indent n
