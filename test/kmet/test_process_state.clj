@@ -13,7 +13,7 @@
 
 (def ^:private roots
   "The modules that share the ctx tree."
-  ["modules/srce/src" "modules/app/src"])
+  ["modules/srce/src" "modules/sklop/src" "modules/app/src"])
 
 (def ^:private allowed
   "Process-state exceptions: :process is a defonce owned for the process's

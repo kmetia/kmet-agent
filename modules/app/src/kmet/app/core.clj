@@ -58,8 +58,9 @@
             [kmet.app.catalog :as catalog]
             [kmet.app.inspect :as inspect]
             [kmet.app.invocation :as invocation]
-            [kmet.app.compose :as compose]
+            [kmet.app.profiles :as profiles]
             [kmet.app.runtime :as runtime]
+            [kmet.sklop.core :as sklop]
             [kmet.srce.core :as srce]))
 
 ;; ── argument parsing ──────────────────────────────────────────────────────
@@ -360,7 +361,7 @@
    flags, so every mode sees one answer."
   [opts]
   (let [opts (-> (resolve-mode opts)
-                 (update :profile #(or % compose/default-profile))
+                 (update :profile #(or % profiles/default-profile))
                  explicit-session-wins)]
     (when (> (count (filter opts [:dump-config? :dump-default-config?
                                   :dump-state?]))
@@ -377,7 +378,7 @@
    :session str :debug :generate-models :list-models str-or-true
    :token str :socket path :max-sessions long :queue-depth long
    :idle-timeout long :ext-flags {name value-or-true}}`.
-   `:profile` defaults to `compose/default-profile`; `--mode` is kmet1's spelling
+   `:profile` defaults to `profiles/default-profile`; `--mode` is kmet1's spelling
    of it (`resolve-mode`), and the run flags are kmet1's: `--model`/`--provider`
    are the agent's overrides, `--thinking`/`--system-prompt`/
    `--append-system-prompt`/`--models`/`--tools`/`--session-dir` the run's
@@ -408,7 +409,7 @@
                 (catch Exception e
                   (throw (ex-info (str "cannot read patch file " path ": " (ex-message e))
                                   {:type :kmet.app/bad-patch-file :path path} e))))]
-    (if (compose/layer? layer)
+    (if (sklop/layer? layer)
       layer
       (throw (ex-info (str "a patch file holds {:rows […] :patch […]}: " path)
                       {:type :kmet.app/bad-patch-file :path path :content layer})))))
@@ -434,15 +435,16 @@
    on stderr instead of failing the boot, so a patch.edn written for an older
    composition cannot strand a run. The built-in layers and the `--patch`
    files stay strict. Returns `{:profile kw :rows … :patches n :dropped […]}`;
-   composition errors are `:kmet.app/*` ex-infos."
+   composition errors are `:kmet.sklop/*` ex-infos; a row's source
+   policy still reports `:kmet.app/*`."
   [opts]
   (let [chosen (:profile opts)
-        table (compose/builtin)
+        table (profiles/builtin)
         ambient (fn [path] (assoc (read-layer path) :lenient? true :path path))
-        layers (concat (compose/layers table chosen)
+        layers (concat (sklop/layers table chosen)
                        (map ambient (:user-layer-paths opts))
                        (map read-layer (:patch opts)))
-        composed (compose/compose (map catalog/describe-layer layers))]
+        composed (sklop/compose (map catalog/describe-layer layers))]
     (warn-dropped-patches! (:dropped composed))
     (assoc composed :profile chosen)))
 
@@ -476,7 +478,7 @@
    booting anything."
   [opts]
   (let [{:keys [rows patches profile]} (compose-config opts)]
-    (compose/render profile {:rows rows :patches patches})))
+    (sklop/render profile {:rows rows :patches patches})))
 
 (defn- deferred-note
   "One line naming the rows a dump held back, or `\"\"`. `--dump-state` does

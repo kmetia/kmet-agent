@@ -7,7 +7,7 @@
    fails loudly — a fiber that is not `:active` once the mounts settle is a
    composition bug (a name nothing provides, an `apply` that threw), not a run
    to start. The row language, cards and the mount primitive live in
-   `kmet.app.compose`; this namespace supplies the app's source resolver and its
+   `kmet.sklop.core`; this namespace supplies the app's source resolver and its
    boot/teardown policy.
 
    The kernel is synchronous and single-threaded by rule (`srce.md` §8): plugin
@@ -24,10 +24,10 @@
    ctx reaches it by `srce/attr` and nothing holds a pointer back to the
    root."
   (:require [clojure.string :as str]
-            [kmet.app.compose :as compose]
             [kmet.app.events :as events]
             [kmet.app.extensions.rows :as extension-rows]
             [kmet.libs.concurrent :as concurrent]
+            [kmet.sklop.core :as sklop]
             [kmet.srce.core :as srce]))
 
 ;; ── submissions ───────────────────────────────────────────────────────────
@@ -110,7 +110,7 @@
 (def startup-timeout-ms
   "How long a mount waits for a plugin whose `apply` handed back a promise
    (the fiber's `:setup`). A row that has not settled by then is a boot error,
-   not a hang — `compose/inactive-rows` shows it as `:starting`. One budget for the
+   not a hang — `sklop/inactive-rows` shows it as `:starting`. One budget for the
    whole boot, and `teardown-timeout-ms` is the exit counterpart."
   5000)
 
@@ -180,11 +180,11 @@
   "Mount ROWS under CTX with the app's source resolution and setup budget:
    vars and `:ext/<id>` rows resolve as the composition declares, and an
    asynchronous setup gets `startup-timeout-ms`. The generic primitive is
-   `kmet.app.compose/mount-rows!`; `boot` is this on a fresh root, a **preset**
+   `kmet.sklop.core/mount-rows!`; `boot` is this on a fresh root, a **preset**
    is this on an agent's child ctx (`kmet.app.presets`)."
   [ctx rows]
-  (compose/mount-rows! ctx rows {:resolve-source row-source
-                                 :timeout-ms startup-timeout-ms}))
+  (sklop/mount-rows! ctx rows {:resolve-source row-source
+                               :timeout-ms startup-timeout-ms}))
 
 (defn- declaration-conflicts
   "Event names that two mounted fibers declare differently, as
@@ -223,7 +223,7 @@
    thrown when there is one. `boot` and `mount-deferred!` share the rules, so a
    mode mounted after the boot fails the same way a world row does."
   [ctx rows fibers all-fibers diagnose?]
-  (let [failed (compose/inactive-rows rows fibers)]
+  (let [failed (sklop/inactive-rows rows fibers)]
     (when (and (seq failed) (not diagnose?))
       (doseq [f failed]
         (srce/log! ctx :error "plugin did not mount" f))

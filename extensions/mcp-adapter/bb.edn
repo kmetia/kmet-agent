@@ -3,7 +3,7 @@
          "../../modules/hikap/src" "../../modules/libs/src"
          "../../modules/tui/src" "../../modules/ai/src"
          "../../modules/loader/src"
-         "../../modules/srce/src" "../../modules/app/src"
+         "../../modules/srce/src" "../../modules/sklop/src" "../../modules/app/src"
          "../../modules/app/test"
          "../../modules/tk/src"]
  :deps {;; the module trees require kmet.libs.json (clojure.data.json, bundled

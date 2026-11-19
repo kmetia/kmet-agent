@@ -24,9 +24,10 @@
             [rewrite-clj.parser :as p]))
 
 (def ^:private source-roots
-  "The tree a kmet2 kernel mutation can live in: the app the server embeds, and
-   the front end a terminal runs."
-  ["modules/app/src"])
+  "The trees a kmet2 kernel mutation can live in: the app the server embeds,
+   the composition module it mounts through, and the front end a terminal
+   runs."
+  ["modules/app/src" "modules/sklop/src"])
 
 (def ^:private structural-mutators
   "The `kmet.srce.core` calls that run plugin code, and are therefore the
@@ -36,15 +37,17 @@
   #{"plugin!" "restart!" "update!" "dispose!" "dispose-plugin!" "dispose-subtree!"})
 
 (def ^:private owner-sites
-  "Every structural mutation the app and UI sources still make, and why that
-   call site is the owner's.
+  "Every structural mutation the app, the composition module and the UI sources
+   still make, and why that call site is the owner's.
 
    File (repo-relative) → fn name → the reason. Adding a call means adding a
    reason; deleting one means deleting it here."
-  {"modules/app/src/kmet/app/runtime.clj"
+  {"modules/sklop/src/kmet/sklop/core.clj"
    {"plugin!"
-    "The composition's own mount (`mount-rows!`). It runs on the thread that called `boot` — the profile row and the preset both mount from here — and this is also where `boundary!`, the drain every other thread's change rides, lives."
-    "dispose-subtree!"
+    "`mount-rows!`: the composition's mount primitive. The app's `kmet.app.runtime/mount-rows!` calls it with the app's source resolver; `boot`, a preset and an extension row all reach it on the thread that owns the root. A tool thread that mounted would be the bug this guard is for; none does."}
+
+   "modules/app/src/kmet/app/runtime.clj"
+   {"dispose-subtree!"
     "`shutdown!`: the composition tearing itself down after its mode row stopped serving, on the same thread that booted it."}
 
    "modules/app/src/kmet/app/presets.clj"
@@ -145,14 +148,14 @@
   (is (every? fs/directory? source-roots)
       "every scanned tree exists — the guard cannot silently narrow")
   (is (seq (source-files)) "the walk finds sources")
-  (testing "the walk reads a real call site with its line, and does not read prose"
-    (let [sites (call-sites "modules/app/src/kmet/app/runtime.clj")]
-      (is (= #{"plugin!" "dispose-subtree!"} (into #{} (map :fn) sites))
-          "`runtime.clj` mounts a row and shuts its subtree down — the two
-           sites `owner-sites` carries. A third one here is a ledger row, not
-           a broken test; the docstring's `srce/plugin!` prose is not a call")
-      (is (every? (comp number? :row) sites)
-          "a call site carries its line, so a failure can name it"))))
+  (testing "the walk reads real call sites with their lines, and does not read prose"
+    (doseq [[file expected] {"modules/app/src/kmet/app/runtime.clj" #{"dispose-subtree!"}
+                             "modules/sklop/src/kmet/sklop/core.clj" #{"plugin!"}}]
+      (let [sites (call-sites file)]
+        (is (= expected (into #{} (map :fn) sites))
+            (str file "'s call sites"))
+        (is (every? (comp number? :row) sites)
+            "a call site carries its line, so a failure can name it")))))
 
 (deftest every-structural-mutation-names-its-thread
   (let [found (into {}

@@ -18,11 +18,12 @@
    presentation has a second place to edit."
   (:require [clojure.string :as str]
             [clojure.test :as t]
-            [kmet.app.compose :as compose]
+            [kmet.app.profiles :as profiles]
             [kmet.app.registry :as registry]
             [kmet.app.runtime :as runtime]
             [kmet.app.tools.registry :as tools]
             [kmet.app.tools.tool :as tool]
+            [kmet.sklop.core :as sklop]
             [kmet.srce.core :as srce]
             [kmet.test-utils :as tu]))
 
@@ -35,7 +36,7 @@
 (defn- tool-rows
   "The composition's tool rows, as `:bundle/minimal` declares them."
   []
-  (->> (:rows (compose/bundle (compose/builtin) :bundle/minimal))
+  (->> (:rows (sklop/bundle (profiles/builtin) :bundle/minimal))
        (filter #(str/starts-with? (str (:id %)) ":tool/"))))
 
 (t/deftest a-registration-belongs-to-its-own-table

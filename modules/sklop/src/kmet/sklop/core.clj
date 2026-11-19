@@ -1,11 +1,11 @@
-(ns kmet.app.compose
+(ns kmet.sklop.core
   "The composition engine: rows, bundles, profiles, patches, cards and mounts.
 
-   This is the app's reusable assembly layer: data in, a mounted srce subtree
-   out. It knows the row language (a row names a plugin source and carries
-   config; a bundle is a reusable row list; a profile stacks bundles and
-   patches) and the mount contract (`srce/plugin!`), not the app's source
-   policy. A caller supplies the policy:
+   A composition layer over the kernel: data in, a mounted srce subtree out.
+   It knows the row language (a row names a plugin source and carries config; a
+   bundle is a reusable row list; a profile stacks bundles and patches) and the
+   mount contract (`srce/plugin!`), not an application's source policy or
+   table. A caller supplies the policy:
 
    - `:describe-source` turns a row into a card (`describe`, `describe-layer`),
      which is how a var source, an `:ext/…` id or a plain map is read without
@@ -14,27 +14,14 @@
      (`mount-rows!`);
    - `:timeout-ms` is the budget for a mount's asynchronous setups.
 
-   `kmet.app.catalog` is the app's describe-source (vars and `:ext/…` rows);
-   `kmet.app.runtime` is the app's resolver plus boot and teardown policy. The
-   language is data only: `compose` never loads a plugin and never reads a
-   process value. `builtin` reads kmet's committed table; another app calls
-   `read-table` or passes its own table to `profile`, `bundle`, `layers` and
-   `compose`."
-  (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
-            [clojure.string :as str]
+   The language is data only: `compose` never loads a plugin and never reads a
+   process value. The application supplies its own table and source policy
+   (`kmet.app.profiles`, `kmet.app.catalog` and `kmet.app.runtime` are kmet's)."
+  (:require [clojure.string :as str]
             [kmet.libs.concurrent :as concurrent]
             [kmet.srce.core :as srce]))
 
-(def resource
-  "kmet's committed composition table (bundles + profiles)."
-  "kmet/app/profiles.edn")
-
-(def default-profile
-  "The profile a bare run composes."
-  :tui)
-
-(def patch-keys
+(def ^:private patch-keys
   "The keys a patch entry may carry. `:name :inject :provide` are the card
    keys an insert/replace patch gains when `kmet.app.catalog` describes it;
    the rest are the patch itself."
@@ -53,28 +40,12 @@
        (or (nil? (:rows x)) (sequential? (:rows x)))
        (or (nil? (:patch x)) (sequential? (:patch x)))))
 
-(defn read-table
-  "The composition table at classpath RESOURCE: `{:bundles {name bundle}
-   :profiles {name profile}}`. A missing resource is a packaging bug, not an
-   empty table."
-  [resource]
-  (if-let [r (io/resource resource)]
-    (edn/read-string (slurp r))
-    (throw (ex-info (str "missing composition resource " resource)
-                    {:type :kmet.app/missing-profiles}))))
-
-(defn builtin
-  "kmet's built-in composition table, read from `resource`. Another app calls
-   `read-table` with its own resource."
-  []
-  (read-table resource))
-
 (defn profile
-  "The named PROFILE from TABLE; throws :kmet.app/unknown-profile."
+  "The named PROFILE from TABLE; throws :kmet.sklop/unknown-profile."
   [table profile-name]
   (or (get (:profiles table) profile-name)
       (throw (ex-info (str "unknown profile: " (pr-str profile-name))
-                      {:type :kmet.app/unknown-profile
+                      {:type :kmet.sklop/unknown-profile
                        :profile profile-name
                        :known (vec (sort (keys (:profiles table))))}))))
 
@@ -88,16 +59,16 @@
            (or (nil? (second entry)) (map? (second entry))))
     [(first entry) (second entry)]
     (throw (ex-info (str "a :bundles entry is [:bundle/name layer?]: " (pr-str entry))
-                    {:type :kmet.app/bad-bundle-entry :entry entry}))))
+                    {:type :kmet.sklop/bad-bundle-entry :entry entry}))))
 
 (defn bundle
-  "The named BUNDLE-NAME from TABLE; throws :kmet.app/unknown-bundle. Public
+  "The named BUNDLE-NAME from TABLE; throws :kmet.sklop/unknown-bundle. Public
    because a bundle has two mount points: a profile stacks it at the root, a
    preset mounts it on one child ctx (`kmet.app.presets`)."
   [table bundle-name]
   (or (get (:bundles table) bundle-name)
       (throw (ex-info (str "unknown bundle: " (pr-str bundle-name))
-                      {:type :kmet.app/unknown-bundle
+                      {:type :kmet.sklop/unknown-bundle
                        :bundle bundle-name
                        :known (vec (sort (keys (:bundles table))))}))))
 
@@ -126,16 +97,16 @@
 
 (defn- unknown-row [id patch]
   (throw (ex-info (str "patch targets an unknown row: " (pr-str id))
-                  {:type :kmet.app/unknown-row :id id :patch patch})))
+                  {:type :kmet.sklop/unknown-row :id id :patch patch})))
 
 (defn- bad-patch
-  "Throw :kmet.app/bad-patch about PATCH, with the entry it rejected appended."
+  "Throw :kmet.sklop/bad-patch about PATCH, with the entry it rejected appended."
   [patch message]
   (throw (ex-info (str message ": " (pr-str patch))
-                  {:type :kmet.app/bad-patch :patch patch})))
+                  {:type :kmet.sklop/bad-patch :patch patch})))
 
 (defn- check-patch!
-  "Throw :kmet.app/bad-patch unless PATCH is a well-formed patch entry."
+  "Throw :kmet.sklop/bad-patch unless PATCH is a well-formed patch entry."
   [patch]
   (when-not (map? patch)
     (bad-patch patch "a patch entry must be a map"))
@@ -177,7 +148,7 @@
   (vec (concat (subvec rows 0 at) [(dissoc patch :after :before)] (subvec rows at))))
 
 (defn- unknown-or-dropped
-  "Strict composition: raise :kmet.app/unknown-row naming MISSING. A LAYER
+  "Strict composition: raise :kmet.sklop/unknown-row naming MISSING. A LAYER
    flagged `:lenient?` instead records the patch in STATE's `:dropped` —
    `{:missing missing :patch patch :path (:path layer)}` — and continues."
   [state layer missing patch]
@@ -254,10 +225,10 @@
         dupes (->> rows (map :id) frequencies (filter (fn [[_ n]] (> n 1))) (map key) sort)]
     (when missing
       (throw (ex-info "composed rows must carry an :id"
-                      {:type :kmet.app/row-without-id :rows (vec missing)})))
+                      {:type :kmet.sklop/row-without-id :rows (vec missing)})))
     (when (seq dupes)
       (throw (ex-info (str "duplicate row ids: " (pr-str (vec dupes)))
-                      {:type :kmet.app/duplicate-row :ids (vec dupes)})))
+                      {:type :kmet.sklop/duplicate-row :ids (vec dupes)})))
     {:rows rows :patches patches :dropped (:dropped composed)}))
 
 (defn- pad [s width] (format (str "%-" width "s") s))
@@ -288,14 +259,14 @@
 ;; ── cards ─────────────────────────────────────────────────────────────────
 
 (defn- bad-row [row message]
-  (throw (ex-info message {:type :kmet.app/bad-row :row row})))
+  (throw (ex-info message {:type :kmet.sklop/bad-row :row row})))
 
 (defn describe
   "The card for ROW: the row plus :id, :name, :inject and :provide.
    DESCRIBE-SOURCE is the caller's source policy: it receives ROW and returns
    the source's card (`{:name :inject :provide}`, plus :id when the policy has
    one). A row without a :plugin, or a source that does not describe as a
-   card, is `:kmet.app/bad-row`."
+   card, is `:kmet.sklop/bad-row`."
   [row {:keys [describe-source]}]
   (when-not (fn? describe-source)
     (bad-row row "a card needs a :describe-source fn"))
@@ -314,15 +285,14 @@
   "Describe LAYER's rows and its insert/replace patches through
    DESCRIBE-SOURCE; config-only and remove patches pass through."
   [layer {:keys [describe-source]}]
-  (cond-> layer
-    (:rows layer) (update :rows #(mapv (fn [row]
-                                         (describe row {:describe-source describe-source}))
-                                       %))
-    (:patch layer) (update :patch #(mapv (fn [patch]
-                                           (if (:plugin patch)
-                                             (describe patch {:describe-source describe-source})
-                                             patch))
-                                         %))))
+  (let [opts {:describe-source describe-source}]
+    (cond-> layer
+      (:rows layer) (update :rows #(mapv (fn [row] (describe row opts)) %))
+      (:patch layer) (update :patch #(mapv (fn [patch]
+                                             (if (:plugin patch)
+                                               (describe patch opts)
+                                               patch))
+                                           %)))))
 
 ;; ── mounts ────────────────────────────────────────────────────────────────
 
@@ -332,7 +302,7 @@
    caller's inactive-row check reports what is still starting."
   8)
 
-(defn await-setups!
+(defn- await-setups!
   "Wait for the row setups that ran asynchronously and re-settle, so the
    caller sees decided fibers. TIMEOUT-MS is the caller's budget for the whole
    wait, spent in monotonic slices; it is required so the policy stays with
@@ -341,7 +311,7 @@
   [ctx {:keys [timeout-ms]}]
   (when-not (number? timeout-ms)
     (throw (ex-info "await-setups! needs a :timeout-ms"
-                    {:type :kmet.app/bad-mount})))
+                    {:type :kmet.sklop/bad-mount})))
   (let [deadline (+ (concurrent/monotonic-ms) timeout-ms)]
     (loop [round 0]
       (let [handles (into [] (keep :setup) (srce/fibers ctx))]
@@ -363,10 +333,10 @@
   [ctx rows {:keys [resolve-source timeout-ms]}]
   (when-not (fn? resolve-source)
     (throw (ex-info "mount-rows! needs a :resolve-source fn"
-                    {:type :kmet.app/bad-mount :rows (count rows)})))
+                    {:type :kmet.sklop/bad-mount :rows (count rows)})))
   (when-not (number? timeout-ms)
     (throw (ex-info "mount-rows! needs a :timeout-ms"
-                    {:type :kmet.app/bad-mount :rows (count rows)})))
+                    {:type :kmet.sklop/bad-mount :rows (count rows)})))
   (let [fibers (mapv (fn [row]
                        (srce/plugin! ctx (resolve-source row) (:config row)))
                      rows)]

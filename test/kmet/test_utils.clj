@@ -4,14 +4,15 @@
             [clojure.test :as t]
             [kmet.app.commands :as commands]
             [kmet.app.extensions.core :as extensions]
+            [kmet.app.profiles :as profiles]
             [kmet.app.prompts :as prompts]
-            [kmet.app.compose :as compose]
             [kmet.app.registries :as registries]
             [kmet.app.registry :as registry]
             [kmet.app.runtime :as runtime]
             [kmet.app.session.runtime :as rt]
             [kmet.app.skills :as skills]
             [kmet.app.tools.registry :as tools]
+            [kmet.sklop.core :as sklop]
             [kmet.srce.core :as srce]
             [kmet.tui.utils :as u]))
 
@@ -118,7 +119,7 @@
   [ctx]
   (when-not (srce/get ctx :commands)
     (srce/provide! ctx :commands (registry/atom-registry)))
-  (let [rows (->> (:rows (compose/bundle (compose/builtin) :bundle/minimal))
+  (let [rows (->> (:rows (sklop/bundle (profiles/builtin) :bundle/minimal))
                   (filter #(tools/tool-row-name (:id %))))]
     (runtime/mount-rows! ctx rows)
     (srce/settle! ctx)

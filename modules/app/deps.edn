@@ -1,8 +1,9 @@
 {:paths ["src" "test"]
  ;; Rank 3: the application, the top of the ladder — it holds the front end,
  ;; so it sits above the component backend (`tui`, rank 2) the widgets build
- ;; on. Its sources require only lower-ranked modules (kmet.srce.*,
- ;; kmet.libs.*, kmet.ai.*, kmet.loader.*, kmet.tui.*, kmet.reakt.*), plus
+  ;; on. Its sources require only lower-ranked modules (kmet.srce.*,
+  ;; kmet.sklop.*, kmet.libs.*, kmet.ai.*, kmet.loader.*, kmet.tui.*,
+  ;; kmet.reakt.*), plus
  ;; third-party code; the module may never require a module at its own rank or
  ;; above. babashka/process is the version rule's git describe.
  ;;
@@ -73,6 +74,7 @@
  :deps {kmet/libs {:local/root "../libs"}
         kmet/hikap {:local/root "../hikap"}
         kmet/srce {:local/root "../srce"}
+        kmet/sklop {:local/root "../sklop"}
         kmet/ai {:local/root "../ai"}
         kmet/loader {:local/root "../loader"}
         ;; The front end's component backends, from the merge: kmet.ui.* builds

@@ -1,5 +1,5 @@
 (ns kmet.app.catalog
-  "The app's row-source policy for `kmet.app.compose` cards.
+  "The app's row-source policy for `kmet.sklop.core` cards.
 
    A profile row names a plugin **source** (a var, or an `:ext/…` id the
    extension host resolves). Describing a row resolves the source and reads the
@@ -9,7 +9,7 @@
    nothing, so this is inspection, not boot.
 
    The card merge, patch walking and inject normalization live in
-   `kmet.app.compose`; this namespace is the app's `:describe-source`: it says
+   `kmet.sklop.core`; this namespace is the app's `:describe-source`: it says
    what a var and an `:ext/…` source mean and what an unknown source reports.
 
    A source that does not resolve is a composition error, reported by
@@ -25,8 +25,8 @@
    `:ext/…` source is resolved from the installed extensions by name
    (`kmet.app.extensions.rows`) without loading it, so the dump names a real
    row."
-  (:require [kmet.app.compose :as compose]
-            [kmet.app.extensions.rows :as extension-rows]))
+  (:require [kmet.app.extensions.rows :as extension-rows]
+            [kmet.sklop.core :as sklop]))
 
 (defn- unknown-plugin
   "The composition error for a row's plugin SOURCE. CAUSE, when the source
@@ -90,10 +90,10 @@
 (defn describe
   "The composition card for ROW, through the app's source policy."
   [row]
-  (compose/describe row {:describe-source describe-source}))
+  (sklop/describe row {:describe-source describe-source}))
 
 (defn describe-layer
   "Describe a layer's rows, and its insert/replace patches (the ones carrying
    a `:plugin` source); config-only and remove patches pass through."
   [layer]
-  (compose/describe-layer layer {:describe-source describe-source}))
+  (sklop/describe-layer layer {:describe-source describe-source}))

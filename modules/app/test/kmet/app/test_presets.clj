@@ -87,7 +87,7 @@
                                             :setup (presets/setup [:bundle/gated :bundle/nope])})
                         ::no-throw
                         (catch clojure.lang.ExceptionInfo e e))]
-        (is (= :kmet.app/unknown-bundle (:type (ex-data thrown)))
+        (is (= :kmet.sklop/unknown-bundle (:type (ex-data thrown)))
             "a name the composition does not have is a composition error, not
              a creation that happened to fail")
         (is (re-find #"unknown bundle: :bundle/nope" (ex-message thrown))

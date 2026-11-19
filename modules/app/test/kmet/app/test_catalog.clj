@@ -127,7 +127,7 @@
   (is (= :kmet.app/unknown-plugin
          (error-type #(catalog/describe {:plugin 'kmet.app.test-catalog/not-a-plugin})))
       "a var that is not a plugin map is not a card")
-  (is (= :kmet.app/bad-row
+  (is (= :kmet.sklop/bad-row
          (error-type #(catalog/describe {:id :row})))
       "a row without a :plugin source is a bad row")
   (is (= :kmet.app/bad-row

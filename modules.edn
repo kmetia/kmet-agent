@@ -19,6 +19,10 @@
   {:name "ai" :src "modules/ai/src" :test "modules/ai/test" :rank 1}
   {:name "loader" :src "modules/loader/src" :test "modules/loader/test" :rank 0}
   {:name "srce" :src "modules/srce/src" :test "modules/srce/test" :rank 1}
+  ;; The composition layer above the kernel: rows, bundles, profiles, patches,
+  ;; cards and mounts. It owns the language; the app supplies the table, the
+  ;; source policy and boot/teardown (modules/sklop/README.md).
+  {:name "sklop" :src "modules/sklop/src" :test "modules/sklop/test" :rank 2}
   ;; The kmet2 application: shared services, the session layer, the extension
   ;; host (architecture.md § Composition), and the front end. The TUI's widgets,
   ;; selectors and mode row are `kmet.ui.*` under `modules/app/src/kmet/ui` —

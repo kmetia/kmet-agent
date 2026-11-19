@@ -218,7 +218,7 @@
    that composes but does not mount."
   [t]
   (contains? #{:kmet.app/bad-agent-handle :kmet.app/preset-failed
-               :kmet.app/unknown-bundle}
+               :kmet.sklop/unknown-bundle}
              (:type (ex-data t))))
 
 (defn- setup-fn

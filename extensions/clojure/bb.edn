@@ -4,7 +4,7 @@
          "../../modules/libs/test"
          "../../modules/tui/src" "../../modules/ai/src"
          "../../modules/loader/src"
-         "../../modules/srce/src" "../../modules/app/src"
+         "../../modules/srce/src" "../../modules/sklop/src" "../../modules/app/src"
          "../../modules/tk/src"]
  :deps {dev.weavejester/cljfmt {:mvn/version "0.16.6"
                                 :exclusions [rewrite-clj/rewrite-clj]}

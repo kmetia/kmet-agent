@@ -37,7 +37,7 @@
  ;; extensions/<name>/src layout, so io/resource reads a bundled extension at
  ;; the same path in a binary as in a checkout. A
  ;; missing root embeds nothing — the runtime then offers no bundled set.
- :jolt/build {:embed ["modules/reakt/src" "modules/hikap/src" "modules/libs/src" "modules/tui/src" "modules/ai/src" "modules/loader/src" "modules/srce/src" "modules/app/src" "modules/tk/src" "target/kmet-version" "target/kmet-bundled"]
+ :jolt/build {:embed ["modules/reakt/src" "modules/hikap/src" "modules/libs/src" "modules/tui/src" "modules/ai/src" "modules/loader/src" "modules/srce/src" "modules/sklop/src" "modules/app/src" "modules/tk/src" "target/kmet-version" "target/kmet-bundled"]
                ;; Runtime-only requires the static scan cannot see. clojure.core.async's
                ;; overlay (alts!!, mult, …) is loaded by the extension host; babashka.cli
                ;; and babashka.tasks are loaded by the eval/codemode sandbox

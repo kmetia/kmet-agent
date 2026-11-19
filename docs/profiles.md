@@ -166,7 +166,7 @@ Every mistake is refused by name before anything boots: an unknown row id (the
 two ambient layers drop such a patch with a warning instead), a duplicate id,
 a patch that changes nothing, a `:remove` that also sets config, an unknown
 patch key, or a file that is not `{:rows … :patch …}` — each names the
-offending entry (`:kmet.app/unknown-row`, `:kmet.app/bad-patch`,
+offending entry (`:kmet.sklop/unknown-row`, `:kmet.sklop/bad-patch`,
 `:kmet.app/bad-patch-file`, …).
 
 ## Checking a layer before you run it

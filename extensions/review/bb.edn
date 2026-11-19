@@ -3,7 +3,7 @@
          "../../modules/hikap/src" "../../modules/libs/src"
          "../../modules/tui/src" "../../modules/ai/src"
          "../../modules/loader/src"
-         "../../modules/srce/src" "../../modules/app/src"
+         "../../modules/srce/src" "../../modules/sklop/src" "../../modules/app/src"
          "../../modules/tk/src"]
  :tasks
  {test {:doc "Run review extension tests (args: test namespace names)"
