@@ -91,3 +91,18 @@
           (t/is (= :edit-error (:type (ex-data op-error))) (str case))
           (t/is (= (ex-message op-error) (:content tool-result))
                 "the op and the tool report the same :edit-error message"))))))
+
+(t/deftest write-and-edit-use-pi-strict-sampling
+  (t/is (= {:type :json-schema :strict :prefer}
+           (:constrained-sampling write/definition)))
+  (t/is (= {:type :json-schema :strict :prefer}
+           (:constrained-sampling edit/definition))))
+
+(t/deftest test-read-tool-strips-a-model-zero-tail
+  (with-dir
+    (fn [dir]
+      (spit (str dir "/lines.txt") "one\ntwo")
+      (let [result (tool-call "read" {:path "lines.txt" :offset 1 :limit 2
+                                      :tail 0 :footer false})]
+        (t/is (not (:is-error result)))
+        (t/is (= "one\ntwo" (:content result)))))))

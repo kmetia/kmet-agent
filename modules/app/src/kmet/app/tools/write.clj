@@ -63,6 +63,7 @@
    :prompt-guidelines ["Use write only for new files or complete rewrites."]
    :params {:path    {:type :string :description "File path to write to (relative or absolute)"}
             :content {:type :string :description "Content to write to the file"}}
+   :constrained-sampling {:type :json-schema :strict :prefer}
    :execute execute
    ;; the cancel signal is the third execute argument (see execute)
    :contextual? true

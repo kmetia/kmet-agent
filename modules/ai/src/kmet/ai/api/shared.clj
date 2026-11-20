@@ -584,6 +584,10 @@
    so a wire can read its own compat key from here without a detection entry.
    The single source of compat truth for the wire request builders.
 
+   The Codex Responses wire defaults strict tools on (pi
+   openai-codex-responses.ts: `model.compat?.supportsStrictMode ?? true`),
+   unlike the generic Responses wire; an explicit false still wins.
+
    One deliberate exception to pure key-wise merge: an explicit
    :thinking-format :deepseek pins a model to the DeepSeek thinking-mode
    protocol, which requires reasoning_content on every assistant message once
@@ -596,6 +600,10 @@
         merged (merge (detect-openai-compat model)
                       (into {} (remove (comp nil? val)) explicit))]
     (cond-> merged
+      (and (= :openai-codex-responses (:api model))
+           (nil? (get explicit :supports-strict-mode)))
+      (assoc :supports-strict-mode true)
+
       (and (= :deepseek (:thinking-format merged))
            (nil? (get explicit :requires-reasoning-content-on-assistant-messages)))
       (assoc :requires-reasoning-content-on-assistant-messages true))))

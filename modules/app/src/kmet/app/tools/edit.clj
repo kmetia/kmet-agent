@@ -153,6 +153,7 @@
                                               :required ["oldText" "newText"]}
                                       :description "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."}}
                 :required ["path" "edits"]}
+   :constrained-sampling {:type :json-schema :strict :prefer}
    :execute execute
    ;; the cancel signal is the third execute argument (see execute)
    :contextual? true

@@ -105,6 +105,26 @@
       (t/is (= "bash" (get-in payload [:tools 0 :name])))
       (t/is (= 0.2 (:temperature payload)) "sampling-params win over the envelope"))))
 
+(t/deftest test-llm-codex-strict-tools
+  (let [tool (tools/make-tool
+              :name "read" :description "d"
+              :params {:path {:type :string :description "p"}
+                       :tail {:type :number :description "t" :optional? true}}
+              :constrained-sampling {:type :json-schema :strict :prefer}
+              :execute (fn [_] nil))]
+    (t/testing "strict tools default on for the Codex Responses wire"
+      (let [payload (@#'codex/codex-payload (codex-model) :high [] [tool]
+                                            "gpt-5.4" nil)]
+        (t/is (true? (get-in payload [:tools 0 :strict])))
+        (t/is (some? (get-in payload [:tools 0 :parameters "properties" "tail" "anyOf"]))
+              "the optional tail is nullable in the strict schema")))
+    (t/testing "an explicit false keeps strict tools off"
+      (let [payload (@#'codex/codex-payload
+                     (codex-model {:compat {:supports-strict-mode false}})
+                     :high [] [tool] "gpt-5.4" nil)]
+        (t/is (not (contains? (get-in payload [:tools 0]) :strict)))
+        (t/is (nil? (get-in payload [:tools 0 :parameters "properties" "tail" "anyOf"])))))))
+
 (t/deftest test-llm-codex-request-headers
   (let [token (test-jwt "acc-9")
         headers (@#'codex/codex-request-headers token "sess-123")]

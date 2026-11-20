@@ -171,3 +171,23 @@
   (let [props (:properties (:parameters read/definition))]
     (doseq [k ["as" "start" "end"]]
       (is (not (contains? props k))))))
+
+(deftest the-read-tool-uses-pi-strict-sampling
+  (is (= {:type :json-schema :strict :prefer}
+         (:constrained-sampling read/definition))))
+
+(deftest a-model-tail-of-zero-is-not-a-tail
+  (testing "a model on a non-strict wire may send its unused :tail as 0;
+            the model boundary strips it, while the eval verb still rejects 0"
+    (let [dir (test-tmp/temp-dir! "test-read-model-tail-")
+          f (str (fs/path dir "lines.txt"))
+          prepare (:prepare-arguments read/definition)]
+      (fs/create-dirs dir)
+      (spit f "one\ntwo")
+      (try
+        (is (= {:path f :offset 1 :limit 2}
+               (prepare {:path f :offset 1 :limit 2 :tail 0})))
+        (is (= 2 (:tail (prepare {:path f :tail 2}))))
+        (is (= "one\ntwo"
+               (:content (read-call (prepare {:path f :offset 1 :limit 2 :tail 0})))))
+        (finally (fs/delete-tree dir))))))

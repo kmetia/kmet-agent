@@ -493,6 +493,14 @@
             :limit  {:type :number :description "Maximum number of lines to read" :optional? true}
             :tail   {:type :number :description "Read the last N lines (cannot combine with :offset or :limit)" :optional? true}
             :footer {:type :boolean :description "Include the continuation hint when :limit stops before the end of the file (default true)" :optional? true}}
+   :constrained-sampling {:type :json-schema :strict :prefer}
+   ;; Strict sampling sends an unused :tail as null; a model on a
+   ;; non-strict wire may send 0 instead. The eval verb calls execute
+   ;; directly, so it keeps rejecting :tail 0.
+   :prepare-arguments (fn [args]
+                        (if (and (number? (:tail args)) (zero? (:tail args)))
+                          (dissoc args :tail)
+                          args))
    :execute execute
    ;; the cancel signal is the third execute argument (see execute)
    :contextual? true
