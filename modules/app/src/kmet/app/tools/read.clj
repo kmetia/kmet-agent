@@ -306,6 +306,11 @@
        :is-error true}
       (lines-result raw-path all-lines start end))))
 
+(defn- positive-line-number-error
+  "The message for OPTION when its line number is not a positive integer."
+  [option]
+  (str option " must be a positive integer (line numbers start at 1)."))
+
 (defn- range-error
   "The error for conflicting or invalid range selectors, or nil."
   [{:keys [offset start limit end tail]}]
@@ -323,10 +328,10 @@
     "Use :tail without :start or :end."
 
     (and (some? start) (not (tool-util/positive-integer? start)))
-    ":start must be a positive integer."
+    (positive-line-number-error ":start")
 
     (and (some? end) (not (tool-util/positive-integer? end)))
-    ":end must be a positive integer."
+    (positive-line-number-error ":end")
 
     (and (some? end) (some? (or offset start)) (< end (or offset start)))
     ":end must not be before the start line."))
@@ -393,7 +398,7 @@
                                         ":tail must be a positive integer."
                                         (and (some? offset)
                                              (not (tool-util/positive-integer? offset)))
-                                        ":offset must be a positive integer."
+                                        (positive-line-number-error ":offset")
                                         (and (some? limit)
                                              (not (tool-util/positive-integer? limit)))
                                         ":limit must be a positive integer."

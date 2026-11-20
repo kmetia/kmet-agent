@@ -1140,7 +1140,7 @@
        "\n" (builtin-help-line)
        "\nUnqualified read is the file reader; clojure.core/read remains "
        "available. Read a long file in ranges with "
-       "(read path {:offset N :limit N :footer false}) or the last lines with "
+       "(read path {:offset 1 :limit N :footer false}) (1-based line numbers) or the last lines with "
        "(read path {:tail N}); :footer false keeps an exact range free of the "
        "continuation hint."
        "\nShell: (bash \"cmd\") returns output; a nonzero exit is a normal "

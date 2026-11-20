@@ -356,7 +356,7 @@ Execute a bash command in the current working directory. Returns stdout and stde
 **Description:**
 
 Fresh Clojure SCI sandbox with the active tools bridged in; definitions do not persist.
-Files: (read "p") or (read "p" {:offset N :limit N :footer false :tail N}); (write "p" text); (edit "p" old new) or (edit "p" pairs).
+Files: (read "p") or (read "p" {:offset 1 :limit N :footer false :tail N}) (1-based line numbers); (write "p" text); (edit "p" old new) or (edit "p" pairs).
 Shell: (bash "cmd" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.
 Aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require needed. HTTP: (fetch "url" {:as :json}) -> {:status :headers :body}.
 Tools: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; @(tools/read {…}) is the per-tool shorthand, while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) lists the callable tools with their descriptions and parameters; (tools/describe "name") returns one declaration. Inner results never enter the conversation.
@@ -413,7 +413,7 @@ Only the current session is searchable. One result is capped at 50 KB.
 **Description:**
 
 Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order, definitions persist.
-File/shell/HTTP: (read "p") -> text; (read "p" {:offset N :limit N}); (read "p" {:start N :end N :as :lines}); (write "p" text); (edit "p" old new|pairs); (bash "cmd" {:timeout N :max-lines N :max-bytes N :as :map}); (glob "p"); (grep "p"); (fetch "url" {:as :json}). Nonzero exits are normal.
+File/shell/HTTP: (read "p") -> text; (read "p" {:offset 1 :limit N}); (read "p" {:start 1 :end N :as :lines}); (write "p" text); (edit "p" old new|pairs); (bash "cmd" {:timeout N :max-lines N :max-bytes N :as :map}); (glob "p"); (grep "p"); (fetch "url" {:as :json}). Nonzero exits are normal.
 Output: emitted text and form values are interleaved in order (earlier values one line each, last value full); (emit v) adds full output. stdout/stderr (println/print/prn) discarded. Limit 16 KiB (50 KiB with :max-output-bytes); timeout seconds, omit/0 = none.
 Discover: (help), (help :core), (sources), (help :library), (index "text"), (describe 'name); source verbs <id>/verb.
 

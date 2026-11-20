@@ -969,7 +969,7 @@
 
 (defn read-text
   "Read PATH through the read tool's implementation; OPTS may carry :offset,
-   :limit, :start/:end (inclusive), :tail (not with offset/limit), :footer and
+   :limit, :start/:end (inclusive, 1-based line numbers), :tail (not with offset/limit), :footer and
    :as. :as :lines returns the numbered map
    {:path :start :end :total-lines :lines :truncated?} instead of the content
    string. Throws on a read error; use emit-image for images."

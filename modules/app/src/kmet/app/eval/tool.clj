@@ -67,7 +67,7 @@
    :name "eval"
    :label "Eval"
    :description (str "Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order, definitions persist.\n"
-                     "File/shell/HTTP: (read \"p\") -> text; (read \"p\" {:offset N :limit N}); (read \"p\" {:start N :end N :as :lines}); (write \"p\" text); (edit \"p\" old new|pairs); (bash \"cmd\" {:timeout N :max-lines N :max-bytes N :as :map}); (glob \"p\"); (grep \"p\"); (fetch \"url\" {:as :json}). Nonzero exits are normal.\n"
+                     "File/shell/HTTP: (read \"p\") -> text; (read \"p\" {:offset 1 :limit N}); (read \"p\" {:start 1 :end N :as :lines}); (write \"p\" text); (edit \"p\" old new|pairs); (bash \"cmd\" {:timeout N :max-lines N :max-bytes N :as :map}); (glob \"p\"); (grep \"p\"); (fetch \"url\" {:as :json}). Nonzero exits are normal.\n"
                      "Output: emitted text and form values are interleaved in order (earlier values one line each, last value full); (emit v) adds full output. stdout/stderr (println/print/prn) discarded. Limit 16 KiB (50 KiB with :max-output-bytes); timeout seconds, omit/0 = none.\n"
                      "Discover: (help), (help :core), (sources), (help :library), (index \"text\"), (describe 'name); source verbs <id>/verb.")
    :prompt-snippet "Runs in cwd; independent eval calls may be issued together."
@@ -75,7 +75,7 @@
    ["Run several eval calls in one message; keep dependent forms in one call."
     "Use (emit v) to add output; println/print produce nothing."
     "Bind intermediate output; bound reads."
-    "`read` returns text; `:as :lines` -> map with `:lines [{:n :text}]`, 1-based; grep/glob take `:path`; avoid sed/head/tail/cat and bash rg/find."
+    "`read` paging is 1-based (`{:offset 1 :limit N}`); `:as :lines` -> map with `:lines [{:n :text}]`; grep/glob take `:path`; avoid sed/head/tail/cat and bash rg/find."
     "Aliases: fs,str,set,edn,walk,json (clojure.data.json),p (babashka.process)."
     "Don't assume libs; (help :surface) lists them."]
    :parameters {:type "object"

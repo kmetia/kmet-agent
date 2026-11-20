@@ -184,6 +184,7 @@
     (t/is (str/includes? (:description tool)
                          "json (clojure.data.json)"))
     (t/is (str/includes? (:description tool) "(fetch"))
+    (t/is (str/includes? (:description tool) "1-based line numbers"))
     (t/is (str/includes? (:prompt-snippet tool)
                          "Batch independent reads/tests")))
   (let [guidelines (str/join "\n" (:prompt-guidelines (tools/get-tool reg "codemode")))]

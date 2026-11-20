@@ -72,7 +72,12 @@
           (is (str/includes? (:content result) "positive")))
         (let [result (read-call {:path f :offset 0})]
           (is (:is-error result))
-          (is (str/includes? (:content result) ":offset must be a positive integer")))
+          (is (str/includes? (:content result) ":offset must be a positive integer"))
+          (is (str/includes? (:content result) "line numbers start at 1")))
+        (let [result (read-call {:path f :start 0})]
+          (is (:is-error result))
+          (is (str/includes? (:content result) ":start must be a positive integer"))
+          (is (str/includes? (:content result) "line numbers start at 1")))
         (let [result (read-call {:path f :limit 1.5})]
           (is (:is-error result))
           (is (str/includes? (:content result) ":limit must be a positive integer")))
