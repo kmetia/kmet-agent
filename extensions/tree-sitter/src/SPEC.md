@@ -24,7 +24,7 @@ embeds wasmtime, loads `.wasm` grammars from `TREE_SITTER_LIBDIR`) +
 **grammar `.wasm` files fetched from Zed's public extension registry**
 (wasi-format modules — the format the CLI accepts).
 
-Empirical facts the implementation depends on (verified against CLI 0.26.13):
+Empirical facts the implementation depends on (verified against CLI 0.26.13 and 0.27.2):
 
 1. Grammar discovery needs, per language, a scaffold dir under a configured
    `parser-directories` entry:
@@ -62,7 +62,7 @@ Empirical facts the implementation depends on (verified against CLI 0.26.13):
    straight from the official grammar repos' GitHub releases
    (`tree-sitter/tree-sitter-python` v0.25.0,
    `tree-sitter/tree-sitter-typescript` v0.23.2 — both verified loading in
-   CLI 0.26.13).
+   CLI 0.26.13 and 0.27.2).
 6. On Termux the released `tree-sitter-cli-linux-arm64` binary needs the
    glibc loader: `<prefix>/glibc/lib/ld-linux-aarch64.so.1 --library-path …`
    — same launcher pattern `kmet.tasks.build` already emits for babashka itself.

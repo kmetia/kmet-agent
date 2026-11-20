@@ -42,7 +42,7 @@ Nothing is fetched at install time. Unless `KMET_TREE_SITTER_BIN` is set
 (see below), on first use the extension downloads,
 sha256-verifies against pinned manifests, and caches:
 
-1. the `tree-sitter` CLI binary (v0.26.13) into
+1. the `tree-sitter` CLI binary (v0.27.2) into
    `~/.kmet/agent/tree-sitter/bin/` — on Termux a glibc launcher script is
    generated next to it;
 2. each language's grammar WASM into `~/.kmet/agent/tree-sitter/libs/`

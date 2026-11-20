@@ -4,28 +4,28 @@
 ;; :sha256 pins the downloaded zip; :binary-sha256 pins the extracted
 ;; executable (cache-validity check). Version pin upgrade = new top-level
 ;; version key with freshly hashed assets.
-{"0.26.13"
+{"0.27.2"
  {"linux-x64"
-  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.26.13/tree-sitter-cli-linux-x64.zip"
-   :sha256 "1b781c0dc1dfefea44b5db2ec2a58440fe9d006856c3f5b3fd9a17119d1138a2"
-   :binary-sha256 "ad369a4df2bb1ebf5cd37045d34bdc9160b9351f92520399106d8e689cac00af"}
+  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.27.2/tree-sitter-cli-linux-x64.zip"
+   :sha256 "b4233ecc4f0e648d6d8ccc4bac96c00c712ca1a5eb1e0ca7197d29b750bffa6d"
+   :binary-sha256 "a658dfc7704d6595a3d2f50eba2590f5919ecd54beedf978ba9888ec914fec1f"}
   "linux-arm64"
-  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.26.13/tree-sitter-cli-linux-arm64.zip"
-   :sha256 "72c6d6c669c70491f93db290b285d9e85fd68ead9e324cc55ace35a1be66c3bd"
-   :binary-sha256 "89fa5f92264afaf851545f97669947af86fac8ed5fb0fe8042cb74d161a301bb"}
+  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.27.2/tree-sitter-cli-linux-arm64.zip"
+   :sha256 "4598875d129dfef384b3d78da329b766f151c2f827404fb5f3363a135935d0d3"
+   :binary-sha256 "fb5737925d182e7e314978cbf166dfea9274de6a465efa751be72f422956e9c5"}
   "macos-x64"
-  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.26.13/tree-sitter-cli-macos-x64.zip"
-   :sha256 "052f2866ad453bb39ab2905e5b7bbb9de670875f67483243cd9659c0503d97ef"
-   :binary-sha256 "3f473c3a308de1c01458473f931daa9c4613490b7d2692e779dcb3d71ebddef0"}
+  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.27.2/tree-sitter-cli-macos-x64.zip"
+   :sha256 "7a44003e536a9074fca2693d83af4d6e9a746b47049f9a6971e3bd91d55e2313"
+   :binary-sha256 "12a3e817ec17fc5db2961e53287f3912ea467c14493a6d311e18310a7d409b65"}
   "macos-arm64"
-  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.26.13/tree-sitter-cli-macos-arm64.zip"
-   :sha256 "eeb4c0fd909187de2e77a6403ca9c748d41f209f1186cac0d38f38f571930c02"
-   :binary-sha256 "89375793233b2854ca3ead7bc7ccdf4c3e22497052c0bd2429fe9efdb8968912"}
+  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.27.2/tree-sitter-cli-macos-arm64.zip"
+   :sha256 "2f5645377a5f99ce0b019a316a9a2f17457a53d6f494eff437433db69b6fc363"
+   :binary-sha256 "755fe1c7067fe2b0794f849fcb9c2d3deee503245b1bed645d694edd189a1ede"}
   "windows-x64"
-  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.26.13/tree-sitter-cli-windows-x64.zip"
-   :sha256 "c167ecf331ecd5d067cf96f612f404d7d8ebd08569b142939fcc264211f8cd9a"
-   :binary-sha256 "4da8e3e19080cd65906d55c7b5b5c68bc6bfbff7482bb5e069997abbf8805d4c"}
+  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.27.2/tree-sitter-cli-windows-x64.zip"
+   :sha256 "9a6dc00c08ed26e98c05481f08c6f83c5ff05c6756442aec2aff1800732ad3da"
+   :binary-sha256 "f0740c74b044e2a1fe91f30409a2e8028a3daf8d553572ebb9b572d7ef81f998"}
   "windows-arm64"
-  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.26.13/tree-sitter-cli-windows-arm64.zip"
-   :sha256 "c4306ddb015aca7fd01504cfb6ac5fc449d285d50a4c60f051ef648bb303a4c9"
-   :binary-sha256 "4409b6dc663f08c9686718f98b56953e7c7efd08da431107764ac7fcc715fcf5"}}}
+  {:url "https://github.com/tree-sitter/tree-sitter/releases/download/v0.27.2/tree-sitter-cli-windows-arm64.zip"
+   :sha256 "303ac25e8ed3d423131b7b47f87cd049c1c3d82bdf7a11c5e0348366abef072c"
+   :binary-sha256 "ce03c42cf03de305a650bcae06612cfc1e7f17b2bf2bbc24eee518b89433f607"}}}
