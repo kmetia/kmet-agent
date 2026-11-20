@@ -5,7 +5,7 @@
             [kmet.extensions.local.gate :as gate]))
 
 (def ^:private source-description
-  "Project gates: local/gate.")
+  "Project test gates: local/gate.")
 
 (defn- eval-source
   [ctx]

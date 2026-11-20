@@ -1,39 +1,34 @@
 (ns kmet.extensions.local.gate
-  "Project gates: fix formatting, then lint and tests, and return findings by category."
+  "Project test gates: run test suites and return findings by category."
   (:require [babashka.process :as p]
             [clojure.string :as str]
             [kmet.libs.process :as process]))
 
 (defn- gate*
-  "Run project gates: fix formatting, then lint and tests, and return every
-   finding grouped by category.
+  "Run project test gates and return every finding grouped by category.
 
-   Changed files only by default. Formatting is checked, fixed with
-   `bb format[-changed]`, and re-checked; fixed files are reported separately.
+   Changed files only by default; :tasks selects the gates (default [:test]).
    Every selected gate runs even after an earlier one fails.
 
    OPTS:
      :full     (default false) run the full tree; false checks changed files only
-     :tasks    :format, :lint, :test, :test-ext, or a collection of them
-               (default [:format :lint :test]; :test-ext is opt-in)
-     :host     test host: :bb (default), :jolt or :jvm. Lint and formatting
-               always use the bb tasks; :jvm runs bb test*-jvm.
+     :tasks    :test (default), :test-ext, or a collection; :test-ext is opt-in
+     :host     test host: :bb (default), :jolt or :jvm; :jvm runs bb test*-jvm
      :timeout  seconds per command (default 1800; nil disables the timeout)
 
    Invalid option keys, hosts, task ids or timeouts throw ex-info with :type
    ::unknown-options, ::invalid-host, ::invalid-tasks or ::invalid-timeout.
 
    Returns {:ok? bool :scope :changed|:full :host :bb|:jolt|:jvm
-            :issue-count int :fixed-count int :formatted [file]
-            :findings {category [issue ...]} :gates [gate-result ...]
-            :report string}. Test issues carry the exact :namespace plus
-            :test and :where; unloaded namespaces and test-side problems
-            appear as :test-problem with :namespace and :message. :report is
-            the human-readable category report."
+            :issue-count int :findings {category [issue ...]}
+            :gates [gate-result ...] :report string}. Test issues carry the
+            exact :namespace plus :test and :where; unloaded namespaces and
+            test-side problems appear as :test-problem with :namespace and
+            :message. :report is the human-readable category report."
   ([cwd] (gate* cwd {}))
   ([cwd {:keys [full tasks host timeout]
          :as opts
-         :or {full false tasks [:format :lint :test] host :bb timeout 1800}}]
+         :or {full false tasks [:test] host :bb timeout 1800}}]
    (letfn [(relative-path [path]
              (if-not path
                path
@@ -99,30 +94,9 @@
                       (for [line lines
                             :when (re-find #"^\s+TIMED OUT after " line)]
                         {:kind :timeout :detail (str/trim line)})))))
-           (lint-issues [out]
-             (into []
-                   (keep (fn [line]
-                           (when-let [[_ file row col level message]
-                                      (re-matches #"^(.+):(\d+):(\d+): (error|warning|info): (.*)$" line)]
-                             {:kind :lint-finding
-                              :file file
-                              :line (read-string row)
-                              :col (read-string col)
-                              :level (keyword level)
-                              :message message
-                              :detail line})))
-                   (str/split-lines out)))
-           (format-issues [out]
-             (into []
-                   (keep (fn [line]
-                           (when-let [[_ file] (re-matches #"^(.+) has incorrect formatting$" line)]
-                             {:kind :format-residual
-                              :file file
-                              :detail (str file " has incorrect formatting")})))
-                   (str/split-lines out)))
            (summary-of [out]
              (let [lines (str/split-lines (str out))]
-               (or (last (keep #(re-find #"^(?:Results: .*|Ran \d+ tests.*|linting took .*|\d+ file\(s\) formatted incorrectly|All source files formatted correctly)$" %) lines))
+               (or (last (keep #(re-find #"^(?:Results: .*|Ran \d+ tests.*)$" %) lines))
                    (last (remove str/blank? lines)))))
            (run-command [command]
              (let [started (try {:proc (p/process (str/split command #" ")
@@ -163,12 +137,10 @@
                           (not= 0 exit-code) (str command " exited " exit-code)
                           :else (str command " failed"))
                 :excerpt excerpt}))
-           (run-plain [{:keys [gate command]}]
+           (run-tests [{:keys [gate command]}]
              (let [res (run-command command)
                    out (:output res)
-                   issues (case gate
-                            (:test :test-ext) (test-issues out)
-                            :lint (lint-issues out))
+                   issues (test-issues out)
                    issues (cond-> issues
                             (or (:timed-out? res)
                                 (and (not= 0 (:exit-code res)) (empty? issues)))
@@ -180,74 +152,24 @@
                 :timed-out? (:timed-out? res)
                 :summary (summary-of out)
                 :issues issues}))
-           (run-format [{:keys [gate check-command fix-command]}]
-             (let [pre (run-command check-command)
-                   pre-issues (format-issues (:output pre))
-                   need-fix? (or (:timed-out? pre) (not= 0 (:exit-code pre)) (seq pre-issues))
-                   fix (when need-fix? (run-command fix-command))
-                   post (when fix (run-command check-command))
-                   final (or post pre)
-                   final-issues (format-issues (:output final))
-                   fixed (when post
-                           (->> pre-issues
-                                (map :file)
-                                (remove (set (map :file final-issues)))
-                                distinct
-                                vec))
-                   clean? (and (not (:timed-out? final))
-                               (= 0 (:exit-code final))
-                               (empty? final-issues))
-                   fix-failure (when (and fix
-                                          (not clean?)
-                                          (or (:timed-out? fix) (not= 0 (:exit-code fix))))
-                                 (task-failure fix-command fix))
-                   issues (when-not clean?
-                            (concat (when fix-failure [fix-failure])
-                                    (if (seq final-issues)
-                                      final-issues
-                                      [(task-failure check-command final)])))
-
-                   summary (cond
-                             (not clean?) (or (summary-of (:output final))
-                                              (str check-command " still failing"))
-                             (seq fixed) (str "fixed " (count fixed) " file(s) via " fix-command ", now clean")
-                             :else (summary-of (:output pre)))]
-               {:gate gate
-                :command check-command
-                :fix-command (when fix fix-command)
-                :fix-exit-code (when fix (:exit-code fix))
-                :fix-timed-out? (when fix (:timed-out? fix))
-                :ok? clean?
-                :exit-code (:exit-code final)
-                :timed-out? (:timed-out? final)
-                :summary summary
-                :formatted (vec fixed)
-                :issues (vec issues)}))
            (issue-text [{:keys [detail excerpt]}]
              (str detail (when (seq excerpt) (str "\n" excerpt))))
            (category [gate]
-             (get {:format {:key :formatting :title "Formatting"}
-                   :lint {:key :lint :title "Lint"}
-                   :test {:key :test :title "Tests"}
+             (get {:test {:key :test :title "Tests"}
                    :test-ext {:key :test-ext :title "Slow tests"}}
                   gate))
            (render-report [scope host results]
              (let [total (count results)
                    passed (count (filter :ok? results))
-                   problems (mapcat :issues results)
-                   fixed (mapcat #(or (:formatted %) []) results)
-                   host-label (if (some #(contains? #{:test :test-ext} (:gate %)) results)
-                                (name host)
-                                "bb")]
+                   problems (mapcat :issues results)]
                (str/join
                 "\n"
                 (concat
-                 [(str "gate " (name scope) " (" host-label "): "
+                 [(str "gate " (name scope) " (" (name host) "): "
                        (if (= passed total) "PASS" "FAIL")
-                       " (" passed "/" total " gates passed, " (count problems) " issue(s), "
-                       (count fixed) " file(s) fixed)")]
+                       " (" passed "/" total " gates passed, " (count problems) " issue(s)")]
                  (mapcat
-                  (fn [{:keys [gate command ok? exit-code timed-out? summary formatted issues]}]
+                  (fn [{:keys [gate command ok? exit-code timed-out? summary issues]}]
                     (concat
                      [(str "## " (:title (category gate)))
                       (str (if ok? "PASS " "FAIL ") command
@@ -256,7 +178,6 @@
                              (not= 0 exit-code) (str " — exit " exit-code)
                              :else "")
                            (if (seq summary) (str " — " summary) ""))]
-                     (for [file formatted] (str "  - fixed " file))
                      (for [issue issues]
                        (str "  - " (str/replace (issue-text issue) "\n" "\n    ")))))
                   results)))))]
@@ -267,7 +188,7 @@
            _ (when (seq unknown-options)
                (throw (ex-info (str "gate: unknown option(s) " (pr-str (vec unknown-options)))
                                {:type ::unknown-options :options (vec unknown-options)})))
-           unknown (remove #{:format :lint :test :test-ext} selected)
+           unknown (remove #{:test :test-ext} selected)
            _ (when-not (#{:bb :jolt :jvm} host)
                (throw (ex-info (str "gate: unknown :host " (pr-str host))
                                {:type ::invalid-host :host host})))
@@ -287,30 +208,19 @@
            jvm-suffix (if (= host :jvm) "-jvm" "")
            test-command (str host-prefix "test" suffix jvm-suffix)
            test-ext-command (str host-prefix "test-ext" suffix jvm-suffix)
-           gate-tasks (->> [{:gate :format
-                             :check-command (str "bb format-check" suffix)
-                             :fix-command (str "bb format" suffix)}
-                            {:gate :lint :command (str "bb lint" suffix)}
-                            {:gate :test :command test-command}
+           gate-tasks (->> [{:gate :test :command test-command}
                             {:gate :test-ext :command test-ext-command}]
                            (filter #(contains? selected (:gate %))))
-           results (mapv (fn [task]
-                           (if (= :format (:gate task))
-                             (run-format task)
-                             (run-plain task)))
-                         gate-tasks)
+           results (mapv run-tests gate-tasks)
            findings (into (array-map)
                           (for [{:keys [gate issues]} results]
                             [(:key (category gate)) (vec issues)]))
            problems (mapcat :issues results)
-           formatted (vec (mapcat #(or (:formatted %) []) results))
            ok? (every? :ok? results)]
        {:ok? ok?
         :scope scope
         :host host
         :issue-count (count problems)
-        :fixed-count (count formatted)
-        :formatted formatted
         :findings findings
         :gates results
         :report (render-report scope host results)}))))

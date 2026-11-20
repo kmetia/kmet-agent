@@ -1,8 +1,9 @@
 # local extension (project-local)
 
-Exposes the project gate workflow as `local/gate`. File discovery and content
-search are built into the eval sandbox as the `glob` and `grep` verbs, so this
-extension no longer contributes them.
+Exposes the project test gate as `local/gate`. Formatting and lint are the
+separate `bb format-check` / `bb lint` tasks, not part of the gate. File
+discovery and content search are built into the eval sandbox as the `glob` and
+`grep` verbs, so this extension no longer contributes them.
 
 ## Compose
 
@@ -20,9 +21,9 @@ adding the row.
 ## Use
 
 ```clojure
-(local/gate)                                      ; changed, bb, format+lint+test
-(local/gate {:full true})                         ; full tree
-(local/gate {:tasks [:format :lint :test :test-ext]})
+(local/gate)                                      ; changed, bb, tests
+(local/gate {:full true})                         ; full test tree
+(local/gate {:tasks [:test :test-ext]})
 (local/gate {:host :jolt :tasks [:test]})         ; jolt test tasks
 (local/gate {:host :jvm :tasks [:test]})          ; bb test*-jvm
 
@@ -37,6 +38,5 @@ show paths relative to the call's cwd, `~/...` under home, and absolute paths
 outside it. `grep` skips binary and oversized files; inside a git work tree it
 uses git's file list, so `.gitignore` is honored.
 
-Formatting is checked, fixed, and re-checked. The returned map carries
-`:report`, `:findings` by category, `:formatted`, and per-gate results.
-Test failures carry the exact `:namespace`.
+The returned map carries `:report`, `:findings` by category, and per-gate
+results. Test failures carry the exact `:namespace`.
