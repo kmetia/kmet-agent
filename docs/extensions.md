@@ -7,11 +7,11 @@ It is an ordinary Clojure namespace with an explicit contract: it depends on
 plugin var — and is loaded, reloaded and unloaded while kmet runs.
 
 This guide covers authoring, packaging and testing an extension. The
-authoritative reference for what each `kmet.extension` function takes and
-returns, the `api`/context map keys, the allowed namespaces and the lifecycle
-guarantees is
-[`modules/app/src/kmet/extension.md`](../modules/app/src/kmet/extension.md);
-keep that contract reference and this guide in sync when behavior changes.
+[contract reference](../modules/app/src/kmet/extension.md) owns the API
+surface — function inputs and returns, the `api`/context keys, allowed
+namespaces and lifecycle guarantees. This guide owns layouts, loaders, recipes
+and examples, and links instead of restating contract details. Change the
+document that owns the behavior.
 
 Related: [customization](customization.md) (user-facing setup and discovery),
 [`extensions/README.md`](../extensions/README.md) (the shipped catalog and the
@@ -44,23 +44,14 @@ record still go immediately, and its namespaces and jars are released once the
 promise settles (`kmet.libs.concurrent/after` chains on it).
 
 An extension **is** a plugin: the loader mounts the `plugin` var, `:apply`
-receives the extension's ctx and its capability map, and everything registered
-through `api` belongs to the extension — unload disposes it automatically.
-What the body mounts on that ctx through `kmet.srce.core` belongs to it too
-(a service from `provide!`, a plugin from `plugin!`); `provide!`'s
-`{:in (ext/app-root api)}` option publishes a service app-wide while keeping
-the extension's lifetime.
-`:apply` may also answer `{:srce/setup p}` (a promise) when its setup cannot
-finish inline: the mount stays `:starting`, what it provides is invisible until
-it settles, and the mount waits for it (`startup-timeout-ms`). Every other
-return value is checked as an effect, so a body that starts a thread answers
-`nil` — not the `future` it started, which is `:srce/bad-effect`.
-`:inject` lives in the same map, so a mount waits for the services it names.
-That is also the **single-file** form; a directory or jar extension names the
-same var in `extension.edn` (see
+receives the extension's ctx and capability map, and everything registered
+through `api` is disposed on unload. The contract reference's
+[§ The contract](../modules/app/src/kmet/extension.md#the-contract) covers
+`:inject`, `{:srce/setup p}`, effect checking, ownership and name conflicts.
+
+The example above is also the **single-file** form; a directory or jar
+extension names the same var in `extension.edn` (see
 [Directory extensions](#directory-extensions-multi-file-extensionedn)).
-The full contract (ownership, name conflicts, lifecycle guarantees) is in the
-[contract reference](../modules/app/src/kmet/extension.md#the-contract).
 
 Tool interception is one around hook, `ext/on-tool`, shaped
 `(fn [op next] → result)`: do not call `next` to settle the call (veto it, or
@@ -69,7 +60,8 @@ rewriting `:args` if the call needs it — and transform the returned map to
 rewrite the result. A hook runs on the call's own thread — its own worker in a
 parallel batch, the loop's in a sequential one — so it may block (ask the host,
 read a file) without holding up its siblings; the chain sits outside the app's
-permission policy, which still judges the arguments a hook settled on. `modules/app/src/kmet/extension.md` § Hooks has
+permission policy, which still judges the arguments a hook settled on. The
+contract reference's [Hooks](../modules/app/src/kmet/extension.md#hooks) has
 the details, and `extensions/clojure/` and `extensions/tree-sitter/` are the
 in-repo consumers.
 
@@ -87,15 +79,12 @@ the extension's own ctx right after `:apply`:
             :config {:dir "reviews"}}]})
 ```
 
-Each row gets what a composition row gets — `:inject` waiting, `:config`,
-effects, disposal — and the rows die with the extension (unloading disposes
-them in reverse order). `:plugin` names one of the extension's **own** plugin
-vars (resolved through its loader) or one on the host classpath. They are
-**its** rows, not the run's: a service one provides is visible to the
-extension's subtree, while the app-wide services stay the profile's (the kernel
-refuses a second provider of a name already on the chain). Rows naming an
-`:ext/…` source, carrying `:mode`, missing a keyword `:id`, or using a key
-outside `{:id :plugin :config}` are refused at load.
+The rows are children of the extension, so unloading disposes them; `:plugin`
+names a var in the extension's own namespace or on the host classpath. A row
+may not name another `:ext/…` source, carry `:mode`, omit a keyword `:id`, or
+use a key outside `{:id :plugin :config}`. The contract reference's
+[Rows the extension mounts](../modules/app/src/kmet/extension.md#rows-the-extension-mounts)
+has the lifecycle and service-visibility rules.
 
 ## Where extensions live and what loads them
 
@@ -427,29 +416,14 @@ An extension directory may declare its own library dependencies in a
 `deps.edn`; the extension's `ns` form can then require them normally
 (`[clojure.data.json :as json]` or simply `[kmet.libs.json :as json]`). kmet
 resolves the declared dependencies — the complete transitive closure — and
-serves them **only to that extension's evaluation context**. Every extension
-runs in its own isolated context (the guarantees are in the contract
-reference's § Allowed namespaces and isolation):
+serves them **only to that extension's evaluation context**. The isolation
+rules, the shared namespaces and the host-FFI carve-out are in the contract
+reference's
+[§ Allowed namespaces and isolation](../modules/app/src/kmet/extension.md#allowed-namespaces-and-isolation).
 
-- kmet core and `clojure.*` / `babashka.*` namespaces are shared references
-  (never re-evaluated), so extension registrations always reach the real
-  kmet registries. Extensions may depend only on `kmet.extension`, `kmet.srce.core`, plus the
-  shared `kmet.tui.*` / `kmet.libs.*` / `kmet.reakt.*` / `kmet.hikap.*` libraries; other kmet
-  internals are not resolvable from an extension context (the load fails with an explicit
-  error) — the loader, `kmet.loader*`, is one of those internals.
-- The host FFI is shared too: `babashka.ffi` on babashka and the JVM (the
-  standalone `org.babashka/ffi` needs JDK 22+; an older JVM leaves it
-  unshared), `jolt.ffi` on Jolt. FFI code is host-specific by nature — select
-  it with the host-conditional require kmet's own platform code uses:
-  `[#?(:jolt jolt.ffi :default babashka.ffi) :as ffi]`.
-- **Contexts are forks of one shared base** — the shared layers and the
-  seeded classes are built once and forked per extension, so your
-  definitions live only in your context (two extensions may even declare
-  the same internal namespace name).
-- **A `jolt dist` binary cannot resolve deps today** — the app image doesn't
-  carry `jolt.deps`, so an extension with a `deps.edn` warns and skips there
-  (dev jolt and every bb mode resolve normally). The shipped set declares no
-  `deps.edn`.
+A `jolt dist` binary cannot resolve deps today: the app image does not carry
+`jolt.deps`, so an extension with a `deps.edn` warns and skips there (dev Jolt
+and every bb mode resolve normally).
 
 Dep resolution happens **in-process** (via `clojure.tools.deps`, bundled
 with babashka — no extra dependency, no JVM) — no subprocess, and nothing
@@ -459,29 +433,11 @@ a clear error unless it is part of the fixed bundled set below.
 
 ### The fixed bundled set
 
-kmet ships a fixed set of libraries in **both** artifacts and shares them by
-reference with every extension context and `codemode`/`eval` script, so
-requiring a set member needs **no `deps.edn`** and no host-conditional code
-(the table and the portability guarantee are in the contract reference's
-§ Bundled extension libraries).
-
-Script contexts (`codemode` and `eval`) pre-bind `json`
-(`clojure.data.json`), `p` (`babashka.process`), `fs`, `str`, `set`, `edn` and
-`walk`, and `fetch` is the HTTP verb. The `kmet.libs` ports stay available to
-extension contexts but are not require-able from a script.
-
-The **guarantee is the namespace surface, not the version**: on babashka a
-bundled port decides its own edition, while Jolt uses the version kmet pins
-in `deps.edn`. Pinning a set member in an extension's `deps.edn` therefore
-does **not** override the shared copy — declare only libraries **outside**
-the set.
-
-Everything else babashka bundles (cheshire, clj-yaml, http-kit, selmer,
-transit, hiccup, timbre, nextjournal.markdown, bencode, …) is **not** part of
-the portable surface: those are neither injected nor source-evaluable under
-SCI — Java-backed copies fail on classes the native image does not expose —
-and Jolt has no copies at all. Use `kmet.libs.json`, `kmet.libs.yaml`,
-`kmet.libs.markdown` and `kmet.libs.http` instead.
+kmet bundles some libraries in both artifacts and shares them by reference,
+so requiring a set member needs **no `deps.edn`** and no host-conditional
+code. The set, its portability guarantee and the script-context bindings are
+in the contract reference's
+[§ Bundled extension libraries](../modules/app/src/kmet/extension.md#bundled-extension-libraries-fixed-set).
 
 ### Limits (inherent to Babashka)
 
@@ -645,71 +601,21 @@ calls, so it can expose current state instead of a snapshot:
 
 The optional third argument is registration metadata:
 `{:description "License helpers: license/add!."}` — one line the eval
-manifest lists without invoking the source; the source id alone is listed when
-it is omitted. The source id is also the public call alias (`license/add!`);
-it must not collide with the sandbox's standard aliases, namespaces, or eval
-verbs. Put the verbs meant as `<id>/verb` directly under `ext.<id>`; a verb in
-a subnamespace keeps its dotted path (`license.internal/verb`). `/config`
-lists each contributed verb under the extension that registered the source,
-labelled with the eval call surface (`verb/license/add!` under
-`ext/<extension>`), and persists the canonical source key
-`ext.license/add!`; a disabled verb stays bound as an error stub and is omitted
-from the help listings.
+manifest lists without invoking the source. The source id is the public call
+alias (`license/add!`); put verbs meant as `<id>/verb` under `ext.<id>`, and
+keep the source fast — it runs synchronously and is read on every eval call.
 
-- Values must live under `ext.<source-id>` or a subnamespace of it:
-  `ext.license`, `ext.license.internal`. The model's `user`, the system
-  `core`, `clj` and `eval`, and the fixed host namespaces (`clojure.core`,
-  `clojure`, `babashka.process`) are reserved. `read`, `write`,
-  `edit` and `bash` (also `core/...`) call the tool implementations
-  directly; `clj/edit-form`, `clj/replace-sexp` and `clj/paren-repair` call
-  `kmet.libs.clj-edit` directly; `clj/nrepl-eval` calls
-  `kmet.libs.clj-eval`, the same implementation as the clojure extension's
-  `clojure_eval` tool. The eval sandbox has no `tools` namespace, so a source
-  verb cannot call a tool. Use `license/add!`, not `add!` or
-  `user/add!`.
-- `:verbs` carries the call's `:read-file`, `:edit` and `:write-file`
-  operations. They read that call's cwd and cancel signal; use them within
-  the call, never keep them.
-- A contributed value may carry `:doc`, `:arglists` and `:source` metadata
-  (the keys a var uses, plus the implementation text, since a source verb has
-  no library file). `(sources)` lists each verb with its doc and
-  arglists; `(help)` keeps one summary line per source, and
-  `(help :license)` (or `(help "license")`) lists the source's
-  description and verbs; a missed topic or name names the nearest spelling
-  before the index. The eval manifest announces the built-in help
-  topics one line each and the source's registration description at prompt
-  start, without building an evaluator or invoking the source;
-  `(index "text")` searches loaded and live definitions and source verbs by
-  name, docstring and source text.
-  `(describe 'license/add!)` returns its `:kind`,
-  `:arglists`, `:source` and, when it has no source, `:doc` (a source-bearing
-  entry omits the docstring; nil `:file` and `:scope` are omitted).
-  `(describe 'license/add! :doc)` and
-  `(describe 'license/add! :source)` return one field each. A value
-  without metadata is still valid and lists as `(no docstring)`.
-- `:commands` adds verbs to `/eval`; its built-in verbs (`list`, `index`,
-  `describe`, `drop`, `move`, `reload`, `sources`, `help`) are reserved.
-- A source key is never written to the eval library. A model redefinition
-  shadows it live, and dropping the name restores the source value while the
-  source is mounted (the result line says `restored`, not `forgot`). The key
-  stays non-storable after the source unloads.
-- A source fn runs synchronously on the eval build/call thread and has no
-  timeout; keep it fast because it is read on every eval call.
-- A throwing or malformed source contributes nothing and is reported; it never
-  fails the eval call. The source is removed automatically when the extension
-  unloads.
-
-The full shape, the macro convention and the call context are in the contract
-reference's [Eval sources](../modules/app/src/kmet/extension.md#eval-sources-register-eval-source)
+The full shape, the `:verbs`/context keys, metadata fields, `/config`
+selection, reserved names and failure rules are in the contract reference's
+[Eval sources](../modules/app/src/kmet/extension.md#eval-sources-register-eval-source)
 section.
 
 ## Testing an extension
 
-Extensions are testable in isolation with the **nullable API** — a test
-fixture that captures every registration into a state atom, with no kmet
-runtime involved. Call the plugin's `:apply` with it and assert what was
-registered (the state shape and the `create-nullable-api` contract are in the
-contract reference's § Testing extensions).
+Use `create-nullable-api` to call `:apply` against a captured state atom
+without a kmet runtime; the contract reference's
+[§ Testing extensions](../modules/app/src/kmet/extension.md#testing-extensions)
+defines the state shape and the deregistration contract.
 
 The fixture in a directory-based extension's own test tree:
 

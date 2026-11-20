@@ -2,16 +2,17 @@
 
 An extension is a Clojure namespace with an explicit contract: it depends on
 `kmet.extension` (and, when it names its plugin var, the kernel's public
-`kmet.srce.core`), and is loaded, reloaded and unloaded at runtime. This document is the authoritative reference for that contract —
-the `kmet.extension` function table, the `api` and context map keys, the
-allowed namespaces, and the lifecycle guarantees.
+`kmet.srce.core`), and is loaded, reloaded and unloaded at runtime. This
+document is the authoritative reference for that contract — the `kmet.extension`
+function table, the `api` and context map keys, the allowed namespaces, and
+the lifecycle guarantees.
 
 Related docs: the authoring guide [`docs/extensions.md`](../../../../docs/extensions.md)
-covers layouts, manifests, loaders, dependency resolution, UI patterns and
-the testing workflow; [`extensions/README.md`](../../../../extensions/README.md)
+owns layouts, manifests, loaders, dependency resolution, UI patterns, testing
+and worked examples; [`extensions/README.md`](../../../../extensions/README.md)
 is the shipped catalog; [`docs/customization.md`](../../../../docs/customization.md)
-covers user-facing setup and discovery. Keep this reference and the authoring
-guide in sync whenever the described behavior changes.
+covers user-facing setup and discovery. This reference owns the API, allowed
+namespaces and lifecycle. Change the document that owns the behavior.
 
 The contract has **no compatibility promise before 1.0**: the names, the
 allowed-namespace list and the `api` keys may change between releases, and the
@@ -42,53 +43,26 @@ A composition can mount an installed extension as a row (`:ext/<id>`, see
 [`docs/profiles.md`](../../../../docs/profiles.md#extensions-as-rows)); the
 row's `:config` then arrives as `(:config api)`.
 
-```clojure
-(ns my.hello-ext
-  (:require [kmet.extension :as ext]
-            [kmet.srce.core :as srce]))
-
-(srce/defplugin plugin
-  {:name  :ext/hello
-   :apply (fn [_ctx api]
-            (ext/register-command! api
-              {:name        "hello"
-               :description "Say hello"
-               :handler     (fn [ctx args] (str "Hello, " args "!"))})
-            nil)})
-
-(defn shutdown [api]
-  ;; optional teardown — deregistration is automatic
-  nil)
-```
-
-`shutdown` is optional. Every `ext/...` wrapper takes `api` as its first
-argument and dispatches to the runtime; extensions never require kmet internals.
+The authoring guide's [Hello, extension](../../../../docs/extensions.md#hello-extension)
+shows the minimal plugin. `shutdown` is optional. Every `ext/...` wrapper takes
+`api` as its first argument and dispatches to the runtime; extensions never
+require kmet internals.
 
 The table of wrappers and the host's api map are contract-tested as a pair: a
 key a wrapper reads (`(:notify (ui api))` reads `[:ui :notify]`) must exist in
 the api the host builds, or an extension fails inside its plugin body with
 a nil-invoke. `kmet.app.extensions.test-api-contract` reads every such path
-out of this file, loads a real extension and asserts the host carries them all
-— so adding a wrapper means adding the capability, in one change.
+out of the ABI source, loads a real extension and asserts the host carries them
+all — so adding a wrapper means adding the capability, in one change.
 
 ### Rows the extension mounts
 
 An extension's plugin map may declare `:rows` — composition-shaped rows it
-mounts **inside its own ctx**, after `:apply` returns:
-
-```clojure
-(srce/defplugin plugin
-  {:name  :ext/review
-   :apply (fn [ctx api]
-            (ext/register-command! api {:name "review" :description "…"
-                                        :handler (fn [_ _] nil)}))
-   :rows  [{:id :review/store :plugin 'my.review.store/plugin
-            :config {:dir "reviews"}}]})
-```
-
-This is the extension as a small composition of its own: each row gets the
-kernel's `:inject` waiting, its `:config`, effects and disposal, instead of a
-hand-written `srce/plugin!` in `:apply`. The rows are **children of the
+mounts **inside its own ctx**, after `:apply` returns. The authoring guide's
+[Rows an extension mounts](../../../../docs/extensions.md#rows-an-extension-mounts)
+shows the shape; this is the extension as a small composition of its own: each
+row gets the kernel's `:inject` waiting, its `:config`, effects and disposal,
+instead of a hand-written `srce/plugin!` in `:apply`. The rows are **children of the
 extension's fiber** — unloading or reloading the extension disposes them in
 reverse order — and a service a row provides is visible to the extension's
 subtree, not to the app. The app-wide services belong to the profile's
@@ -202,7 +176,7 @@ script.
 ## Runtime lifecycle
 
 Extensions load when a composition row names them (`:ext/<id>`,
-[kmet.app.extensions.rows](kmet/app/extensions/rows.clj)) and `/reload`
+[kmet.app.extensions.rows](app/extensions/rows.clj)) and `/reload`
 reloads the mounted rows with their configs. The core loader can also be
 driven directly (from another extension or a REPL):
 
@@ -1451,21 +1425,10 @@ extension shell commands. Headless runs fall back to the process cwd.
 
 Extensions are testable in isolation with the **nullable API** — a test fixture
 that captures every registration into a state atom, with no kmet runtime
-involved. Call the plugin's `:apply` with it and assert what was registered:
-
-```clojure
-(ns my.hello-ext-test
-  (:require [clojure.test :refer [deftest is]]
-            [kmet.extension :as ext]
-            [my.hello-ext :as sut]))
-
-(deftest the-plugin-registers-hello-command
-  (let [{:keys [api state]} (ext/create-nullable-api)]
-    ((:apply sut/plugin) nil api)
-    (is (contains? (:commands @state) "hello"))
-    ;; deregister fns remove registrations (unload replay)
-    (is (= 1 (count (get-in @state [:handlers :session-start]))))))
-```
+involved. Call the plugin's `:apply` with it and assert what was registered;
+the authoring guide's
+[Testing an extension](../../../../docs/extensions.md#testing-an-extension)
+has a minimal test.
 
 State shape: `:commands` `:tools` `:tool-sources` `:eval-sources` `:handlers` `:flags` `:shortcuts`
 `:markdown-transformers` `:entry-renderers` `:message-renderers` `:aliases`

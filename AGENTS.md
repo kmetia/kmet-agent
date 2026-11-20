@@ -160,9 +160,11 @@ The extension ABI carries **no compatibility promise** before 1.0:
 - **Say it is a break.** A third-party-visible change is a break: the commit
   body names the moved surface — like any other change, no changelog file.
 
-Update [`modules/app/src/kmet/extension.md`](modules/app/src/kmet/extension.md)
-and [`docs/extensions.md`](docs/extensions.md) in the same change; they are
-authoritative.
+The extension contract reference
+[`modules/app/src/kmet/extension.md`](modules/app/src/kmet/extension.md) is
+authoritative for the API, allowed namespaces and lifecycle; the authoring
+guide [`docs/extensions.md`](docs/extensions.md) owns layouts, loaders, recipes
+and examples. Update the document that owns the behavior.
 
 ### Complexity is a budget, not a scoreboard
 
