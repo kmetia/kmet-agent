@@ -69,7 +69,7 @@ export KMET_TREE_SITTER_BIN=/path/to/tree-sitter
 ```
 
 The override is explicit: `tree-sitter` on `PATH` is never used implicitly.
-The CLI must be version 0.26.11 through 0.27.x and built with WASM support
+The CLI must be version 0.26.11 through 0.28.x and built with WASM support
 (`tree-sitter parse --help` lists `--wasm`). kmet probes both before using
 it and caches the result by path + size/mtime; an unusable override
 reports the path and the failed probe instead of falling back to the pinned

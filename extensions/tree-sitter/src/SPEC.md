@@ -91,11 +91,15 @@ Empirical facts the implementation depends on (verified against CLI 0.26.13):
 **Override:** `KMET_TREE_SITTER_BIN` (absolute path or bare command resolved
 on `PATH`) takes precedence over the pinned download and is never inferred
 implicitly. The target is probed with `--version` and `parse --help`: accepted
-versions are 0.26.11 through 0.27.x, and `--wasm` must be listed. Successful
+versions are 0.26.11 through 0.28.x, and `--wasm` must be listed. Successful
 probes are cached by path + size/mtime. An unusable override fails with the
 path and probe detail; it never falls back to the pin. The override forgoes
-the manifest sha256 pin — the user's package manager is the trust root. On
-Nix/NixOS the default package lacks WASM support, so point the variable at
+the manifest sha256 pin — the user's package manager is the trust root.
+
+0.28.x was validated against the upstream 0.28.0 nightly; no tagged 0.28
+release existed at that time.
+
+On Nix/NixOS the default package lacks WASM support, so point the variable at
 `pkgs.tree-sitter.override { wasmSupport = true; }` (or a wrapper).
 
 **Binary, on first use (no override):** resolve target `{os-arch}` → look up

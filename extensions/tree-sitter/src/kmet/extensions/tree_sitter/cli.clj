@@ -1,7 +1,7 @@
 (ns kmet.extensions.tree-sitter.cli
   "Locating, installing and spawning the tree-sitter CLI binary.
    A KMET_TREE_SITTER_BIN override wins over the pinned download; it must be
-   an executable tree-sitter CLI with WASM support (0.26.11 through 0.27.x).
+   an executable tree-sitter CLI with WASM support (0.26.11 through 0.28.x).
    The pinned path downloads the release once, verifies its sha256 against the
    shipped manifest, emits the Termux glibc launcher next to the binary (same
    pattern as kmet.tasks.build) and smoke-runs --version before declaring the
@@ -28,7 +28,7 @@
 
 (def ^:private system-version-max
   "First external CLI minor line this extension has not tested."
-  [0 28 0])
+  [0 29 0])
 
 (defn configured-binary
   "KMET_TREE_SITTER_BIN (with a leading ~ expanded), or nil when unset or
@@ -81,7 +81,7 @@
 
 (defn- supported-system-version?
   "True for CLI versions this extension has exercised (0.26.11 through
-   0.27.x); newer minor lines need a test run before they are accepted."
+   0.28.x); newer minor lines need a test run before they are accepted."
   [parts]
   (and (some? parts)
        (not (neg? (compare parts system-version-min)))
@@ -310,7 +310,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$DIR/%s\" \"$@\"
         (when-not (supported-system-version? parts)
           (throw (ex-info (str "KMET_TREE_SITTER_BIN reports tree-sitter "
                                (version-text parts) " at " path
-                               "; supported versions are >=0.26.11 and <0.28.0")
+                               "; supported versions are >=0.26.11 and <0.29.0")
                           {:type ::unsupported-system-version
                            :path (str path)
                            :version (version-text parts)})))

@@ -96,11 +96,14 @@
       (is (true? (:system? result)))
       (is (fs/exists? (:path result)))))
   (testing "the tested lower bound is accepted"
-    (is (= "0.26.11" (:version (probe-system-binary! "0.26.11" "--wasm"))))))
+    (is (= "0.26.11" (:version (probe-system-binary! "0.26.11" "--wasm")))))
+  (testing "0.28.x with a commit suffix is accepted"
+    (is (= "0.28.0"
+           (:version (probe-system-binary! "0.28.0 (abc123)" "--wasm"))))))
 
 (deftest ^:bb-only system-binary-rejection-test
   (testing "unsupported versions are rejected"
-    (doseq [version ["0.26.10" "0.28.0"]]
+    (doseq [version ["0.26.10" "0.29.0"]]
       (is (thrown-with-msg? Exception #"supported versions"
                             (probe-system-binary! version "--wasm")))))
   (testing "a CLI built without WASM is rejected with the Nix hint"
