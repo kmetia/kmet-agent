@@ -38,7 +38,8 @@ sha256 + probe snippet) and a rule set under
 
 ## Auto-download (first use)
 
-Nothing is fetched at install time. On first use the extension downloads,
+Nothing is fetched at install time. Unless `KMET_TREE_SITTER_BIN` is set
+(see below), on first use the extension downloads,
 sha256-verifies against pinned manifests, and caches:
 
 1. the `tree-sitter` CLI binary (v0.26.13) into
@@ -57,6 +58,38 @@ call — no partial state.
 **Privacy:** files are parsed locally by the locally-cached `tree-sitter`
 binary. Source code never leaves the machine; only manifest metadata
 (version pins) references public GitHub/Zed URLs at download time.
+
+## Using a system tree-sitter CLI
+
+Set `KMET_TREE_SITTER_BIN` to an executable `tree-sitter` CLI to skip the
+pinned download:
+
+```sh
+export KMET_TREE_SITTER_BIN=/path/to/tree-sitter
+```
+
+The override is explicit: `tree-sitter` on `PATH` is never used implicitly.
+The CLI must be version 0.26.11 through 0.27.x and built with WASM support
+(`tree-sitter parse --help` lists `--wasm`). kmet probes both before using
+it and caches the result by path + size/mtime; an unusable override
+reports the path and the failed probe instead of falling back to the pinned
+release.
+
+On Nix/NixOS the default `pkgs.tree-sitter` is built without WASM support.
+Build the override once and point kmet at it:
+
+```nix
+let
+  tree-sitter = pkgs.tree-sitter.override { wasmSupport = true; };
+in {
+  home.sessionVariables.KMET_TREE_SITTER_BIN = "${tree-sitter}/bin/tree-sitter";
+}
+```
+
+The pinned release remains the default. The override trades the shipped
+sha256 pin for the user's package manager (Nix store paths are
+content-addressed). A wrapper script is also a valid `KMET_TREE_SITTER_BIN`
+when the CLI needs extra environment or loader arguments.
 
 ## Syntax validation hooks
 

@@ -88,7 +88,17 @@ Empirical facts the implementation depends on (verified against CLI 0.26.13):
 
 ## Auto-download
 
-**Binary, on first use:** resolve target `{os-arch}` → look up
+**Override:** `KMET_TREE_SITTER_BIN` (absolute path or bare command resolved
+on `PATH`) takes precedence over the pinned download and is never inferred
+implicitly. The target is probed with `--version` and `parse --help`: accepted
+versions are 0.26.11 through 0.27.x, and `--wasm` must be listed. Successful
+probes are cached by path + size/mtime. An unusable override fails with the
+path and probe detail; it never falls back to the pin. The override forgoes
+the manifest sha256 pin — the user's package manager is the trust root. On
+Nix/NixOS the default package lacks WASM support, so point the variable at
+`pkgs.tree-sitter.override { wasmSupport = true; }` (or a wrapper).
+
+**Binary, on first use (no override):** resolve target `{os-arch}` → look up
 `bin/manifest.edn` → download → sha256 verify → chmod → on Termux also emit
 the `.sh` launcher. All six release targets exist upstream (linux-x64/arm64,
 macos-x64/arm64, windows-x64/arm64). Version pin upgrades = new manifest.
