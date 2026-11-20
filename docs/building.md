@@ -145,14 +145,14 @@ classpath.
 
 The test suites run on the JVM with the same runner and selection as the bb
 gate — the four tasks mirror `bb test` / `bb test-ext` / `bb test-changed` /
-`bb test-ext-changed`, take the same filters and the same directly changed or
-paired namespace set, and run under the JVM aliases:
+`bb test-ext-changed`, take the same filters and the same affected-namespace
+set, and run under the JVM aliases:
 
 ```sh
 bb test-jvm               # fast suites (non-^:slow), filters as `bb test`
 bb test-ext-jvm           # only the ^:slow suites
-bb test-changed-jvm       # fast suites of the changed files' namespaces
-bb test-ext-changed-jvm   # slow suites of the changed files' namespaces
+bb test-changed-jvm       # fast suites of the affected namespaces
+bb test-ext-changed-jvm   # slow suites of the affected namespaces
 ```
 
 `^:bb-only` tests (babashka's bundled SCI ports, `babashka.classpath`, Maven

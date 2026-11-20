@@ -1,11 +1,13 @@
 (ns kmet.tasks.changed
   "Dev-loop helper backing the `bb changed` / `bb *-changed` tasks: finds
-   changed files and maps them to the namespaces to test and lint. Test
-   namespaces pair with source namespaces by convention (test/kmet/x/test_y.clj
-   ↔ src/kmet/x/y.clj, and test/kmet/tasks/y_test.clj ↔ tasks/kmet/tasks/y.clj),
-   so a source change re-runs its directly paired test namespace; dependents
-   are not pulled in. Lint still follows the require graph, because a changed
-   signature is flagged at its call sites.
+   changed files and computes the namespaces they affect over the require
+   graph. Test namespaces pair with source namespaces by convention
+   (test/kmet/x/test_y.clj ↔ src/kmet/x/y.clj, and
+   test/kmet/tasks/y_test.clj ↔ tasks/kmet/tasks/y.clj); a changed source
+   pulls in every test namespace that transitively requires it, and the
+   paired test stays selected even when the test drives its source through
+   another namespace. A central namespace can therefore select much of the
+   suite; `bb test` remains the full run.
 
    The source roots are src/, test/, tasks/ and extensions/ (see AGENTS.md
    § File layout — tasks/ holds the task implementations). Their files are
@@ -321,27 +323,29 @@
                      parent (conj (symbol (str parent ".test-" segment))))]
     (filterv test-nss candidates)))
 
-(defn changed-test-nss-by
-  "Test namespaces directly changed or directly paired with a changed source
-   namespace. Dependents are not included: a shared namespace change does not
-   re-run every test that transitively requires it."
+(defn affected-test-nss-by
+  "Test namespaces affected by CHANGED-NSS: every test namespace that
+   transitively requires a changed namespace, plus the paired test of every
+   affected source namespace. Pairing is the fallback for a test that drives
+   its source through another namespace instead of requiring it directly. A
+   central namespace can therefore select much of the suite; `bb test`
+   remains the full run."
   [changed-nss]
-  (let [{:keys [paths]} (scan-graph)
-        test-nss (set (filter test-ns? (keys paths)))]
-    (->> changed-nss
-         (mapcat (fn [ns-sym]
-                   (if (test-ns? ns-sym)
-                     [ns-sym]
-                     (direct-test-nss ns-sym test-nss))))
-         (filter test-nss)
+  (let [{:keys [graph paths]} (scan-graph)
+        test-nss (set (filter test-ns? (keys paths)))
+        affected (closure (filter graph changed-nss) (reverse-graph graph))
+        paired (mapcat (fn [ns-sym]
+                         (when-not (test-ns? ns-sym)
+                           (direct-test-nss ns-sym test-nss)))
+                       (concat changed-nss affected))]
+    (->> (concat (filter test-nss affected) paired)
          distinct
          sort)))
 
-(defn changed-test-nss
-  "Test namespaces directly changed or paired with the currently changed
-   files."
+(defn affected-test-nss
+  "Test namespaces affected by the currently changed files."
   []
-  (changed-test-nss-by (map path->ns (changed-clj-files))))
+  (affected-test-nss-by (map path->ns (changed-clj-files))))
 
 (defn affected-lint-files-by
   "Files to lint for CHANGED-PATHS: the paths themselves, every affected
@@ -365,8 +369,9 @@
   (affected-lint-files-by (changed-clj-files)))
 
 (defn extension-changed-files
-  "Changed .clj files under extensions/. Their tests run from inside the
-   extension directory, never from the root runner — the `bb *-changed`
-   test tasks print a hint instead of silently skipping them."
+  "Changed .clj files under extensions/. Extension test namespaces are part
+   of the root test registry (modules.edn :extensions), so the `bb *-changed`
+   tasks select them like any other affected test; this helper exposes the
+   raw changed extension paths."
   []
   (filter #(str/starts-with? % "extensions/") (changed-clj-files)))
