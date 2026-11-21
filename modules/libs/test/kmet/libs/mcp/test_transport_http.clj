@@ -1,13 +1,14 @@
 (ns kmet.libs.mcp.test-transport-http
-  "Streamable-HTTP transport without sockets: responses are injected with
-   :request-fn, so parsing, header negotiation, retry and timeout paths run
-   as plain unit tests (the socket-level cases stay in the extension's
-   extensions/mcp-adapter/test/.../client_test.clj)."
-  (:require [clojure.java.io :as io]
+  "HTTP transports without sockets: streamable-HTTP responses are
+   injected with :request-fn, so parsing, header negotiation, retry and
+   timeout paths run as plain unit tests; the legacy HTTP+SSE internals are
+   exercised against an injected stream. The socket-level cases stay in the
+   extension's extensions/mcp-adapter/test/.../client_test.clj."
+  (:require [clojure.core.async :as async]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.libs.json :as json]
-            [kmet.libs.mcp.protocol :as protocol]
             [kmet.libs.mcp.transport :as transport]
             [kmet.libs.mcp.transport.http :as http]))
 
@@ -16,7 +17,7 @@
   ([] (modern-conn "http://server"))
   ([url]
    (assoc (http/connect! url {})
-          :era (atom {:era :modern :version protocol/modern-protocol-version}))))
+          :era (atom {:era :modern :version transport/modern-protocol-version}))))
 
 (defn- response
   ([status content-type body] (response status content-type body {}))
@@ -397,12 +398,12 @@
 
 (defn- subscription-meta
   [id]
-  {:_meta {(protocol/meta-key "subscriptionId") id}})
+  {:_meta {(transport/meta-key "subscriptionId") id}})
 
 (defn- ack-frame
   [id agreed]
   {:jsonrpc "2.0"
-   :method protocol/ack-method
+   :method transport/ack-method
    :params (merge {:notifications agreed} (subscription-meta id))})
 
 (defn- list-changed-frame
@@ -418,11 +419,11 @@
         capture (fn [_url opts]
                   (let [sent (json/parse-string (:body opts) true)]
                     (swap! requests conj sent)
-                    (if (= protocol/listen-method (:method sent))
+                    (if (= transport/listen-method (:method sent))
                       (do
                         (is (nil? (:timeout opts))
                             "no deadline: curl gets no --max-time")
-                        (is (= protocol/listen-method
+                        (is (= transport/listen-method
                                (get (:headers opts) "Mcp-Method")))
                         (response 200 "text/event-stream"
                                   (str ":\r\n"   ;; keepalive comment
@@ -442,10 +443,10 @@
                                         (fn [msg] (swap! observed conj msg)))]
       (is (= :ended (deref ended 2000 ::timeout))
           "the stream's EOF ends the subscription")
-      (is (= [protocol/ack-method "notifications/tools/list_changed"]
+      (is (= [transport/ack-method "notifications/tools/list_changed"]
              (mapv :method @observed))
           "the ack and our own stamped frame reach the observer; the stale id is dropped")
-      (is (= [protocol/ack-method "notifications/tools/list_changed"]
+      (is (= [transport/ack-method "notifications/tools/list_changed"]
              (mapv :method @conn-level))
           "both frames are delivered to the conn-level handler too")
       (is (= {:jsonrpc "2.0" :id 9001 :result {}} (second @requests))
@@ -542,3 +543,90 @@
       (is (http/alive? conn) "the conn stays usable")
       (finally
         (deliver release true)))))
+
+;; Legacy HTTP+SSE transport (§7.4)
+
+(def ^:private endpoint-url @#'http/sse-endpoint-url)
+(def ^:private drain-stream! @#'http/drain-sse-stream)
+(def ^:private endpoint! @#'http/endpoint!)
+
+(deftest endpoint-resolution
+  (testing "a bare path resolves against the GET url"
+    (is (= "http://h:1/msg" (endpoint-url "http://h:1/base" "/msg")))
+    (is (= "http://h:1/msg" (endpoint-url "http://h:1/base" "  /msg  "))))
+  (testing "a JSON endpoint event carries the uri"
+    (is (= "http://other/x" (endpoint-url "http://h:1/base" "{\"uri\":\"http://other/x\"}")))
+    (is (= "http://h:1/base" (endpoint-url "http://h:1/base" "{}"))
+        "JSON without a uri falls back to the GET url"))
+  (testing "anything else falls back to the GET url"
+    (is (= "http://h:1/base" (endpoint-url "http://h:1/base" "relative/path")))
+    (is (= "http://h:1/base" (endpoint-url "http://h:1/base" "")))))
+
+(deftest drain-reads-endpoint-and-messages
+  (let [body (str "event: endpoint\ndata: /messages\n\n"
+                  "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n\n")
+        ch (async/chan 8)
+        endpoint (atom nil)
+        ready (promise)]
+    (drain-stream! (io/input-stream (.getBytes body "UTF-8")) ch endpoint
+                   "http://h:1/sse" ready)
+    (is (= "http://h:1/messages" @endpoint))
+    (is (realized? ready) "the endpoint event releases the wait")
+    (is (= {:jsonrpc "2.0" :id 7 :result {}} (async/<!! ch)))
+    (testing "stream end delivers the eof marker"
+      (is (= transport/eof-marker (async/<!! ch))))))
+
+(deftest drain-drops-non-json-payloads
+  (let [body (str "event: message\ndata: not-json\n\n"
+                  "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n")
+        ch (async/chan 8)]
+    (drain-stream! (io/input-stream (.getBytes body "UTF-8")) ch (atom nil)
+                   "http://h/sse" (promise))
+    (is (= {:jsonrpc "2.0" :id 1 :result {}} (async/<!! ch)))))
+
+(deftest endpoint-wait
+  (let [conn (http/connect-sse! "http://h/sse" {})]
+    (testing "an already-resolved endpoint returns immediately"
+      (reset! (:endpoint-atom conn) "http://h/messages")
+      (is (= "http://h/messages" (endpoint! conn))))
+    (testing "a not-yet-arrived endpoint event is awaited, not polled"
+      (reset! (:endpoint-atom conn) nil)
+      (let [ready (promise)]
+        (reset! (:endpoint-ready conn) ready)
+        (future (Thread/sleep 20)
+                (reset! (:endpoint-atom conn) "http://h/messages")
+                (deliver ready true))
+        (is (= "http://h/messages" (endpoint! conn)))))
+    (testing "no endpoint event fails with the MCP error after the wait"
+      (reset! (:endpoint-atom conn) nil)
+      (reset! (:endpoint-ready conn) (promise))
+      (with-redefs-fn {#'http/endpoint-wait-ms 10}
+        (fn []
+          (is (thrown-with-msg? Exception #"no SSE endpoint received"
+                                (endpoint! conn))))))))
+
+(deftest connection-lifecycle
+  (let [conn (http/connect-sse! "http://h/sse" {})]
+    (is (false? (http/alive-sse? conn)) "no stream open yet")
+    (reset! (:stream-open conn) true)
+    (is (true? (http/alive-sse? conn)))
+    (http/close-sse! conn)
+    (is (false? (http/alive-sse? conn)))
+    (is (false? @(:stream-open conn)))
+    (is (true? @(:closed conn)) "close! marks the conn closed"))
+  (let [conn (http/connect-sse! "http://h/sse" {:reconnect-fn (fn [_] nil)})]
+    (is (fn? (:reconnect-fn conn)) "the client's reconnect hook is captured")))
+
+(deftest wait-for-response-cancels-on-signal
+  (let [ch (async/chan 1)
+        signal (atom false)
+        call (future
+               (try (transport/wait-for-response
+                     {:transport :sse} ch 1 "tools/call" 5000 nil
+                     (fn [_conn _msg] nil) signal)
+                    (catch Exception e e)))]
+    (reset! signal true)
+    (let [e (deref call 2000 ::timeout)]
+      (is (instance? Exception e))
+      (is (= :mcp-error (:type (ex-data e))))
+      (is (true? (:cancelled (ex-data e)))))))

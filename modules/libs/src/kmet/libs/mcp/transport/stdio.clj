@@ -24,7 +24,6 @@
   (:require [clojure.string :as str]
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.jsonrpc :as jrpc]
-            [kmet.libs.mcp.protocol :as protocol]
             [kmet.libs.mcp.transport :as transport]
             [kmet.libs.process :as process]))
 
@@ -77,11 +76,11 @@
       (try (jrpc/notify! conn "notifications/cancelled"
                          (cond-> {:requestId (:id (ex-data e))
                                   :reason (str "kmet: " method " — timed out")}
-                           (protocol/modern-conn? conn)
-                           (update :_meta merge (protocol/conn-meta conn))))
+                           (transport/modern-conn? conn)
+                           (update :_meta merge (transport/conn-meta conn))))
            (catch Exception _ nil))
-      (protocol/mcp-error (str "MCP request timed out after " timeout-ms "ms: " method)
-                          {:timeout-ms timeout-ms :method method}))
+      (transport/mcp-error (str "MCP request timed out after " timeout-ms "ms: " method)
+                           {:timeout-ms timeout-ms :method method}))
 
     ::jrpc/cancelled
     (do
@@ -91,18 +90,18 @@
         (try (jrpc/notify! conn "notifications/cancelled"
                            (cond-> {:requestId id
                                     :reason (str "kmet: " method " — cancelled")}
-                             (protocol/modern-conn? conn)
-                             (update :_meta merge (protocol/conn-meta conn))))
+                             (transport/modern-conn? conn)
+                             (update :_meta merge (transport/conn-meta conn))))
              (catch Exception _ nil)))
-      (protocol/cancelled-error method))
+      (transport/cancelled-error method))
 
     ::jrpc/request-error
     (let [{:keys [code message]} (:error (ex-data e))]
-      (protocol/mcp-error (str "MCP error " code ": " message)
-                          {:code code :message message}))
+      (transport/mcp-error (str "MCP error " code ": " message)
+                           {:code code :message message}))
 
     ::jrpc/transport-dead
-    (protocol/mcp-error (dead-message conn method) {:transport :stdio})
+    (transport/mcp-error (dead-message conn method) {:transport :stdio})
 
     e))
 
@@ -164,16 +163,16 @@
         stopped (atom false)
         ended (promise)
         params (cond-> {:notifications filter}
-                 (protocol/modern-conn? conn)
-                 (update :_meta merge (protocol/conn-meta conn)))
+                 (transport/modern-conn? conn)
+                 (update :_meta merge (transport/conn-meta conn)))
         stop! (fn []
                 (reset! stopped true)
                 (try
                   (jrpc/notify! conn "notifications/cancelled"
                                 (cond-> {:requestId id
                                          :reason "kmet: subscription closed"}
-                                  (protocol/modern-conn? conn)
-                                  (update :_meta merge (protocol/conn-meta conn))))
+                                  (transport/modern-conn? conn)
+                                  (update :_meta merge (transport/conn-meta conn))))
                   (catch Exception _ nil))
                 (deliver ended :stopped))
         run (fn []
@@ -183,7 +182,7 @@
                 ;; nothing to cancel, so don't subscribe at all
                   (deliver ended :stopped)
                   (do
-                    (jrpc/request! conn protocol/listen-method params
+                    (jrpc/request! conn transport/listen-method params
                                    {:timeout-ms jrpc/no-deadline :id id})
                     (deliver ended (if @stopped :stopped :ended))))
                 (catch Exception e

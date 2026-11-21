@@ -11,7 +11,7 @@
   (:require [clojure.string :as str]
             [kmet.libs.json :as json]
             [kmet.libs.mcp.client :as mcp]
-            [kmet.libs.mcp.protocol :as protocol]
+            [kmet.libs.mcp.transport :as transport]
             [kmet.libs.mcp.transport.http :as mcp-http]
             [kmet.extensions.mcp-adapter.catalog :as catalog]
             [kmet.extensions.mcp-adapter.output-guard :as guard]
@@ -151,7 +151,7 @@
 (defn- format-tool-result
   "Guard and shape a tools/call RESULT for the model."
   [state result]
-  (let [formatted (protocol/format-result result)
+  (let [formatted (transport/format-result result)
         guard-options (guard/resolve-options (catalog/settings state))
         guarded (guard/guard-text (:text formatted) guard-options)
         details (guard/guarded-details (:guard guarded)
@@ -224,7 +224,7 @@
                   result (mcp/request! conn "tools/call"
                                        {:name tool-name
                                         :arguments arguments
-                                        :_meta {:progressToken (protocol/progress-token)}}
+                                        :_meta {:progressToken (transport/progress-token)}}
                                        {:timeout-ms timeout-ms
                                         :signal (:signal opts)
                                         :on-notification (on-update-progress! (:on-update opts))

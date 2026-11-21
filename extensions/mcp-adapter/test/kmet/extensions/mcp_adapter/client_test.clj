@@ -9,7 +9,7 @@
             [clojure.test :refer [deftest is testing]]
             [kmet.libs.json :as json]
             [kmet.libs.mcp.client :as mcp]
-            [kmet.libs.mcp.protocol :as protocol]
+            [kmet.libs.mcp.transport :as transport]
             [kmet.libs.mcp.transport.http :as mcp-http]
             [kmet.extensions.mcp-adapter.test-util :as tu]))
 
@@ -28,7 +28,7 @@
   {:url (str "http://127.0.0.1:" port "/mcp" (or query ""))
    :http-transport :streamable-http})
 
-(defn- text [result] (:text (protocol/format-result result)))
+(defn- text [result] (:text (transport/format-result result)))
 
 ;; ─── stdio ────────────────────────────────────────────────────────────────
 
@@ -133,7 +133,7 @@
 (deftest ^:slow stdio-error-and-timeout-paths
   (tu/with-connect [{:keys [conn]} (stdio-def)]
     (testing "a tool error result surfaces as :is-error"
-      (let [formatted (protocol/format-result
+      (let [formatted (transport/format-result
                        (mcp/request! conn "tools/call" {:name "boom" :arguments {}}))]
         (is (true? (:is-error formatted)))
         (is (= "kaboom" (:text formatted)))))

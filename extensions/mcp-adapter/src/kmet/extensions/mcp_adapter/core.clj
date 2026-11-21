@@ -28,7 +28,7 @@
             [kmet.srce.core :as srce]
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.mcp.client :as mcp]
-            [kmet.libs.mcp.protocol :as protocol]
+            [kmet.libs.mcp.transport :as transport]
             [kmet.libs.theme :as theme]))
 
 (def ^:private state-atom (atom nil))
@@ -291,7 +291,7 @@
       (try
         (mcp/listen! conn filter
                      {:on-frame (fn [msg]
-                                  (when (= protocol/ack-method (:method msg))
+                                  (when (= transport/ack-method (:method msg))
                                     (log-subscription-ack! name filter msg)))
                       :on-restored
                       (fn []

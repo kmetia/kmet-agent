@@ -6,7 +6,7 @@
    Kept apart from kmet.app.tools.bash-executor so formatting an output
    preview or truncating a result does not load the process engine."
   (:require [clojure.string :as str]
-            [kmet.libs.terminal :as terminal]))
+            [kmet.libs.text :as text]))
 
 (def DEFAULT-MAX-LINES
   "Default output line budget (pi: DEFAULT_MAX_LINES)."
@@ -64,10 +64,10 @@
   "Pi: sanitizeBinaryOutput() — strips ANSI codes and control chars (except
    \\t \\n \\r) and Unicode format characters (U+FFF9-U+FFFB). The ANSI
    strip is the shared host-branched scanner
-   (kmet.libs.terminal/strip-ansi-codes); the CR pass is guarded so a LF-only
+   (kmet.libs.text/strip-ansi-codes); the CR pass is guarded so a LF-only
    chunk (the common case) skips both replaces."
   [s]
-  (let [s (terminal/strip-ansi-codes s)
+  (let [s (text/strip-ansi-codes s)
         s (if (str/includes? s "\r")
             (-> s (str/replace #"\r\n" "\n") (str/replace #"\r" "\n"))
             s)]

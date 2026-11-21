@@ -1,24 +1,33 @@
 (ns kmet.libs.mcp.transport.http
-  "MCP streamable-HTTP transport (§7.3): per-request POST (kmet.libs.http,
-   :as :stream); initialize captures Mcp-Session-Id, and later POSTs carry
-   the negotiated MCP-Protocol-Version; responses are parsed by content
-   type (application/json or text/event-stream). A modern conn sends no
-   session header and mirrors the method (and the tool/prompt/resource
-   name) in Mcp-Method/Mcp-Name routing headers.
+  "MCP HTTP transports: streamable-HTTP (§7.3) and the legacy HTTP+SSE
+   binding (§7.4).
 
-   Conn keys: :url :session-id :protocol-version :closed :listen, plus
-   the common contract keys documented in kmet.libs.mcp.transport.
+   Streamable-HTTP: per-request POST (kmet.libs.http, :as :stream);
+   initialize captures Mcp-Session-Id, and later POSTs carry the negotiated
+   MCP-Protocol-Version; responses are parsed by content type
+   (application/json or text/event-stream). A modern conn sends no session
+   header and mirrors the method (and the tool/prompt/resource name) in
+   Mcp-Method/Mcp-Name routing headers.
 
-   This namespace also owns the HTTP POST/parse helpers and send-async!
-   that the legacy SSE transport (kmet.libs.mcp.transport.sse) reuses,
-   plus the SEP-2243 custom-header helpers (x-mcp-param-headers /
-   valid-x-mcp-header?) for tool parameters annotated x-mcp-header."
-  (:require [clojure.java.io :as io]
+   Legacy HTTP+SSE: a GET stream carries the `endpoint` event and server
+   messages; client requests POST to the endpoint URL and wait for the
+   id-matched message on the stream. A dropped stream is reopened once and
+   re-established via (:reconnect-fn conn) — the client's initialize — so
+   this namespace never requires kmet.libs.mcp.client. It is deprecated by
+   the 2025-03-26 streamable-HTTP revision but still used in the wild.
+
+   Conn keys for both bindings are documented beside their constructors;
+   the common contract keys are in kmet.libs.mcp.transport. This namespace
+   also owns the HTTP POST/parse helpers and send-async! that the legacy
+   SSE binding reuses, plus the SEP-2243 custom-header helpers
+   (x-mcp-param-headers / valid-x-mcp-header?) for tool parameters
+   annotated x-mcp-header."
+  (:require [clojure.core.async :as async]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.http :as http]
             [kmet.libs.json :as json]
-            [kmet.libs.mcp.protocol :as protocol]
             [kmet.libs.mcp.transport :as transport]
             [kmet.libs.sse :as sse]))
 
@@ -58,7 +67,7 @@
   [conn]
   (cond-> {"Content-Type" "application/json"
            "Accept" "application/json, text/event-stream"}
-    (and (not (protocol/modern-conn? conn)) @(:session-id conn))
+    (and (not (transport/modern-conn? conn)) @(:session-id conn))
     (assoc "Mcp-Session-Id" @(:session-id conn))
     (and (:protocol-version conn) @(:protocol-version conn))
     (assoc "MCP-Protocol-Version" @(:protocol-version conn))))
@@ -96,7 +105,7 @@
    Mcp-Method on every request, Mcp-Name for the methods that name a
    tool, resource or prompt. Empty for a legacy conn."
   [conn method params]
-  (if (protocol/modern-conn? conn)
+  (if (transport/modern-conn? conn)
     (let [name (name-header-value method params)]
       (cond-> {"Mcp-Method" method}
         name (assoc "Mcp-Name" (encode-header-value name))))
@@ -375,9 +384,9 @@
               (json/parse-string text true)))
 
           :else
-          (throw (protocol/mcp-error (str "MCP connect failed: unexpected response content type "
-                                          content-type " (status " status ")")
-                                     {:status status})))
+          (throw (transport/mcp-error (str "MCP connect failed: unexpected response content type "
+                                           content-type " (status " status ")")
+                                      {:status status})))
 
         :else
         (let [text (when-let [b (:body response)]
@@ -385,7 +394,7 @@
               error (:error (when (seq text)
                               (try (json/parse-string text true)
                                    (catch Exception _ nil))))]
-          (throw (protocol/mcp-error
+          (throw (transport/mcp-error
                   (str "MCP connect failed: HTTP " status
                        (when (seq text) (str ": " text)))
                   (cond-> {:status status}
@@ -459,7 +468,7 @@
         (do
           ;; a modern conn has no session: a header a probe or discovery
           ;; response carried is never captured (nor mirrored later)
-          (when-let [session-id (and (not (protocol/modern-conn? conn))
+          (when-let [session-id (and (not (transport/modern-conn? conn))
                                      (transport/header-value
                                       (:headers response)
                                       "Mcp-Session-Id"))]
@@ -467,7 +476,7 @@
           (parse-http-response conn response id on-notification))))
     (catch Exception e
       (if (timeout-exception? e)
-        (protocol/mcp-error
+        (transport/mcp-error
          (str "MCP request timed out after " timeout-ms "ms: " method)
          {:timeout-ms timeout-ms :method method})
         e))))
@@ -487,7 +496,7 @@
   [conn method params timeout-ms on-notification {:keys [http-headers signal]}]
   (transport/touch! conn)
   (when (and signal @signal)
-    (throw (protocol/cancelled-error method)))
+    (throw (transport/cancelled-error method)))
   (let [id (swap! (:id-counter conn) inc)
         result-p (promise)
         abandoned (atom false)
@@ -511,7 +520,7 @@
         ;; bb), so it finishes on its own timeout
         (abandon! abandoned response-atom)
         (transport/cancel! conn id method "cancelled" send-async!)
-        (throw (protocol/cancelled-error method)))
+        (throw (transport/cancelled-error method)))
 
       (= ::timeout response)
       (do
@@ -523,20 +532,20 @@
         (abandon! abandoned response-atom)
         (reset! (:closed conn) true)
         (transport/cancel! conn id method "timed out" send-async!)
-        (throw (protocol/mcp-error (str "MCP request timed out after " timeout-ms "ms: " method)
-                                   {:timeout-ms timeout-ms :method method})))
+        (throw (transport/mcp-error (str "MCP request timed out after " timeout-ms "ms: " method)
+                                    {:timeout-ms timeout-ms :method method})))
 
       :else
       (if (instance? Exception response)
         (throw response)
         (if (:error response)
-          (throw (protocol/mcp-error (str "MCP error " (:code (:error response)) ": "
-                                          (:message (:error response)))
-                                     {:code (:code (:error response))
-                                      :message (:message (:error response))}))
+          (throw (transport/mcp-error (str "MCP error " (:code (:error response)) ": "
+                                           (:message (:error response)))
+                                      {:code (:code (:error response))
+                                       :message (:message (:error response))}))
           (if (nil? response)
-            (throw (protocol/mcp-error (str "MCP connect failed: empty response to " method)
-                                       {:method method}))
+            (throw (transport/mcp-error (str "MCP connect failed: empty response to " method)
+                                        {:method method}))
             (:result response)))))))
 
 (defn send-async!
@@ -550,8 +559,8 @@
     (try
       (let [endpoint (if (= :sse (:transport conn))
                        (or @(:endpoint-atom conn)
-                           (throw (protocol/mcp-error "MCP connect failed: no SSE endpoint received"
-                                                      {:transport :sse})))
+                           (throw (transport/mcp-error "MCP connect failed: no SSE endpoint received"
+                                                       {:transport :sse})))
                        (:url conn))
             response (http-post! conn endpoint
                                  (http-request-headers conn (:method msg) (:params msg))
@@ -612,13 +621,13 @@
   [conn filter on-frame]
   (let [id (swap! (:id-counter conn) inc)
         params (cond-> {:notifications filter}
-                 (protocol/modern-conn? conn)
-                 (update :_meta merge (protocol/conn-meta conn)))
+                 (transport/modern-conn? conn)
+                 (update :_meta merge (transport/conn-meta conn)))
         body (json/generate-string {:jsonrpc "2.0" :id id
-                                    :method protocol/listen-method
+                                    :method transport/listen-method
                                     :params params})
         response (http-post! conn (:url conn)
-                             (http-request-headers conn protocol/listen-method params)
+                             (http-request-headers conn transport/listen-method params)
                              body nil)
         status (:status response)
         content-type (or (transport/header-value (:headers response) "Content-Type")
@@ -627,8 +636,8 @@
                  (str/includes? content-type "text/event-stream"))
       (do
         (http/close! response)
-        (throw (protocol/mcp-error
-                (str "MCP connect failed: " protocol/listen-method " answered "
+        (throw (transport/mcp-error
+                (str "MCP connect failed: " transport/listen-method " answered "
                      status " " content-type)
                 {:status status})))
       (let [listen-atom (:listen conn)
@@ -674,7 +683,7 @@
    Mcp-Session-Id; returns true when a DELETE was scheduled."
   [conn]
   (if (and (= :streamable-http (:transport conn))
-           (not (protocol/modern-conn? conn))
+           (not (transport/modern-conn? conn))
            @(:session-id conn))
     (do
       (spawn
@@ -709,3 +718,205 @@
   "True while the conn has not been closed."
   [conn]
   (not @(:closed conn)))
+
+;; ─── Legacy HTTP+SSE transport (§7.4) ─────────────────────────────────────
+
+;; ─── GET stream ───────────────────────────────────────────────────────────
+
+(defn- sse-endpoint-url
+  "Resolve the POST endpoint from an SSE `endpoint` event: assume the data
+   is a bare path unless it parses as JSON; append relative to the GET url."
+  [get-url data]
+  (let [data (str/trim (or data ""))]
+    (if (str/starts-with? data "{")
+      (let [parsed (try (json/parse-string data true) (catch Exception _ nil))]
+        (if (and (map? parsed) (string? (:uri parsed)))
+          (:uri parsed)
+          get-url))
+      (if (str/starts-with? data "/")
+        (let [uri (java.net.URI. get-url)]
+          (str (.getScheme uri) "://" (.getAuthority uri) data))
+        get-url))))
+
+(defn- drain-sse-stream
+  "Background reader for the legacy SSE GET stream: `endpoint` event → the
+   POST URL and the endpoint-ready signal; `message` event → JSON-RPC →
+   channel; ::eof + close on EOF."
+  [body ch endpoint-atom get-url endpoint-ready]
+  (try
+    (with-open [rdr (io/reader body)]
+      (loop [event-name nil buf ""]
+        (let [line (.readLine rdr)]
+          (cond
+            (nil? line) nil
+            :else
+            (let [[ev data] (sse/parse-sse-line line)]
+              (cond
+                ev (recur ev buf)
+                data (recur event-name (sse/append-data buf data))
+                (and (str/blank? line) (seq buf))
+                (do
+                  (if (= "endpoint" event-name)
+                    (do (reset! endpoint-atom (sse-endpoint-url get-url buf))
+                        (deliver endpoint-ready true))
+                    (try
+                      (let [parsed (json/parse-string buf true)]
+                        (when (map? parsed)
+                          (async/put! ch parsed)))
+                      (catch Exception _ nil)))
+                  (recur nil ""))
+                :else (recur event-name buf)))))))
+    (catch Exception _ nil)
+    (finally
+      (async/put! ch transport/eof-marker)
+      (async/close! ch))))
+
+(defn open-stream!
+  "(Re)open the SSE GET stream; resets the response channel and stores the
+   active response on the conn (:response) so close! can abort it (the
+   reader thread releases on disconnect)."
+  [conn]
+  (let [headers (merge {"Accept" "text/event-stream"}
+                       (or (when-let [auth (:auth-headers conn)] (auth)) {}))
+        response (http/get (:url conn)
+                           {:headers headers
+                            :as :stream
+                            :throw? false
+                            :timeout 30000})]
+    (when-not (<= 200 (:status response) 299)
+      ;; close the failed stream (reap curl / release the body) before
+      ;; surfacing the MCP error
+      (http/close! response)
+      (throw (transport/mcp-error (str "MCP connect failed: HTTP " (:status response)
+                                       " opening SSE stream")
+                                  {:status (:status response)})))
+    ;; an earlier stream (reconnect) is abandoned — the reader thread is
+    ;; gone with the old channel; a mid-stream transport failure there is
+    ;; stale noise, not the reconnect's problem
+    (when-let [prev @(:response conn)]
+      (try (http/close! prev) (catch Exception _ nil)))
+    (let [ch (async/chan 128)
+          ready (promise)]
+      ;; every (re)open gets its own endpoint-ready signal, so a request
+      ;; waits for this stream's `endpoint` event rather than a stale one
+      (reset! (:endpoint-ready conn) ready)
+      (spawn #(drain-sse-stream (:body response) ch (:endpoint-atom conn)
+                                (:url conn) ready))
+      (reset! (:ch conn) ch)
+      (reset! (:response conn) response)
+      (reset! (:stream-open conn) true))))
+
+(defn connect-sse!
+  "Legacy SSE conn: a GET stream + POSTs to the endpoint URL."
+  [url opts]
+  {:transport :sse
+   :url url
+   :endpoint-atom (atom nil)
+   :endpoint-ready (atom nil)
+   :ch (atom nil)
+   :response (atom nil)
+   :stream-open (atom false)
+   :session-id (atom nil)
+   :id-counter (atom 0)
+   :closed (atom false)
+   :last-used (atom (concurrent/monotonic-ms))
+   :auth-headers (:auth-headers opts)
+   :on-401 (:on-401 opts)
+   :on-notification (:on-notification opts)
+   :reconnect-fn (:reconnect-fn opts)
+   :req-lock (Object.)})
+
+;; ─── Messaging ────────────────────────────────────────────────────────────
+
+(defn send-async-sse!
+  "Deliver a JSON-RPC message expecting no answer (POST, body unread)."
+  [conn msg]
+  (send-async! conn msg))
+
+(def ^:private endpoint-wait-ms
+  "How long a request waits for the stream's `endpoint` event before
+   failing — the event normally arrives within a round trip."
+  5000)
+
+(defn- endpoint!
+  "The POST endpoint for an SSE conn — waits up to endpoint-wait-ms for
+   the stream's `endpoint` event (the reader thread delivers it
+   asynchronously); an endpoint already resolved by an earlier stream
+   returns immediately."
+  [conn]
+  (or @(:endpoint-atom conn)
+      (do
+        (when-let [ready (some-> (:endpoint-ready conn) deref)]
+          (deref ready endpoint-wait-ms nil))
+        (or @(:endpoint-atom conn)
+            (throw (transport/mcp-error "MCP connect failed: no SSE endpoint received"
+                                        {:transport :sse}))))))
+
+(defn request-sse!
+  "POST a request and wait for its id-matched message on the stream. A
+   dropped stream reopens once and re-establishes the session. OPTS is
+   the transport-neutral request options map — the legacy SSE binding
+   consumes :signal (a cancel signal, a non-blocking derefable, polled
+   while the response waits; an
+   initial POST already in flight is bounded by the request timeout);
+   :http-headers is streamable-HTTP only."
+  [conn method params timeout-ms on-notification {:keys [signal]}]
+  (transport/touch! conn)
+  (when (and signal @signal)
+    (throw (transport/cancelled-error method)))
+  (let [id (swap! (:id-counter conn) inc)]
+    (loop [attempts 0]
+      (let [ch @(:ch conn)]
+        (when (nil? ch)
+          (throw (transport/mcp-error "MCP connect failed: SSE stream not open"
+                                      {:transport :sse})))
+        (let [endpoint (endpoint! conn)
+              body (json/generate-string {:jsonrpc "2.0" :id id :method method :params params})
+              response (http-post! conn endpoint
+                                   (http-request-headers conn)
+                                   body timeout-ms)
+              parsed (parse-http-response conn response id on-notification)]
+          (if (and (map? parsed) (contains? parsed :id) (:error parsed))
+            (throw (transport/mcp-error (str "MCP error " (:code (:error parsed)) ": "
+                                             (:message (:error parsed)))
+                                        {:code (:code (:error parsed))
+                                         :message (:message (:error parsed))}))
+            (let [wait-result (if (and (map? parsed) (contains? parsed :id))
+                                parsed
+                                (transport/wait-for-response conn ch id method timeout-ms
+                                                             on-notification send-async-sse!
+                                                             signal))]
+              (if (= transport/eof-marker wait-result)
+              ;; Stream dropped — reopen + re-initialize (bounded retry).
+                (if (< attempts 1)
+                  (do (reset! (:stream-open conn) false)
+                      (open-stream! conn)
+                      (when-let [reconnect (:reconnect-fn conn)] (reconnect conn))
+                      (recur (inc attempts)))
+                  (throw (transport/mcp-error
+                          (str "MCP connect failed: SSE stream dropped while waiting for "
+                               method)
+                          {:transport :sse})))
+                (if (:error wait-result)
+                  (throw (transport/mcp-error (str "MCP error " (:code (:error wait-result)) ": "
+                                                   (:message (:error wait-result)))
+                                              {:code (:code (:error wait-result))
+                                               :message (:message (:error wait-result))}))
+                  (:result wait-result))))))))))
+
+;; ─── Teardown ─────────────────────────────────────────────────────────────
+
+(defn close-sse!
+  "Mark the conn closed and abort the active stream (releases the blocked
+   reader + reaps the transport)."
+  [conn]
+  (reset! (:closed conn) true)
+  (reset! (:stream-open conn) false)
+  (when-let [r @(:response conn)]
+    (try (http/close! r) (catch Exception _ nil)))
+  nil)
+
+(defn alive-sse?
+  "True while the stream is open and the conn has not been closed."
+  [conn]
+  (boolean (and @(:stream-open conn) (not @(:closed conn)))))

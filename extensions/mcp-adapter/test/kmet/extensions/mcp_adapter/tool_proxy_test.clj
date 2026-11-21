@@ -6,7 +6,7 @@
             [clojure.test :refer [deftest is testing]]
             [kmet.libs.concurrent]
             [kmet.libs.mcp.client :as mcp-client]
-            [kmet.libs.mcp.protocol :as protocol]
+            [kmet.libs.mcp.transport :as transport]
             [kmet.extensions.mcp-adapter.test-util :as tu]
             [kmet.extensions.mcp-adapter.tool-proxy :as proxy]))
 
@@ -193,7 +193,7 @@
                          :ensure-connected-fn (fn [_] {:transport :streamable-http})
                          :read-state-fn (fn [] nil))]
         (with-redefs [mcp-client/request!
-                      (fn [& _] (throw (protocol/cancelled-error "tools/call")))]
+                      (fn [& _] (throw (transport/cancelled-error "tools/call")))]
           (is (= {:content "MCP call cancelled." :is-error true}
                  (proxy/call-mcp-tool state "fs" "read_file" {}))))))))
 

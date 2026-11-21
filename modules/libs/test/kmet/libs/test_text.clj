@@ -76,3 +76,11 @@
   (is (= [] (text/nearest-words "CORE" ["core"]))
       "the helper is case-sensitive; the caller folds case when it wants to")
   (is (= [] (text/nearest-words nil ["core"]))))
+
+;; ─── ANSI stripping ───────────────────────────────────────────────────────
+
+(deftest strip-ansi-codes-test
+  (testing "CSI and OSC sequences are removed, plain text is untouched"
+    (is (= "hello" (text/strip-ansi-codes "\u001b[31mhello\u001b[0m")))
+    (is (= "link" (text/strip-ansi-codes "\u001b]8;;http://x\u001b\\link\u001b]8;;\u0007")))
+    (is (= "plain" (text/strip-ansi-codes "plain")))))

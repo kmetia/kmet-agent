@@ -266,10 +266,8 @@
     kmet.libs.markdown
     kmet.libs.mcp.auth
     kmet.libs.mcp.client
-    kmet.libs.mcp.protocol
     kmet.libs.mcp.transport
     kmet.libs.mcp.transport.http
-    kmet.libs.mcp.transport.sse
     kmet.libs.mcp.transport.stdio
     kmet.libs.nrepl
     kmet.libs.oauth
@@ -277,7 +275,6 @@
     kmet.libs.process
     kmet.libs.ranking
     kmet.libs.sse
-    kmet.libs.terminal
     kmet.libs.terminal-image
     kmet.libs.text
     kmet.libs.theme

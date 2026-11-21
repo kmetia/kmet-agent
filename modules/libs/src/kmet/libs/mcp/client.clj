@@ -1,8 +1,9 @@
 (ns kmet.libs.mcp.client
   "Transport-neutral MCP client: the request core, the initialize
    handshake, capability-gated catalog discovery and URI-template
-   expansion. Transports live in kmet.libs.mcp.transport.{stdio,http,sse};
-   protocol constants in kmet.libs.mcp.protocol.
+   expansion. Transports live in kmet.libs.mcp.transport.{stdio,http};
+   protocol constants and the connection contract in
+   kmet.libs.mcp.transport.
 
    Public protocol: request! / notify! / listen! / close! / alive? /
    last-used / modern?.
@@ -16,10 +17,8 @@
    unused servers."
   (:require [clojure.string :as str]
             [kmet.libs.concurrent :as concurrent]
-            [kmet.libs.mcp.protocol :as protocol]
             [kmet.libs.mcp.transport :as transport]
             [kmet.libs.mcp.transport.http :as http]
-            [kmet.libs.mcp.transport.sse :as sse]
             [kmet.libs.mcp.transport.stdio :as stdio]))
 
 ;; ─── request!/notify!/close!/alive? (§7.1) ────────────────────────────────
@@ -35,15 +34,15 @@
   "True when the connection negotiated the 2026-07-28 era: no initialize
    handshake, per-request _meta, resultType on every result."
   [conn]
-  (protocol/modern-conn? conn))
+  (transport/modern-conn? conn))
 
 (defn- with-request-meta
   "Merge the era's _meta into PARAMS for a modern CONN; a legacy conn's
    params pass through untouched. Caller-supplied keys (a progress token)
    win."
   [conn params]
-  (if (protocol/modern-conn? conn)
-    (update (or params {}) :_meta #(merge (protocol/conn-meta conn) %))
+  (if (transport/modern-conn? conn)
+    (update (or params {}) :_meta #(merge (transport/conn-meta conn) %))
     params))
 
 (def ^:private mrtr-max-retries
@@ -55,9 +54,9 @@
 (defn- input-required-error
   "MRTR result the client cannot serve: the server asked for an
    inputRequests entry (elicitation/sampling/roots, none of which kmet
-   declares in protocol/modern-request-meta)."
+   declares in transport/modern-request-meta)."
   [result]
-  (protocol/mcp-error
+  (transport/mcp-error
    (str "MCP server requested client input (MRTR): "
         (str/join ", " (map (fn [[k v]] (str (name k) " → " (:method v)))
                             (:inputRequests result))))
@@ -67,7 +66,7 @@
 (defn- mrtr-exhausted-error
   "MRTR result abandoned after mrtr-max-retries requestState-only rounds."
   [method]
-  (protocol/mcp-error
+  (transport/mcp-error
    (str "MCP server kept requesting input (MRTR) after "
         mrtr-max-retries " retries: " method)
    {:result-type :input-required
@@ -79,7 +78,7 @@
    re-check after acquiring it."
   [signal method]
   (when (and signal @signal)
-    (throw (protocol/cancelled-error method))))
+    (throw (transport/cancelled-error method))))
 
 (defn request!
   "Send a JSON-RPC request and return its :result. OPTS:
@@ -97,15 +96,15 @@
    while the server asked for no client input; an inputRequests entry
    throws — kmet declares no elicitation/sampling/roots capabilities."
   [conn method params & [{:keys [timeout-ms on-notification http-headers signal]}]]
-  (let [timeout (or timeout-ms protocol/default-request-timeout-ms)
-        modern? (protocol/modern-conn? conn)
+  (let [timeout (or timeout-ms transport/default-request-timeout-ms)
+        modern? (transport/modern-conn? conn)
         request-opts (cond-> {:http-headers http-headers}
                        signal (assoc :signal signal))
         dispatch (fn [params]
                    (case (:transport conn)
                      :stdio (stdio/request! conn method params timeout on-notification request-opts)
                      :streamable-http (http/request! conn method params timeout on-notification request-opts)
-                     :sse (sse/request! conn method params timeout on-notification request-opts)))]
+                     :sse (http/request-sse! conn method params timeout on-notification request-opts)))]
     ;; one request at a time per stdio/sse conn: SSE matches responses on
     ;; one shared channel, so two waiters would consume (and drop) each
     ;; other's responses; stdio correlates per request in jsonrpc but
@@ -127,7 +126,7 @@
                      (locking (:req-lock conn)
                        (check-signal! signal method)
                        (dispatch params)))]
-        (if (and modern? (= "input_required" (protocol/result-type result)))
+        (if (and modern? (= "input_required" (transport/result-type result)))
           (cond
             (seq (:inputRequests result)) (throw (input-required-error result))
             (< retries mrtr-max-retries)
@@ -184,7 +183,7 @@
    (case (:transport conn)
      :stdio (stdio/close! conn)
      :streamable-http (http/close! conn opts)
-     :sse (sse/close! conn))
+     :sse (http/close-sse! conn))
    nil))
 
 (defn alive?
@@ -193,30 +192,30 @@
   (case (:transport conn)
     :stdio (stdio/alive? conn)
     :streamable-http (http/alive? conn)
-    :sse (sse/alive? conn)))
+    :sse (http/alive-sse? conn)))
 
 ;; ─── Handshake + discovery (§7.5) ─────────────────────────────────────────
 
 (defn initialize!
   "Run the MCP handshake: initialize (60s timeout) → notifications/
    initialized. The revision the server selects is validated against
-   kmet.libs.mcp.protocol/supported-protocol-versions (an answer outside
+   kmet.libs.mcp.transport/supported-protocol-versions (an answer outside
    that list is an error) and recorded in the conn :protocol-version atom,
    so streamable-HTTP requests after the handshake carry the negotiated
    MCP-Protocol-Version header. Returns {:protocol-version str
    :server-info map :capabilities map}."
   [conn]
   (let [result (request! conn "initialize"
-                         {:protocolVersion protocol/protocol-version
+                         {:protocolVersion transport/protocol-version
                           :capabilities {}
-                          :clientInfo protocol/client-info}
-                         {:timeout-ms protocol/initialize-timeout-ms})
-        version (or (:protocolVersion result) protocol/protocol-version)]
-    (when-not (some #{version} protocol/supported-protocol-versions)
-      (throw (protocol/mcp-error (str "MCP server selected unsupported protocol version "
-                                      version)
-                                 {:protocol-version version
-                                  :supported protocol/supported-protocol-versions})))
+                          :clientInfo transport/client-info}
+                         {:timeout-ms transport/initialize-timeout-ms})
+        version (or (:protocolVersion result) transport/protocol-version)]
+    (when-not (some #{version} transport/supported-protocol-versions)
+      (throw (transport/mcp-error (str "MCP server selected unsupported protocol version "
+                                       version)
+                                  {:protocol-version version
+                                   :supported transport/supported-protocol-versions})))
     (when-let [pv (:protocol-version conn)]
       (reset! pv version))
     (notify! conn "notifications/initialized" {})
@@ -241,7 +240,7 @@
   (loop [cursor nil tools []]
     (let [result (request! conn "tools/list"
                            (if cursor {:cursor cursor} {})
-                           {:timeout-ms protocol/list-page-timeout-ms})
+                           {:timeout-ms transport/list-page-timeout-ms})
           tools (into tools (list-tools-for-conn conn (:tools result)))]
       (if-let [next-cursor (:nextCursor result)]
         (recur next-cursor tools)
@@ -253,7 +252,7 @@
   (loop [cursor nil prompts []]
     (let [result (request! conn "prompts/list"
                            (if cursor {:cursor cursor} {})
-                           {:timeout-ms protocol/list-page-timeout-ms})
+                           {:timeout-ms transport/list-page-timeout-ms})
           prompts (into prompts (:prompts result))]
       (if-let [next-cursor (:nextCursor result)]
         (recur next-cursor prompts)
@@ -266,7 +265,7 @@
   (request! conn "prompts/get"
             (cond-> {:name name}
               (seq arguments) (assoc :arguments arguments))
-            {:timeout-ms (or timeout-ms protocol/default-request-timeout-ms)}))
+            {:timeout-ms (or timeout-ms transport/default-request-timeout-ms)}))
 
 (defn list-all-resources
   "resources/list with cursor pagination (30s per page)."
@@ -274,7 +273,7 @@
   (loop [cursor nil resources []]
     (let [result (request! conn "resources/list"
                            (if cursor {:cursor cursor} {})
-                           {:timeout-ms protocol/list-page-timeout-ms})
+                           {:timeout-ms transport/list-page-timeout-ms})
           resources (into resources (:resources result))]
       (if-let [next-cursor (:nextCursor result)]
         (recur next-cursor resources)
@@ -293,7 +292,7 @@
     (loop [cursor nil templates []]
       (let [result (request! conn "resources/templates/list"
                              (if cursor {:cursor cursor} {})
-                             {:timeout-ms protocol/list-page-timeout-ms})
+                             {:timeout-ms transport/list-page-timeout-ms})
             templates (into templates (:resourceTemplates result))]
         (if-let [next-cursor (:nextCursor result)]
           (recur next-cursor templates)
@@ -307,7 +306,7 @@
    OPTS: :timeout-ms and :signal (the cancel signal)."
   [conn uri & [{:keys [timeout-ms signal]}]]
   (request! conn "resources/read" {:uri uri}
-            {:timeout-ms (or timeout-ms protocol/default-request-timeout-ms)
+            {:timeout-ms (or timeout-ms transport/default-request-timeout-ms)
              :signal signal}))
 
 (defn- uri-escape
@@ -372,14 +371,14 @@
     (reset! (:protocol-version conn) version)
     (when-let [session (:session-id conn)] (reset! session nil)))
   (request! conn "server/discover"
-            {:_meta (protocol/modern-request-meta version)}
+            {:_meta (transport/modern-request-meta version)}
             {:timeout-ms timeout-ms}))
 
 (defn- discover-handshake
   "A raw DiscoverResult → the handshake shape establish! works with."
   [version result]
   {:protocol-version version
-   :server-info (get-in result [:_meta (protocol/meta-key "serverInfo")])
+   :server-info (get-in result [:_meta (transport/meta-key "serverInfo")])
    :capabilities (or (:capabilities result) {})})
 
 (defn discover!
@@ -387,10 +386,10 @@
    handshake. Returns {:protocol-version :server-info :capabilities
    :supported-versions}. VERSION defaults to the conn's recorded
    revision."
-  ([conn] (discover! conn (or (protocol/era-version conn)
-                              protocol/modern-protocol-version)))
+  ([conn] (discover! conn (or (transport/era-version conn)
+                              transport/modern-protocol-version)))
   ([conn version]
-   (let [result (discover-request! conn version protocol/initialize-timeout-ms)]
+   (let [result (discover-request! conn version transport/initialize-timeout-ms)]
      (assoc (discover-handshake version result)
             :supported-versions (vec (:supportedVersions result))))))
 
@@ -398,12 +397,12 @@
   "The error for a server whose advertised revisions share none with the
    client's."
   [advertised]
-  (protocol/mcp-error
+  (transport/mcp-error
    (str "MCP server advertises no protocol revision this client speaks: "
         (str/join ", " (or (seq advertised) ["none"])))
    {:supported (vec advertised)
-    :client-supported (into protocol/modern-supported-versions
-                            protocol/supported-protocol-versions)}))
+    :client-supported (into transport/modern-supported-versions
+                            transport/supported-protocol-versions)}))
 
 (defn- detect-stdio-era!
   "Classify a stdio conn's era with a server/discover probe:
@@ -419,12 +418,12 @@
    Returns {:era :modern :version rev :discover result} or
    {:era :legacy :probe-error e-or-nil}."
   [conn]
-  (loop [version protocol/modern-protocol-version]
+  (loop [version transport/modern-protocol-version]
     (let [outcome (try {:result (discover-request! conn version
-                                                   protocol/probe-timeout-ms)}
+                                                   transport/probe-timeout-ms)}
                        (catch Exception e {:error e}))]
       (if-let [result (:result outcome)]
-        (if-let [negotiated (protocol/negotiate-version (:supportedVersions result))]
+        (if-let [negotiated (transport/negotiate-version (:supportedVersions result))]
           (case (:era negotiated)
             :modern {:era :modern
                      :version (:version negotiated)
@@ -435,7 +434,7 @@
               code (:code (ex-data e))]
           (cond
             (= -32022 code)
-            (if-let [negotiated (protocol/negotiate-version
+            (if-let [negotiated (transport/negotiate-version
                                  (:supported (:data (ex-data e))))]
               (case (:era negotiated)
                 :modern (if (= (:version negotiated) version)
@@ -443,7 +442,7 @@
                           (recur (:version negotiated)))
                 :legacy {:era :legacy})
               (throw (no-overlap-error (:supported (:data (ex-data e))))))
-            (protocol/modern-error? (ex-data e)) (throw e)
+            (transport/modern-error? (ex-data e)) (throw e)
             :else {:era :legacy :probe-error e}))))))
 
 (defn- detect-http-era!
@@ -462,12 +461,12 @@
    Returns {:era :modern :version rev :discover result} or
    {:era :legacy :probe-error e-or-nil}."
   [conn]
-  (loop [version protocol/modern-protocol-version]
+  (loop [version transport/modern-protocol-version]
     (let [outcome (try {:result (discover-request! conn version
-                                                   protocol/probe-timeout-ms)}
+                                                   transport/probe-timeout-ms)}
                        (catch Exception e {:error e}))]
       (if-let [result (:result outcome)]
-        (if-let [negotiated (protocol/negotiate-version (:supportedVersions result))]
+        (if-let [negotiated (transport/negotiate-version (:supportedVersions result))]
           (case (:era negotiated)
             :modern {:era :modern
                      :version (:version negotiated)
@@ -478,9 +477,9 @@
               data (ex-data e)
               code (:code data)]
           (cond
-            (and code (protocol/modern-error? data))
+            (and code (transport/modern-error? data))
             (if (= -32022 code)
-              (if-let [negotiated (protocol/negotiate-version (:supported (:data data)))]
+              (if-let [negotiated (transport/negotiate-version (:supported (:data data)))]
                 (case (:era negotiated)
                   :modern (if (= (:version negotiated) version)
                             {:era :modern :version version}
@@ -517,9 +516,9 @@
    surface. Returns the modern establish map or nil."
   [conn]
   (try
-    (let [version protocol/modern-protocol-version
-          result (discover-request! conn version protocol/initialize-timeout-ms)]
-      (when-let [negotiated (protocol/negotiate-version (:supportedVersions result))]
+    (let [version transport/modern-protocol-version
+          result (discover-request! conn version transport/initialize-timeout-ms)]
+      (when-let [negotiated (transport/negotiate-version (:supportedVersions result))]
         (when (= :modern (:era negotiated))
           (establish-modern! conn (:version negotiated) result))))
     (catch Exception _ nil)))
@@ -606,8 +605,8 @@
   (try
     (if (= :modern era)
       (establish-modern! conn (or version
-                                  (protocol/era-version conn)
-                                  protocol/modern-protocol-version)
+                                  (transport/era-version conn)
+                                  transport/modern-protocol-version)
                          nil)
       (establish-legacy! conn nil))
     (catch Exception e
@@ -676,7 +675,7 @@
   (let [url (:url definition)
         transport-conn (if url
                          (case (:http-transport definition)
-                           :sse (sse/connect! url (assoc opts :reconnect-fn initialize!))
+                           :sse (http/connect-sse! url (assoc opts :reconnect-fn initialize!))
                            (http/connect! url opts))
                          (stdio/connect! definition opts))
         conn (assoc transport-conn
@@ -694,7 +693,7 @@
                     :listener (atom nil))]
     (try
       (when (and url (= :sse (:transport conn)))
-        (sse/open-stream! conn))
+        (http/open-stream! conn))
       (let [established (establish! conn opts)
             conn (assoc conn :capabilities (:capabilities established))]
         ;; the transport's internal callbacks captured the pre-assoc map;
@@ -732,8 +731,8 @@
          (fn [l]
            (cond-> (update l :frames inc)
              (zero? (:frames l))
-             (assoc :first-ack? (= protocol/ack-method (:method msg)))
-             (and (= protocol/ack-method (:method msg))
+             (assoc :first-ack? (= transport/ack-method (:method msg)))
+             (and (= transport/ack-method (:method msg))
                   (map? (:notifications (:params msg))))
              (assoc :agreed (:notifications (:params msg)))))))
 
@@ -821,16 +820,16 @@
    listener state atom; throws for a conn that did not negotiate the era
    or whose transport has no subscription stream."
   [conn filter & [{:keys [on-frame on-restored]}]]
-  (when-not (protocol/modern-conn? conn)
-    (throw (protocol/mcp-error
-            (str "MCP " protocol/listen-method
+  (when-not (transport/modern-conn? conn)
+    (throw (transport/mcp-error
+            (str "MCP " transport/listen-method
                  " requires the 2026-07-28 era: no subscription opened")
-            {:method protocol/listen-method})))
+            {:method transport/listen-method})))
   (when-not (#{:stdio :streamable-http} (:transport conn))
-    (throw (protocol/mcp-error
-            (str "MCP " protocol/listen-method " is not available over "
+    (throw (transport/mcp-error
+            (str "MCP " transport/listen-method " is not available over "
                  (name (or (:transport conn) :unknown)) " (legacy transport)")
-            {:method protocol/listen-method :transport (:transport conn)})))
+            {:method transport/listen-method :transport (:transport conn)})))
   (stop-listener! conn)
   (let [state (atom {:filter filter
                      :on-restored on-restored

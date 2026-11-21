@@ -5,9 +5,8 @@
    redefined)."
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.libs.mcp.client :as mcp]
-            [kmet.libs.mcp.protocol :as protocol]
+            [kmet.libs.mcp.transport :as transport]
             [kmet.libs.mcp.transport.http :as http]
-            [kmet.libs.mcp.transport.sse :as sse]
             [kmet.libs.mcp.transport.stdio :as stdio]))
 
 ;; ─── URI templates ────────────────────────────────────────────────────────
@@ -34,7 +33,7 @@
 
 (defn- era-conn
   "A conn that needs no transport: :streamable-http skips request!'s
-   serialization lock; the era atom follows protocol/modern-conn?."
+   serialization lock; the era atom follows transport/modern-conn?."
   [era & [version]]
   {:transport :streamable-http
    :era (atom (when era {:era era :version (or version "2026-07-28")}))})
@@ -56,9 +55,9 @@
         (is (= {:ok true}
                (mcp/request! (era-conn :modern) "tools/call" {:name "t"})))
         (is (= {:name "t"
-                :_meta {(protocol/meta-key "protocolVersion") "2026-07-28"
-                        (protocol/meta-key "clientInfo") protocol/client-info
-                        (protocol/meta-key "clientCapabilities") {}}}
+                :_meta {(transport/meta-key "protocolVersion") "2026-07-28"
+                        (transport/meta-key "clientInfo") transport/client-info
+                        (transport/meta-key "clientCapabilities") {}}}
                (first @calls))))
       (testing "caller _meta keys survive"
         (reset! calls [])
@@ -66,7 +65,7 @@
                       {:_meta {:progressToken "p1"}})
         (is (= "p1" (get-in (first @calls) [:_meta :progressToken])))
         (is (= "2026-07-28"
-               (get-in (first @calls) [:_meta (protocol/meta-key "protocolVersion")]))))
+               (get-in (first @calls) [:_meta (transport/meta-key "protocolVersion")]))))
       (testing "a legacy conn sends no _meta"
         (reset! calls [])
         (mcp/request! (era-conn :legacy) "tools/list" {})
@@ -81,9 +80,9 @@
     (with-redefs [http/send-async! (fn [_conn msg] (swap! sent conj msg))]
       (mcp/notify! (era-conn :modern) "notifications/cancelled" {:requestId 7})
       (is (= {:requestId 7
-              :_meta {(protocol/meta-key "protocolVersion") "2026-07-28"
-                      (protocol/meta-key "clientInfo") protocol/client-info
-                      (protocol/meta-key "clientCapabilities") {}}}
+              :_meta {(transport/meta-key "protocolVersion") "2026-07-28"
+                      (transport/meta-key "clientInfo") transport/client-info
+                      (transport/meta-key "clientCapabilities") {}}}
              (-> @sent first :params)))
       (reset! sent [])
       (mcp/notify! (era-conn :legacy) "notifications/initialized" {})
@@ -110,7 +109,7 @@
       (is (= {:name "t"} (dissoc (nth @calls 1) :requestState :_meta))
           "the same request is retried")
       (is (= "2026-07-28"
-             (get-in (nth @calls 2) [:_meta (protocol/meta-key "protocolVersion")]))
+             (get-in (nth @calls 2) [:_meta (transport/meta-key "protocolVersion")]))
           "retries keep the era _meta"))))
 
 (deftest request!-bounds-mrtr-retries
@@ -225,7 +224,7 @@
         (is (= {:name "modern" :version "1"} (:server-info est)))
         (is (= [{:name "t"}] (:tools est)))
         (is (mcp/modern? conn))
-        (is (= "2026-07-28" (protocol/era-version conn)))
+        (is (= "2026-07-28" (transport/era-version conn)))
         (is (= "2026-07-28" @(:protocol-version conn)))
         (is (= ["server/discover" "tools/list"] @methods)
             "detection's round trip is reused by establish!; no initialize")))))
@@ -238,15 +237,15 @@
                     (swap! methods conj method)
                     (case method
                       "server/discover"
-                      (throw (protocol/mcp-error "MCP error -32601: Method not found"
-                                                 {:code -32601}))
+                      (throw (transport/mcp-error "MCP error -32601: Method not found"
+                                                  {:code -32601}))
                       "initialize" {:protocolVersion "2025-11-25" :capabilities {}}
                       (throw (ex-info "unexpected request" {:method method}))))
                   mcp/notify! (fn [_ _ _] nil)]
       (let [est (mcp/establish! conn)]
         (is (= "2025-11-25" (:protocol-version est)))
         (is (not (mcp/modern? conn)))
-        (is (= "2025-11-25" (protocol/era-version conn)))
+        (is (= "2025-11-25" (transport/era-version conn)))
         (is (= "2025-11-25" @(:protocol-version conn)))
         (is (= ["server/discover" "initialize"] @methods))))))
 
@@ -272,25 +271,25 @@
                   (fn [_ method _params & _]
                     (case method
                       "server/discover"
-                      (throw (protocol/mcp-error "unsupported"
-                                                 {:code -32022
-                                                  :data {:supported ["2025-11-25"]}}))
+                      (throw (transport/mcp-error "unsupported"
+                                                  {:code -32022
+                                                   :data {:supported ["2025-11-25"]}}))
                       "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
                   mcp/notify! (fn [_ _ _] nil)]
       (is (= "2025-11-25" (:protocol-version (mcp/establish! (stdio-conn)))))))
   (testing "no overlap in data.supported errors"
     (with-redefs [mcp/request!
                   (fn [_ _method _params & _]
-                    (throw (protocol/mcp-error "unsupported"
-                                               {:code -32022
-                                                :data {:supported ["1999-01-01"]}})))
+                    (throw (transport/mcp-error "unsupported"
+                                                {:code -32022
+                                                 :data {:supported ["1999-01-01"]}})))
                   mcp/notify! (fn [_ _ _] nil)]
       (is (thrown-with-msg? Exception #"no protocol revision"
                             (mcp/establish! (stdio-conn))))))
   (testing "a header/era rejection surfaces"
     (with-redefs [mcp/request!
                   (fn [_ _method _params & _]
-                    (throw (protocol/mcp-error "header mismatch" {:code -32020})))
+                    (throw (transport/mcp-error "header mismatch" {:code -32020})))
                   mcp/notify! (fn [_ _ _] nil)]
       (let [e (try (mcp/establish! (stdio-conn)) nil (catch Exception e e))]
         (is (= -32020 (:code (ex-data e)))))))
@@ -299,15 +298,15 @@
     ;; with the one it advertised. The client speaks one modern revision
     ;; today, so the branch is pinned here for the next one.
     (let [asked (atom [])]
-      (with-redefs [protocol/modern-supported-versions ["2026-11-01" "2026-07-28"]
+      (with-redefs [transport/modern-supported-versions ["2026-11-01" "2026-07-28"]
                     mcp/request!
                     (fn [_ method params & _]
                       (case method
                         "server/discover"
-                        (let [v (get-in params [:_meta (protocol/meta-key "protocolVersion")])]
+                        (let [v (get-in params [:_meta (transport/meta-key "protocolVersion")])]
                           (swap! asked conj v)
                           (if (= "2026-07-28" v)
-                            (throw (protocol/mcp-error
+                            (throw (transport/mcp-error
                                     "unsupported"
                                     {:code -32022 :data {:supported ["2026-11-01"]}}))
                             (discover-result ["2026-11-01"])))
@@ -317,15 +316,15 @@
           (is (= "2026-11-01" (:protocol-version (mcp/establish! conn))))
           (is (= ["2026-07-28" "2026-11-01"] @asked)
               "the probe retried with the revision the server advertised")
-          (is (= "2026-11-01" (protocol/era-version conn))))))))
+          (is (= "2026-11-01" (transport/era-version conn))))))))
 
 (deftest establish!-probe-timeout-falls-back
   (with-redefs [mcp/request!
                 (fn [_ method _params & _]
                   (case method
                     "server/discover"
-                    (throw (protocol/mcp-error "timed out" {:timeout-ms 10
-                                                            :method method}))
+                    (throw (transport/mcp-error "timed out" {:timeout-ms 10
+                                                             :method method}))
                     "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
                 mcp/notify! (fn [_ _ _] nil)]
     (let [conn (stdio-conn)]
@@ -343,12 +342,12 @@
                     (case method
                       "server/discover"
                       (if (= 1 (swap! discovers inc))
-                        (throw (protocol/mcp-error "timed out" {:timeout-ms 10
-                                                                :method method}))
+                        (throw (transport/mcp-error "timed out" {:timeout-ms 10
+                                                                 :method method}))
                         (discover-result))
                       "initialize"
-                      (throw (protocol/mcp-error "MCP error -32601: Method not found"
-                                                 {:code -32601}))
+                      (throw (transport/mcp-error "MCP error -32601: Method not found"
+                                                  {:code -32601}))
                       "tools/list" {:tools []}))
                   mcp/notify! (fn [_ _ _] nil)]
       (let [conn (stdio-conn)
@@ -395,8 +394,8 @@
                       (case method
                         "server/discover"
                         (if (= 1 (swap! discovers inc))
-                          (throw (protocol/mcp-error "MCP error -32601: Method not found"
-                                                     {:code -32601}))
+                          (throw (transport/mcp-error "MCP error -32601: Method not found"
+                                                      {:code -32601}))
                           (discover-result))
                         "tools/list" {:tools []}))
                     mcp/notify! (fn [_ _ _] nil)]
@@ -413,7 +412,7 @@
                       (case method
                         "server/discover"
                         (if (= 1 (swap! discovers inc))
-                          (throw (protocol/mcp-error
+                          (throw (transport/mcp-error
                                   "unsupported"
                                   {:code -32022 :data {:supported ["2026-07-28"]}}))
                           (discover-result))
@@ -429,7 +428,7 @@
       (with-redefs [mcp/request!
                     (fn [_ method _params & _]
                       (swap! methods conj method)
-                      (throw (protocol/mcp-error "header mismatch" {:code -32020})))
+                      (throw (transport/mcp-error "header mismatch" {:code -32020})))
                     mcp/notify! (fn [_ _ _] nil)]
         (let [e (try (mcp/establish! (stdio-conn) {:protocol-era {:era :modern
                                                                   :version "2026-07-28"}})
@@ -442,7 +441,7 @@
                     (fn [_ method _params & _]
                       (swap! methods conj method)
                       (case method
-                        "initialize" (throw (protocol/mcp-error
+                        "initialize" (throw (transport/mcp-error
                                              "unsupported"
                                              {:code -32022
                                               :data {:supported ["2026-07-28"]}}))
@@ -464,12 +463,12 @@
                       (case method
                         "initialize"
                         (if (= 1 (swap! initializes inc))
-                          (throw (protocol/mcp-error "MCP error -32601: Method not found"
-                                                     {:code -32601}))
+                          (throw (transport/mcp-error "MCP error -32601: Method not found"
+                                                      {:code -32601}))
                           {:protocolVersion "2025-11-25" :capabilities {}})
                         "server/discover"
-                        (throw (protocol/mcp-error "MCP error -32601: Method not found"
-                                                   {:code -32601}))))
+                        (throw (transport/mcp-error "MCP error -32601: Method not found"
+                                                    {:code -32601}))))
                     mcp/notify! (fn [_ _ _] nil)]
         (let [est (mcp/establish! (stdio-conn) {:protocol-era {:era :legacy
                                                                :version "2025-11-25"}})]
@@ -482,7 +481,7 @@
                     (fn [_ method _params & _]
                       (swap! methods conj method)
                       (case method
-                        "server/discover" (throw (protocol/mcp-error
+                        "server/discover" (throw (transport/mcp-error
                                                   "MCP error -32601: Method not found"
                                                   {:code -32601}))
                         "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
@@ -495,8 +494,8 @@
       (with-redefs [mcp/request!
                     (fn [_ method _params & _]
                       (swap! methods conj method)
-                      (throw (protocol/mcp-error "timed out" {:timeout-ms 10
-                                                              :method method})))
+                      (throw (transport/mcp-error "timed out" {:timeout-ms 10
+                                                               :method method})))
                     mcp/notify! (fn [_ _ _] nil)]
         (let [e (try (mcp/establish! (stdio-conn) {:protocol-era :legacy})
                      nil (catch Exception e e))]
@@ -543,7 +542,7 @@
                   (fn [conn method _params & _]
                     (swap! seen conj [method @(:protocol-version conn)])
                     (case method
-                      "server/discover" (throw (protocol/mcp-error
+                      "server/discover" (throw (transport/mcp-error
                                                 "HTTP 404" {:code -32601
                                                             :status 404}))
                       "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
@@ -557,7 +556,7 @@
     (with-redefs [mcp/request!
                   (fn [conn method params & _]
                     (swap! seen conj [method
-                                      (get-in params [:_meta (protocol/meta-key "protocolVersion")])
+                                      (get-in params [:_meta (transport/meta-key "protocolVersion")])
                                       @(:protocol-version conn)])
                     (case method
                       "server/discover" (discover-result)
@@ -577,7 +576,7 @@
                       (case method
                         "server/discover"
                         (if (= 1 (swap! discovers inc))
-                          (throw (protocol/mcp-error
+                          (throw (transport/mcp-error
                                   "unsupported"
                                   {:code -32022
                                    :data {:supported ["2026-07-28"]}}))
@@ -592,9 +591,9 @@
                   (fn [_ method _params & _]
                     (case method
                       "server/discover"
-                      (throw (protocol/mcp-error "unsupported"
-                                                 {:code -32022
-                                                  :data {:supported ["2025-11-25"]}}))
+                      (throw (transport/mcp-error "unsupported"
+                                                  {:code -32022
+                                                   :data {:supported ["2025-11-25"]}}))
                       "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
                   mcp/notify! (fn [_ _ _] nil)]
       (let [conn (http-conn)]
@@ -603,17 +602,17 @@
   (testing "no overlap in data.supported errors"
     (with-redefs [mcp/request!
                   (fn [_ _method _params & _]
-                    (throw (protocol/mcp-error "unsupported"
-                                               {:code -32022
-                                                :data {:supported ["1999-01-01"]}})))
+                    (throw (transport/mcp-error "unsupported"
+                                                {:code -32022
+                                                 :data {:supported ["1999-01-01"]}})))
                   mcp/notify! (fn [_ _ _] nil)]
       (is (thrown-with-msg? Exception #"no protocol revision"
                             (mcp/establish! (http-conn))))))
   (testing "a header/era rejection surfaces"
     (with-redefs [mcp/request!
                   (fn [_ _method _params & _]
-                    (throw (protocol/mcp-error "header mismatch"
-                                               {:code -32020 :status 400})))
+                    (throw (transport/mcp-error "header mismatch"
+                                                {:code -32020 :status 400})))
                   mcp/notify! (fn [_ _ _] nil)]
       (let [e (try (mcp/establish! (http-conn)) nil (catch Exception e e))]
         (is (= -32020 (:code (ex-data e))))))))
@@ -622,15 +621,15 @@
   ;; the HTTP twin: the retry re-seeds MCP-Protocol-Version, so the second
   ;; probe carries the revision it asks for
   (let [seen (atom [])]
-    (with-redefs [protocol/modern-supported-versions ["2026-11-01" "2026-07-28"]
+    (with-redefs [transport/modern-supported-versions ["2026-11-01" "2026-07-28"]
                   mcp/request!
                   (fn [conn method params & _]
                     (case method
                       "server/discover"
-                      (let [v (get-in params [:_meta (protocol/meta-key "protocolVersion")])]
+                      (let [v (get-in params [:_meta (transport/meta-key "protocolVersion")])]
                         (swap! seen conj [v @(:protocol-version conn)])
                         (if (= "2026-07-28" v)
-                          (throw (protocol/mcp-error
+                          (throw (transport/mcp-error
                                   "unsupported"
                                   {:code -32022 :status 400
                                    :data {:supported ["2026-11-01"]}}))
@@ -642,7 +641,7 @@
         (is (= [["2026-07-28" "2026-07-28"] ["2026-11-01" "2026-11-01"]]
                (take 2 @seen))
             "the retry's POST carries the revision it requests")
-        (is (= "2026-11-01" (protocol/era-version conn)))))))
+        (is (= "2026-11-01" (transport/era-version conn)))))))
 
 (deftest establish!-http-non-modern-error-falls-back
   ;; a 404 + JSON-RPC body is not an era signal: run the handshake
@@ -651,7 +650,7 @@
                   (fn [_ method _params & _]
                     (swap! methods conj method)
                     (case method
-                      "server/discover" (throw (protocol/mcp-error
+                      "server/discover" (throw (transport/mcp-error
                                                 "HTTP 404" {:code -32601
                                                             :status 404}))
                       "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
@@ -664,8 +663,8 @@
     (with-redefs [mcp/request!
                   (fn [_ method _params & _]
                     (swap! methods conj method)
-                    (throw (protocol/mcp-error "MCP connect failed: HTTP 401: unauthorized"
-                                               {:status 401})))
+                    (throw (transport/mcp-error "MCP connect failed: HTTP 401: unauthorized"
+                                                {:status 401})))
                   mcp/notify! (fn [_ _ _] nil)]
       (let [e (try (mcp/establish! (http-conn)) nil (catch Exception e e))]
         (is (= 401 (:status (ex-data e))))
@@ -681,10 +680,10 @@
                     (case method
                       "server/discover"
                       (if (= 1 (swap! discovers inc))
-                        (throw (protocol/mcp-error "timed out" {:timeout-ms 10
-                                                                :method method}))
+                        (throw (transport/mcp-error "timed out" {:timeout-ms 10
+                                                                 :method method}))
                         (discover-result))
-                      "initialize" (throw (protocol/mcp-error
+                      "initialize" (throw (transport/mcp-error
                                            "HTTP 404" {:code -32601
                                                        :status 404}))
                       "tools/list" {:tools []}))
@@ -839,7 +838,7 @@
    server: the transport keys the listener touches plus its slots."
   []
   (assoc (http/connect! "http://server" {})
-         :era (atom {:era :modern :version protocol/modern-protocol-version})
+         :era (atom {:era :modern :version transport/modern-protocol-version})
          :listener (atom nil)))
 
 (defn- wait-for
@@ -857,12 +856,12 @@
 
 (defn- subscription-meta
   [id]
-  {:_meta {(protocol/meta-key "subscriptionId") id}})
+  {:_meta {(transport/meta-key "subscriptionId") id}})
 
 (defn- ack-notification
   [id agreed]
   {:jsonrpc "2.0"
-   :method protocol/ack-method
+   :method transport/ack-method
    :params (merge {:notifications agreed} (subscription-meta id))})
 
 (deftest listen!-requires-a-modern-streamable-conn
@@ -895,7 +894,7 @@
       (is (true? (:first-ack? (listen-state conn))))
       (is (= {:toolsListChanged true} (:agreed (listen-state conn)))
           "the filter the server dropped stays visible")
-      (is (= [protocol/ack-method "notifications/tools/list_changed"] @observed)
+      (is (= [transport/ack-method "notifications/tools/list_changed"] @observed)
           "the observer sees every frame of the subscription")
       (mcp/close! conn)
       (is (false? (mcp/listening? conn)))
@@ -1022,9 +1021,9 @@
                    (deref release 5000 nil)))]
     (try
       (is (true? (deref held 2000 false)))
-      (with-redefs [sse/request! (fn [& _]
-                                   (reset! dispatched true)
-                                   {:ok true})]
+      (with-redefs [http/request-sse! (fn [& _]
+                                        (reset! dispatched true)
+                                        {:ok true})]
         (let [call (future
                      (try (mcp/request! {:transport :sse :req-lock lock}
                                         "tools/call" {}

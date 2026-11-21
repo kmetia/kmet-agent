@@ -5,7 +5,7 @@
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.libs.jsonrpc :as jrpc]
             [kmet.libs.mcp.client :as mcp]
-            [kmet.libs.mcp.protocol :as protocol]
+            [kmet.libs.mcp.transport :as transport]
             [kmet.libs.mcp.transport.stdio :as stdio]))
 
 (def ^:private ping-handler @#'stdio/ping-handler)
@@ -49,21 +49,21 @@
                                       (fn [_ msg] (swap! conn-level conj (:method msg))))
         stamped (fn [sid] {:jsonrpc "2.0"
                            :method "notifications/tools/list_changed"
-                           :params {:_meta {(protocol/meta-key "subscriptionId") sid}}})]
+                           :params {:_meta {(transport/meta-key "subscriptionId") sid}}})]
     (testing "the acknowledgment establishes the subscription id"
       (handler {:jsonrpc "2.0"
-                :method protocol/ack-method
+                :method transport/ack-method
                 :params {:notifications {:toolsListChanged true}
-                         :_meta {(protocol/meta-key "subscriptionId") 7}}})
+                         :_meta {(transport/meta-key "subscriptionId") 7}}})
       (is (= 7 (:subscription-id @listen)))
-      (is (= [protocol/ack-method] @observed)
+      (is (= [transport/ack-method] @observed)
           "the ack reaches the subscription observer")
-      (is (= [protocol/ack-method] @conn-level)
+      (is (= [transport/ack-method] @conn-level)
           "and the conn-level handler like any other notification"))
     (testing "our own stamped frame is observed and delivered"
       (handler (stamped 7))
-      (is (= [protocol/ack-method "notifications/tools/list_changed"] @observed))
-      (is (= [protocol/ack-method "notifications/tools/list_changed"] @conn-level)))
+      (is (= [transport/ack-method "notifications/tools/list_changed"] @observed))
+      (is (= [transport/ack-method "notifications/tools/list_changed"] @conn-level)))
     (testing "a stale subscription's frame is dropped"
       (handler (stamped 999))
       (is (= 2 (count @observed)))
@@ -139,7 +139,7 @@
                {:requestId 8
                 :reason "kmet: tools/call — timed out"
                 :_meta {:io.modelcontextprotocol/protocolVersion "2026-07-28"
-                        :io.modelcontextprotocol/clientInfo protocol/client-info
+                        :io.modelcontextprotocol/clientInfo transport/client-info
                         :io.modelcontextprotocol/clientCapabilities {}}}]]
              @sent)))))
 
@@ -257,7 +257,7 @@
       (is (= [{:name "discover-1"}] tools)
           "one discover: detection's round trip was reused by establish!")
       (is (= "2026-07-28" @(:protocol-version conn)))
-      (is (= "hi" (:text (protocol/format-result
+      (is (= "hi" (:text (transport/format-result
                           (mcp/request! conn "tools/call" {:name "echo"})))))
       (finally
         (mcp/close! conn)))))
