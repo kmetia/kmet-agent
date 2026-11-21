@@ -3,7 +3,7 @@
    path completion via CombinedAutocompleteProvider."
   (:require [clojure.test :as t]
             [clojure.string :as str]
-            [kmet.libs.host :as host]
+            [kmet.tui.host :as host]
             [kmet.tui.autocomplete :as ac]
             [babashka.fs :as fs]
             [kmet.test-tmp :as test-tmp]))

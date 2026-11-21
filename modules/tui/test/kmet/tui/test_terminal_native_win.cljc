@@ -14,7 +14,7 @@
   #?(:jolt
      (:require [clojure.test :as t :refer [deftest testing]]
                [jolt.ffi :as ffi]
-               [kmet.libs.host :as host]
+               [kmet.tui.host :as host]
                [kmet.tui.terminal :as term]
                [kmet.tui.terminal-native-win :as win])))
 

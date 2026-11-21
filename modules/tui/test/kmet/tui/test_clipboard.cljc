@@ -11,7 +11,7 @@
    skips there, as the backend falls back to the platform tools)."
   (:require [clojure.test :as t :refer [deftest testing]]
             [kmet.tui.clipboard :as clipboard]
-            [kmet.libs.host :as host]))
+            [kmet.tui.host :as host]))
 
 (def ^:private ffi
   "The host's FFI namespace, resolved at first use: babashka.ffi on babashka

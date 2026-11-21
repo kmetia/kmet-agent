@@ -6,7 +6,7 @@
    for environments with no tool."
   (:require [babashka.process :as proc]
             [clojure.string :as str]
-            [kmet.libs.host :as host]))
+            [kmet.tui.host :as host]))
 
 (def ^:private tool-timeout-ms 5000)
 

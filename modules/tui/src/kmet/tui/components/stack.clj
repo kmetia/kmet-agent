@@ -6,7 +6,7 @@
    it natively into the terminal scrollback, keeping the viewport pinned to
    the document end (kmet.tui.core/compose-document)."
   (:require [kmet.tui.protocols :as protocols]
-            [kmet.libs.host :as host]))
+            [kmet.tui.host :as host]))
 
 ;; ─── Stack entries ─────────────────────────────────────────────────────────
 

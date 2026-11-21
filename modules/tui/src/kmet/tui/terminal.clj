@@ -22,7 +22,7 @@
    those fields. The small shared pieces the platform backends build on —
    the bounded-read buffer size, the COLUMNS/LINES size fallback and the
    pending-queue helper — live here."
-  (:require [kmet.libs.host :as host]
+  (:require [kmet.tui.host :as host]
             [kmet.tui.terminal-escape :as escape]))
 
 ;; ─── The protocol: platform primitives only ────────────────────────────────
@@ -108,7 +108,7 @@
 ;; ─── Backend dispatch ──────────────────────────────────────────────────────
 
 (defn create-terminal
-  "Create the host's terminal backend (Jolt detection: kmet.libs.host).
+  "Create the host's terminal backend (Jolt detection: kmet.tui.host).
    The backend namespace is resolved at call time, so the JLine backend
    never loads on Jolt (no org.jline.*) and the FFI backends never load on
    bb/JVM (no jolt.ffi); on Jolt the OS picks the FFI backend, so a Unix

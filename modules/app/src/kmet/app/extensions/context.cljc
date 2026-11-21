@@ -201,6 +201,7 @@
     kmet.tui.core
     kmet.tui.highlight
     kmet.tui.hikap
+    kmet.tui.host
     kmet.tui.keybindings
     kmet.tui.keys
     kmet.tui.macros

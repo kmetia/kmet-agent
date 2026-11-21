@@ -156,6 +156,7 @@ atom change → reaction dirty → queued → frame flush runs it →
 | `kmet.tui.frame` | one frame: normalize the composed document, reuse unchanged lines, diff against the previous frame, emit the bytes (`render-frame!`), plus the frame-state reset a forced render needs |
 | `kmet.tui.terminal` | backend abstraction: the lean `ITerminal` protocol (raw mode, bounded reads, live size, writes, progress) + shared ANSI verbs, Kitty/query wrappers and drain; `create-terminal` resolves the host backend at runtime |
 | `kmet.tui.terminal-jline` / `kmet.tui.terminal-native-unix` / `kmet.tui.terminal-native-win` | the three backends — JLine on bb/JVM, termios (Unix) / kernel32 console (Windows) FFI over `jolt.ffi` on Jolt; only these namespaces touch platform deps |
+| `kmet.tui.host` | the package's host predicates: Windows/Jolt detection and the finite-number check; the TUI needs no `kmet.libs.host` dependency |
 | `kmet.tui.protocols` | `IComponent`, `IFocusable`, `IEditorComponent` |
 | `kmet.tui.macros` | `defcomponent` — TUI record boilerplate over `kmet.tui.protocols/IComponent` |
 | `kmet.reakt.core` | reactions/track/cursor/batching over plain atoms |

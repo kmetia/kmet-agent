@@ -13,7 +13,7 @@
             [babashka.process :as process]
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest testing]]
-            [kmet.libs.host :as host]
+            [kmet.tui.host :as host]
             [kmet.tui.terminal :as term]))
 
 (defn- native-create-terminal

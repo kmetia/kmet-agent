@@ -8,7 +8,7 @@
   (:require [kmet.libs.fuzzy :as fuzzy]
             [babashka.fs :as fs]
             [clojure.string :as str]
-            [kmet.libs.host :as host]))
+            [kmet.tui.host :as host]))
 
 ;; ─── Records ───────────────────────────────────────────────────────────────
 
