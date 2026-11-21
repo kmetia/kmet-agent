@@ -726,7 +726,7 @@ Inside a git work tree both use git's file list, so `.gitignore` is
 honored (an explicitly named ignored directory is still searched); outside
 git they use the shared safe traversal. `grep` skips binary and oversized
 files instead of decoding them, and both accept `:exclude` globs. Patterns
-and excludes are compiled by `kmet.libs.glob`; it matches `/`-separated paths,
+and excludes are compiled by `kmet.app.tools.glob`; it matches `/`-separated paths,
 with `*` within a segment and `**` across segments. The verbs validate patterns
 as text, never as filesystem paths (Windows rejects glob metacharacters in a
 path), and normalize native separators before matching; `/` works on every

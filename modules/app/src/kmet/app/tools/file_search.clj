@@ -11,7 +11,7 @@
   (:require [babashka.fs :as fs]
             [babashka.process :as proc]
             [clojure.string :as str]
-            [kmet.libs.glob :as glob]
+            [kmet.app.tools.glob :as glob]
             [kmet.libs.path :as path]))
 
 (def ^:private default-max-file-bytes
@@ -73,7 +73,7 @@
   [exclude]
   (->> (if (string? exclude) [exclude] exclude)
        (mapv #(relative-pattern % ":exclude"))
-       glob/compile-patterns))
+       glob/compile-matcher))
 
 (defn- git-ignored?
   "True when BASE is covered by git's ignore rules."
@@ -140,7 +140,7 @@
                             {:type ::not-directory :path path})))
         pattern (relative-pattern pattern "PATTERN")
         max (positive-int max default-max-paths)
-        matcher (glob/compile-pattern pattern)
+        matcher (glob/compile-matcher pattern)
         excludes (compile-excludes exclude)
         files (vec (filtered-files base matcher excludes gitignore?))
         total (count files)
@@ -237,7 +237,7 @@
         pattern (str pattern)
         re (re-pattern (if ignore-case? (str "(?i)" pattern) pattern))
         glob (relative-pattern glob ":glob")
-        matcher (glob/compile-pattern glob)
+        matcher (glob/compile-matcher glob)
         excludes (compile-excludes exclude)
         max (positive-int max default-max-matches)
         max-file-bytes (positive-int max-file-bytes default-max-file-bytes)

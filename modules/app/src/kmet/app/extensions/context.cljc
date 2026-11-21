@@ -257,7 +257,6 @@
     kmet.libs.edn-store
     kmet.libs.fs
     kmet.libs.fuzzy
-    kmet.libs.glob
     kmet.libs.highlight
     kmet.libs.host
     kmet.libs.http
