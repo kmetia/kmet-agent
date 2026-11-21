@@ -50,7 +50,7 @@
                                     (tmodel :beta "beta-1" 1000 100 false)])]
                 (maintenance/list-models "beta")))]
     (t/is (str/includes? out "beta-1"))
-    (t/is (not (str/includes? out "zeta")) "fuzzy search filters"))
+    (t/is (not (str/includes? out "zeta")) "search filters"))
 
   (let [out (with-out-str
               (with-redefs [models/get-model-config-error (fn [] nil)
@@ -58,6 +58,18 @@
                             (fn [] [(tmodel :alpha "zeta" 1000 100 true)])]
                 (maintenance/list-models "nope")))]
     (t/is (str/includes? out "No models matching \"nope\""))))
+
+(t/deftest test-list-models-search-tokens
+  ;; the local filter keeps the fuzzy matcher's case-insensitive, multi-token
+  ;; subsequence behavior; only the discarded score is gone
+  (let [out (with-out-str
+              (with-redefs [models/get-model-config-error (fn [] nil)
+                            models/get-available
+                            (fn [] [(tmodel :alpha "zeta" 1000 100 true)
+                                    (tmodel :beta "beta-1" 1000 100 false)])]
+                (maintenance/list-models "ALPHA Z")))]
+    (t/is (str/includes? out "alpha     zeta"))
+    (t/is (not (str/includes? out "beta-1")))))
 
 (t/deftest test-list-models-no-available
   (let [out (with-out-str

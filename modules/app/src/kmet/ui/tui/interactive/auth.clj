@@ -9,7 +9,7 @@
    provider's normal login flow."
   (:require [clojure.string :as str]
             [kmet.tui.core :as tui]
-            [kmet.libs.fuzzy :as fuzzy]
+            [kmet.tui.fuzzy :as fuzzy]
             [kmet.ui.tui.auth-selector :as auth-selector]
             [kmet.ui.tui.chat-history :as chat-history]
             [kmet.ui.tui.dock :as dock]

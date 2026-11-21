@@ -640,7 +640,7 @@
    `test-changed-jvm` is `-m kmet.tasks.runner false --changed`).
    Remaining args are filters: plain test var names (`bb test
    test-tool-bash`), ns/var pairs (`bb test-ext kmet.app.loop.test-turn/my-test`),
-   or whole namespaces (`bb test kmet.libs.test-fuzzy`, or ns/ with a trailing
+   or whole namespaces (`bb test kmet.tui.test-fuzzy`, or ns/ with a trailing
    slash). Whole-namespace filters select by slow?; var filters ignore slow?.
    The skip report lists unloadable namespaces (full run: all of them;
    filtered run: only the requested ones) with the load failure reason.

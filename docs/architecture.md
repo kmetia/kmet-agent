@@ -44,9 +44,9 @@ may depend only on strictly lower-ranked ones, and a *namespace* may require
 only a file in a strictly lower-ranked module — `libs` 0, `ai` 1,
 `tui`/`sklop` 2, `app` 3. The external `kmet.loader.*`, `kmet.reakt.*`,
 `kmet.hikap.*`, `kmet.srce.*` and `kmet.tk.*` libraries are pinned below all of
-them. A leaf that both the app
-and the components read therefore lives in `libs`, never in either of them:
-`kmet.libs.fuzzy` (the selectors and the `--list-models` filter) is the one.
+them. A leaf that both the app's
+business code and the components read therefore lives in `libs`, never in
+either of them.
 Themes are the TUI's now: `kmet.tui.theme` is loaded by the TUI row and read by
 the widgets and extensions, while app business code no longer reaches it.
 

@@ -4,7 +4,7 @@
    two-column item layout with aligned descriptions, `→ ` selected prefix,
    `  (N/M)` scroll info, `  No matching commands` empty state."
   (:require [clojure.string :as str]
-            [kmet.libs.fuzzy :as fuzzy]
+            [kmet.tui.fuzzy :as fuzzy]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.keys :as keys]
             [kmet.tui.keybindings :as kb]

@@ -1,7 +1,7 @@
-(ns kmet.libs.fuzzy
-  "Fuzzy matching utilities. Port of @earendil-works/pi-tui fuzzy.ts.
-   Matches if all query characters appear in order (not necessarily
-   consecutive). Lower score = better match."
+(ns kmet.tui.fuzzy
+  "Fuzzy matching utilities — the TUI package's matcher, a port of
+   @earendil-works/pi-tui fuzzy.ts. Matches if all query characters appear
+   in order (not necessarily consecutive). Lower score = better match."
   (:require [clojure.string :as str]))
 
 (defn- word-boundary?

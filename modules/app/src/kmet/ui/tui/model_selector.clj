@@ -15,7 +15,7 @@
             [kmet.ui.tui.model-catalog :as model-catalog]
             [kmet.tui.components.filter-panel :as fp]
             [kmet.tui.core :as tui]
-            [kmet.libs.fuzzy :as fuzzy]
+            [kmet.tui.fuzzy :as fuzzy]
             [kmet.tui.keybindings :as kb]
             [kmet.tui.theme :as theme]))
 

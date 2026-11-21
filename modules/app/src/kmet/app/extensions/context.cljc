@@ -199,6 +199,7 @@
     kmet.tui.border
     kmet.tui.clipboard
     kmet.tui.core
+    kmet.tui.fuzzy
     kmet.tui.highlight
     kmet.tui.hikap
     kmet.tui.host
@@ -261,7 +262,6 @@
     kmet.libs.edit-diff
     kmet.libs.edn-store
     kmet.libs.fs
-    kmet.libs.fuzzy
     kmet.libs.host
     kmet.libs.http
     kmet.libs.json

@@ -15,7 +15,7 @@
             [kmet.tui.components.expandable-text :as expandable-text]
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.spinner :as spinner]
-            [kmet.libs.fuzzy :as fuzzy]
+            [kmet.tui.fuzzy :as fuzzy]
             [kmet.ai.models :as models]
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]

@@ -21,7 +21,7 @@
 (deftest help-requested?-test
   (testing "both help spellings count, wherever they appear"
     (is (help/help-requested? ["--help"]))
-    (is (help/help-requested? ["kmet.libs.test-fuzzy" "-h"])))
+    (is (help/help-requested? ["kmet.tui.test-fuzzy" "-h"])))
   (testing "ordinary arguments do not"
     (is (not (help/help-requested? [])))
     (is (not (help/help-requested? ["--dry-run" "src"])))))

@@ -12,8 +12,7 @@
             [kmet.ai.image-models :as image-models]
             [kmet.ai.model-gen :as model-gen]
             [kmet.ai.models :as models]
-            [kmet.app.config :as cfg]
-            [kmet.libs.fuzzy :as fuzzy]))
+            [kmet.app.config :as cfg]))
 
 (defn generate-models!
   "Fetch the current provider and image-model catalogs into the user-level
@@ -51,9 +50,38 @@
       (>= n 1000) (str (fmt 1000.0) "K")
       :else (str n))))
 
+(defn- search-tokens
+  "The whitespace/slash-separated tokens of SEARCH-PATTERN."
+  [pattern]
+  (->> (str/split (or pattern "") #"[\s/]+")
+       (remove str/blank?)))
+
+(defn- subsequence-match?
+  "True when every character of PATTERN appears in TEXT in order. The caller
+   lowercases both; `--list-models` only needs the match, because the fuzzy
+   scorer's ranking is discarded by the provider/id sort below."
+  [pattern text]
+  (let [pl (count pattern)
+        tl (count text)]
+    (if (zero? pl)
+      true
+      (loop [pi 0 ti 0]
+        (cond
+          (>= pi pl) true
+          (>= ti tl) false
+          (= (nth pattern pi) (nth text ti)) (recur (inc pi) (inc ti))
+          :else (recur pi (inc ti)))))))
+
+(defn- model-search-match?
+  "True when every token of SEARCH-PATTERN matches MODEL's provider + id."
+  [search-pattern model]
+  (let [text (str/lower-case (str (name (:provider model)) " " (:id model)))]
+    (every? #(subsequence-match? (str/lower-case %) text)
+            (search-tokens search-pattern))))
+
 (defn list-models
   "Print the available models (provider | model | context | max-out | thinking
-   | images), optionally fuzzy-search-filtered over provider + id (pi
+   | images), optionally search-filtered over provider + id (pi
    cli/list-models.ts). Call after the process world loads, so the table
    includes every provider the catalogs and extensions installed."
   [search-pattern]
@@ -63,8 +91,7 @@
   (let [available (models/get-available)]
     (if (empty? available)
       (println "No models available. Use /login to configure a provider.")
-      (let [filtered (fuzzy/fuzzy-filter available (or search-pattern "")
-                                         #(str (name (:provider %)) " " (:id %)))]
+      (let [filtered (filterv #(model-search-match? search-pattern %) available)]
         (if (empty? filtered)
           (println (str "No models matching \"" search-pattern "\""))
           (let [rows (mapv (fn [m]

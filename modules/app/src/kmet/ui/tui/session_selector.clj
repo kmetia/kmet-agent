@@ -34,7 +34,7 @@
             [kmet.libs.path :as path]
             [kmet.tui.components.input :as input]
             [kmet.tui.core :as tui]
-            [kmet.libs.fuzzy :as fuzzy]
+            [kmet.tui.fuzzy :as fuzzy]
             [kmet.hikap.core :as engine]
             [kmet.tui.hikap :as hiccup]
             [kmet.tui.keybindings :as kb]

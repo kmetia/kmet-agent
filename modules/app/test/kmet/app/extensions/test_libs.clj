@@ -60,9 +60,8 @@
    included so the test can pin their exclusion."
   []
   (let [roots [["kmet.tui" "modules/tui/src/kmet/tui"]
-               ;; the whole libs module: the theme loader and the fuzzy matcher
-               ;; are kmet.libs.* leaves that the components and the world load
-               ;; share
+               ;; the whole libs module: its kmet.libs.* leaves are shared by
+               ;; the app and the extension contexts
                ["" "modules/libs/src"]
                ["kmet.hikap" "../hikap/src/kmet/hikap"]
                ["kmet.reakt" "../reakt/src/kmet/reakt"]]]

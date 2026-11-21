@@ -548,7 +548,7 @@ selectors share — the caller supplies rows, filtering and chrome), `stack`,
 `theme/get-settings-list-theme` for the selector look),
 `kmet.hikap.component` (`track!`/`track-deps` reactive caching,
 `with-let`), `kmet.tui.macros` (`defcomponent`), `kmet.tui.keybindings`, `kmet.tui.keys`,
-`kmet.libs.fuzzy` and `kmet.tui.autocomplete`. Extension components must follow
+`kmet.tui.fuzzy` and `kmet.tui.autocomplete`. Extension components must follow
 the duck-typed `{:render :handle-input :invalidate}` contract accepted by
 `ui/custom` (returning a real record is also fine). Extension components are
 weakly watched: the `track!` and reaction registries hold them weakly, so a

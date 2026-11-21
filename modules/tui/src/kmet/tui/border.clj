@@ -21,7 +21,7 @@
    the glyphs entirely). Unknown keywords throw with a did-you-mean, the
    same loud contract the hiccup tag table uses."
   (:refer-clojure :exclude [resolve])
-  (:require [kmet.libs.fuzzy :as fuzzy]))
+  (:require [kmet.tui.fuzzy :as fuzzy]))
 
 (defn border
   "A border from its thirteen parts. Anything omitted is a space, which is

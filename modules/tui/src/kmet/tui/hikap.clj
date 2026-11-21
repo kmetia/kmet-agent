@@ -32,7 +32,7 @@
    [kmet.tui.components.text :as text]
    [kmet.tui.components.truncated-text :as truncated-text]
    [kmet.tui.components.v-stack :as v-stack]
-   [kmet.libs.fuzzy :as fuzzy]
+   [kmet.tui.fuzzy :as fuzzy]
    [kmet.tui.protocols :as protocols]))
 
 ;; ═══════════════════════════════════════════════════════════════════════════

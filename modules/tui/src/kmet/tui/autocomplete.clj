@@ -5,7 +5,7 @@
    Synchronous (kmet runs single-threaded); pi's async AbortController
    and debounce machinery are unnecessary because each request computes
    fresh from the current editor state."
-  (:require [kmet.libs.fuzzy :as fuzzy]
+  (:require [kmet.tui.fuzzy :as fuzzy]
             [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.tui.host :as host]))
@@ -618,7 +618,7 @@
              :query query}))))))
 
 (defn- fuzzy-fallback-score
-  "Subsequence match on the basename (kmet.libs.fuzzy), scored below pi's
+  "Subsequence match on the basename (kmet.tui.fuzzy), scored below pi's
    literal substring tiers; any positive score means \"include\"."
   [rel query]
   (let [{:keys [matches score]} (fuzzy/fuzzy-match query (last (str/split rel #"/")))]
