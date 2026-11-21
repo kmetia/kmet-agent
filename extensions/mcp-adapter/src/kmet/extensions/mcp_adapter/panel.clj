@@ -21,7 +21,7 @@
             [kmet.libs.theme :as theme]
             [kmet.tui.utils :as u]
             [kmet.tui.components.input :as input]
-            [kmet.libs.clipboard :as clipboard]
+            [kmet.tui.clipboard :as clipboard]
             [kmet.extensions.mcp-adapter.metadata :as metadata]))
 
 ;; ─── Styling (pi mcp-panel.ts DEFAULT_THEME) ──────────────────────────────

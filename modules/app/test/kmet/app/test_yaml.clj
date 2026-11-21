@@ -1,6 +1,6 @@
-(ns kmet.libs.test-yaml
+(ns kmet.app.test-yaml
   (:require [clojure.test :as t :refer [deftest is testing]]
-            [kmet.libs.yaml :as yaml]))
+            [kmet.app.yaml :as yaml]))
 
 ;; ─── Plain scalars ─────────────────────────────────────────────────────────
 
@@ -218,7 +218,7 @@
   (is (= {"name" "s2", "description" "One line."}
          (yaml/parse "---\nname: s2\ndescription: One line.\n---\n# body"))))
 
-;; ─── Frontmatter (kmet.libs.yaml, pi: utils/frontmatter.js) ───────────────
+;; ─── Frontmatter (kmet.app.yaml, pi: utils/frontmatter.js) ───────────────
 
 (deftest no-frontmatter
   (is (= {:frontmatter {} :body "hello\nworld"}

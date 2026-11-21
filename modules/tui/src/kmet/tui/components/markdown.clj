@@ -1,7 +1,7 @@
 (ns kmet.tui.components.markdown
   "Markdown to ANSI-styled terminal output.
    Port of @earendil-works/pi-tui Markdown.
-   The tokenizer is kmet.libs.markdown/parse (pure data, no ANSI); this
+   The tokenizer is kmet.tui.markdown/parse (pure data, no ANSI); this
    component walks the token AST and applies theme, padding, and word-wrap.
    Table borders come from a kmet.tui.border set (tui.md §2.8)."
   (:require [clojure.string :as str]
@@ -10,7 +10,7 @@
             [kmet.tui.utils :as u]
             [kmet.hikap.component :refer [track!]]
             [kmet.tui.macros :refer [defcomponent]]
-            [kmet.libs.markdown :as md]
+            [kmet.tui.markdown :as md]
             [kmet.libs.theme :as theme]))
 
 ;; ─── Theme ──────────────────────────────────────────────────────────────────

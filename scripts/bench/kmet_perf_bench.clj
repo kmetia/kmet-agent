@@ -16,7 +16,7 @@
   (:require [clojure.string :as str]
             [kmet.tui.keys :as keys]
             [kmet.tui.utils :as utils]
-            [kmet.libs.markdown :as md]
+            [kmet.tui.markdown :as md]
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.markdown :as markdown]
             [kmet.tui.protocols :as protocols]

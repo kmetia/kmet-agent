@@ -47,7 +47,7 @@
             [kmet.ui.tui.subs :as subs]
             [kmet.ui.tui.thinking-selector :as thinking-selector]
             [kmet.ui.tui.tools-selector :as tools-selector]
-            [kmet.libs.clipboard :as clipboard]
+            [kmet.tui.clipboard :as clipboard]
             [kmet.app.project-context :as context]
             [kmet.libs.process :as process]
             [kmet.tui.terminal-escape :as lib-term]

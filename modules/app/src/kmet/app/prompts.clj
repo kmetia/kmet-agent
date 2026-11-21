@@ -18,7 +18,7 @@
             [babashka.fs :as fs]
             [kmet.app.registry :as registry]
             [kmet.app.resources :as app-resources]
-            [kmet.libs.yaml :as yaml]))
+            [kmet.app.yaml :as yaml]))
 
 ;; ─── Template registry ────────────────────────────────────────────────────
 

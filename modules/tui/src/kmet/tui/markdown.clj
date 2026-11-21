@@ -1,4 +1,4 @@
-(ns kmet.libs.markdown
+(ns kmet.tui.markdown
   "Pure Markdown tokenizer: text -> AST.
 
    Self-contained (stdlib only, no kmet.* deps, no ANSI, no width). The TUI

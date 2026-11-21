@@ -197,11 +197,13 @@
    kmet.app.extensions.test-libs keeps this list and the source trees in sync."
   '[kmet.tui.autocomplete
     kmet.tui.border
+    kmet.tui.clipboard
     kmet.tui.core
     kmet.tui.hikap
     kmet.tui.keybindings
     kmet.tui.keys
     kmet.tui.macros
+    kmet.tui.markdown
     kmet.tui.protocols
     kmet.tui.terminal
     kmet.tui.terminal-escape
@@ -242,14 +244,13 @@
    lower-ranked code), so the whole layer is whitelisted. Required once here
    so they exist when a per-extension context is built — injection is by
    reference, never re-evaluated, so any protocols they define keep their
-   identity. Host backends stay out (kmet.libs.clipboard-win loads user32.dll
+   identity. Host backends stay out (kmet.tui.clipboard-win loads user32.dll
    at namespace load; kmet.libs.host-native is a Jolt .jolt source) — the
    drift guard in kmet.app.extensions.test-libs keeps this list and the source
    trees in sync."
   '[kmet.libs.archive
     kmet.libs.clj-edit
     kmet.libs.clj-eval
-    kmet.libs.clipboard
     kmet.libs.concurrent
     kmet.libs.crypto
     kmet.libs.edit-diff
@@ -262,7 +263,6 @@
     kmet.libs.json
     kmet.libs.jsonrpc
     kmet.libs.log
-    kmet.libs.markdown
     kmet.libs.mcp.auth
     kmet.libs.mcp.client
     kmet.libs.mcp.transport
@@ -277,7 +277,6 @@
     kmet.libs.terminal-image
     kmet.libs.text
     kmet.libs.theme
-    kmet.libs.yaml
     ;; the framework modules the libs compose
     kmet.reakt.core
     kmet.reakt.weak

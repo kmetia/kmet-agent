@@ -3,7 +3,7 @@
    package and whitelisted wholesale into extension SCI contexts:
 
    - self-contained: no requires outside kmet.libs.* (app, tui, modes, ai are
-     forbidden; sibling libs like kmet.libs.yaml are allowed), statically or
+     forbidden; sibling libs like kmet.libs.json are allowed), statically or
      through a literal `(requiring-resolve 'kmet.…)`
    - sandbox-safe: no static-field reference in any code a sandbox runs. SCI
      has static-method access but no static-field access, so a `Class/FIELD`

@@ -23,7 +23,7 @@
   "Shared-layer namespaces deliberately outside the extension lists: each
    loads host resources at namespace load, so host-requires!'s eager require
    cannot pull it on every host."
-  '#{kmet.libs.clipboard-win        ;; user32/kernel32 FFI at namespace load
+  '#{kmet.tui.clipboard-win         ;; user32/kernel32 FFI at namespace load
      kmet.libs.host-native          ;; Jolt host backend (.jolt source)
      kmet.tui.terminal-jline        ;; imports org.jline.* (bb/JVM only)
      kmet.tui.terminal-native-unix  ;; Jolt/Unix backend (.jolt source)

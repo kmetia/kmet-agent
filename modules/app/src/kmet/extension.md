@@ -165,8 +165,8 @@ Everything else babashka bundles (cheshire, clj-yaml, http-kit, selmer,
 transit, hiccup, timbre, nextjournal.markdown, bencode, …) is **not** part of
 the portable surface: those are neither injected nor source-evaluable under
 SCI — Java-backed copies fail on classes the native image does not expose —
-and Jolt has no copies at all. Use `kmet.libs.json`, `kmet.libs.yaml`,
-`kmet.libs.markdown` and `kmet.libs.http` instead.
+and Jolt has no copies at all. Use `kmet.libs.json`, `kmet.libs.http` and
+`kmet.tui.markdown` instead; YAML is not part of the shared layer.
 
 Script contexts (`codemode` and `eval`) pre-bind `json`
 (`clojure.data.json`), `p` (`babashka.process`) and the Clojure vocabulary, and

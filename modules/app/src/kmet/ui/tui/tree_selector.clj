@@ -22,7 +22,7 @@
             [kmet.ui.tui.chat-history :as chat-history]
             [kmet.ui.tui.dock :as dock]
             [kmet.app.config :as cfg]
-            [kmet.libs.clipboard :as clipboard]
+            [kmet.tui.clipboard :as clipboard]
             [kmet.libs.path :as path]
             [kmet.tui.components.input :as input]
             [kmet.tui.hikap :as h]

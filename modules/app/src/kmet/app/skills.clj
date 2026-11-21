@@ -8,7 +8,7 @@
    prompt (pi: core/system-prompt.js buildSystemPrompt).
 
    Deviations from pi: no .gitignore/.ignore/.fdignore support (kmet scans only
-   its own skills dirs); frontmatter parses via kmet.libs.yaml (a minimal YAML
+   its own skills dirs); frontmatter parses via kmet.app.yaml (a minimal YAML
    subset parser — babashka has no YAML lib).
 
    Skills live in the app root's `:skills` registry, under the `[:app
@@ -26,7 +26,7 @@
             [kmet.app.resources :as app-resources]
             [kmet.app.system-prompt :as system-prompt]
             [kmet.app.tools.registry :as tools-registry]
-            [kmet.libs.yaml :as yaml]))
+            [kmet.app.yaml :as yaml]))
 
 ;; ─── Constants (pi: MAX_NAME_LENGTH / MAX_DESCRIPTION_LENGTH) ─────────────
 

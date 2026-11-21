@@ -1,7 +1,7 @@
-(ns kmet.libs.clipboard
+(ns kmet.tui.clipboard
   "System clipboard copy — the platform tools (pi: utils/clipboard.ts
    copyToClipboard — /copy), with the Win32 clipboard API over the host FFI
-   as Windows' no-subprocess path (kmet.libs.clipboard-win). Termux,
+   as Windows' no-subprocess path (kmet.tui.clipboard-win). Termux,
    Wayland, X11, macOS, Windows; the calling layer may add an OSC52 fallback
    for environments with no tool."
   (:require [babashka.process :as proc]
@@ -33,7 +33,7 @@
   [text]
   (if-not (host/windows?)
     false
-    (if-let [set-clipboard! (try (requiring-resolve 'kmet.libs.clipboard-win/set-clipboard!)
+    (if-let [set-clipboard! (try (requiring-resolve 'kmet.tui.clipboard-win/set-clipboard!)
                                  (catch Exception _ nil))]
       (try
         (boolean (set-clipboard! text))
@@ -42,7 +42,7 @@
 
 (defn copy-text!
   "Copy TEXT to the system clipboard. Windows goes through the Win32 API
-   over the host FFI first (kmet.libs.clipboard-win, no subprocess); the
+   over the host FFI first (kmet.tui.clipboard-win, no subprocess); the
    platform tools are used everywhere else: Termux (termux-clipboard-set),
    Wayland (wl-copy), X11 (xclip, then xsel), macOS (pbcopy). On Windows
    there is no subprocess fallback (clip.exe/PowerShell paths mangle

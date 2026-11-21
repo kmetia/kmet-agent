@@ -1,8 +1,8 @@
-(ns kmet.libs.clipboard-win
+(ns kmet.tui.clipboard-win
   "Windows clipboard backend over the host FFI: CF_UNICODETEXT through
    OpenClipboard / EmptyClipboard / SetClipboardData, no subprocess.
 
-   kmet.libs.clipboard resolves this namespace at call time and only on
+   kmet.tui.clipboard resolves this namespace at call time and only on
    Windows, so a Unix host never loads it; user32 and kernel32 are loaded
    here, at namespace load. The host FFI — babashka.ffi (bundled in babashka,
    the standalone org.babashka/ffi on the JVM) or jolt.ffi — exposes the same

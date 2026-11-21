@@ -2,7 +2,7 @@
   (:require [clojure.test :as t]
             [clojure.string :as str]
             [kmet.libs.highlight :as hlib]
-            [kmet.libs.markdown :as mdlib]
+            [kmet.tui.markdown :as mdlib]
             [kmet.libs.terminal-image :as timg]
             [kmet.tui.core :as core]
             [kmet.tui.hikap :as h]

@@ -274,7 +274,7 @@ Status: reviewed; decisions recorded. A (fetch), B (grep `:context`), C (glob `:
 - [x] `bb generate-catalog` (or `bb check-catalog`)
 - [x] `bb check` for source namespaces
 - [x] Extension-context guard: `modules/app/test/kmet/app/extensions/test_resources.clj`
-      (~702) still proves an extension context can require `kmet.libs.yaml`;
+      (~702) still proves an extension context can require `kmet.libs.json`;
       run the relevant extension test or `bb test` for it.
 - [x] Optionally `bb slop --dups` if a test HTTP server is copied — none was.
 - [x] Fresh-session manual checks:
@@ -331,7 +331,7 @@ Ordered by value/effort.
       function over CC 10.
 - [x] Table-drive `detect-openai-compat` (CC 47 in 89 SLOC,
       `modules/ai/src/kmet/ai/api/shared.clj:465`) and `parse-inline`
-      (CC 54, `modules/libs/src/kmet/libs/markdown.clj:289`) — rule tables
+      (CC 54, `modules/tui/src/kmet/tui/markdown.clj:289`) — rule tables
       instead of nested conditionals in two high-traffic files.
 - [x] Merge the two near-identical `cond` tables in
       `modules/libs/src/kmet/libs/ranking.clj` (18.1% flagged) into one

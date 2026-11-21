@@ -1,4 +1,4 @@
-(ns kmet.libs.yaml
+(ns kmet.app.yaml
   "Minimal YAML subset parser + frontmatter extraction (pi: the yaml npm
    package + utils/frontmatter.js). Self-contained, babashka-compatible
    (stdlib only).

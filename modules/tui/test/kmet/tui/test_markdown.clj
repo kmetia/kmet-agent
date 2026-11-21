@@ -1,9 +1,9 @@
-(ns kmet.libs.test-markdown
-  "Parser tests: kmet.libs.markdown produces a pure-data AST — no ANSI,
+(ns kmet.tui.test-markdown
+  "Parser tests: kmet.tui.markdown produces a pure-data AST — no ANSI,
    no width. Renderer behavior is covered by the tui component tests."
   (:require [clojure.test :as t]
             [clojure.string :as str]
-            [kmet.libs.markdown :as md]))
+            [kmet.tui.markdown :as md]))
 
 ;; ─── parse-inline ──────────────────────────────────────────────────────────
 

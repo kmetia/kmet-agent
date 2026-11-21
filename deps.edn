@@ -218,7 +218,7 @@
                                :git/sha "f70782c15b1a6a7d48ce82a852b53192fe7e00b3"}
                      org.clojure/tools.deps {:mvn/version "0.31.1646"}
                      ;; The host FFI on the JVM: the Windows clipboard backend
-                     ;; (kmet.libs.clipboard-win) and the Tk adapter
+                     ;; (kmet.tui.clipboard-win) and the Tk adapter
                      ;; (kmet.tk.tcl) both call into it — babashka bundles
                      ;; babashka.ffi and Jolt has jolt.ffi natively. It needs
                      ;; the Class-File/FFM API of JDK 22+; an older JVM falls

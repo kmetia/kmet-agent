@@ -1,5 +1,5 @@
-(ns kmet.libs.test-clipboard
-  "Windows clipboard backend tests. kmet.libs.clipboard-win loads user32 and
+(ns kmet.tui.test-clipboard
+  "Windows clipboard backend tests. kmet.tui.clipboard-win loads user32 and
    kernel32 at namespace load, so this file never requires it: the backend's
    vars are resolved at runtime and every test skips off Windows. The
    roundtrip test is ^:slow — it sets CF_UNICODETEXT and reads it back
@@ -10,7 +10,7 @@
    needs JDK 22+, and an older JVM must still LOAD this file (every test here
    skips there, as the backend falls back to the platform tools)."
   (:require [clojure.test :as t :refer [deftest testing]]
-            [kmet.libs.clipboard :as clipboard]
+            [kmet.tui.clipboard :as clipboard]
             [kmet.libs.host :as host]))
 
 (def ^:private ffi
@@ -81,7 +81,7 @@
 
 (deftest utf16-units
   (testing "the host's string model becomes UTF-16 code units"
-    (if-let [units (win-var 'kmet.libs.clipboard-win/utf16-units)]
+    (if-let [units (win-var 'kmet.tui.clipboard-win/utf16-units)]
       (do
         (t/is (= [104 105] (vec (units "hi"))))
         (t/is (= [0x2014] (vec (units "—"))) "a BMP char is one unit")
@@ -96,8 +96,8 @@
     ;; tests).
     (if-not (host/windows?)
       (t/is true "skipped: Windows only")
-      (let [units (win-var 'kmet.libs.clipboard-win/utf16-units)
-            backend (win-var 'kmet.libs.clipboard-win/set-clipboard!)]
+      (let [units (win-var 'kmet.tui.clipboard-win/utf16-units)
+            backend (win-var 'kmet.tui.clipboard-win/set-clipboard!)]
         (if-not (and units backend)
           (t/is true "skipped: the Windows backend did not load")
           (doseq [[label copy!] [["backend" backend]
