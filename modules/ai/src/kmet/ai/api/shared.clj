@@ -6,7 +6,7 @@
   (:require
    [kmet.ai.attribution :as attribution]
    [kmet.ai.auth :as auth]
-   [kmet.libs.dynamic-value :as dynamic-value]
+   [kmet.ai.config-value :as dynamic-value]
    [kmet.libs.json :as json]
    [kmet.ai.message :as message]
    [kmet.ai.models :as models]

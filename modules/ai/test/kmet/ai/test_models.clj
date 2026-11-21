@@ -8,7 +8,7 @@
             [kmet.ai.model-config :as model-config]
             [kmet.ai.auth :as auth]
             [kmet.ai.oauth :as oauth]
-            [kmet.libs.dynamic-value :as dynamic-value]
+            [kmet.ai.config-value :as dynamic-value]
             [kmet.test-tmp :as test-tmp]))
 
 ;; ─── Registry semantics (pi: MutableModels) ────────────────────────────────

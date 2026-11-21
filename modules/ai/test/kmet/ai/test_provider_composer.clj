@@ -5,7 +5,7 @@
    last, auth-header flag, configured-auth-status (pi provider-composer.ts)."
   (:require [clojure.test :as t]
             [clojure.string :as str]
-            [kmet.libs.dynamic-value :as dynamic-value]
+            [kmet.ai.config-value :as dynamic-value]
             [kmet.ai.models :as models]
             [kmet.ai.provider-composer :as pc]))
 

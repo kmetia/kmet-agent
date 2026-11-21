@@ -5,7 +5,7 @@
             [kmet.libs.json :as json]
             [clojure.string :as str]
             [kmet.ai.auth :as auth]
-            [kmet.libs.dynamic-value :as dynamic-value]
+            [kmet.ai.config-value :as dynamic-value]
             [kmet.ai.llm :as llm]
             [kmet.ai.api.shared :as shared]
             [kmet.ai.api.anthropic-messages :as anthropic]

@@ -1,9 +1,9 @@
-(ns kmet.libs.test-dynamic-value
+(ns kmet.ai.test-config-value
   "Phase 6: config-value resolution — env interpolation, $$/$! escapes,
    !command (cached, timeout), missing-env → nil, is-config-value-configured?,
    header resolution (pi resolve-config-value.ts)."
   (:require [clojure.test :as t]
-            [kmet.libs.dynamic-value :as dynamic-value]))
+            [kmet.ai.config-value :as dynamic-value]))
 
 ;; ─── Parsing (pi parseConfigValueTemplate) ─────────────────────────────────
 

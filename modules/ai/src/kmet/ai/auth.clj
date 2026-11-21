@@ -17,7 +17,7 @@
             [clojure.string :as str]
             [kmet.ai.aws-sigv4 :as aws-sigv4]
             [kmet.libs.edn-store :as cred]
-            [kmet.libs.dynamic-value :as dynamic-value]
+            [kmet.ai.config-value :as dynamic-value]
             [kmet.ai.slots :as slots]
             [kmet.ai.google-adc :as google-adc]))
 

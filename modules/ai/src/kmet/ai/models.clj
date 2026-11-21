@@ -19,7 +19,7 @@
             [clojure.java.io :as io]
             [babashka.fs :as fs]
             [kmet.ai.auth :as auth]
-            [kmet.libs.dynamic-value :as dynamic-value]
+            [kmet.ai.config-value :as dynamic-value]
             [kmet.ai.model-config :as model-config]
             [kmet.ai.registry :as registry]
             [kmet.ai.oauth :as oauth]

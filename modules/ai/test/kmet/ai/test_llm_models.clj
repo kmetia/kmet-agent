@@ -3,7 +3,7 @@
    levels and request shaping, header merging, and compat auto-detection."
   (:require [clojure.test :as t]
             [kmet.ai.auth :as auth]
-            [kmet.libs.dynamic-value :as dynamic-value]
+            [kmet.ai.config-value :as dynamic-value]
             [kmet.ai.llm :as llm]
             [kmet.ai.api.shared :as shared]
             [kmet.ai.api.openai-completions :as completions]

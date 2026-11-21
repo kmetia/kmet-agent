@@ -252,7 +252,6 @@
     kmet.libs.clipboard
     kmet.libs.concurrent
     kmet.libs.crypto
-    kmet.libs.dynamic-value
     kmet.libs.edit-diff
     kmet.libs.edn-store
     kmet.libs.fs

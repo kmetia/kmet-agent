@@ -15,7 +15,7 @@
    headers after them, so a provider-level header wins over a colliding
    model-level one (pi lets the model win). /reload recomposes, so the
    observable behavior is equivalent."
-  (:require [kmet.libs.dynamic-value :as dynamic-value]
+  (:require [kmet.ai.config-value :as dynamic-value]
             [kmet.ai.oauth :as oauth]))
 
 (declare adapt-oauth)
