@@ -83,9 +83,9 @@ modules/srce/
                           the six non-awaiting dispatch modes
 ```
 
-`kmet.srce.*` is rank 1 — it may require rank-0 code (`kmet.libs.*`,
-`kmet.reakt.*`, and the external `kmet.loader.*`), nothing at its own rank or
-above;
+`kmet.srce.*` is rank 1 — it may require rank-0 code (`kmet.libs.*`), the
+external `kmet.loader.*` and `kmet.reakt.*` libraries, nothing at its own rank
+or above;
 the subnamespaces are internal and nothing above the kernel requires them.
 The module's `modules.edn` row — `:name "srce"`, the source/test paths,
 `:rank 1` — is also its classpath and embed entry: the manifest is the classpath
@@ -744,8 +744,9 @@ the hook is what a plugin declares when its service can absorb one.
 **Source resolution is a seam, not a dependency.** `plugin-source` normalizes
 what the caller hands `plugin!`: a var passes through, a keyword is looked up by
 the resolver, a miss is `{:type :srce/bad-source}`. `srce.*` may require
-`kmet.loader.*` (rank 0, below the kernel) and `kmet.loader.core/Loader` is the
-resolver kmet passes, but the kernel never requires it and never decides what
+the external `kmet.loader.*` (rank 0, below the kernel), and
+`kmet.loader.core/Loader` is the resolver kmet passes, but the kernel never
+requires it and never decides what
 a keyword means — how an extension source is resolved is the extension host's
 implementation detail, not a kernel contract.
 
@@ -781,9 +782,9 @@ writes the diagnostics error log (`logs/kmet-error.log` under the process cwd
 unless `KMET_LOG_DIR` names another directory), the other levels follow
 `--debug`.
 
-`kmet.srce.*` may require only rank-0 code — `kmet.libs.*`, `kmet.reakt.*`,
-the external `kmet.loader.*`, and third-party code — and currently requires none
-of them, so
+`kmet.srce.*` may require only rank-0 code — `kmet.libs.*`, the external
+`kmet.loader.*` and `kmet.reakt.*`, and third-party code — and currently
+requires none of them, so
 the kernel cannot call `kmet.app.debug` directly — which is also why the full
 port's
 logger service (exporters, formatters, ANSI palette, ring buffer, `:logger`
@@ -1085,8 +1086,8 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
   a subtree teardown aggregating every handle; and a
   non-fn `:update` rejected as `:srce/bad-plugin`.
 - srce self-containment: `kmet.srce.*` may require only rank-0 code
-  (`kmet.libs.*`, `kmet.reakt.*`, the external `kmet.loader.*`) and third-party
-  code — no
+  (`kmet.libs.*`, the external `kmet.loader.*` and `kmet.reakt.*`) and
+  third-party code — no
   `kmet.app.*`, `kmet.tui.*`, `kmet.tk.*`, nothing at its own rank or above.
 - **No `kmet.libs.scope` require in `kmet.srce.*`** (§9), and after 4e no
   `kmet.agent.*` require either — the deletion gate.

@@ -51,12 +51,13 @@ user-facing); implementation notes sit beside their source. `perf.md`,
 - `bb clean` removes build output and caches (`--dry-run` lists them;
   `jolt clean` is the equivalent); `bb tasks` lists summaries and
   `bb <task> --help` full usage.
-- The loader (`kmet.loader.*`) is a separate project. Development uses the
-  sibling `../loader` checkout: `bb` and the Jolt tasks resolve it from
-  `bb.edn`, the JVM dev aliases from `deps.edn`'s `:dev`; direct `jolt`
-  invocations that read `deps.edn` take `-A:dev` (for example
-  `jolt -A:dev nrepl-server 7802`). The default `deps.edn` coordinate is the
-  pinned GitHub commit.
+- The loader, reakt and hikap (`kmet.loader.*`, `kmet.reakt.*`,
+  `kmet.hikap.*`) are separate projects. Development uses the sibling
+  `../loader`, `../reakt` and `../hikap` checkouts: `bb` and the Jolt tasks
+  resolve them from `bb.edn`, the JVM dev aliases from `deps.edn`'s `:dev`;
+  direct `jolt` invocations that read `deps.edn` take `-A:dev` (for example
+  `jolt -A:dev nrepl-server 7802`). The default `deps.edn` coordinates are the
+  pinned GitHub commits.
 - nREPL: `bb nrepl` (7801, no port file), `bb nrepl-jvm [port]` (7803) and
   `jolt -A:dev nrepl-server 7802`; JVM/Jolt share `.nrepl-port`, so pass a port
   when both run (see [`docs/architecture.md`](docs/architecture.md) § Development

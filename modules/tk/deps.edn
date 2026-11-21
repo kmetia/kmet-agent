@@ -1,6 +1,6 @@
 {:paths ["src" "test"]
  ;; The Tcl adapter's FFI seam is the host's (babashka.ffi on babashka and the
  ;; JVM via the :jvm alias's org.babashka/ffi, jolt.ffi on Jolt), so it is not
- ;; a module dep. babashka.fs walks this module's files.
- :deps {kmet/hikap {:local/root "../hikap"}
-        babashka/fs {:mvn/version "0.5.34"}}}
+ ;; a module dep. The hikap library is an external pinned dependency at the
+ ;; root. babashka.fs walks this module's files.
+ :deps {babashka/fs {:mvn/version "0.5.34"}}}

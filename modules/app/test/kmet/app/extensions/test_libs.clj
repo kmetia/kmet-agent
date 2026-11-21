@@ -54,16 +54,17 @@
                    (str/replace "/" ".")))))
 
 (defn- shared-source-namespaces
-  "Every namespace defined in the shared TUI/libs source trees — the lists'
-   universe, host backends included so the test can pin their exclusion."
+  "Every namespace defined in the shared TUI/libs source trees and the
+   extracted reakt/hikap checkouts — the lists' universe, host backends
+   included so the test can pin their exclusion."
   []
   (let [roots [["kmet.tui" "modules/tui/src/kmet/tui"]
                ;; the whole libs module: the theme loader and the fuzzy matcher
                ;; are kmet.libs.* leaves that the components and the world load
                ;; share
                ["" "modules/libs/src"]
-               ["kmet.hikap" "modules/hikap/src/kmet/hikap"]
-               ["kmet.reakt" "modules/reakt/src/kmet/reakt"]]]
+               ["kmet.hikap" "../hikap/src/kmet/hikap"]
+               ["kmet.reakt" "../reakt/src/kmet/reakt"]]]
     (into #{}
           (mapcat (fn [[prefix dir]]
                     (map #(library-ns-name prefix dir %)

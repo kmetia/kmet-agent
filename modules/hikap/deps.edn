@@ -1,2 +1,0 @@
-{:paths ["src" "test"]
- :deps {kmet/reakt {:local/root "../reakt"}}}

@@ -102,20 +102,30 @@
      :default (throw (ex-info "kmet.tasks.build/bb-classpath is bb-only"
                               {:type ::bb-only}))))
 
-(defn- loader-src-root
-  "The loader dependency's source root on the bb classpath. bb.edn declares the
-   sibling ../loader as a :local/root, so the root is a directory holding
-   kmet/loader/core.clj. A missing root fails the build: an artifact without the
-   loader would start and immediately fail to resolve an app namespace."
+(def ^:private external-src-markers
+  "Source files that identify the extracted libraries on the bb classpath."
+  ["kmet/loader/core.clj" "kmet/reakt/core.clj" "kmet/hikap/core.clj"])
+
+(defn- external-src-roots
+  "The extracted libraries' source roots on the bb classpath. bb.edn declares
+   the sibling checkouts as :local/root dependencies, so each root is a
+   directory holding its marker source. A missing root fails the build: an
+   artifact without one would start and immediately fail to resolve an app
+   namespace."
   []
-  (or (some (fn [root]
-              (when (and (not (str/ends-with? root ".jar"))
-                         (fs/exists? (fs/path root "kmet/loader/core.clj")))
-                root))
-            (str/split (bb-classpath)
-                       (re-pattern (System/getProperty "path.separator"))))
-      (throw (ex-info "loader source root not found on the bb classpath"
-                      {:type ::no-loader-root}))))
+  (let [roots (str/split (bb-classpath)
+                         (re-pattern (System/getProperty "path.separator")))]
+    (mapv (fn [marker]
+            (or (some (fn [root]
+                        (when (and (not (str/ends-with? root ".jar"))
+                                   (fs/exists? (fs/path root marker)))
+                          root))
+                      roots)
+                (throw (ex-info (str "source root for " marker
+                                     " not found on the bb classpath")
+                                {:type ::no-external-src-root
+                                 :marker marker}))))
+          external-src-markers)))
 
 ;; ─── Target table ──────────────────────────────────────────────────────────
 ;;
@@ -481,7 +491,7 @@
   (bb-only! "kmet.tasks.build/uberjar*")
   (stage-bundled-extensions!)
   (write-uberjar! jar-path main-class
-                  (conj (vec (modules/module-src-paths)) (loader-src-root))
+                  (into (vec (modules/module-src-paths)) (external-src-roots))
                   {:extra-roots [bundled-staging-root]}))
 
 (defn test-uberjar*
@@ -495,9 +505,9 @@
   (generate-test-main!)
   (stage-bundled-extensions!)
   (write-uberjar! test-jar-path test-main-class
-                  (conj (into (modules/module-paths)
+                  (into (into (modules/module-paths)
                               (concat (modules/roots) [test-entry-root]))
-                        (loader-src-root))
+                        (external-src-roots))
                   {:extra-roots [bundled-staging-root]}))
 
 ;; ─── Assembling artifacts ──────────────────────────────────────────────────

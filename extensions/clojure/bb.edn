@@ -1,13 +1,14 @@
 {:paths ["src" "test" "../../test"
-         "../../modules/reakt/src"
-         "../../modules/hikap/src" "../../modules/libs/src"
+         "../../modules/libs/src"
          "../../modules/libs/test"
          "../../modules/tui/src" "../../modules/ai/src"
          "../../modules/srce/src" "../../modules/sklop/src" "../../modules/app/src"
          "../../modules/tk/src"]
- :deps {;; the loader is the sibling checkout; the app and module trees
-        ;; require it, and the release classpath pins the same coordinate.
+ :deps {;; the extracted libraries are sibling checkouts; the app and module
+        ;; trees require them, and the release classpath pins the same coordinates.
         kmet/loader {:local/root "../../../loader"}
+        kmet/reakt {:local/root "../../../reakt"}
+        kmet/hikap {:local/root "../../../hikap"}
         dev.weavejester/cljfmt {:mvn/version "0.16.6"
                                 :exclusions [rewrite-clj/rewrite-clj]}
         parinferish/parinferish {:mvn/version "0.8.0"}

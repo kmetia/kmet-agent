@@ -37,7 +37,7 @@
  ;; extensions/<name>/src layout, so io/resource reads a bundled extension at
  ;; the same path in a binary as in a checkout. A
  ;; missing root embeds nothing — the runtime then offers no bundled set.
- :jolt/build {:embed ["modules/reakt/src" "modules/hikap/src" "modules/libs/src" "modules/tui/src" "modules/ai/src" "modules/srce/src" "modules/sklop/src" "modules/app/src" "modules/tk/src" "target/kmet-version" "target/kmet-bundled"]
+ :jolt/build {:embed ["modules/libs/src" "modules/tui/src" "modules/ai/src" "modules/srce/src" "modules/sklop/src" "modules/app/src" "modules/tk/src" "target/kmet-version" "target/kmet-bundled"]
                ;; Runtime-only requires the static scan cannot see. clojure.core.async's
                ;; overlay (alts!!, mult, …) is loaded by the extension host; babashka.cli
                ;; and babashka.tasks are loaded by the eval/codemode sandbox
@@ -77,17 +77,21 @@
 
  :deps {kmet/app {:local/root "modules/app"}
 
-        ;; kmet.loader is its own project (github.com/kmetia/loader), pinned
-        ;; here for JVM and packaged classpaths; the :dev alias and bb.edn
-        ;; use the sibling checkout while developing.
+        ;; kmet.loader, kmet.reakt and kmet.hikap are their own projects,
+        ;; pinned here for JVM and packaged classpaths; the :dev alias and
+        ;; bb.edn use the sibling checkouts while developing.
         kmet/loader {:git/url "https://github.com/kmetia/loader.git"
                      :git/sha "a5015459a68c89535558d4908a4ff698e0fc7d97"}
+        kmet/reakt {:git/url "https://github.com/kmetia/reakt.git"
+                    :git/sha "e1e93d384906b208b40106f6035e6186d6ba843c"}
+        kmet/hikap {:git/url "https://github.com/kmetia/hikap.git"
+                    :git/sha "f9db3d61ae0d0bc9dbaee1d47158e56daecfb2c6"}
 
-        ;; The module roots chain: app → (libs, hikap, srce, ai, tui, reakt),
-        ;; and tk through the :jvm alias below (no module depends on it).
-        ;; babashka uses bb.edn's flat :paths; a JVM classpath resolves the same
-        ;; sources through these local roots. The loader is the one external
-        ;; edge: pinned above, sibling checkout in :dev.
+        ;; The module roots chain: app → (libs, srce, ai, tui, sklop), and tk
+        ;; through the :jvm alias below (no module depends on it). babashka
+        ;; uses bb.edn's flat :paths; a JVM classpath resolves the same sources
+        ;; through these local roots. The loader, reakt and hikap are the
+        ;; external edges: pinned above, sibling checkouts in :dev.
         ;; babashka.fs / babashka.process are deliberately NOT deps: babashka
         ;; bundles them, and jolt vendors the same namespaces (built-in,
         ;; resolving ahead of any deps.edn copy). A Maven copy is redundant on
@@ -231,9 +235,11 @@
   ;; (babashka bundles both and Jolt vendors them), and the uberjar basis adds
   ;; :jvm :clj-pin only, so nothing here reaches an artifact.
   :dev {:extra-paths ["test"]
-        ;; The loader is a separate project; dev and test runs use the sibling
-        ;; checkout, while the default coordinate above stays pinned.
-        :override-deps {kmet/loader {:local/root "../loader"}}
+        ;; The extracted libraries are separate projects; dev and test runs use
+        ;; the sibling checkouts, while the default coordinates stay pinned.
+        :override-deps {kmet/loader {:local/root "../loader"}
+                        kmet/reakt {:local/root "../reakt"}
+                        kmet/hikap {:local/root "../hikap"}}
         :extra-deps {babashka/fs {:mvn/version "0.5.34"}
                      babashka/process {:mvn/version "0.6.25"}}}
   ;; The JVM nREPL server (`bb nrepl-jvm`). Dev-only like :build — the app
