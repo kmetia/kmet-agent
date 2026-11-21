@@ -376,7 +376,7 @@ QWdiAKmzt6MfYOx22Q50Fqk=
           (ansi-random-strings 1200 16)))
 
 (defn- regex-code-at
-  "ANSI-CODE-RE anchored at I — ansi-code-at's :default side."
+  "The independent test regex anchored at I."
   [s i]
   (when (and (< i (count s)) (= \u001b (nth s i)))
     (let [m (re-matcher ansi-re s)]
@@ -398,27 +398,26 @@ QWdiAKmzt6MfYOx22Q50Fqk=
           (recur (inc j) out))))))
 
 (t/deftest test-strip-ansi-host-equivalence
-  ;; The Jolt path strips ANSI with a hand-rolled scanner (strip-ansi-native)
-  ;; while bb/JVM keep the regex strip. The scanner must accept exactly the
-  ;; regex's language — including the sequences the regex does NOT match
-  ;; (private-parameter CSI, unterminated OSC, a lone ESC), which must stay
-  ;; in the output as literal text. Both implementations run on both hosts,
-  ;; so this test pins them against each other wherever the suite runs.
+  ;; The TUI strips ANSI with a hand-rolled scanner on every host; the regex
+  ;; helper lives in kmet.libs.text for app code. The scanner must accept
+  ;; exactly the regex's language — including the sequences the regex does
+  ;; NOT match (private-parameter CSI, unterminated OSC, a lone ESC), which
+  ;; must stay in the output as literal text. The test regex is an independent
+  ;; oracle, so this pins the scanner wherever the suite runs.
   (let [native-strip (var-get #'u/strip-ansi-native)
         corpus ansi-corpus]
     (doseq [s corpus]
       (t/is (= (str/replace s ansi-re "") (native-strip s)) (pr-str s))))
   ;; and the public width path agrees on strip-needing input
   (t/is (= 3 (u/visible-width "\u001b[31mabc\u001b[0m")))
-  ;; private-parameter CSI is NOT ANSI-CODE-RE: ESC measures 0, the rest
-  ;; sorts as literal text (the documented quirk both strippers share)
+  ;; private-parameter CSI is NOT matched by the test regex: ESC measures 0,
+  ;; the rest sorts as literal text (the documented quirk both strippers share)
   (t/is (= 5 (u/visible-width "\u001b[?25l"))))
 
 (t/deftest test-ansi-code-at-host-equivalence
-  ;; ansi-code-at's Jolt side is the hand-rolled scanner
-  ;; (ansi-code-at-native); bb/JVM keep the anchored regex matcher (match-at +
-  ;; ANSI-CODE-RE). Both must agree at every index of every curated string —
-  ;; including the indices where neither matches.
+  ;; ansi-code-at is the hand-rolled scanner on every host; the independent
+  ;; test regex is the oracle. Both must agree at every index of every curated
+  ;; string — including the indices where neither matches.
   (let [native-code (var-get #'u/ansi-code-at-native)]
     (doseq [s ansi-corpus
             i (range (inc (count s)))]
@@ -426,7 +425,7 @@ QWdiAKmzt6MfYOx22Q50Fqk=
             (str (pr-str s) " @" i)))))
 
 (t/deftest test-ansi-scanner-regex-equivalence
-  ;; The scanners must accept exactly ANSI-CODE-RE's language in every case:
+  ;; The scanners must accept exactly the test regex's language in every case:
   ;; the curated corpus, every string up to length 4 over the escape alphabet
   ;; and a deterministic sample of longer strings, compared on strip, the
   ;; anchored code-at, the full code scan and the [i, stop) scan. Each

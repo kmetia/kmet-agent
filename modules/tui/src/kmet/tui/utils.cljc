@@ -1,7 +1,6 @@
 (ns kmet.tui.utils
   "Text width calculation and wrapping utilities."
   (:require [clojure.string :as str]
-            [kmet.libs.text :as text]
             [kmet.tui.terminal-image :as img]))
 
 ;; ─── Cursor marker ────────────────────────────────────────────────────────
@@ -13,12 +12,9 @@
 ;; CSI (ESC [...) and OSC (ESC ] ... ST) sequences. OSC 8 hyperlinks
 ;; (ESC ]8;;url ESC\) are zero-width metadata but must be recognized so they
 ;; don't count toward visible width. OSC is terminated by BEL, ESC\ or 0x9C
-;; (pi: ansi-regex).
-(def ANSI-CODE-RE
-  "ANSI CSI (ESC [ … final byte) and OSC (ESC ] … BEL/ST/0x9C) sequences.
-   Delegated to kmet.libs.text so app code can share it without a TUI
-   require."
-  text/ANSI-CODE-RE)
+;; (pi: ansi-regex). The scanner below is the one implementation; the tests
+;; pin it against an independent regex, so the TUI needs no kmet.libs.text
+;; dependency.
 
 ;; ansi-code-at lives in the ANSI-window-slicing section below; the
 ;; truncation walk reaches it through this declaration.
@@ -26,14 +22,13 @@
 
 (defn- ansi-sequence-end
   "End index (exclusive) of the ANSI escape sequence starting at index I of
-   S when one starts there, nil otherwise. Hand-rolled equivalent of
-   ANSI-CODE-RE anchored at I (same accepted CSI/OSC language, including
-   what the regex does NOT match: private-parameter CSI like \"ESC[?25l\"
-   and an OSC body interrupted by a bare ESC have no regex match and must
-   stay literal text). Used by the scanner paths on both hosts; the utils
-   test suite pins this scanner and the regex against each other on a
-   corpus (all strings up to length 4 over the escape alphabet plus a
-   longer sample)."
+   S when one starts there, nil otherwise. Hand-rolled ANSI CSI/OSC scanner
+   at I: the same language as the shared regex in `kmet.libs.text`,
+   including what that regex does NOT match: private-parameter CSI like
+   \"ESC[?25l\" and an OSC body interrupted by a bare ESC stay literal text.
+   Used by both hosts; the utils test suite pins this scanner against an
+   independent regex on a corpus (all strings up to length 4 over the escape
+   alphabet plus a longer sample)."
   [s i]
   (let [n (count s)]
     (when (and (< i n) (= \u001b (nth s i)) (< (inc i) n))
@@ -77,9 +72,9 @@
 (defn strip-ansi-native
   "Remove ANSI sequences with the hand-rolled scanner: str/index-of seeds
    each search (native on both hosts), ansi-sequence-end consumes the
-   sequence, and a non-sequence ESC is kept as literal text, exactly like
-   the regex strip. ~5x faster than the regex strip on Jolt for styled
-   lines and ~3x for no-escape strings (the regex still scans them)."
+   sequence, and a non-sequence ESC is kept as literal text, matching the
+   shared regex strip. The scanner is the TUI's only strip path: ~5x faster
+   than the regex on Jolt for styled lines and ~3x for no-escape strings."
   [s]
   (let [n (count s)]
     (loop [pos 0 out nil]
@@ -94,25 +89,13 @@
 
 (defn- strip-ansi
   "Remove ANSI CSI/OSC sequences from S — the one implementation behind
-   strip-ansi-codes and visible-width. Jolt takes the scanner (its regex
-   engine is irregex: 17 µs vs 3.4 µs on a styled 100-char line); babashka
-   and the JVM stay on the regex strip, where java.util.regex is the faster
-   primitive (4.6 µs vs 8 µs)."
+   strip-ansi-codes and visible-width. Always the scanner: Jolt's regex
+   engine is irregex (17 µs vs 3.4 µs on a styled 100-char line), and the
+   scanner also keeps the TUI independent of `kmet.libs.text` on bb/JVM,
+   where java.util.regex would be faster (~4.6 µs vs ~8 µs). Plain ASCII
+   lines still take visible-width's fast path."
   [s]
-  #?(:jolt (strip-ansi-native s)
-     :default (str/replace s ANSI-CODE-RE "")))
-
-(defn match-at
-  "Match RE in S starting exactly at index I — the anchored-scan idiom
-   (.find m i) + (= (.start m) i). Returns [match-text end] with END
-   absolute in S, nil when nothing starts at I. Public like
-   ansi-code-at-native: its only caller now sits in ansi-code-at's :default
-   reader branch, which the bb lint view does not read."
-  [re s i]
-  (when (< i (count s))
-    (let [m (re-matcher re s)]
-      (when (and (.find m i) (= i (.start m)))
-        [(.group m) (.end m)]))))
+  (strip-ansi-native s))
 
 ;; pi: SEGMENT_RESET — full SGR + OSC 8 reset appended to every non-image line
 ;; by applyLineResets so a truncated line can never leave active attributes
@@ -708,8 +691,8 @@
 (defn- ansi-codes-scan
   "All ANSI sequences in S in order, found with the hand-rolled scanner:
    str/index-of seeds each search and ansi-sequence-end consumes the
-   sequence — exactly the sequences ANSI-CODE-RE matches. Feeds the wrap
-   tracker on both hosts."
+   sequence — exactly the ANSI CSI/OSC sequences the scanner accepts. Feeds
+   the wrap tracker on both hosts."
   [s]
   (let [n (count s)]
     (loop [pos 0 out (transient [])]
@@ -724,8 +707,8 @@
 
 (defn- ansi-codes-scan-range
   "All ANSI sequences of S whose start index is in [i, stop), in order; a
-   sequence found just before STOP may extend past it (the regex loop
-   consumes it the same way). Feeds ansi-process-range! on both hosts."
+   sequence found just before STOP may extend past it (a regex scan would
+   consume it the same way). Feeds ansi-process-range! on both hosts."
   [s i stop]
   (loop [j i out (transient [])]
     (let [idx (str/index-of s "\u001b" j)]
@@ -960,8 +943,7 @@
 ;; ─── ANSI helpers ───────────────────────────────────────────────────────────
 
 (defn strip-ansi-codes
-  "Strip ANSI CSI/OSC sequences from S (host-optimal: the scanner on Jolt,
-   java.util.regex elsewhere)."
+  "Strip ANSI CSI/OSC sequences from S with the scanner."
   [s]
   (strip-ansi s))
 
@@ -1003,11 +985,9 @@
 ;; ─── ANSI-aware window slicing ──────────────────────────────────────────────
 
 (defn ansi-code-at-native
-  "ANSI escape starting at I as [code length] via the hand-rolled scanner —
-   the Jolt side of ansi-code-at (its regex engine makes the anchored
-   re-matcher setup the slow primitive). Accepts exactly ANSI-CODE-RE's
-   language; the utils test suite pins the two against each other at every
-   index of a corpus on both hosts."
+  "ANSI escape starting at I as [code length] via the hand-rolled scanner.
+   Accepts the ANSI CSI/OSC language; the utils test suite pins it against an
+   independent regex at every index of a corpus on both hosts."
   [s i]
   (when-let [end (ansi-sequence-end s i)]
     [(subs s i end) (- end i)]))
@@ -1015,10 +995,7 @@
 (defn ansi-code-at
   "Return [code length] when an ANSI escape sequence starts at index I of S."
   [s i]
-  #?(:jolt (ansi-code-at-native s i)
-     :default (when (and (< i (count s)) (= \u001b (nth s i)))
-                (when-let [[code end] (match-at ANSI-CODE-RE s i)]
-                  [code (- end i)]))))
+  (ansi-code-at-native s i))
 
 (defn slice-with-width
   "Slice LINE's visible columns [start-col, start-col+length), ANSI-aware.
