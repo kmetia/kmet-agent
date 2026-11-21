@@ -118,6 +118,9 @@
            :task (help/with-help (do (require 'kmet.app.core)
                                      (println "All source namespaces compile successfully.")))
            :override-builtin true}
+  check-pins {:doc "Verify every sibling checkout HEAD matches its deps.edn :git/sha\n\nSame check `bb dist` runs before packaging; a mismatch, missing checkout or dirty tree exits 1."
+              :requires ([kmet.tasks.build :as build])
+              :task (help/with-help (build/check-dependency-pins! false))}
   generate-models {:doc "Regenerate the committed provider + image model catalogs (network)\n\nProvider catalogs come from models.dev + the live sources; the image catalog from OpenRouter. Either failure exits 1."
                    :requires ([kmet.tasks.generate-models :as gen-models])
                    :task (help/with-help (gen-models/-main))}
