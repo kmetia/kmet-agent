@@ -21,15 +21,18 @@
    each tick and calls `cancel-all!` on stop, so no timer outlives the
    session that created it. Headless tests drive `pump!` by hand.
 
-   Timer deadlines are monotonic (`kmet.libs.concurrent/monotonic-ms`), so a
-   wall-clock step neither fires timers early nor parks the loop for the
-   step's length."
-  (:require [kmet.libs.concurrent :as concurrent]))
+   Timer deadlines are monotonic (`now-ms`, nanoTime), so a wall-clock step
+   neither fires timers early nor parks the loop for the step's length.")
 
 (defonce ^:private registry
   (atom {:next-id 0 :entries {}}))
 
-(defn- now-ms [] (concurrent/monotonic-ms))
+(defn now-ms
+  "Elapsed-time milliseconds for the TUI's timers — `System/nanoTime`, which
+   has no epoch and cannot step with the wall clock. The TUI's clock seam:
+   tests and a host that needs a different monotonic source redefine this."
+  []
+  (quot (System/nanoTime) 1000000))
 
 (defn- add!
   "Register F under a fresh id, FIRST due in MS from now (EVERY repeats).
@@ -127,7 +130,7 @@
 
 (defn mark-frame!
   "Record that a frame is starting. The render loop calls the 0-arity at
-   every frame start; AT-MS (a monotonic-ms stamp) lets tests age the clock
+   every frame start; AT-MS (a now-ms stamp) lets tests age the clock
    deliberately."
   ([] (mark-frame! (now-ms)))
   ([at-ms] (reset! last-frame-at-ms at-ms) nil))

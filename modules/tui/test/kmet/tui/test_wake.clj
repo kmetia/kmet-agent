@@ -4,7 +4,7 @@
    and the recheck consumes a wakeup that races the park instead of losing
    it."
   (:require [clojure.test :as t]
-            [kmet.libs.concurrent :as concurrent]
+            [kmet.tui.timers :as timers]
             [kmet.tui.wake :as wake]))
 
 (t/deftest wake-releases-a-parked-thread
@@ -15,25 +15,25 @@
                           (wake/park! w (fn [] (reset! parked? true) false) 10000)
                           (reset! fired true)))]
     (.start parker)
-    (let [deadline (+ (concurrent/monotonic-ms) 2000)]
-      (while (and (not @parked?) (< (concurrent/monotonic-ms) deadline))
+    (let [deadline (+ (timers/now-ms) 2000)]
+      (while (and (not @parked?) (< (timers/now-ms) deadline))
         (Thread/sleep 5)))
     (t/is (true? @parked?) "parker reached park!")
     ;; wake until it takes: a monitor wake landing before the wait begins is
     ;; dropped by design (the recheck is the production guard — the next
     ;; test), so this pins the wake path itself with retries instead of a
     ;; fixed sleep racing the parker's last two instructions
-    (let [deadline (+ (concurrent/monotonic-ms) 2000)]
-      (while (and (not @fired) (< (concurrent/monotonic-ms) deadline))
+    (let [deadline (+ (timers/now-ms) 2000)]
+      (while (and (not @fired) (< (timers/now-ms) deadline))
         (wake/wake! w)
         (.join parker 25)))
     (t/is (true? @fired) "wake! released the parked thread")))
 
 (t/deftest park-times-out
   (let [w (wake/make-waker)
-        t0 (concurrent/monotonic-ms)]
+        t0 (timers/now-ms)]
     (wake/park! w (fn [] false) 50)
-    (let [elapsed (- (concurrent/monotonic-ms) t0)]
+    (let [elapsed (- (timers/now-ms) t0)]
       (t/is (>= elapsed 40) "parked for roughly the timeout")
       (t/is (< elapsed 3000) "returned in bounded time"))))
 
@@ -42,9 +42,9 @@
   ;; enters park! is observed by the recheck, so the parker never blocks
   ;; for the full timeout on work it already has
   (let [w (wake/make-waker)
-        t0 (concurrent/monotonic-ms)]
+        t0 (timers/now-ms)]
     (wake/park! w (fn [] true) 5000)
-    (t/is (< (- (concurrent/monotonic-ms) t0) 1000)
+    (t/is (< (- (timers/now-ms) t0) 1000)
           "a truthy recheck returns without parking")))
 
 (t/deftest wake-and-flag-release-the-parker

@@ -34,7 +34,6 @@
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest testing]]
             [babashka.fs :as fs]
-            [kmet.libs.concurrent :as concurrent]
             [kmet.test-tmp :as test-tmp]
             [kmet.tui.core :as core]
             [kmet.tui.terminal :as term]
@@ -187,9 +186,9 @@
 (defn- wait-for-frames
   "Block until N frames are written or TIMEOUT-MS elapses."
   [writes n timeout-ms]
-  (let [deadline (+ (concurrent/monotonic-ms) timeout-ms)]
+  (let [deadline (+ (timers/now-ms) timeout-ms)]
     (loop []
-      (when (and (< (concurrent/monotonic-ms) deadline)
+      (when (and (< (timers/now-ms) deadline)
                  (< (count (frame-writes writes)) n))
         (Thread/sleep 5)
         (recur)))
@@ -199,11 +198,11 @@
 (defn- wait-until
   "Block until PRED is truthy or TIMEOUT-MS elapses; returns whether it became truthy."
   [pred timeout-ms]
-  (let [deadline (+ (concurrent/monotonic-ms) timeout-ms)]
+  (let [deadline (+ (timers/now-ms) timeout-ms)]
     (loop []
       (cond
         (pred) true
-        (< (concurrent/monotonic-ms) deadline) (do (Thread/sleep 10) (recur))
+        (< (timers/now-ms) deadline) (do (Thread/sleep 10) (recur))
         :else false))))
 
 ;; ─── Tests ─────────────────────────────────────────────────────────────────
@@ -760,9 +759,9 @@
         ;; unchanged content emits nothing) — the render itself is observable
         ;; via the diff-state update.
         (swap! size assoc :rows 30)
-        (let [deadline (+ (concurrent/monotonic-ms) 5000)]
+        (let [deadline (+ (timers/now-ms) 5000)]
           (loop []
-            (when (and (< (concurrent/monotonic-ms) deadline)
+            (when (and (< (timers/now-ms) deadline)
                        (not= 30 @(:previous-height tui)))
               (Thread/sleep 5)
               (recur))))
@@ -1031,7 +1030,7 @@
   (let [vt (make-virtual-terminal)
         tui (core/create-tui (:terminal vt))]
     (try
-      (timers/mark-frame! (- (concurrent/monotonic-ms) 100000))
+      (timers/mark-frame! (- (timers/now-ms) 100000))
       (core/tui-add-child tui (test-component (atom ["alpha"])))
       (start-loop tui)
       (core/tui-request-render tui)

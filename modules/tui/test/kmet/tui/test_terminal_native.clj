@@ -116,7 +116,7 @@ sys.exit(os.waitstatus_to_exitcode(status) if exited else 124)
    winner takes the byte and the loser times out."
   "(require '[kmet.tui.terminal :as term]
             '[kmet.tui.terminal-native-unix :as native]
-            '[kmet.libs.concurrent :as concurrent])
+            '[kmet.tui.timers :as timers])
 (let [t (native/create-terminal)]
   (term/start! t (fn [_] nil) (fn [] nil))
   (println \"STARTED\" (term/started? t) (term/columns t) (term/rows t))
@@ -126,9 +126,9 @@ sys.exit(os.waitstatus_to_exitcode(status) if exited else 124)
         r1 (deref f1 8000 :timeout)
         r2 (deref f2 8000 :timeout)]
     (println \"CONC\" (pr-str [r1 r2])))
-  (let [deadline (+ (concurrent/monotonic-ms) 6000)]
+  (let [deadline (+ (timers/now-ms) 6000)]
     (loop [got []]
-      (if (or (>= (count got) 3) (> (concurrent/monotonic-ms) deadline))
+      (if (or (>= (count got) 3) (> (timers/now-ms) deadline))
         (println \"GOT\" (pr-str got))
         (let [c (term/read-input t 200)]
           (if (pos? c) (recur (conj got c)) (recur got))))))

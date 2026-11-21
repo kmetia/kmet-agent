@@ -127,10 +127,12 @@ user-facing); implementation notes sit beside their source. `perf.md`,
 
 ### Time and durations
 
-Durations and deadlines go through `kmet.libs.concurrent/monotonic-ms`:
+Durations and deadlines go through `kmet.libs.concurrent/monotonic-ms`;
 timeouts, sleep slices, backoff, idle reaping, elapsed counters. The wall
 clock steps (NTP, Android radio time, VM resume), so a duration measured on it
-fires early or stalls; never mix the two clocks in one deadline. The wall clock
+fires early or stalls; never mix the two clocks in one deadline. The TUI timer
+registry is the one exception (`kmet.tui.timers/now-ms`, the same `nanoTime`
+clock) because it is extracted as a standalone package. The wall clock
 is right for absolute values and externally-produced wall-clock data:
 token/JWT expiry, epoch ids and timestamps, file mtimes, persisted
 cross-process cache TTLs.

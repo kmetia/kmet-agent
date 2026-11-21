@@ -2,7 +2,6 @@
   (:require [clojure.test :as t :refer [testing]]
             [babashka.fs :as fs]
             [clojure.string :as str]
-            [kmet.libs.concurrent :as concurrent]
             [kmet.tui.core :as core]
             [kmet.tui.frame :as frame]
             [kmet.reakt.core :as reakt]
@@ -10,6 +9,7 @@
             [kmet.tui.terminal-image :as img]
             [kmet.tui.keys :as keys]
             [kmet.tui.terminal :as term]
+            [kmet.tui.timers :as timers]
             [kmet.tui.components.container :as container]
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.filler :as filler]
@@ -867,8 +867,8 @@
 (defn- wait-for!
   "Block until PRED holds or TIMEOUT-MS elapses; returns the final result."
   [pred timeout-ms]
-  (let [deadline (+ (concurrent/monotonic-ms) timeout-ms)]
-    (while (and (not (pred)) (< (concurrent/monotonic-ms) deadline))
+  (let [deadline (+ (timers/now-ms) timeout-ms)]
+    (while (and (not (pred)) (< (timers/now-ms) deadline))
       (Thread/sleep 5)))
   (pred))
 
@@ -1001,8 +1001,8 @@
           dispatched (atom [])]
       (swap! (:input-listeners tui) conj (fn [data] (swap! dispatched conj data) nil))
       ((var kmet.tui.core/process-input-buffer!) tui (fn [_] -2) buf)
-      (let [deadline (+ (concurrent/monotonic-ms) 600)]
-        (while (and (empty? @dispatched) (< (concurrent/monotonic-ms) deadline))
+      (let [deadline (+ (timers/now-ms) 600)]
+        (while (and (empty? @dispatched) (< (timers/now-ms) deadline))
           (Thread/sleep 5)))
       (t/is (= ["\u001b"] @dispatched) "genuine Escape still works")
       (t/is (= "" @buf) "buffer consumed"))))
@@ -1264,8 +1264,8 @@
       (swap! (:input-listeners tui) conj (fn [data] (swap! dispatched conj data) nil))
       (swap! buf str "\u001b")
       ((var kmet.tui.core/process-input-buffer!) tui (fn [_] -2) buf)
-      (let [deadline (+ (concurrent/monotonic-ms) 600)]
-        (while (and (empty? @dispatched) (< (concurrent/monotonic-ms) deadline))
+      (let [deadline (+ (timers/now-ms) 600)]
+        (while (and (empty? @dispatched) (< (timers/now-ms) deadline))
           (Thread/sleep 5)))
       (t/is (= ["\u001b"] @dispatched) "Escape dispatched")
       (t/is (= "" @buf) "buffer cleared")))
@@ -1390,8 +1390,8 @@
       (swap! (:input-generation tui) inc)
       (swap! buf str "\u001b")
       ((var kmet.tui.core/process-input-buffer!) tui (fn [_] -2) buf)
-      (let [deadline (+ (concurrent/monotonic-ms) 2000)]
-        (while (and (empty? @dispatched) (< (concurrent/monotonic-ms) deadline))
+      (let [deadline (+ (timers/now-ms) 2000)]
+        (while (and (empty? @dispatched) (< (timers/now-ms) deadline))
           (Thread/sleep 5)))
       (t/is (= ["\u001b"] @dispatched) "genuine Escape still works"))))
 

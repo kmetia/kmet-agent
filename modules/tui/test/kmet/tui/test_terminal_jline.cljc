@@ -6,7 +6,7 @@
   #?(:bb
      (:require [clojure.test :as t :refer [deftest]]
                [babashka.process :as proc]
-               [kmet.libs.concurrent :as concurrent]
+               [kmet.tui.timers :as timers]
                [kmet.tui.terminal-jline])))
 
 #?(:bb
@@ -33,14 +33,14 @@
                    of abandoning it (a hung stty must not outlive the call)"
          (if-let [read-bounded (jline-var 'read-bounded)]
            (let [p (:proc (proc/process ["sh" "-c" "sleep 30"]))
-                 started (concurrent/monotonic-ms)
+                 started (timers/now-ms)
                  result (read-bounded p)]
              (t/is (nil? result) "the bounded read gave up")
-             (t/is (< (- (concurrent/monotonic-ms) started) 10000)
+             (t/is (< (- (timers/now-ms) started) 10000)
                    "within the deadline")
-             (let [deadline (+ (concurrent/monotonic-ms) 3000)]
+             (let [deadline (+ (timers/now-ms) 3000)]
                (while (and (.isAlive p)
-                           (< (concurrent/monotonic-ms) deadline))
+                           (< (timers/now-ms) deadline))
                  (Thread/sleep 20))
                (t/is (not (.isAlive p))
                      "the hung child was destroyed")))
