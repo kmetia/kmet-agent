@@ -37,7 +37,7 @@
  ;; extensions/<name>/src layout, so io/resource reads a bundled extension at
  ;; the same path in a binary as in a checkout. A
  ;; missing root embeds nothing — the runtime then offers no bundled set.
- :jolt/build {:embed ["modules/libs/src" "modules/tui/src" "modules/ai/src" "modules/sklop/src" "modules/app/src" "modules/tk/src" "target/kmet-version" "target/kmet-bundled"]
+ :jolt/build {:embed ["modules/libs/src" "modules/tui/src" "modules/ai/src" "modules/sklop/src" "modules/app/src" "target/kmet-version" "target/kmet-bundled"]
                ;; Runtime-only requires the static scan cannot see. clojure.core.async's
                ;; overlay (alts!!, mult, …) is loaded by the extension host; babashka.cli
                ;; and babashka.tasks are loaded by the eval/codemode sandbox
@@ -89,11 +89,11 @@
         kmet/srce {:git/url "https://github.com/kmetia/srce.git"
                    :git/sha "b3e78d4a70385d71237a517421345cc01ba09c27"}
 
-        ;; The module roots chain: app → (libs, ai, tui, sklop), and tk through
-        ;; the :jvm alias below (no module depends on it). babashka uses
+        ;; The module roots chain: app → (libs, ai, tui, sklop). babashka uses
         ;; bb.edn's flat :paths; a JVM classpath resolves the same sources
         ;; through these local roots. The loader, reakt, hikap and srce are the
-        ;; external edges: pinned above, sibling checkouts in :dev.
+        ;; external edges pinned above; tk is external too and pinned in the
+        ;; :jvm alias below. All five use sibling checkouts in :dev.
         ;; babashka.fs / babashka.process are deliberately NOT deps: babashka
         ;; bundles them, and jolt vendors the same namespaces (built-in,
         ;; resolving ahead of any deps.edn copy). A Maven copy is redundant on
@@ -214,7 +214,8 @@
   ;; kmet.app.extensions.context/jars-for) and babashka.ffi (the Windows
   ;; clipboard backend). `bb start-jvm`, the JVM test tasks and the JVM
   ;; packager (which resolves its basis with this alias) opt in.
-  :jvm {:extra-deps {kmet/tk {:local/root "modules/tk"}
+  :jvm {:extra-deps {kmet/tk {:git/url "https://github.com/kmetia/tk.git"
+                               :git/sha "f70782c15b1a6a7d48ce82a852b53192fe7e00b3"}
                      org.clojure/tools.deps {:mvn/version "0.31.1646"}
                      ;; The host FFI on the JVM: the Windows clipboard backend
                      ;; (kmet.libs.clipboard-win) and the Tk adapter
@@ -242,7 +243,8 @@
         :override-deps {kmet/loader {:local/root "../loader"}
                         kmet/reakt {:local/root "../reakt"}
                         kmet/hikap {:local/root "../hikap"}
-                        kmet/srce {:local/root "../srce"}}
+                        kmet/srce {:local/root "../srce"}
+                        kmet/tk {:local/root "../tk"}}
         :extra-deps {babashka/fs {:mvn/version "0.5.34"}
                      babashka/process {:mvn/version "0.6.25"}}}
   ;; The JVM nREPL server (`bb nrepl-jvm`). Dev-only like :build — the app

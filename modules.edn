@@ -10,9 +10,9 @@
 ;; coordinates (the host's own artifacts excepted).
 ;; Extension projects are not workspace modules: each is an independently
 ;; loadable extension with its own bb.edn test entry (and, when it needs
-;; library deps, a deps.edn). The loader, reakt, hikap and srce are the
-;; external edges: pinned kmet/* dependencies in deps.edn, with their sibling
-;; checkouts used as local roots in bb.edn and the :dev alias.
+;; library deps, a deps.edn). The loader, reakt, hikap, srce and tk are the
+;; external edges: pinned kmet/* dependencies (tk in the :jvm alias), with
+;; their sibling checkouts used as local roots in bb.edn and the :dev alias.
 {:modules
  [{:name "libs" :src "modules/libs/src" :test "modules/libs/test" :rank 0}
   {:name "tui" :src "modules/tui/src" :test "modules/tui/test" :rank 2}
@@ -29,11 +29,7 @@
   ;; renamed the ones whose lifts had kept kmet1's names); kmet.extension is
   ;; the ABI and keeps its name.
   {:name "app" :src "modules/app/src" :test "modules/app/test" :rank 3}
-  ;; tk is the Tk backend plus its kmet.gui-sample.* widget skeleton (one
-  ;; `:ui/transcript` composite over the backend's extra-tag seam). No module
-  ;; depends on it: it reaches the JVM classpath through the root deps.edn
-  ;; :jvm alias (the host FFI and the module root), not a module edge.
-  {:name "tk" :src "modules/tk/src" :test "modules/tk/test" :rank 2}]
+]
 
  :extension-root "extensions"
  ;; :test-hosts [:bb] marks a test tree whose every test var is ^:bb-only: the

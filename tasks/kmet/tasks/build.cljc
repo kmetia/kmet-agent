@@ -105,7 +105,7 @@
 (def ^:private external-src-markers
   "Source files that identify the extracted libraries on the bb classpath."
   ["kmet/loader/core.clj" "kmet/reakt/core.clj" "kmet/hikap/core.clj"
-   "kmet/srce/core.clj"])
+   "kmet/srce/core.clj" "kmet/tk/core.clj"])
 
 (defn- external-src-roots
   "The extracted libraries' source roots on the bb classpath. bb.edn declares

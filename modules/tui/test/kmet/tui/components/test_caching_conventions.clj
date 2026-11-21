@@ -68,7 +68,7 @@
    the last pieces into) and the Tk skeleton's."
   ["modules/tui/src/kmet/tui/components"
    "modules/app/src/kmet/ui/tui"
-   "modules/tk/src/kmet/gui_sample"])
+   "../tk/src/kmet/gui_sample"])
 
 ;; ─── Top-level form splitting (paren-balanced, strings/comments skipped) ──
 

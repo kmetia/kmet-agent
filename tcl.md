@@ -2,7 +2,7 @@
 
 Working notes on the gaps of the Tk backend (`kmet.tk.*`), ordered by what
 would matter first to an app UI built on it. The app port's own work, which
-waits for these, is listed at the end. `modules/tk/src/kmet/tk/README.md` is the
+waits for these, is listed at the end. `https://github.com/kmetia/tk/blob/master/src/kmet/tk/README.md` is the
 package's design document; this file is the open-work list beside it.
 
 ## What is complete
@@ -35,7 +35,7 @@ identity (an `:id` written as the item's first Tk tag, reconciled in place,
 with Tk's item events and its stacking order), `:context-menu` posting
 through Tk's own `tk_popup`, check and radio menu items with the private
 variables Tk needs, and `grid`/`place` as a child's own geometry maps. What
-each contract is, and what it refuses, is in `modules/tk/src/kmet/tk/README.md` (Data
+each contract is, and what it refuses, is in `https://github.com/kmetia/tk/blob/master/src/kmet/tk/README.md` (Data
 widgets, Props and bindings, Geometry).
 
 The variable-backed options are props: `:variable`, `:textvariable` and
@@ -48,7 +48,7 @@ app's own Tcl owns, which kmet scripts as it is and never unsets.
 `:tristatevalue` are plain props beside it, a checkable widget's variable
 is shared with the app and with its radio group, and a second source of
 truth (`:text` beside `:textvariable`, `:items` beside `:listvariable`) is
-refused. `modules/tk/src/kmet/tk/README.md` (Shared variables) is the contract.
+refused. `https://github.com/kmetia/tk/blob/master/src/kmet/tk/README.md` (Shared variables) is the contract.
 
 The script-typed options are props too — binding slots of the tags whose
 widgets have them. Tk asks `:validatecommand` whether an edit is allowed,

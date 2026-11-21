@@ -122,8 +122,8 @@ to the code and people who own it. The longer etymology is in
 ## Project layout
 
 ```text
-modules/        — application modules and libraries (app, ai, libs, tui,
-                  tk); each is a standalone classpath root
+modules/        — application modules and libraries (app, ai, libs, tui);
+                  each is a standalone classpath root
 extensions/     — bundled opt-in extensions and single-file tools
 jolt/           — Jolt provider scaffolding
 docs/           — user guides and references
@@ -132,10 +132,10 @@ tasks/          — development and packaging tasks
 scripts/        — repo tooling (git hooks, repros, capture and benchmark helpers)
 ```
 
-The loader, reakt, hikap and srce (`kmet.loader.*`, `kmet.reakt.*`,
-`kmet.hikap.*`, `kmet.srce.*`) are separate projects: `deps.edn` pins their
-commits, and development uses the sibling `../loader`, `../reakt`, `../hikap`
-and `../srce` checkouts.
+The loader, reakt, hikap, srce and tk (`kmet.loader.*`, `kmet.reakt.*`,
+`kmet.hikap.*`, `kmet.srce.*`, `kmet.tk.*`) are separate projects: `deps.edn`
+pins their commits (tk in the `:jvm` alias), and development uses the sibling
+`../loader`, `../reakt`, `../hikap`, `../srce` and `../tk` checkouts.
 
 Implementation and development references sit beside the source they describe
 — for example, the kernel and TUI design notes — and

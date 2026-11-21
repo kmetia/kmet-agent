@@ -1,12 +1,12 @@
 {:paths ["src" "test" "../../test"
          "../../modules/libs/src"
          "../../modules/tui/src" "../../modules/ai/src"
-         "../../modules/sklop/src" "../../modules/app/src"
-         "../../modules/tk/src"]
+         "../../modules/sklop/src" "../../modules/app/src"]
  :deps {kmet/loader {:local/root "../../../loader"}
         kmet/reakt {:local/root "../../../reakt"}
         kmet/hikap {:local/root "../../../hikap"}
         kmet/srce {:local/root "../../../srce"}
+        kmet/tk {:local/root "../../../tk"}
         ;; tests load the module trees, whose kmet.libs.http requires the
         ;; kmet.libs.json seam → clojure.data.json — bb >= 1.13.224 bundles
         ;; it (the built-in wins), declared for a standalone classpath and

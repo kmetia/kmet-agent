@@ -1,12 +1,12 @@
 {:paths ["src" "test" "../../test"
          "../../modules/libs/src"
          "../../modules/tui/src" "../../modules/ai/src"
-         "../../modules/sklop/src" "../../modules/app/src"
-         "../../modules/tk/src"]
+         "../../modules/sklop/src" "../../modules/app/src"]
  :deps {kmet/loader {:local/root "../../../loader"}
         kmet/reakt {:local/root "../../../reakt"}
         kmet/hikap {:local/root "../../../hikap"}
         kmet/srce {:local/root "../../../srce"}
+        kmet/tk {:local/root "../../../tk"}
         ;; the module trees require kmet.libs.json (clojure.data.json, bundled
         ;; by bb >= 1.13.224 but declared for a standalone classpath) and
         ;; malli at load time; pinned at the root deps.edn versions.

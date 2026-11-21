@@ -23,16 +23,16 @@ modules/
 ├── tui/    — terminal backend over hikap            (kmet.tui.*; tui.md)
 ├── ai/     — provider/auth library                  (kmet.ai.*)
 ├── sklop/  — composition: rows, bundles, profiles    (kmet.sklop.*; sklop README)
-├── app/    — the application + its TUI front end   (kmet.app.*, kmet.ui.*)
-└── tk/     — Tk backend + widget sample            (kmet.tk.*, kmet.gui-sample.*)
+└── app/    — the application + its TUI front end   (kmet.app.*, kmet.ui.*)
 ```
 
 `modules.edn` is the workspace manifest: it lists the module trees and the
 extra source roots, and the tasks read it instead of repeating the paths
-(`kmet.tasks.modules`). The loader, reakt, hikap and srce are the exceptions:
-`kmet.loader.*`, `kmet.reakt.*`, `kmet.hikap.*` and `kmet.srce.*` are separate
-projects, pinned in `deps.edn` and checked out as `../loader`, `../reakt`,
-`../hikap` and `../srce` in dev.
+(`kmet.tasks.modules`). The loader, reakt, hikap, srce and tk are the
+exceptions: `kmet.loader.*`, `kmet.reakt.*`, `kmet.hikap.*`, `kmet.srce.*` and
+`kmet.tk.*` are separate projects, pinned in `deps.edn` (tk in the `:jvm` alias)
+and checked out as `../loader`, `../reakt`, `../hikap`, `../srce` and `../tk` in
+dev.
 
 A module's namespaces sit under the root it is
 named for: `libs` holds `kmet.libs.*`, `ai` holds `kmet.ai.*`. `app` is the
@@ -42,9 +42,9 @@ one module with two prefixes: its business tree is `kmet.app.*`, and
 Ranks are the manifest's layering guard (`kmet.test-module-deps`): a module
 may depend only on strictly lower-ranked ones, and a *namespace* may require
 only a file in a strictly lower-ranked module — `libs` 0, `ai` 1,
-`tui`/`tk`/`sklop` 2, `app` 3. The external `kmet.loader.*`, `kmet.reakt.*`,
-`kmet.hikap.*` and `kmet.srce.*` libraries are pinned below all of them. A leaf
-that both the app
+`tui`/`sklop` 2, `app` 3. The external `kmet.loader.*`, `kmet.reakt.*`,
+`kmet.hikap.*`, `kmet.srce.*` and `kmet.tk.*` libraries are pinned below all of
+them. A leaf that both the app
 and the components read therefore lives in `libs`, never in either of them:
 `kmet.libs.theme` (the world load reads it, the widgets style from it) and
 `kmet.libs.fuzzy` (the selectors and the `--list-models` filter) are the two.
