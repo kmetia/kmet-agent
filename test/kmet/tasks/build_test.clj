@@ -46,21 +46,24 @@
 
 (deftest ^:bb-only parse-args-collects-targets-and-flags
   (is (= {:targets [] :all? false :force? false :no-smoke? true
-          :out nil :help? false}
+          :allow-drift? false :out nil :help? false}
          (build/parse-args [])))
   (is (= {:targets ["linux-aarch64"] :all? true :force? true :no-smoke? true
-          :out nil :help? false}
+          :allow-drift? false :out nil :help? false}
          (build/parse-args ["linux-aarch64" "--all" "--force"])))
   (is (= {:targets ["macos-aarch64" "windows-amd64"]
-          :all? false :force? false :no-smoke? true :out nil :help? true}
+          :all? false :force? false :no-smoke? true :allow-drift? false
+          :out nil :help? true}
          (build/parse-args ["macos-aarch64" "--help" "windows-amd64"])))
   (testing "a babashka release asset slug is accepted as its platform"
     (is (= {:targets ["linux-amd64"] :all? false :force? false :no-smoke? true
-            :out nil :help? false}
+            :allow-drift? false :out nil :help? false}
            (build/parse-args ["linux-amd64-static"]))))
   (testing "the smoke test is opt-in"
     (is (false? (:no-smoke? (build/parse-args ["--smoke"]))))
     (is (true? (:no-smoke? (build/parse-args ["--no-smoke"])))))
+  (testing "--allow-drift skips the dependency-pin check"
+    (is (true? (:allow-drift? (build/parse-args ["--allow-drift"])))))
   (testing "--out names the directory the executable is additionally copied to"
     (is (= "bin" (:out (build/parse-args ["--out" "bin"]))))
     (is (= "bin" (:out (build/parse-args ["-o" "bin"]))))
@@ -72,6 +75,52 @@
                         (build/parse-args ["plan9"])))
   (is (thrown-with-msg? Exception #"unknown option"
                         (build/parse-args ["--wat"]))))
+
+(deftest ^:bb-only dependency-pins-report-every-drift
+  (let [deps {:deps {'ok {:git/sha "111"}
+                     'moved {:git/sha "222"}
+                     'dirty {:git/sha "333"}
+                     'missing {:git/sha "444"}
+                     'unverifiable {:git/sha "555"}}
+              :aliases {:jvm {:extra-deps {'tk {:git/sha "666"}}}
+                        :dev {:override-deps {'ok {:local/root "../ok"}}}}}
+        bb {:deps {'ok {:local/root "../ok"}
+                   'moved {:local/root "../moved"}
+                   'dirty {:local/root "../dirty"}
+                   'missing {:local/root "../missing"}
+                   'unverifiable {:local/root "../unverifiable"}
+                   'tk {:local/root "../tk"}
+                   'unpinned {:local/root "../unpinned"}
+                   'mvn {:mvn/version "1"}}}
+        pins (#'build/dependency-pins deps bb)
+        problems (#'build/pin-problems
+                  pins
+                  {'ok {:sha "111"}
+                   'moved {:sha "999"}
+                   'dirty {:sha "333" :dirty? true}
+                   'missing {:missing? true}
+                   'unverifiable {:unverifiable? true}
+                   'tk {:sha "666"}})]
+    (is (= #{'ok 'moved 'dirty 'missing 'unverifiable 'tk}
+           (set (map :lib pins))))
+    (is (= {'moved [:sha-mismatch]
+            'dirty [:dirty]
+            'missing [:missing]
+            'unverifiable [:unverifiable]}
+           (into {} (map (juxt :lib :issues)) problems)))))
+
+(deftest ^:bb-only check-dependency-pins-fails-on-drift-and-allows-it
+  (let [deps {:deps {'kmet/loader {:git/url "https://example/loader"
+                                   :git/sha "pinned"}}}
+        bb {:deps {'kmet/loader {:local/root "../loader"}}}
+        problems (atom nil)]
+    (with-redefs [build/checkout-state (fn [_] {:sha "checkout"})]
+      (is (thrown-with-msg? Exception #"external dependency drift"
+                            (build/check-dependency-pins! false deps bb)))
+      (let [out (with-out-str
+                  (reset! problems (build/check-dependency-pins! true deps bb)))]
+        (is (= 1 (count @problems)))
+        (is (re-find #"warning: external dependency drift" out))))))
 
 (deftest ^:bb-only pack-artifact-zips-one-folder-with-executable-launcher-and-license
   (let [dir (test-tmp/temp-dir! "test-dist-pack-")

@@ -46,7 +46,7 @@
   dist-jvm {:doc "Package the JVM artifact (dist/kmetc-<version>-jvm.zip: kmetc.jar, the kmetc/kmetc.sh/kmetc.bat/kmetc.cmd/kmetc.ps1 launchers and LICENSE)\n\nOne platform-independent zip, no cross-building: the uberjar is built and smoke-tested first, then packed by the same conventions `bb dist` / `jolt dist` use (`jvm` sits in the platform slot, and the kmetc- prefix keeps the command distinct from kmet and kmetj). Needs the Clojure CLI."
             :requires ([babashka.process :as p])
             :task (help/with-help (p/shell "clojure" "-M:build" "-m" "kmet.tasks.build-jvm" "--dist"))}
-  dist    {:doc "Package self-contained kmet executables (one platform-qualified zip in dist/, each holding a folder with the executable and LICENSE; bb: uberjar + babashka binary; jolt: AOT via `jolt build`)\n\n`bb dist --help` / `jolt dist --help`: platforms, flags (--force, --smoke, --test, --dev, --out, --static/--dynamic, --boot, --target), artifact naming and layout, and the bundled-extension staging both packagers share."
+  dist    {:doc "Package self-contained kmet executables (one platform-qualified zip in dist/, each holding a folder with the executable and LICENSE; bb: uberjar + babashka binary; jolt: AOT via `jolt build`)\n\n`bb dist --help` / `jolt dist --help`: platforms, flags (--force, --smoke, --test, --dev, --out, --static/--dynamic, --boot, --target), the bb dependency-pin check (--allow-drift), artifact naming and layout, and the bundled-extension staging both packagers share."
            :requires ([kmet.tasks.build :as build] [kmet.tasks.build-jolt :as jbuild])
            :task (if (find-var 'clojure.core/*jolt-version*)
                    (apply jbuild/-main *command-line-args*)

@@ -128,6 +128,114 @@
                                  :marker marker}))))
           external-src-markers)))
 
+;; ─── External dependency pins ──────────────────────────────────────────────
+;;
+;; bb.edn resolves the extracted libraries from sibling checkouts, while
+;; deps.edn pins the revisions the Jolt and JVM artifacts compile from.
+;; `bb dist` takes the bb classpath as it stands, so without a check a release
+;; can silently carry sibling HEADs that differ from the pins.
+
+(defn- dependency-pins
+  "The dependencies BB-EDN resolves as sibling checkouts that DEPS-EDN pins, as
+   a deterministic [{:lib :root :sha}]. Alias :extra-deps entries count as
+   pins (kmet/tk is only there); :override-deps is the dev-local root view,
+   not a pin."
+  [deps-edn bb-edn]
+  (let [pins (into (:deps deps-edn)
+                   (mapcat (comp :extra-deps val) (:aliases deps-edn)))]
+    (->> (:deps bb-edn)
+         (keep (fn [[lib coord]]
+                 (when-let [root (:local/root coord)]
+                   (when-let [sha (:git/sha (get pins lib))]
+                     {:lib lib :root (str root) :sha sha}))))
+         (sort-by (comp str :lib))
+         vec)))
+
+(defn- git-output
+  "Trimmed stdout of git ARGS in DIR, or nil when git fails (a non-zero exit or
+   no git executable)."
+  [dir & args]
+  (try
+    (let [{:keys [exit out]}
+          (apply p/sh {:continue true :out :string :err :string}
+                 "git" "-C" (str dir) args)]
+      (when (zero? exit) (str/trim out)))
+    (catch Exception _ nil)))
+
+(defn checkout-state
+  "The git state behind sibling checkout ROOT: {:sha ... :dirty? ...},
+   {:missing? true}, or {:unverifiable? true} when ROOT is not a git checkout
+   or git cannot answer. Untracked files count as dirty: the build would pick
+   up whatever its classpath can see."
+  [root]
+  (let [dir (fs/path root)]
+    (if-not (fs/exists? dir)
+      {:missing? true}
+      (if-let [sha (git-output dir "rev-parse" "HEAD")]
+        {:sha sha :dirty? (boolean (seq (git-output dir "status" "--porcelain")))}
+        {:unverifiable? true}))))
+
+(defn- pin-problems
+  "PINS not satisfied by STATES ({lib state}); each problem carries the pin,
+   the observed :state and an :issues vector."
+  [pins states]
+  (keep (fn [{:keys [lib sha] :as pin}]
+          (let [{:keys [missing? unverifiable? dirty?] :as state} (get states lib)
+                issues (cond-> []
+                         missing? (conj :missing)
+                         unverifiable? (conj :unverifiable)
+                         (and (:sha state) (not= sha (:sha state)))
+                         (conj :sha-mismatch)
+                         dirty? (conj :dirty))]
+            (when (seq issues)
+              (assoc pin :state state :issues issues))))
+        pins))
+
+(defn- describe-problem
+  "One indented line for PROBLEM, the text a drift failure prints."
+  [{:keys [lib root sha state issues]}]
+  (let [state (or state {})
+        actual (or (:sha state) "no HEAD")
+        notes (cond-> []
+                (:dirty? state) (conj "dirty")
+                (some #{:missing} issues) (conj "missing")
+                (some #{:unverifiable} issues)
+                (conj "not a git checkout or git unavailable"))]
+    (str "  " lib " " root ": pinned " sha ", checkout " actual
+         (when (seq notes) (str " (" (str/join ", " notes) ")")))))
+
+(defn check-dependency-pins!
+  "Verify every sibling checkout bb.edn resolves is at its deps.edn :git/sha.
+   ALLOW-DRIFT? downgrades a mismatch to a warning (`bb dist --allow-drift`);
+   otherwise the failure is ::dependency-drift. Returns the problems found."
+  ([allow-drift?]
+   (check-dependency-pins! allow-drift?
+                           (edn/read-string (slurp "deps.edn"))
+                           (edn/read-string (slurp "bb.edn"))))
+  ([allow-drift? deps-edn bb-edn]
+   (let [pins (dependency-pins deps-edn bb-edn)
+         states (into {} (map (juxt :lib (comp checkout-state :root))) pins)
+         problems (pin-problems pins states)]
+     (cond
+       (empty? pins)
+       (println "warning: no local-root dependencies to verify against deps.edn pins")
+
+       (empty? problems)
+       (println (format "external dependency pins match (%d checkouts)" (count pins)))
+
+       allow-drift?
+       (do (println "warning: external dependency drift (--allow-drift):")
+           (doseq [problem problems]
+             (println (describe-problem problem)))
+           (println "         the artifact carries the checkouts, not the pins"))
+
+       :else
+       (throw (ex-info (str "external dependency drift: bb dist builds from the sibling checkouts\n"
+                            (str/join "\n" (map describe-problem problems))
+                            "\ncheck out the pinned revisions or pass --allow-drift for a dev build")
+                       {:type ::dependency-drift :problems (vec problems)})))
+     problems)))
+
 ;; ─── Target table ──────────────────────────────────────────────────────────
 ;;
 ;; Keyed by dist platform — the os-arch name both packagers stamp on the
@@ -978,19 +1086,20 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\"%s \"$@\"
 ;; ─── CLI ───────────────────────────────────────────────────────────────────
 
 (defn parse-args
-  "CLI args => {:targets [...] :all? :force? :no-smoke? :test? :out :help?}.
-   --out DIR additionally copies the built executable into DIR. Unknown
-   targets/options throw ex-info with :type ::usage."
+  "CLI args => {:targets [...] :all? :force? :no-smoke? :allow-drift? :out
+   :help?}. --out DIR additionally copies the built executable into DIR.
+   Unknown targets/options throw ex-info with :type ::usage."
   [args]
   (loop [args args
          opts {:targets [] :all? false :force? false :no-smoke? true
-               :out nil :help? false}]
+               :allow-drift? false :out nil :help? false}]
     (if-some [arg (first args)]
       (cond
         (= "--all" arg) (recur (rest args) (assoc opts :all? true))
         (= "--force" arg) (recur (rest args) (assoc opts :force? true))
         (= "--smoke" arg) (recur (rest args) (assoc opts :no-smoke? false))
         (= "--no-smoke" arg) (recur (rest args) (assoc opts :no-smoke? true))
+        (= "--allow-drift" arg) (recur (rest args) (assoc opts :allow-drift? true))
         (#{"-o" "--out"} arg)
         (let [dir (second args)]
           (when (str/blank? (str dir))
@@ -1007,6 +1116,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\"%s \"$@\"
 
 (defn -main
   "bb dist [target ...|--all] [--force] [--smoke] [--test] [--out DIR]
+   [--allow-drift]
    (the bb.edn task's babashka branch; the jolt branch runs
    kmet.tasks.build-jolt/-main)
 
@@ -1030,13 +1140,21 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\"%s \"$@\"
    the packaged test runner for --test; skipped by default to keep local
    dist builds fast and side-effect free). A fresh uberjar
    target/uberjar-bb.jar is always rebuilt
-   first so artifacts never bundle stale sources."
+   first so artifacts never bundle stale sources.
+
+   Before building, every sibling checkout bb.edn resolves is verified against
+   its deps.edn :git/sha: a moved, dirty, missing or unverifiable checkout
+   fails the build, because the bb artifact would otherwise carry different
+   library code than the pinned Jolt and JVM artifacts. --allow-drift
+   downgrades that check to a warning for a dev build."
   [& args]
   (bb-only! "kmet.tasks.build/-main (the bb half of the dist task)")
-  (let [{:keys [targets all? force? no-smoke? out help?]} (parse-args args)]
+  (let [{:keys [targets all? force? no-smoke? allow-drift? out help?]}
+        (parse-args args)]
     (when help?
       (println (:doc (meta #'-main)))
       (System/exit 0))
+    (check-dependency-pins! allow-drift?)
     (when force?
       (when (fs/exists? cache-dir)
         (fs/delete-tree cache-dir)))

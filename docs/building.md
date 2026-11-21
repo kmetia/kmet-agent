@@ -26,7 +26,16 @@ bb dist                 # dist/kmet-<version>-<platform>.zip
 bb dist --all           # Every published platform
 bb dist macos-aarch64   # Explicit platforms; --force re-downloads, --smoke runs the post-build check
 bb dist --out ~/bin     # additionally copy the executable there
+bb dist --allow-drift   # dev build from unpinned sibling checkouts
 ```
+
+`bb dist` resolves the extracted libraries from the sibling checkouts `bb.edn`
+declares, while `deps.edn` pins the revisions the Jolt and JVM artifacts build
+from. Before building, every sibling checkout is verified against its
+`:git/sha` and its worktree state; a moved, dirty or missing checkout (or a
+directory that is not a git checkout) fails the build, because the artifact
+would otherwise carry different library code than the pinned artifacts.
+`--allow-drift` downgrades that check to a warning for a dev build.
 
 ## Jolt artifacts
 
