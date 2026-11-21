@@ -32,7 +32,7 @@ global.**
 | Tk backend and its widget sample (`kmet.tk.*`, `kmet.gui-sample.*`) | [`modules/tk/src/kmet/tk/README.md`](modules/tk/src/kmet/tk/README.md) |
 | Extension contract (`kmet.extension` API, allowed namespaces, lifecycle) and authoring guide (layouts, loaders, deps, UI, testing) | [`modules/app/src/kmet/extension.md`](modules/app/src/kmet/extension.md); [`docs/extensions.md`](docs/extensions.md) |
 | Architecture lineage and pi alignment | [`design.md`](modules/app/src/kmet/design.md) § Prior art: DSH; [`modules/srce/src/kmet/srce/srce.md`](modules/srce/src/kmet/srce/srce.md); [`docs/pi-alignment.md`](docs/pi-alignment.md) |
-| Loader design and backends | [`modules/loader/src/kmet/loader/loader.md`](modules/loader/src/kmet/loader/loader.md) |
+| Loader design and backends | [`loader`](https://github.com/kmetia/loader) — separate project; `../loader` in dev, pinned in `deps.edn` |
 | Jolt provider scaffolding and host integration | [`jolt/src/jolt/kmet/README.md`](jolt/src/jolt/kmet/README.md) |
 | Platforms (Linux, macOS, Windows, WSL, Termux), building and distribution | [`docs/building.md`](docs/building.md) |
 | User guides, examples, settings and theme samples | [`docs/README.md`](docs/README.md), [`docs/examples/README.md`](docs/examples/README.md) |
@@ -51,9 +51,15 @@ user-facing); implementation notes sit beside their source. `perf.md`,
 - `bb clean` removes build output and caches (`--dry-run` lists them;
   `jolt clean` is the equivalent); `bb tasks` lists summaries and
   `bb <task> --help` full usage.
+- The loader (`kmet.loader.*`) is a separate project. Development uses the
+  sibling `../loader` checkout: `bb` and the Jolt tasks resolve it from
+  `bb.edn`, the JVM dev aliases from `deps.edn`'s `:dev`; direct `jolt`
+  invocations that read `deps.edn` take `-A:dev` (for example
+  `jolt -A:dev nrepl-server 7802`). The default `deps.edn` coordinate is the
+  pinned GitHub commit.
 - nREPL: `bb nrepl` (7801, no port file), `bb nrepl-jvm [port]` (7803) and
-  `jolt nrepl-server 7802`; JVM/Jolt share `.nrepl-port`, so pass a port when
-  both run (see [`docs/architecture.md`](docs/architecture.md) § Development
+  `jolt -A:dev nrepl-server 7802`; JVM/Jolt share `.nrepl-port`, so pass a port
+  when both run (see [`docs/architecture.md`](docs/architecture.md) § Development
   workflow).
 - The changed-file tasks are the normal loop: `bb changed`, `bb test-changed`,
   `bb test-ext-changed`, `bb lint-changed`, `bb format-check-changed` (or

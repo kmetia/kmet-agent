@@ -84,7 +84,8 @@ modules/srce/
 ```
 
 `kmet.srce.*` is rank 1 — it may require rank-0 code (`kmet.libs.*`,
-`kmet.loader.*` and `kmet.reakt.*`), nothing at its own rank or above;
+`kmet.reakt.*`, and the external `kmet.loader.*`), nothing at its own rank or
+above;
 the subnamespaces are internal and nothing above the kernel requires them.
 The module's `modules.edn` row — `:name "srce"`, the source/test paths,
 `:rank 1` — is also its classpath and embed entry: the manifest is the classpath
@@ -780,8 +781,9 @@ writes the diagnostics error log (`logs/kmet-error.log` under the process cwd
 unless `KMET_LOG_DIR` names another directory), the other levels follow
 `--debug`.
 
-`kmet.srce.*` may require only rank-0 code — `kmet.libs.*`, `kmet.loader.*`,
-`kmet.reakt.*` and third-party code — and currently requires none of them, so
+`kmet.srce.*` may require only rank-0 code — `kmet.libs.*`, `kmet.reakt.*`,
+the external `kmet.loader.*`, and third-party code — and currently requires none
+of them, so
 the kernel cannot call `kmet.app.debug` directly — which is also why the full
 port's
 logger service (exporters, formatters, ANSI palette, ring buffer, `:logger`
@@ -1083,7 +1085,8 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
   a subtree teardown aggregating every handle; and a
   non-fn `:update` rejected as `:srce/bad-plugin`.
 - srce self-containment: `kmet.srce.*` may require only rank-0 code
-  (`kmet.libs.*`, `kmet.loader.*`, `kmet.reakt.*`) and third-party code — no
+  (`kmet.libs.*`, `kmet.reakt.*`, the external `kmet.loader.*`) and third-party
+  code — no
   `kmet.app.*`, `kmet.tui.*`, `kmet.tk.*`, nothing at its own rank or above.
 - **No `kmet.libs.scope` require in `kmet.srce.*`** (§9), and after 4e no
   `kmet.agent.*` require either — the deletion gate.

@@ -3,8 +3,10 @@
  ;; implementation lives there (see AGENTS.md § File layout). Both hosts
  ;; resolve kmet.tasks.* from it, and neither artifact carries it — the
  ;; uberjar walks src/, jolt's :jolt/build :embed does too.
- :paths ["modules/reakt/src" "modules/reakt/test" "modules/hikap/src" "modules/hikap/test" "modules/libs/src" "modules/libs/test" "modules/tui/src" "modules/tui/test" "modules/ai/src" "modules/ai/test" "modules/loader/src" "modules/loader/test" "modules/srce/src" "modules/srce/test" "modules/sklop/src" "modules/sklop/test" "modules/app/src" "modules/app/test" "modules/tk/src" "modules/tk/test" "test" "tasks" "extensions/clojure/src" "extensions/clojure/test" "extensions/tree-sitter/src" "extensions/tree-sitter/test" "extensions/review/src" "extensions/review/test" "extensions/mcp-adapter/src" "extensions/mcp-adapter/test" "extensions/lsp-adapter/src" "extensions/lsp-adapter/test"]
- :deps {dev.weavejester/cljfmt {:mvn/version "0.16.6"}
+ :paths ["modules/reakt/src" "modules/reakt/test" "modules/hikap/src" "modules/hikap/test" "modules/libs/src" "modules/libs/test" "modules/tui/src" "modules/tui/test" "modules/ai/src" "modules/ai/test" "modules/srce/src" "modules/srce/test" "modules/sklop/src" "modules/sklop/test" "modules/app/src" "modules/app/test" "modules/tk/src" "modules/tk/test" "test" "tasks" "extensions/clojure/src" "extensions/clojure/test" "extensions/tree-sitter/src" "extensions/tree-sitter/test" "extensions/review/src" "extensions/review/test" "extensions/mcp-adapter/src" "extensions/mcp-adapter/test" "extensions/lsp-adapter/src" "extensions/lsp-adapter/test"]
+ :deps {;; babashka is the dev host: the loader is the sibling checkout.
+        kmet/loader {:local/root "../loader"}
+        dev.weavejester/cljfmt {:mvn/version "0.16.6"}
         ;; babashka >= 1.13.224 bundles data.json (2.5.2 as of 1.13.229) and
         ;; the built-in wins over any declared copy; pinned at the bundled
         ;; version in lockstep with the jolt/JVM classpath (deps.edn).
@@ -27,9 +29,9 @@
   start   {:doc "Start kmet (interactive TUI); `bb start --help` for kmet's CLI options"
            :requires ([kmet.app.core :as core])
            :task (apply core/-main *command-line-args*)}
-  start-jvm {:doc "Start kmet under JVM Clojure (interactive TUI)\n\nRuns with the app's JVM aliases (:jvm :clj-pin) — the classpath the released JVM artifact gets, extension-dependency resolution included."
+  start-jvm {:doc "Start kmet under JVM Clojure (interactive TUI)\n\nRuns with the app's JVM aliases (:jvm :clj-pin :dev) — the release classpath plus the test root and the sibling loader override, extension-dependency resolution included."
              :requires ([babashka.process :as p])
-             :task (apply p/shell "clojure" "-M:jvm:clj-pin" "-m" "kmet.app.core" *command-line-args*)}
+             :task (apply p/shell "clojure" "-M:jvm:clj-pin:dev" "-m" "kmet.app.core" *command-line-args*)}
   uberjar {:doc "Build target/uberjar-bb.jar (run with: bb target/uberjar-bb.jar)\n\nThe babashka payload: an uberjar of src + runtime deps that `bb dist` appends to a babashka release binary. Not JVM-loadable (babashka's built-in namespaces have no source files) — `bb uberjar-jvm` builds the JVM artifact."
            :requires ([kmet.tasks.build :as build])
            :task (help/with-help (build/uberjar*))

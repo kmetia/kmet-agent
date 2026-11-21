@@ -5,7 +5,7 @@ the service catalog, the layering rules and the workflow.
 Implementation-specific references live beside their namespaces rather than in
 the user-facing `docs/` directory: see
 [`modules/tui/src/kmet/tui/tui.md`](../modules/tui/src/kmet/tui/tui.md),
-[`modules/loader/src/kmet/loader/loader.md`](../modules/loader/src/kmet/loader/loader.md),
+[`loader.md`](https://github.com/kmetia/loader/blob/master/src/kmet/loader/loader.md),
 [`modules/srce/src/kmet/srce/srce.md`](../modules/srce/src/kmet/srce/srce.md),
 [`modules/app/src/kmet/extension.md`](../modules/app/src/kmet/extension.md), and
 [`pi-alignment.md`](pi-alignment.md). The generated composition catalog is
@@ -26,22 +26,25 @@ modules/
 ├── ai/     — provider/auth library                  (kmet.ai.*)
 ├── srce/   — the kernel: ctx, services, fibers      (kmet.srce.*; srce.md)
 ├── sklop/  — composition: rows, bundles, profiles    (kmet.sklop.*; sklop README)
-├── loader/ — extension loader                       (kmet.loader.*; loader.md)
 ├── app/    — the application + its TUI front end   (kmet.app.*, kmet.ui.*)
 └── tk/     — Tk backend + widget sample            (kmet.tk.*, kmet.gui-sample.*)
 ```
 
 `modules.edn` is the workspace manifest: it lists the module trees and the
 extra source roots, and the tasks read it instead of repeating the paths
-(`kmet.tasks.modules`). A module's namespaces sit under the root it is
+(`kmet.tasks.modules`). The loader is the exception: `kmet.loader.*` is a
+separate project, pinned in `deps.edn` and checked out as `../loader` in dev.
+
+A module's namespaces sit under the root it is
 named for: `reakt` holds `kmet.reakt.*`, `hikap` holds `kmet.hikap.*`. `app`
 is the one module with two prefixes: its business tree is `kmet.app.*`, and
 `kmet.ui.*` is the TUI front end that merged into it (it was the `ui` module).
 
 Ranks are the manifest's layering guard (`kmet.test-module-deps`): a module
 may depend only on strictly lower-ranked ones, and a *namespace* may require
-only a file in a strictly lower-ranked module — `reakt`/`libs`/`loader` 0,
-`hikap`/`ai`/`srce` 1, `tui`/`tk`/`sklop` 2, `app` 3. A leaf that both the app
+only a file in a strictly lower-ranked module — `reakt`/`libs` 0,
+`hikap`/`ai`/`srce` 1, `tui`/`tk`/`sklop` 2, `app` 3. The external
+`kmet.loader.*` library is pinned below all of them. A leaf that both the app
 and the components read therefore lives in `libs`, never in either of them:
 `kmet.libs.theme` (the world load reads it, the widgets style from it) and
 `kmet.libs.fuzzy` (the selectors and the `--list-models` filter) are the two.

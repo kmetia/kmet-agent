@@ -123,7 +123,7 @@ to the code and people who own it. The longer etymology is in
 
 ```text
 modules/        — application modules and libraries (app, ai, libs, srce, tui,
-                  loader, tk, reakt, hikap); each is a standalone classpath root
+                  tk, reakt, hikap); each is a standalone classpath root
 extensions/     — bundled opt-in extensions and single-file tools
 jolt/           — Jolt provider scaffolding
 docs/           — user guides and references
@@ -131,6 +131,9 @@ test/           — cross-cutting tests (module tests sit beside each module)
 tasks/          — development and packaging tasks
 scripts/        — repo tooling (git hooks, repros, capture and benchmark helpers)
 ```
+
+The loader (`kmet.loader.*`) is a separate project: `deps.edn` pins its
+commit, and development uses the sibling `../loader` checkout.
 
 Implementation and development references sit beside the source they describe
 — for example, the kernel and TUI design notes — and

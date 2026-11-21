@@ -1,8 +1,7 @@
 (ns kmet.tasks.source-reader
   "Read source files without loading them — the architecture guards' shared
    reader (kmet.libs.test-self-contained, kmet.libs.test-scope-self-contained,
-   kmet.ai.test-self-contained, kmet.loader.test-self-contained,
-   kmet.test-layer-guard).
+   kmet.ai.test-self-contained, kmet.test-layer-guard).
 
    Reader conditionals resolve to THIS host's branch — the view the running
    host loads: #{:bb :clj} on babashka, #{:jolt :clj} on Jolt, #{:clj} on the

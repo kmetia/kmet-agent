@@ -2,8 +2,8 @@
  ;; Rank 3: the application, the top of the ladder — it holds the front end,
  ;; so it sits above the component backend (`tui`, rank 2) the widgets build
   ;; on. Its sources require only lower-ranked modules (kmet.srce.*,
-  ;; kmet.sklop.*, kmet.libs.*, kmet.ai.*, kmet.loader.*, kmet.tui.*,
-  ;; kmet.reakt.*), plus
+  ;; kmet.sklop.*, kmet.libs.*, kmet.ai.*, kmet.tui.*, kmet.reakt.*) and the
+  ;; pinned kmet.loader dependency, plus
  ;; third-party code; the module may never require a module at its own rank or
  ;; above. babashka/process is the version rule's git describe.
  ;;
@@ -65,7 +65,8 @@
  ;; isolated
  ;; evaluation context (extensions/context.cljc) and the host itself
  ;; (extensions/core.cljc, whose services arrive as a bound value so it needs
- ;; nothing from `agent`) require kmet.loader.*, the
+ ;; nothing from `agent`) require kmet.loader.*, supplied by the pinned
+ ;; dependency in the root deps.edn (the sibling checkout in :dev); the
  ;; bundled library set (extensions/libs.clj) is what makes those six
  ;; coordinates app's, and the loop's two stages (kmet.app.retry,
  ;; .loop-guard) came with them because they reach nothing above app. The pins
@@ -76,7 +77,6 @@
         kmet/srce {:local/root "../srce"}
         kmet/sklop {:local/root "../sklop"}
         kmet/ai {:local/root "../ai"}
-        kmet/loader {:local/root "../loader"}
         ;; The front end's component backends, from the merge: kmet.ui.* builds
         ;; on the TUI backend (which brings jline and, through hikap, reakt).
         kmet/tui {:local/root "../tui"}

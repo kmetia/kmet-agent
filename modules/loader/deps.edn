@@ -1,5 +1,0 @@
-{:paths ["src" "test"]
- ;; babashka.fs walks the roots. sci stays undeclared by design (loader.md
- ;; §6.5): babashka and Jolt bundle it, and the caller that mints contexts
- ;; declares the artifact — jolt/deps.edn for Jolt, modules/app for the JVM.
- :deps {babashka/fs {:mvn/version "0.5.34"}}}

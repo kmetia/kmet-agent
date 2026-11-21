@@ -120,7 +120,8 @@ through `:gen-class`), carries the model catalogs, the version baked into
 `kmet/version.txt`, and the bundled extensions staged under the same
 `extensions/<name>/src` resource keys `bb dist` and `jolt dist` embed — the
 set is identical across hosts. Extensions run on SCI there: babashka and the
-JVM are the SCI-only hosts (`modules/loader/src/kmet/loader/loader.md`). Every
+JVM are the SCI-only hosts
+(`https://github.com/kmetia/loader/blob/master/src/kmet/loader/loader.md`). Every
 build ends with a smoke test (`java -jar … --version`), the check a jar that
 assembles but cannot start fails. A source checkout needs no build at all:
 `bb start-jvm` runs `clojure -M:jvm:clj-pin -m kmet.app.core`; `bb nrepl-jvm

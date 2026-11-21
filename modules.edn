@@ -10,14 +10,15 @@
 ;; coordinates (the host's own artifacts excepted).
 ;; Extension projects are not workspace modules: each is an independently
 ;; loadable extension with its own bb.edn test entry (and, when it needs
-;; library deps, a deps.edn).
+;; library deps, a deps.edn). The loader is the one other external edge: it is
+;; the pinned kmet/loader dependency in deps.edn, with the sibling ../loader
+;; checkout used as the local root in bb.edn and the :dev alias.
 {:modules
  [{:name "reakt" :src "modules/reakt/src" :test "modules/reakt/test" :rank 0}
   {:name "hikap" :src "modules/hikap/src" :test "modules/hikap/test" :rank 1}
   {:name "libs" :src "modules/libs/src" :test "modules/libs/test" :rank 0}
   {:name "tui" :src "modules/tui/src" :test "modules/tui/test" :rank 2}
   {:name "ai" :src "modules/ai/src" :test "modules/ai/test" :rank 1}
-  {:name "loader" :src "modules/loader/src" :test "modules/loader/test" :rank 0}
   {:name "srce" :src "modules/srce/src" :test "modules/srce/test" :rank 1}
   ;; The composition layer above the kernel: rows, bundles, profiles, patches,
   ;; cards and mounts. It owns the language; the app supplies the table, the
