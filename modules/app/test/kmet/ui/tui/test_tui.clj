@@ -9,9 +9,11 @@
    `scripts/capture/pty_capture.py` drives."
   (:require [clojure.test :refer [deftest is]]
             [kmet.app.core :as core]
+            [kmet.app.packages :as packages]
             [kmet.app.runtime :as runtime]
             [kmet.app.ui :as ui]
             [kmet.srce.core :as srce]
+            [kmet.tui.theme :as theme]
             [kmet.ui.tui :as tui]
             [kmet.ui.tui.interactive :as interactive]))
 
@@ -119,3 +121,23 @@
     (is (= {:mode :interactive :session "1a001ea0a00" :continue true}
            (run-opts {:session "1a001ea0a00" :continue true}))
         "an invocation that asked for both is the mode's to resolve")))
+
+(deftest the-tui-row-loads-the-configured-themes
+  ;; Themes are the TUI's: the world load leaves the store alone, and this row
+  ;; loads the configured paths before the run reads the active theme.
+  (let [calls (atom [])]
+    (with-redefs [packages/resolve-theme-paths (constantly ["/themes"])
+                  theme/load-theme-paths! (fn [paths] (swap! calls conj paths))]
+      (tui/load-themes!)
+      (is (= [["/themes"]] @calls)
+          "the TUI row loads the configured theme paths"))))
+
+(deftest the-tui-run-loads-themes-before-the-run
+  ;; The load is part of the run, not a side effect of the world: the mode
+  ;; must fill the store before `interactive/run` reads the active theme.
+  (let [calls (atom [])]
+    (with-redefs [tui/load-themes! (fn [] (swap! calls conj :themes))
+                  interactive/run (fn [_ _ _] (swap! calls conj :run))]
+      (#'tui/run-tui! nil {:config {}} (constantly nil))
+      (is (= [:themes :run] @calls)
+          "themes load before the interactive run"))))

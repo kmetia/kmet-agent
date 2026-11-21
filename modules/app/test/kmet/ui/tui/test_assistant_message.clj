@@ -3,7 +3,7 @@
             [kmet.test-utils :as tu]
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.tui.core :as core]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.protocols :as protocols]
             [kmet.hikap.component :as component]
             [kmet.tui.components.markdown :as md]

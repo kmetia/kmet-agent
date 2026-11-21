@@ -7,12 +7,12 @@
             [kmet.libs.json :as json]
             [kmet.libs.path :as path]
             [kmet.libs.text :as text]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.utils :as utils]
-            [kmet.libs.terminal-image :as timg]
+            [kmet.tui.terminal-image :as timg]
             [kmet.libs.edit-diff :as edit-diff]
-            [kmet.libs.highlight :as hl]
-            [kmet.app.keybindings :as app-kb]
+            [kmet.tui.highlight :as hl]
+            [kmet.ui.tui.key-hint :as key-hint]
             [kmet.ui.tui.skill-message :as skill-message]
             [kmet.tui.hikap :as h]
             [kmet.app.tools.bash-output :as bash-out]))
@@ -205,7 +205,7 @@
    not shown in full (pi: bash-execution's hiddenLineCount)."
   [theme hidden-lines]
   (str (theme/fg theme :muted (str "... (+" hidden-lines " lines, "))
-       (app-kb/key-hint "app.tools.expand" "toggle")
+       (key-hint/key-hint "app.tools.expand" "toggle")
        (theme/fg theme :muted ")")))
 
 ;; ─── Compact read classification (pi: read.ts getCompactReadClassification) ─

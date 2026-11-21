@@ -39,7 +39,7 @@
             [kmet.hikap.component :refer [track!]]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.ui.tui.messagebox :as messagebox]))
 
 ;; ─── Shared styling (also used by the compact read call) ───────────────────

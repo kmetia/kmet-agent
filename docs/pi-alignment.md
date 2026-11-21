@@ -174,7 +174,8 @@ follow pi, all into pi's insertion order
 `toResolvedPaths` finalization — a stable sort by `resourcePrecedenceRank`
 (project-local 0, project-auto 1, user-local 2, user-auto 3, package 4) then
 dedupe by canonical path, first wins. Loading is one unified enabled-path
-pass per type (`load-skills!` / `load-prompts!` / `load-themes!`). Extensions
+pass per type (`load-skills!` / `load-prompts!`; themes resolve through the
+same pass and the TUI row loads them). Extensions
 diverge: they are composition rows, so only an `:ext/<id>` row loads one
 (`kmet.app.extensions.rows`); the resolution above is discovery.
 Sources are local **files** (load as one extension) or **directories**
@@ -296,7 +297,7 @@ Missing, by pi's cli.md groups:
 | **LaTeX rendering** (`$…$`, `$$…$$`) | `packages/tui/src/latex.ts`, wired in `tui/src/components/markdown.ts` | **Postponed indefinitely** (same) |
 | **Alt-screen search** (search overlay over the transcript) | `packages/tui/src/alt-screen-search.ts`, `tui-alt-screen.ts` | **Postponed indefinitely** (same — needs an alt-screen mode) |
 | **Images in chat** | `terminal.showImages`, `terminal.imageWidthCells`, `images.autoResize`, `images.blockImages` settings; `show-images-selector.ts` | **Partial** — the TUI half done (`tui.md` §10): `:terminal {:show-images :image-width-cells}` settings, terminal-support-gated `/settings` rows, and inline images (or the `imageFallback` text indicator when off/unsupported) in tool results and user/custom messages. `images.blockImages` done: `:images {:block-images}` setting + ungated `/settings` row, stripped per request in `kmet.app.loop.completion/call-llm` (pi: convertToLlmWithBlockImages — placeholder text, consecutive dedupe, stored context untouched). **Missing**: `images.autoResize` and the per-model `inputLimits.images.resize` catalog metadata (pi #9631: resize profiles in `models.json`, applied to attachments, `read`, and tool-result images). Both need a resizer backend decision — pi runs a Photon WASM resize pipeline and babashka has no ImageIO/AWT (see `kmet.app.tools.read`); the generated catalogs carry no `:input-limits` keys yet
-| **Terminal protocol overrides** | `terminal.hyperlinks`, `terminal.images`, `terminal.trueColor` settings | Missing — kmet's `kmet.libs.terminal-image` auto-detects hyperlinks, inline-image protocol, and true color; no per-setting override |
+| **Terminal protocol overrides** | `terminal.hyperlinks`, `terminal.images`, `terminal.trueColor` settings | Missing — kmet's `kmet.tui.terminal-image` auto-detects hyperlinks, inline-image protocol, and true color; no per-setting override |
 | **Cache-miss notices** | `showCacheMissNotices` setting | Done — `:show-cache-miss-notices` setting, `session/detect-cache-miss` (pi detectMiss), notice at agent-end (≥ 20k tokens) |
 | **Skill invocation presentation** | `components/skill-invocation-message.ts` | **Done** — `kmet.app.skill-block/parse` + `kmet.ui.tui.skill-message`: a `/skill:name` block renders as `[skill] name (ctrl+o to expand)` (collapsed) or the name + body as Markdown (expanded), with the trailing args as a normal user message below. Live and replay share the parse; the session still stores the expanded text |
 | **Custom entry rendering** | `registerEntryRenderer` + `components/custom-entry.ts` | Done — `extensions/register-entry-renderer!` + live entry sink; rendered at replay and on append, and a live append is spliced before the streaming component (pi `addCustomEntryToChat`), so a posted entry never lands below the in-flight response |

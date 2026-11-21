@@ -15,12 +15,12 @@
             [kmet.hikap.component :as component]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.timers :as timers]
             [kmet.tui.utils :as u]
             [kmet.tui.components.spinner :as spinner]
             [kmet.app.tools.bash-output :as bash-out]
-            [kmet.app.keybindings :as app-kb]
+            [kmet.ui.tui.key-hint :as key-hint]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.ui.tui.subs :as s]
             [clojure.string :as str]))
@@ -69,11 +69,11 @@
     (let [hint (when (pos? hidden-line-count)
                  (if expanded?
                    (str (theme/fg t :muted "(")
-                        (app-kb/key-hint "app.tools.expand" "toggle")
+                        (key-hint/key-hint "app.tools.expand" "toggle")
                         (theme/fg t :muted ")"))
                    (str (theme/fg t :muted
                                   (str "... (+" hidden-line-count " lines, "))
-                        (app-kb/key-hint "app.tools.expand" "toggle")
+                        (key-hint/key-hint "app.tools.expand" "toggle")
                         (theme/fg t :muted ")"))))
           exit-part (case status
                       :cancelled (theme/fg t :warning "(cancelled)")

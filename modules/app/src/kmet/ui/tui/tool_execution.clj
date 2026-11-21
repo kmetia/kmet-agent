@@ -15,7 +15,7 @@
   (:require [kmet.ui.tui.subs :as s]
             [kmet.reakt.core :as reakt]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.timers :as timers]
             [kmet.tui.components.box :as box]
             [kmet.tui.components.container :as container]

@@ -32,7 +32,7 @@
             [kmet.app.packages :as pkgs]
             [kmet.app.tools.registry :as tool-registry]
             [kmet.libs.path :as path]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.utils :as u]
             [kmet.ui.tui.grouped-selector :as grouped]))
 

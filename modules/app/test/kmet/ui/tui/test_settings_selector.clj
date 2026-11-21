@@ -7,11 +7,11 @@
             [kmet.ui.tui.settings-selector :as ss]
             [kmet.ui.tui.subs :as subs]
             [kmet.app.config :as cfg]
-            [kmet.libs.terminal-image :as timg]
+            [kmet.tui.terminal-image :as timg]
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.settings-list :as settings-list]
             [kmet.tui.core :as core]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.app.session.runtime :as runtime]
             [kmet.ui.tui.interactive.test-handle-support :as hs]))
 

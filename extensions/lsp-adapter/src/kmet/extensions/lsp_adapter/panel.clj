@@ -10,7 +10,7 @@
                         [kmet.tui.keys :as keys]
                         [kmet.tui.keybindings :as kb]
                         [kmet.tui.macros :refer [defcomponent]]
-                        [kmet.libs.theme :as theme]
+                        [kmet.tui.theme :as theme]
                         [kmet.tui.utils :as u]
                         [kmet.libs.path :as path]
                         [kmet.extensions.lsp-adapter.detect :as detect]

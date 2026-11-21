@@ -7,7 +7,7 @@
   (:require [babashka.fs :as fs]
             [kmet.app.config :as cfg]
             [kmet.app.packages :as pkgs]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.core :as tui]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.terminal :as term]

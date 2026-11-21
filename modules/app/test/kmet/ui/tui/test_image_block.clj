@@ -3,7 +3,7 @@
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.ui.tui.image-block :as ib]
             [kmet.ui.tui.subs :as subs]
-            [kmet.libs.terminal-image :as timg]
+            [kmet.tui.terminal-image :as timg]
             [kmet.tui.core :as core]
             [kmet.tui.protocols :as protocols]
             [kmet.hikap.component :as component]

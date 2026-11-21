@@ -4,13 +4,11 @@
   (:require [clojure.test :as t]
             [kmet.app.config :as cfg]
             [kmet.app.extensions.core :as extensions]
-            [kmet.app.packages :as packages]
             [kmet.ai.image-models :as image-models]
             [kmet.ai.models :as models]
             [kmet.app.root :as root]
             [kmet.app.world :as world]
-            [kmet.srce.core :as srce]
-            [kmet.libs.theme :as theme]))
+            [kmet.srce.core :as srce]))
 
 (t/deftest the-world-loads-in-order-and-publishes-its-root
   (let [calls (atom [])
@@ -24,19 +22,15 @@
                     models/load-models-config! (fn [_] (swap! calls conj :models-config))
                     models/get-model-config-error (constantly nil)
                     cfg/init! (fn [] (swap! calls conj :config) {:model "x"})
-                    packages/resolve-theme-paths (constantly ["/t.edn"])
-                    theme/load-theme-paths! (fn [paths] (swap! calls conj [:themes paths]))
                     extensions/set-cli-flags!
                     (fn [flags] (swap! calls conj [:flags flags]))]
         (t/is (= {:model "x"} (world/load! {:ext-flags {"probe" "1"}} ctx))
               "the loaded config is the world load's answer"))
       (t/is (= [:catalogs :image-catalogs :models-config :config
-                [:themes ["/t.edn"]]
                 [:flags {"probe" "1"}]]
                @calls)
-            "catalogs first, then config (which publishes the root), then
-             themes, then the flags; extensions are composition rows, not a
-             world load")
+            "catalogs first, then config (which publishes the root), then the
+             flags; extensions are composition rows, not a world load")
       (t/is (identical? ctx (root/ctx)) "the entry's composition is the process root")
       (finally
         (srce/dispose-subtree! ctx)
@@ -50,8 +44,6 @@
                     models/load-models-config! (constantly nil)
                     models/get-model-config-error (constantly nil)
                     cfg/init! (constantly {})
-                    packages/resolve-theme-paths (constantly [])
-                    theme/load-theme-paths! (constantly nil)
                     extensions/set-cli-flags! (constantly nil)]
         (world/load! {}))
       (t/is (nil? (root/ctx))
@@ -71,8 +63,6 @@
                     models/load-models-config! (constantly nil)
                     models/get-model-config-error (constantly nil)
                     cfg/init! (fn [] (swap! calls conj :config) {:model "x"})
-                    packages/resolve-theme-paths (constantly [])
-                    theme/load-theme-paths! (constantly nil)
                     extensions/get-flag (constantly nil)
                     extensions/set-cli-flags! #(swap! calls conj [:flags %])]
         (let [ctx (srce/root {:name :app})]

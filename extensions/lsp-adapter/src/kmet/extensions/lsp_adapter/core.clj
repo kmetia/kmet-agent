@@ -17,7 +17,7 @@
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.path :as path]
             [kmet.libs.edn-store :as edn-store]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 (def ^:private state-atom (atom nil))
 

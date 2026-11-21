@@ -199,6 +199,7 @@
     kmet.tui.border
     kmet.tui.clipboard
     kmet.tui.core
+    kmet.tui.highlight
     kmet.tui.hikap
     kmet.tui.keybindings
     kmet.tui.keys
@@ -207,6 +208,8 @@
     kmet.tui.protocols
     kmet.tui.terminal
     kmet.tui.terminal-escape
+    kmet.tui.terminal-image
+    kmet.tui.theme
     kmet.tui.timers
     kmet.tui.utils
     kmet.tui.wake
@@ -233,6 +236,7 @@
     kmet.tui.components.text
     kmet.tui.components.v-stack
     kmet.tui.components.truncated-text
+    kmet.ui.tui.key-hint
     kmet.ui.tui.tool-renderers
     kmet.app.keybindings])
 
@@ -257,7 +261,6 @@
     kmet.libs.edn-store
     kmet.libs.fs
     kmet.libs.fuzzy
-    kmet.libs.highlight
     kmet.libs.host
     kmet.libs.http
     kmet.libs.json
@@ -274,9 +277,7 @@
     kmet.libs.process
     kmet.libs.ranking
     kmet.libs.sse
-    kmet.libs.terminal-image
     kmet.libs.text
-    kmet.libs.theme
     ;; the framework modules the libs compose
     kmet.reakt.core
     kmet.reakt.weak
@@ -509,6 +510,7 @@
   [n]
   (or (str/starts-with? n "kmet.tui.")
       (= n "kmet.ui.tui.tool-renderers")
+      (= n "kmet.ui.tui.key-hint")
       (= n "kmet.app.keybindings")))
 
 (def ^:private library-layer-roots
@@ -919,7 +921,8 @@
         ;; (e.g. review/dialogs requiring kmet.tui.macros on second load)
         ;; must validate against what CAN be shared, not what happens to
         ;; be loaded. The load-fn serves kmet.tui.* from the host anyway.
-        (#{"kmet.ui.tui.tool-renderers" "kmet.app.keybindings"} s)
+        (#{"kmet.ui.tui.tool-renderers" "kmet.ui.tui.key-hint"
+           "kmet.app.keybindings"} s)
         (when-not (or (contains? tui-namespaces lib)
                       (contains? (set tui-library-namespaces) lib))
           (throw (ex-info
@@ -1186,6 +1189,7 @@
 
                   (or (str/starts-with? (str ns-sym) "kmet.tui.")
                       (= (str ns-sym) "kmet.ui.tui.tool-renderers")
+                      (= (str ns-sym) "kmet.ui.tui.key-hint")
                       (= (str ns-sym) "kmet.app.keybindings"))
                   (str "Extension " ext-name " requires " ns-sym
                        " — the shared TUI/renderer library is shared by reference and was"
@@ -1266,14 +1270,14 @@
   nil)
 
 (defn load-themes-from-dir!
-  "Apply THEME-DIR's theme files through the shared kmet.libs.theme library and
+  "Apply THEME-DIR's theme files through the shared kmet.tui.theme library and
    return the themes that loaded. The theme store is an extension-ABI shared
    library — host-requires! loads it with the rest of the TUI layer on the
    first extension load — and this namespace owns that call-time door, so
    plain app code (resource discovery in kmet.app.extensions.core) never
    requires kmet.tui.* at the ns level."
   [dir]
-  ((requiring-resolve 'kmet.libs.theme/load-themes-from-dir) dir))
+  ((requiring-resolve 'kmet.tui.theme/load-themes-from-dir) dir))
 
 (defn unregister-theme!
   "Remove THEME from the shared theme store while NAME still holds it — the
@@ -1281,7 +1285,7 @@
    teardown cannot drop a later contributor's registration.
    Returns nil."
   [name theme]
-  ((requiring-resolve 'kmet.libs.theme/unregister-theme!) name theme)
+  ((requiring-resolve 'kmet.tui.theme/unregister-theme!) name theme)
   nil)
 
 ;; ─── The shared base context (per-extension forks) ───────────────────────

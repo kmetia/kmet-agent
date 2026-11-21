@@ -11,7 +11,7 @@
    StatusIndicator in a dedicated layout layer between chat and editor (Pi-style)."
   (:require [clojure.string :as str]
             [kmet.ui.tui.subs :as s]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.components.markdown :as md]
             [kmet.hikap.component :refer [track!]]
             [kmet.tui.macros :refer [defcomponent]]

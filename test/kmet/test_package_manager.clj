@@ -15,7 +15,7 @@
             [kmet.tui.core :as tui]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.terminal :as term]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.test-utils :refer [slash]]
             [kmet.test-tmp :as test-tmp]))
 

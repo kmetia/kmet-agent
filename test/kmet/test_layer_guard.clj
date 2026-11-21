@@ -148,10 +148,14 @@
           (str ns-name " requires forbidden namespaces: " (vec (sort forbidden)))))))
 
 (def ^:private dynamic-front-end-edges
-  "The one business file allowed to resolve a front end lazily, and the exact
-   symbols: the entry injects the plugins screen into the headless package CLI."
+  "The business files allowed to resolve a front end lazily, and the exact
+   symbols: the entry injects the plugins screen into the headless package CLI,
+   and the extension host's theme contribution door reaches the TUI-owned theme
+   store at call time (the theme store is not app state)."
   {"modules/app/src/kmet/app/core.clj"
-   #{"kmet.ui.tui.plugins-command/run-plugins!"}})
+   #{"kmet.ui.tui.plugins-command/run-plugins!"}
+   "modules/app/src/kmet/app/extensions/context.cljc"
+   #{"kmet.tui.theme/load-themes-from-dir" "kmet.tui.theme/unregister-theme!"}})
 
 (deftest app-business-does-not-dynamically-reach-front-ends
   (testing "a lazy require is the same layer edge as a require"

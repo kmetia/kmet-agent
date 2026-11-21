@@ -8,7 +8,7 @@
   (:require
    [kmet.tui.border :as border]
    [kmet.tui.macros :refer [defcomponent]]
-   [kmet.libs.theme :as theme]))
+   [kmet.tui.theme :as theme]))
 
 (defcomponent DynamicBorder nil [color-fn border]
   (render [_this width]

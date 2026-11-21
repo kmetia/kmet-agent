@@ -15,7 +15,7 @@
             [kmet.tui.keybindings :as kb]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 (def ^:private max-visible 8)
 

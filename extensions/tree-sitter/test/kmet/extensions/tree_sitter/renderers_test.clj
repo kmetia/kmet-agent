@@ -6,7 +6,7 @@
             [clojure.test :refer [deftest is testing]]
             [kmet.tui.core :as core]
             [kmet.extensions.tree-sitter.render :as render]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 (def ^:private th theme/dark-theme)
 

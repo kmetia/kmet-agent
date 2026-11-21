@@ -9,8 +9,9 @@
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]
             [kmet.app.keybindings :as app-kb]
+            [kmet.ui.tui.key-hint :as key-hint]
             [kmet.ui.tui.footer-data-provider :as fdp]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.terminal :as term]
             [kmet.libs.host :as host]))
 
@@ -162,7 +163,7 @@
 (defn- fmt-key-hint
   "Pi: keyHint — dim key + muted description, from the live keybindings."
   [id desc]
-  (app-kb/key-hint id desc))
+  (key-hint/key-hint id desc))
 
 (defn- fmt-raw-hint
   "Pi: rawKeyHint — dim literal key text + muted description."

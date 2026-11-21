@@ -18,7 +18,7 @@
             [kmet.tui.core :as tui]
             [kmet.libs.fuzzy :as fuzzy]
             [kmet.tui.keybindings :as kb]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 (defn- full-id [m]
   (model-catalog/model-full-id m))

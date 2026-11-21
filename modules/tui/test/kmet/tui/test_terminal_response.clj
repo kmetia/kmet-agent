@@ -7,7 +7,7 @@
             [kmet.tui.core :as core]
             [kmet.tui.terminal :as term]
             [kmet.tui.terminal-escape :as lib]
-            [kmet.libs.terminal-image :as img]))
+            [kmet.tui.terminal-image :as img]))
 
 (defn- recording-terminal
   "ITerminal stub recording written output."

@@ -31,10 +31,11 @@
 
 (def ^:private app-shared-namespaces
   "Shared-layer namespaces an extension may require that are not the framework's
-   own, both in this module's tree: `kmet.app.keybindings` (the key-hint table)
-   and `kmet.ui.tui.tool-renderers` (the built-in tool renderers an extension's
+   own, all in this module's tree: `kmet.app.keybindings` (the definitions and
+   manager), `kmet.ui.tui.key-hint` (the styled hint renderer) and
+   `kmet.ui.tui.tool-renderers` (the built-in tool renderers an extension's
    tools render through)."
-  '#{kmet.app.keybindings kmet.ui.tui.tool-renderers})
+  '#{kmet.app.keybindings kmet.ui.tui.key-hint kmet.ui.tui.tool-renderers})
 
 (def ^:private internal-namespaces
   "Shared-layer namespaces deliberately outside the extension lists because
@@ -91,6 +92,7 @@
       (t/is (empty? (filter entries host-backend-namespaces))
             "host backends stay out of the eagerly-required lists")
       (t/is (every? fs/exists? ["modules/app/src/kmet/app/keybindings.clj"
+                                "modules/app/src/kmet/ui/tui/key_hint.clj"
                                 "modules/app/src/kmet/ui/tui/tool_renderers.clj"])
             "the shared-layer list entries have source files"))))
 

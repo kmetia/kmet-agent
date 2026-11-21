@@ -46,8 +46,9 @@ only a file in a strictly lower-ranked module — `libs` 0, `ai` 1,
 `kmet.hikap.*`, `kmet.srce.*` and `kmet.tk.*` libraries are pinned below all of
 them. A leaf that both the app
 and the components read therefore lives in `libs`, never in either of them:
-`kmet.libs.theme` (the world load reads it, the widgets style from it) and
-`kmet.libs.fuzzy` (the selectors and the `--list-models` filter) are the two.
+`kmet.libs.fuzzy` (the selectors and the `--list-models` filter) is the one.
+Themes are the TUI's now: `kmet.tui.theme` is loaded by the TUI row and read by
+the widgets and extensions, while app business code no longer reaches it.
 
 The guard holds the declaration in both directions: every module its `src`
 requires must be in the module's `deps.edn`, and nothing may be there that
@@ -126,14 +127,14 @@ kmet/app/
 ├── llm.clj, ui.clj     — the `:llm` and `:ui` contracts
 ├── config.clj, config_schema.clj, project_context.clj — settings, their
 │                         schema, and the project context
-├── world.clj           — the process world: `load!` (catalogs, config, themes,
+├── world.clj           — the process world: `load!` (catalogs, config,
 │                         CLI flags) and the deferred `:world` row that mounts it
 ├── root.clj            — the one process-root atom and the publish rule
 ├── front_end.clj       — the front end's published surface
 ├── inspect.clj         — `/units` and the ctx-tree dump
 ├── model_resolver.clj  — model patterns → catalog ids
-├── keybindings.clj, retry.clj, loop_guard.clj — the key-hint table and the
-│                         loop's two stage leaves
+├── keybindings.clj, retry.clj, loop_guard.clj — the keybinding definitions
+│                         and manager, and the loop's two stage leaves
 └── version.clj         — the version string and the source-run marker
 ```
 
@@ -254,7 +255,7 @@ schema-validated at load).
 
 | Service | Value | Provider |
 |---|---|---|
-| `:world` | `{:config …}` — catalogs, models layer, settings, themes and extension flags as loaded | `kmet.app.world/plugin` (`:defer`, root only) |
+| `:world` | `{:config …}` — catalogs, models layer, settings and extension flags as loaded | `kmet.app.world/plugin` (`:defer`, root only) |
 | `:llm` | `{:send-message (fn [opts])}` | `kmet.app.llm/plugin`; builtin `kmet.ai.llm/send-message` |
 | `:tools` | a `Registry` handle (tag + name) | `kmet.app.registries/tools`; each tool row registers through it |
 | `:commands` `:prompts` `:skills` | a `Registry` handle each | `kmet.app.registries/{commands,prompts,skills}` |

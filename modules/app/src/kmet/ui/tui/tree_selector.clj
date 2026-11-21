@@ -33,7 +33,7 @@
             [kmet.tui.components.filter-panel :as fp]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.terminal :as terminal]
             [kmet.tui.utils :as u]
             [kmet.ui.tui.list-screen :as ls]))

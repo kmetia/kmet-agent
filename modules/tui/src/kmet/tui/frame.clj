@@ -7,7 +7,7 @@
    terminal."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [kmet.libs.terminal-image :as img]
+            [kmet.tui.terminal-image :as img]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.terminal :as terminal]
             [kmet.tui.utils :as utils]))

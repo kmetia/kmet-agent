@@ -15,7 +15,7 @@
    through its ref."
   (:require [babashka.process :as p]
             [clojure.string :as str]
-            [kmet.app.keybindings :as app-kb]
+            [kmet.ui.tui.key-hint :as key-hint]
             [kmet.tui.components.input :as input]
             [kmet.tui.keybindings :as kb]
             [kmet.tui.core :as tui]
@@ -24,7 +24,7 @@
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
             [kmet.reakt.core :as r]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.utils :as u]))
 
 ;; ─── Browser (pi utils/open-browser.ts) ────────────────────────────────────
@@ -76,13 +76,13 @@
 (defn- cancel-hint-line
   "(escape to cancel) hint line, pi keyHint styling."
   []
-  (str "(" (app-kb/key-hint "tui.select.cancel" "to cancel") ")"))
+  (str "(" (key-hint/key-hint "tui.select.cancel" "to cancel") ")"))
 
 (defn- submit-hint-line
   "(escape to cancel, enter to submit) hint line."
   []
-  (str "(" (app-kb/key-hint "tui.select.cancel" "to cancel,") " "
-       (app-kb/key-hint "tui.select.confirm" "to submit") ")"))
+  (str "(" (key-hint/key-hint "tui.select.cancel" "to cancel,") " "
+       (key-hint/key-hint "tui.select.confirm" "to submit") ")"))
 
 ;; ─── Flow states (pi showAuth / showDeviceCode / showPrompt / ...) ─────────
 

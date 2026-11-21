@@ -24,7 +24,7 @@
             [kmet.ai.auth :as auth]
             [kmet.app.loop.state :as loop-state]
             [kmet.libs.http :as http]
-            [kmet.libs.terminal-image :as timg]
+            [kmet.tui.terminal-image :as timg]
             [kmet.app.session.core :as session]
             [kmet.app.session.export :as session-export]
             [kmet.app.session.lifecycle :as lifecycle]

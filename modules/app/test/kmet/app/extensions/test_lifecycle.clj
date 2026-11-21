@@ -16,7 +16,7 @@
             [kmet.app.prompts :as prompts]
             [kmet.app.skills :as skills]
             [kmet.hikap.alias :as alias]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.app.test-support :as support]
             [kmet.test-utils :refer [spit-plugin]]
             [kmet.app.tools.registry :as tools-registry]

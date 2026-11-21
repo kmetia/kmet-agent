@@ -17,7 +17,7 @@
             [babashka.fs :as fs]
             [kmet.libs.host :as host]
             [kmet.tui.utils :as u]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.ui.tui.footer-data-provider :as fdp]
             [kmet.hikap.component :refer [track! track-deps]]
             [kmet.tui.macros :refer [defcomponent]]))

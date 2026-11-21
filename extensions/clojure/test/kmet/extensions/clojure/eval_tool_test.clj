@@ -6,7 +6,7 @@
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.extensions.clojure.eval-tool :as eval-tool]
             [kmet.libs.nrepl :as nrepl]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.core :as core]
             [kmet.tui.utils :as utils]))
 

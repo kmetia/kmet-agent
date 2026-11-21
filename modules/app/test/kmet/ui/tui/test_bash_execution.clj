@@ -8,7 +8,7 @@
             [kmet.hikap.component :as component]
             [kmet.tui.timers :as timers]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.utils :as u]))
 
 (t/deftest test-bash-execution-render-no-output

@@ -1,7 +1,7 @@
-(ns kmet.libs.terminal-image
+(ns kmet.tui.terminal-image
   "Kitty terminal image protocol implementation.
    Port of @earendil-works/pi-tui terminal-image.ts. Generic protocol code —
-   no app/TUI dependencies."
+   no app dependencies."
   (:require [clojure.string :as str])
   (:import [java.util Base64]))
 

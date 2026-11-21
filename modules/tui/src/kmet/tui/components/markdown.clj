@@ -5,13 +5,13 @@
    component walks the token AST and applies theme, padding, and word-wrap.
    Table borders come from a kmet.tui.border set (tui.md §2.8)."
   (:require [clojure.string :as str]
-            [kmet.libs.terminal-image :as timg]
+            [kmet.tui.terminal-image :as timg]
             [kmet.tui.border :as border]
             [kmet.tui.utils :as u]
             [kmet.hikap.component :refer [track!]]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.markdown :as md]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 ;; ─── Theme ──────────────────────────────────────────────────────────────────
 ;; Matches pi's MarkdownTheme interface.

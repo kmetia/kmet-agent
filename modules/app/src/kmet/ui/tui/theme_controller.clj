@@ -7,7 +7,7 @@
             [clojure.string :as str]
             [kmet.app.config :as cfg]
             [kmet.tui.core :as tui]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 (defrecord ThemeController [ui config-atom show-error on-changed
                             terminal-theme-atom active-theme-name-atom

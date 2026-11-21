@@ -11,7 +11,7 @@
             [kmet.app.prompts :as prompts]
             [kmet.app.skills :as skills]
             [kmet.app.config :as cfg]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.test-utils :as tu :refer [slash spit-plugin]]
             [kmet.test-tmp :as test-tmp]))
 

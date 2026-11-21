@@ -10,7 +10,7 @@
             [kmet.tui.core :as core]
             [kmet.tui.hikap :as hiccup]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.utils :as u]
             [kmet.ui.tui.status-indicator :as si]))
 

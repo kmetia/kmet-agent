@@ -26,7 +26,8 @@
    reports its exit, and the world it loaded). The mode owns its output and runs
    on its own thread; `main` waits for the exit and disposes the composition it
    booted. A mode mounts last because its `serve` starts the run, and the run
-   must see the extensions and themes the world load installs. Print mode is the
+   must see the extensions the composition mounted and the settings the world
+   load installs. Print mode is the
    first (`kmet.app.modes.print`); a profile without a mode row still boots,
    reports what it mounted, and exits, which is what proves the rest of the rows
    mount — and loads no world, because a boot with nothing to run has nothing to
@@ -651,14 +652,14 @@
 
 (defn- world-config
   "The config the composition's `:world` row loaded, or a configuration error:
-   a run on a composition that patched the row out has no provider catalogs,
-   settings or themes to stand on, and starting it anyway would fail at the
-   first model request with nothing to say."
+   a run on a composition that patched the row out has no provider catalogs
+   or settings to stand on, and starting it anyway would fail at the first
+   model request with nothing to say."
   [ctx]
   (if-let [loaded (srce/get ctx :world)]
     (:config loaded)
     (throw (ex-info (str "the composition mounts no :world row — a run loads its"
-                         " provider catalogs, settings and themes through it"
+                         " provider catalogs and settings through it"
                          " ({:id :world :plugin kmet.app.world/plugin}), and a"
                          " patch removed this one")
                     {:type :kmet.app/no-world}))))
@@ -670,8 +671,8 @@
 
    Three mounts, in this order, and each step is a contract: the composition's
    rows (with the world and the mode held back), the world — `world/load!`
-   installs the provider catalogs, settings and themes a run stands on, and the
-   row provides what it loaded as `:world` — and then the mode, whose `serve`
+   installs the provider catalogs and settings a run stands on, and the row
+   provides what it loaded as `:world` — and then the mode, whose `serve`
    starts the run, so the run must see the world the load installed. The model
    patterns resolve after the load for the same reason: an extension provider
    is a catalog entry only then. `--list-models` returns after the load and

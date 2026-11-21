@@ -214,7 +214,7 @@
 
 (defn kitty-scan [file]
   (require 'kmet.app.session.core 'kmet.app.registry 'kmet.app.tools.registry 'kmet.ui.tui.chat-history 'kmet.ui.tui.interactive 'kmet.tui.core
-           'kmet.libs.terminal-image)
+           'kmet.tui.terminal-image)
   (tu/with-extension-host
     (fn []
       (let [session ((resolve 'kmet.app.session.core/load-session) file)
@@ -225,7 +225,7 @@
             _ (replay cs session)
             lines ((resolve 'kmet.tui.core/render) ch 100)
             avg (/ (double (reduce + 0 (map count lines))) (max 1 (count lines)))
-            ek (resolve 'kmet.libs.terminal-image/extract-kitty-image-ids)
+            ek (resolve 'kmet.tui.terminal-image/extract-kitty-image-ids)
             scan (fn [] (doseq [l lines] (ek l)))]
         (println (format "lines=%d avg-len=%.0f" (count lines) avg))
         (dotimes [_ 2] (scan))

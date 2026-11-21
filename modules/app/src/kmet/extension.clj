@@ -8,7 +8,7 @@
    reference, never re-evaluated. Everything else in kmet.* is off-limits.
 
    **Building UI**: extensions build their own components with kmet.tui.*
-   (Container/Text/SelectList/Input/... + kmet.libs.theme for styling) and
+   (Container/Text/SelectList/Input/... + kmet.tui.theme for styling) and
    mount them with `ui-custom` — the one host bridge, pi's ctx.ui.custom:
    the factory receives (tui theme keybindings close) and returns a
    component (a defcomponent, or a duck-typed map {:render :handle-input
@@ -19,7 +19,7 @@
    editor, status indicator, and theme controller. There are no host-built
    dialog capabilities — select/input/editor dialogs are kmet.tui
    components you compose yourself (pi parity: pi-mcp-adapter ships its
-   own panel). kmet.libs.theme exposes get-theme/get-all-themes/
+   own panel). kmet.tui.theme exposes get-theme/get-all-themes/
    get-theme-by-name/get-current-theme directly.
 
    An extension is a plugin: its namespace defines
@@ -97,7 +97,7 @@
 ;;              :notify (flash), and layout/editor/status/theme-controller
 ;;              integrations. Build components with kmet.tui.* and host
 ;;              them via ui-custom — the api carries no host-built dialogs
-;;              or theme lookups (kmet.libs.theme is shared) — inert before
+;;              or theme lookups (kmet.tui.theme is shared) — inert before
 ;;              the layout exists / in headless mode
 ;;   :models  — provider/model facades (get-all, find, auth status, …)
 ;;   :session — live session (append entry/message, labels, name)
@@ -325,7 +325,7 @@
 ;; extension-built components (pi: ctx.ui.custom), :notify flashes, and the
 ;; layout/editor/status/theme integrations touch host-owned state. Build
 ;; components with the shared kmet.tui.* layer instead — the api carries no
-;; host-built dialogs or theme lookups (kmet.libs.theme is shared).
+;; host-built dialogs or theme lookups (kmet.tui.theme is shared).
 
 (defn ui-notify
   "Flash MESSAGE. TYPE is :info | :warning | :error. OPTS may carry

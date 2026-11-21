@@ -6,7 +6,7 @@
             [kmet.hikap.component :as component]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.components.text :as text]
-            [kmet.libs.terminal-image :as timg]
+            [kmet.tui.terminal-image :as timg]
             [kmet.ui.tui.bash-execution :as be]
             [kmet.ui.tui.tool-execution :as te]
             [kmet.ui.tui.chat-history :as ch]

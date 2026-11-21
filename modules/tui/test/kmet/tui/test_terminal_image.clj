@@ -1,7 +1,7 @@
-(ns kmet.libs.test-terminal-image
+(ns kmet.tui.test-terminal-image
   (:require [clojure.test :as t :refer [deftest is testing]]
             [clojure.string :as str]
-            [kmet.libs.terminal-image :as img]))
+            [kmet.tui.terminal-image :as img]))
 
 ;; 1x1 red PNG as base64 (generated with Python zlib+struct)
 (def ^:const test-png

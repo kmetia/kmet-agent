@@ -3,16 +3,16 @@
    the registered tool). The result renderer consumes the structured
    :details sections emitted by kmet.extensions.lsp-adapter.tools/execute and
    falls back to a plain preview when they are absent (replayed sessions,
-   error results). All styling goes through kmet.libs.theme; paths are
+   error results). All styling goes through kmet.tui.theme; paths are
    shortened + hyperlinked via the shared host helpers in
    kmet.ui.tui.tool-renderers."
   (:require             [clojure.string :as str]
-                        [kmet.app.keybindings :as app-kb]
+                        [kmet.ui.tui.key-hint :as key-hint]
                         [kmet.ui.tui.tool-renderers :as shared]
                         [kmet.tui.components.container :as container]
                         [kmet.tui.components.spacer :as spacer]
                         [kmet.tui.components.text :as text]
-                        [kmet.libs.theme :as theme]
+                        [kmet.tui.theme :as theme]
                         [kmet.tui.utils :as utils]
                         [kmet.libs.path :as path]))
 
@@ -46,7 +46,7 @@
   [more theme width]
   (utils/truncate-to-width
    (str (theme/fg theme :muted (str "... (" more " more lines,"))
-        " " (app-kb/key-hint "app.tools.expand" "to toggle")
+        " " (key-hint/key-hint "app.tools.expand" "to toggle")
         (theme/fg theme :muted ")"))
    width "..."))
 

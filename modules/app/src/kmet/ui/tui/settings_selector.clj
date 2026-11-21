@@ -23,13 +23,13 @@
             [kmet.ui.tui.theme-submenu :as theme-submenu]
             [kmet.app.config :as cfg]
             [kmet.libs.http :as http]
-            [kmet.libs.terminal-image :as timg]
+            [kmet.tui.terminal-image :as timg]
             [kmet.tui.components.expandable-text :as expandable-text]
             [kmet.hikap.core :as engine]
             [kmet.tui.hikap :as h]
             [kmet.tui.core :as tui]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as th]))
+            [kmet.tui.theme :as th]))
 
 ;; pi: HTTP_IDLE_TIMEOUT_CHOICES (http-dispatcher.ts)
 (def ^:private http-idle-timeout-choices

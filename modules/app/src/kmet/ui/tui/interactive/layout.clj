@@ -7,7 +7,7 @@
             [kmet.app.config :as cfg]
             [kmet.tui.core :as tui]
             [kmet.tui.hikap :as hiccup]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.terminal :as term]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.autocomplete :as ac]

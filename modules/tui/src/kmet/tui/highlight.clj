@@ -1,4 +1,4 @@
-(ns kmet.libs.highlight
+(ns kmet.tui.highlight
   "Lexical syntax tokenizer for terminal code highlighting.
 
    Produces [scope text] token pairs (scope is a keyword or nil) from source

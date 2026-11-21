@@ -916,9 +916,9 @@
 (defn init!
   "Load config. Returns the loaded config map. Call once at startup.
    AGENT-DIR pins the scope dir (KMET_CODING_AGENT_DIR sandboxing); nil
-   resolves via get-agent-dir. Themes are NOT loaded here — the
-   unified resolution (packages/load-themes!) loads them with the other
-   resources, so settings toggles apply."
+   resolves via get-agent-dir. Themes are NOT loaded here — the TUI row
+   loads the resolved theme paths (`kmet.ui.tui/load-themes!`), so settings
+   toggles apply."
   ([] (init! nil))
   ([agent-dir]
    (let [agent-dir (or agent-dir (get-agent-dir))

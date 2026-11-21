@@ -1071,7 +1071,7 @@
    integrations with host layout/editor/status state. Extensions build
    their own components with the shared kmet.tui.* layer
    (pi: ctx.ui.custom hosting extension-built pi-tui components) — the api
-   carries no host-built dialogs or theme lookups (kmet.libs.theme is
+   carries no host-built dialogs or theme lookups (kmet.tui.theme is
    shared directly).
 
    TRACK records the deregister fns of the registrations the front end holds
@@ -1926,7 +1926,7 @@
 
 (defn- load-contributed-themes!
   "Load DIR's theme files and register them under OWNER. The theme store is
-   the TUI layer's own (`kmet.libs.theme`, shared by reference), so the
+   the TUI layer's own (`kmet.tui.theme`, shared by reference), so the
    registration is the host's record of the theme; the removal goes on the
    contributing extension's deregister list, which unload runs — a
    re-application's earlier removal (holding the replaced theme) and another

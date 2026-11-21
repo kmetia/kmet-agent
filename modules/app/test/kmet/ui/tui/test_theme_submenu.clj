@@ -3,7 +3,7 @@
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.ui.tui.theme-submenu :as theme-submenu]
             [kmet.tui.core :as core]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.test-utils :as tu]))
 
 (def ^:const K-DOWN "\u001b[B")

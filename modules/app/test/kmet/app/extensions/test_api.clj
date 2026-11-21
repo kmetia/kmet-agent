@@ -14,7 +14,7 @@
             [kmet.app.registries :as registries]
             [kmet.srce.core :as srce]
             [kmet.hikap.alias :as alias]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.test-tmp :as test-tmp]))
 
 (defn- bare-api
@@ -152,7 +152,7 @@
                     (:bash-tool-opts @state)))))))
 
 (t/deftest test-theme-lookup-shared-directly
-  (testing "theme lookups come from the shared kmet.libs.theme layer, not the
+  (testing "theme lookups come from the shared kmet.tui.theme layer, not the
             api — extensions use them directly"
     (t/is (= "dark" (:name (theme/get-theme "dark"))))
     (t/is (= "dark" (:name (theme/get-theme "does-not-exist")))

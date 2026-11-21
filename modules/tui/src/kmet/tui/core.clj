@@ -4,7 +4,7 @@
    accessors; components and helpers are required from their own namespaces."
   (:require [clojure.string :as str]
             [kmet.tui.border :as border]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.hikap.component :as component]
             [kmet.tui.protocols :as protocols]
             [kmet.reakt.core :as reakt]
@@ -16,7 +16,7 @@
             [kmet.tui.wake :as wake]
             [kmet.tui.keys :as keys]
             [kmet.tui.utils :as utils]
-            [kmet.libs.terminal-image :as img]
+            [kmet.tui.terminal-image :as img]
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.alt-screen-flash :as alt-screen-flash]
             [kmet.tui.components.filler :as filler]))

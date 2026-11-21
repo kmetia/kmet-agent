@@ -9,7 +9,7 @@
    belongs to `kmet.app.resources`."
   (:require [kmet.app.session.runtime :as runtime]
             [kmet.hikap.core :as engine]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.hikap :as h]
             [kmet.ui.tui.dock :as dock]))
 

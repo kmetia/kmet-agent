@@ -1,9 +1,9 @@
 (ns kmet.ui.tui.test-custom-message
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.core :as core]
-            [kmet.libs.terminal-image :as timg]
+            [kmet.tui.terminal-image :as timg]
             [kmet.ui.tui.subs :as subs]
             [kmet.ui.tui.custom-message :as cm]
             [kmet.hikap.component :as component]))

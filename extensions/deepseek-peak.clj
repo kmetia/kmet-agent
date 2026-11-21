@@ -39,7 +39,7 @@
             [clojure.string :as str]
             [kmet.extension :as ext]
             [kmet.srce.core :as srce]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 ;; ─── The schedule (api-docs.deepseek.com/quick_start/pricing) ──────────────
 

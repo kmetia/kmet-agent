@@ -3,7 +3,7 @@
             [clojure.test :as t :refer [testing]]
             [kmet.tui.core :as core]
             [kmet.tui.terminal :as term]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 (defn- leaf
   "A focusable leaf component with a focused?-atom (like the editor)."

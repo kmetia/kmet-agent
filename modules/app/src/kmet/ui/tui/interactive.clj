@@ -7,7 +7,7 @@
             [kmet.hikap.component :as component]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.terminal :as term]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.timers :as timers]
             [kmet.app.config :as cfg]
             [babashka.fs :as fs]

@@ -15,7 +15,7 @@
             [kmet.tui.components.filter-panel :as fp]
             [kmet.libs.fuzzy :as fuzzy]
             [kmet.tui.keybindings :as kb]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 ;; ─── Level metadata (pi THINKING_DESCRIPTIONS) ────────────────────────────
 

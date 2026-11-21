@@ -10,7 +10,7 @@
             [kmet.app.config :as cfg]
             [kmet.tui.core :as tui]
             [kmet.tui.keybindings :as tui-kb]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.terminal :as term]
             [kmet.tui.components.container :as container]
             [kmet.app.session.submission :as submission]

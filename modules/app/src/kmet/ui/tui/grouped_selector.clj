@@ -52,7 +52,7 @@
   (:require [clojure.string :as str]
             [kmet.app.keybindings :as app-kb]
             [kmet.hikap.core :as engine]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.reakt.core :as r]
             [kmet.tui.components.input :as input]
             [kmet.tui.hikap :as hikap]

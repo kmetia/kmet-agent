@@ -1,17 +1,14 @@
 (ns kmet.app.keybindings
   "App-level keybindings — extends TUI keybindings with agent-specific actions.
    Port of @earendil-works/pi-coding-agent KeybindingsManager.
-   Keybinding IDs like \"app.tools.expand\" are used by key-hint in tool renderers.
+   Keybinding IDs like \"app.tools.expand\" are used by the key-hint renderer
+   (`kmet.ui.tui.key-hint`) in tool renderers.
    User overrides persist in ~/.kmet/agent/keybindings.edn (pi:
    ~/.pi/agent/keybindings.json) and are loaded by create-agent-keybindings-manager."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [babashka.fs :as fs]
-            [kmet.app.config :as cfg]
-            ;; The hint's styling is the live theme's, read at render time: a
-            ;; theme change re-renders the hint, so there is nothing to install
-            ;; and no process cell two terminals could disagree about (9b).
-            [kmet.libs.theme :as theme]))
+            [kmet.app.config :as cfg]))
 
 ;; ─── App keybinding definitions ──────────────────────────────────────────
 ;; Extends the TUI definitions with agent-specific actions.
@@ -222,16 +219,6 @@
              (spit f (str (pr-str config) "\n"))))
          (catch Exception _ nil))))))
 
-;; ─── Convenience: key-hint with theme fns ───────────────────────────────
-
-(defn- hint-styling
-  "The key-hint styling: the active theme's dim and muted. Derived at call time
-   — a theme change re-renders the hint (the header's content fns run again),
-   so there is no installed pair to refresh and no cell to read."
-  []
-  {:dim theme/dim
-   :muted #(theme/fg (theme/get-current-theme) :muted %)})
-
 (defn key-text
   [id]
   (or ((tui-kb-var 'key-text) ((tui-kb-var 'get-global-keybindings)) id) ""))
@@ -246,19 +233,6 @@
   [id fallback]
   (let [label (key-label id)]
     (if (seq label) label fallback)))
-
-(defn key-hint
-  ([id desc]
-   (if-let [hint (tui-kb-var 'key-hint)]
-     (let [{:keys [dim muted]} (hint-styling)]
-       (hint ((tui-kb-var 'get-global-keybindings)) id desc dim muted))
-     ;; Fallback: plain text (a host that never loaded the TUI's keybindings)
-     (str (key-label id) " " desc)))
-  ([kmgr id desc]
-   (if-let [hint (tui-kb-var 'key-hint)]
-     (let [{:keys [dim muted]} (hint-styling)]
-       (hint kmgr id desc dim muted))
-     (str (or ((tui-kb-var 'key-label-text) kmgr id) "") " " desc))))
 
 ;; ─── Create/reload manager wrappers ───────────────────────────────────────
 

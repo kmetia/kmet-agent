@@ -13,7 +13,7 @@
             [kmet.tui.components.input :as input]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.utils :as u]))
 
 (defn- node

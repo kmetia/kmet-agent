@@ -1,20 +1,19 @@
-(ns kmet.libs.theme
+(ns kmet.tui.theme
   "Theme system — identical structure to pi's theme.ts.
    EDN-only loading with the same :vars/:colors schema and color values
    (hex, OKHSL, OKLCH, 256-color index, variable refs, terminal default)
    as pi's JSON.
 
-   A `kmet.libs.*` leaf read from both sides: the process world load
-   (`kmet.app.world`) reads `load-theme-paths!`, and the components that style
-   themselves read the rest, so it lives below both and may reach neither. It
-   was `kmet.tui.theme` while `app` and `tui` shared rank 2; the name followed
-   the module once that exception stopped being worth its keep."
+   The TUI layer's theme leaf: the TUI mode row loads the configured paths
+   (`load-theme-paths!`) and the components that style themselves read the
+   rest. It moved back here when theme loading left the process world; app
+   business code no longer reads the store."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [babashka.fs :as fs]
-            [kmet.libs.highlight :as hl]
-            [kmet.libs.terminal-image :as term-image]))
+            [kmet.tui.highlight :as hl]
+            [kmet.tui.terminal-image :as term-image]))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Color tokens — matching pi's ThemeColor / ThemeBg exactly
@@ -841,7 +840,7 @@
    everything else :256color — the safe default, since truecolor codes
    degrade to the default bg on unsupported terminals, which breaks light
    themes where dark text lands on a dark fallback. Capabilities come from
-   the shared kmet.libs.terminal-image detection (COLORTERM plus the known
+   the shared kmet.tui.terminal-image detection (COLORTERM plus the known
    terminal programs: kitty, wezterm, ghostty, iTerm, Warp, Windows
    Terminal, VS Code, alacritty), cached once per process."
   []

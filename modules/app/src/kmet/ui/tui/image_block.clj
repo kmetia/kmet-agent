@@ -8,7 +8,7 @@
    ui.subs/image-settings-sub, so a /settings change re-renders every
    mounted block — tool results and message images alike."
   (:require [kmet.ui.tui.subs :as s]
-            [kmet.libs.terminal-image :as timg]
+            [kmet.tui.terminal-image :as timg]
             [kmet.tui.components.image :as ic]
             [kmet.hikap.component :refer [track!]]
             [kmet.tui.macros :refer [defcomponent]]

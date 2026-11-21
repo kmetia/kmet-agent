@@ -3,7 +3,7 @@
    Wraps label and content Text children in a Box with custom-message-bg.
    Matching Pi architecture: Box handles padding/background/caching."
   (:require [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.ui.tui.subs :as s]
             [kmet.ui.tui.image-block :as image-block]
             [kmet.tui.components.box :as box]

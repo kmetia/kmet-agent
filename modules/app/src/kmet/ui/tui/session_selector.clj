@@ -23,6 +23,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.keybindings :as app-kb]
+            [kmet.ui.tui.key-hint :as key-hint]
             [kmet.app.session.core :as session]
             [kmet.ui.tui.dock :as dock]
             [kmet.ui.tui.footer-data-provider :as fdp]
@@ -39,7 +40,7 @@
             [kmet.tui.keybindings :as kb]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.timers :as timers]
             [kmet.tui.utils :as u]
             [kmet.ui.tui.list-screen :as ls]))
@@ -652,9 +653,9 @@
     (if (:confirming-delete st)
       [(theme/fg th :error
                  (truncate (str "Delete session? "
-                                (app-kb/key-hint "tui.select.confirm" "confirm")
+                                (key-hint/key-hint "tui.select.confirm" "confirm")
                                 " · "
-                                (app-kb/key-hint "tui.select.cancel" "cancel"))))
+                                (key-hint/key-hint "tui.select.cancel" "cancel"))))
        ""]
       (if-let [status (:status st)]
         [(let [color (if (= :error (:type status))
@@ -662,16 +663,16 @@
                        #(theme/fg th :accent %))]
            (color (truncate (:message status))))
          ""]
-        [(truncate (str (app-kb/key-hint "tui.input.tab" "scope") sep
+        [(truncate (str (key-hint/key-hint "tui.input.tab" "scope") sep
                         (muted "re:<pattern> regex · \"phrase\" exact")))
          (truncate (str/join sep
-                             [(app-kb/key-hint "app.session.toggleSort" "sort")
-                              (app-kb/key-hint "app.session.toggleNamedFilter" "named")
-                              (app-kb/key-hint "app.session.delete" "delete")
-                              (app-kb/key-hint "app.session.togglePath"
-                                               (str "path "
-                                                    (if (:show-path st) "(on)" "(off)")))
-                              (app-kb/key-hint "app.session.rename" "rename")]))]))))
+                             [(key-hint/key-hint "app.session.toggleSort" "sort")
+                              (key-hint/key-hint "app.session.toggleNamedFilter" "named")
+                              (key-hint/key-hint "app.session.delete" "delete")
+                              (key-hint/key-hint "app.session.togglePath"
+                                                 (str "path "
+                                                      (if (:show-path st) "(on)" "(off)")))
+                              (key-hint/key-hint "app.session.rename" "rename")]))]))))
 
 (defn- empty-message
   "pi: SessionList.render empty state — named-filter and scope aware."

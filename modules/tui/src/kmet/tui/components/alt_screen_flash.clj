@@ -10,7 +10,7 @@
    [kmet.tui.macros :refer [defcomponent]]
    [kmet.tui.timers :as timers]
    [kmet.tui.utils :as u]
-   [kmet.libs.theme :as theme]))
+   [kmet.tui.theme :as theme]))
 
 (def ^:private DEFAULT-DURATION-MS 1000)
 

@@ -10,7 +10,7 @@
             [kmet.libs.clj-eval :as clj-eval]
             [kmet.libs.nrepl :as nrepl]
             [kmet.libs.text :as text]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.ui.tui.tool-renderers :as renderers]))
 
 ;; ─── Tool execute ─────────────────────────────────────────────────────────

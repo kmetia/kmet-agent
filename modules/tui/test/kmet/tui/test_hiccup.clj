@@ -26,7 +26,7 @@
             [kmet.tui.components.stack :as stack]
             [kmet.tui.utils :as u]
             [kmet.reakt.core :as rag]
-            [kmet.libs.terminal-image :as timg]))
+            [kmet.tui.terminal-image :as timg]))
 
 (defn- joined [tree width]
   (str/join "\n" (h/render-lines tree width)))

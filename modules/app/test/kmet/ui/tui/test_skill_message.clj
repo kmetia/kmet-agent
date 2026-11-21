@@ -15,7 +15,7 @@
             [kmet.tui.core :as core]
             [kmet.tui.keybindings :as kb]
             [kmet.hikap.component :as component]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 (defn- strip-ansi [s]
   (str/replace s #"\u001b\[[0-9;]*[a-zA-Z]" ""))

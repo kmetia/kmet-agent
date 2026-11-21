@@ -6,7 +6,7 @@
             [kmet.app.debug :as debug]
             [kmet.app.config :as cfg]
             [kmet.tui.core :as tui]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.container :as container]
             [kmet.app.session.core :as session]

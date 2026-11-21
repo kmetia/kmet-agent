@@ -1,6 +1,6 @@
-(ns kmet.libs.test-highlight
+(ns kmet.tui.test-highlight
   (:require [clojure.test :as t]
-            [kmet.libs.highlight :as hl]))
+            [kmet.tui.highlight :as hl]))
 
 (defn- toks [lang text] (hl/tokenize lang text))
 

@@ -9,7 +9,7 @@
             [kmet.tui.core :as tui]
             [kmet.tui.hikap :as hiccup]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.terminal :as term]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.autocomplete :as ac]
@@ -462,7 +462,7 @@
                       ;; setThemeInstance; names through setThemeName (which
                       ;; disables auto-sync). kmet has no settings write
                       ;; path — the switch is applied live only.
-                      (if (instance? kmet.libs.theme.Theme theme-or-name)
+                      (if (instance? kmet.tui.theme.Theme theme-or-name)
                         (theme-ctrl/set-theme-instance! theme-controller theme-or-name)
                         (theme-ctrl/set-theme-name! theme-controller theme-or-name true)))
          :get-tools-expanded (fn [] (chat-history/chat-history-get-tool-expanded ch))

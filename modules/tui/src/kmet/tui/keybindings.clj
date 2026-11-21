@@ -207,7 +207,7 @@
 ;; ─── Key hint formatting ──────────────────────────────────────────────────
 ;; These produce ANSI-styled strings for display in tool outputs.
 ;; The theme-fn-dir and theme-fn-muted are color/styling functions from
-;; kmet.libs.theme (dim, muted). We accept them as args to avoid circular deps.
+;; kmet.tui.theme (dim, muted). We accept them as args to avoid circular deps.
 
 (defn key-text
   "Pi: keyText — display text for a keybinding ID: all resolved key chords

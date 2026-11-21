@@ -7,7 +7,7 @@
    messages\"). Lines are TruncatedText-shaped: truncated ANSI-aware with an
    ellipsis instead of wrapping. The caller keeps pending bash components
    in the same container."
-  (:require [kmet.libs.theme :as theme]
+  (:require [kmet.tui.theme :as theme]
             [kmet.tui.utils :as u]
             [kmet.hikap.component :refer [track!]]
             [kmet.tui.macros :refer [defcomponent]]))

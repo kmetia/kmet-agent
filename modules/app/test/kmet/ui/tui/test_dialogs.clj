@@ -3,7 +3,7 @@
    propagation (pi: ExtensionSelector/InputComponent)."
   (:require [clojure.test :as t :refer [deftest testing]]
             [kmet.tui.core :as core]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.ui.tui.dialogs :as d]
             [kmet.test-utils :as tu]))
 

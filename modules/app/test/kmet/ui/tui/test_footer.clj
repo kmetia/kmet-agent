@@ -7,7 +7,7 @@
             [kmet.app.session.core :as s]
             [kmet.ui.tui.footer :as ft]
             [kmet.ui.tui.footer-data-provider :as fdp]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.test-tmp :as test-tmp]))
 
 (defn- strip-ansi [s]

@@ -3,7 +3,7 @@
    Port of @earendil-works/pi-tui Image component.
    Falls back to text representation when image protocol is unavailable."
   (:require [kmet.tui.protocols :as protocols]
-            [kmet.libs.terminal-image :as img]
+            [kmet.tui.terminal-image :as img]
             [kmet.tui.utils :as utils]
             [kmet.hikap.component :refer [track!]]
             [kmet.tui.macros :refer [defcomponent]]))

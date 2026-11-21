@@ -5,7 +5,7 @@
             [kmet.ai.models :as models]
             [kmet.ui.tui.footer-data-provider :as fdp]
             [kmet.app.session.runtime :as runtime]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 (defn model-full-id
   "Full \"provider/id\" id of a Model record (pi: `${provider}/${id}`)."

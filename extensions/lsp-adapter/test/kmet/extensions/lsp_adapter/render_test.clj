@@ -4,7 +4,7 @@
    fallback and the collapsed expand hint."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.core :as core]
             [kmet.extensions.lsp-adapter.render :as render]))
 

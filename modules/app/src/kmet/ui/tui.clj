@@ -6,9 +6,10 @@
    the row mounts `kmet.ui.tui.interactive` over the composition the entry
    booted, the run reads the composition's `:tools`, `:sessions` and
    `:systemPrompt` rows through the ctx it is given, and the startup a
-   *process* world needs — catalogs, config, extension packages, themes —
-   arrives as the config the entry loads into this tree before mounting the
-   row (`kmet.app.world`, 5l-ii).
+   *process* world needs — catalogs, config, extension packages — arrives
+   as the config the entry loads into this tree before mounting the row
+   (`kmet.app.world`, 5l-ii); themes are loaded here by `load-themes!`,
+   because only the TUI reads them.
 
    **The provider.** `provider` is the terminal implementation of
    `kmet.app.ui`'s contract: a dialog is drawn by the running TUI
@@ -42,9 +43,11 @@
    agent through `:agents` has no session option to give its factory yet, and
    `kmet.app.core` refuses the session flags there by name."
   (:require [kmet.app.invocation :as invocation]
+            [kmet.app.packages :as packages]
             [kmet.app.permissions :as permissions]
             [kmet.app.ui :as ui]
             [kmet.srce.core :as srce]
+            [kmet.tui.theme :as theme]
             [kmet.ui.tui.interactive :as interactive]))
 
 (defn- run-opts
@@ -68,6 +71,13 @@
     (:resume config) (assoc :resume true)
     (:continue config) (assoc :continue true)))
 
+(defn load-themes!
+  "Load the configured theme paths into the TUI theme store. Themes are the
+   TUI's: the world load no longer reads them, so a headless mode never
+   touches the theme store."
+  []
+  (theme/load-theme-paths! (packages/resolve-theme-paths)))
+
 (defn- run-tui!
   "Run the TUI on CTX with the entry's loaded world CONFIG until it quits, and
    report the exit.
@@ -81,6 +91,7 @@
     ;; the composition's ctx, not a process root: the run's tool table, system
     ;; prompt and session log are the ones the profile mounted, and the config
     ;; is the world the entry loaded into that same tree
+    (load-themes!)
     (interactive/run (:config config) (run-opts config) ctx)
     (on-result {:exit 0})
     (catch Throwable t

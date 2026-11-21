@@ -19,7 +19,7 @@
             [kmet.test-utils :as tu]
             [kmet.tui.core :as core]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 (defn- now [] (System/nanoTime))
 (defn- ms [n] (double (/ n 1e6)))

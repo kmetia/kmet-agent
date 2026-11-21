@@ -11,11 +11,11 @@
    Treat the subs as read-only: they ARE the atoms, so a write through a
    sub name mutates global state past its owner — write the owning atom
    through its API instead (the theme setters, the settings rows)."
-  (:require [kmet.libs.theme :as theme]))
+  (:require [kmet.tui.theme :as theme]))
 
 (def theme-sub
   "The active theme (pi: the global theme getter) as a subscribable ref —
-   kmet.libs.theme/theme-atom itself. Deref inside render bodies: the tracked
+   kmet.tui.theme/theme-atom itself. Deref inside render bodies: the tracked
    read subscribes the component, and a theme switch (settings, /theme,
    custom-file reload) invalidates exactly the subscribed caches on the next
    frame."

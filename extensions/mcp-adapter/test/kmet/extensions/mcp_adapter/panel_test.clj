@@ -8,7 +8,7 @@
             [kmet.tui.core :as core]
             [kmet.tui.keybindings :as kb]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.extensions.mcp-adapter.metadata :as metadata]
             [kmet.extensions.mcp-adapter.panel :as panel]
             [kmet.extensions.mcp-adapter.test-util :as tu]))

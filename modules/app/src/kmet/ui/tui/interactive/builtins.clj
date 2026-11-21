@@ -10,7 +10,7 @@
             [kmet.app.debug :as debug]
             [kmet.app.config :as cfg]
             [kmet.tui.core :as tui]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.terminal :as term]
             [kmet.tui.components.expandable-text :as expandable-text]
             [kmet.tui.components.editor :as editor]

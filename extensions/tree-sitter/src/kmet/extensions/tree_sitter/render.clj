@@ -3,18 +3,18 @@
    :render-result on the registered tools). Result rendering consumes the
    structured :details maps emitted by the execute step and falls back to a
    plain preview when they are absent (replayed sessions, error results).
-   All styling goes through kmet.libs.theme; paths are shortened +
+   All styling goes through kmet.tui.theme; paths are shortened +
    hyperlinked via the shared host helpers in kmet.ui.tui.tool-renderers."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
-            [kmet.app.keybindings :as app-kb]
+            [kmet.ui.tui.key-hint :as key-hint]
             [kmet.ui.tui.tool-renderers :as shared]
             [kmet.tui.components.container :as container]
             [kmet.tui.components.spacer :as spacer]
             [kmet.tui.components.text :as text]
-            [kmet.libs.highlight :as hl]
+            [kmet.tui.highlight :as hl]
             [kmet.libs.path :as path]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.utils :as utils]))
 
 ;; ─── Small helpers ────────────────────────────────────────────────────────
@@ -74,7 +74,7 @@
   [more theme width]
   (utils/truncate-to-width
    (str (theme/fg theme :muted (str "... (" more " more lines,"))
-        " " (app-kb/key-hint "app.tools.expand" "to toggle")
+        " " (key-hint/key-hint "app.tools.expand" "to toggle")
         (theme/fg theme :muted ")"))
    width "..."))
 
@@ -158,7 +158,7 @@
         (plain-rows! c (str/split-lines (or content "")) theme width))))
 
 (def ^:private ext-lang
-  "File extension → highlight language name (kmet.libs.highlight set)."
+  "File extension → highlight language name (kmet.tui.highlight set)."
   {"clj" "clojure" "cljs" "clojure" "cljc" "clojure" "cljd" "clojure"
    "bb" "clojure" "edn" "clojure" "lpy" "clojure"
    "py" "python"

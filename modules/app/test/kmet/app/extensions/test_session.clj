@@ -19,7 +19,7 @@
             [kmet.app.skills :as skills]
             [kmet.app.test-support :as support]
             [kmet.test-utils :as tu :refer [spit-plugin]]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.app.tools.registry :as tools-registry]
             [kmet.test-tmp :as test-tmp]))
 

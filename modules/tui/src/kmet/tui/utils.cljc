@@ -2,7 +2,7 @@
   "Text width calculation and wrapping utilities."
   (:require [clojure.string :as str]
             [kmet.libs.text :as text]
-            [kmet.libs.terminal-image :as img]))
+            [kmet.tui.terminal-image :as img]))
 
 ;; ─── Cursor marker ────────────────────────────────────────────────────────
 ;; Zero-width APC sequence emitted at cursor position for IME positioning.

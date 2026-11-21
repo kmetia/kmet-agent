@@ -12,7 +12,7 @@
             [kmet.tui.keybindings :as tui-kb]
             [kmet.hikap.component :as component]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.tui.utils :as u]
             [kmet.test-tmp :as test-tmp]))
 

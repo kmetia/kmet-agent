@@ -22,7 +22,7 @@
             [kmet.app.config :as cfg]
             [kmet.app.resources :as resources]
             [kmet.app.session.runtime :as runtime]
-            [kmet.libs.theme :as th]
+            [kmet.tui.theme :as th]
             [kmet.srce.core :as srce]
             [kmet.tui.core :as tui]
             [kmet.tui.utils :as u]

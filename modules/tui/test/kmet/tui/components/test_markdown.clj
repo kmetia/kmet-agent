@@ -1,12 +1,12 @@
 (ns kmet.tui.components.test-markdown
   (:require [clojure.test :as t]
             [clojure.string :as str]
-            [kmet.libs.highlight :as hlib]
+            [kmet.tui.highlight :as hlib]
             [kmet.tui.markdown :as mdlib]
-            [kmet.libs.terminal-image :as timg]
+            [kmet.tui.terminal-image :as timg]
             [kmet.tui.core :as core]
             [kmet.tui.hikap :as h]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.utils :as u]
             [kmet.tui.components.markdown :as md]))
 

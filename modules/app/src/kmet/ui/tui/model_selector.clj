@@ -5,7 +5,7 @@
    Tab toggle), and the model-switch helpers shared with cycling and the
    footer sync."
   (:require [clojure.string :as str]
-            [kmet.app.keybindings :as app-kb]
+            [kmet.ui.tui.key-hint :as key-hint]
             [kmet.ai.models :as models]
             [kmet.app.model-resolver :as resolver]
             [kmet.app.session.runtime :as runtime]
@@ -17,7 +17,7 @@
             [kmet.tui.core :as tui]
             [kmet.libs.fuzzy :as fuzzy]
             [kmet.tui.keybindings :as kb]
-            [kmet.libs.theme :as theme]))
+            [kmet.tui.theme :as theme]))
 
 (defn- fmt-model [provider model]
   (str (name provider) ":" model))
@@ -110,7 +110,7 @@
   "Pi getScopeHintText — the Tab scope hint, styled with dim key + muted
    description (pi keyHint + theme.fg muted)."
   []
-  (str (app-kb/key-hint "tui.input.tab" "scope")
+  (str (key-hint/key-hint "tui.input.tab" "scope")
        (let [th (theme/get-current-theme)]
          (theme/fg th :muted " (all/scoped)"))))
 

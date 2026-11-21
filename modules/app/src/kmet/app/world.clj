@@ -1,6 +1,6 @@
 (ns kmet.app.world
   "The process world a run stands on: the provider catalogs and the models.edn
-   layer over them, the config, the themes, and the extension CLI flags.
+   layer over them, the config, and the extension CLI flags.
    Extensions are composition rows and load when they mount, not here.
 
    The world is a **row** — `:world` in `:bundle/minimal` — and it is
@@ -16,21 +16,17 @@
    The order inside the load is load-bearing: the provider catalogs and
    models.edn come first, so the model patterns the run resolves afterwards see
    both the built-ins and the user's providers; the config follows (it publishes
-   the composition as the process root); the themes come next (a composition's
-   `:ext/…` rows loaded their extensions earlier, when the composition mounted);
-   and the CLI flags are last, because their registrations are the ones the
-   parse collected.
+   the composition as the process root); and the CLI flags are last, because
+   their registrations are the ones the parse collected.
 
    The row mounts at the **root**, never on an agent's ctx: the world is the
    process's, so a preset that names a bundle carrying this row is refused
    instead of loading a second world inside one agent."
   (:require [kmet.app.config :as cfg]
             [kmet.app.extensions.core :as extensions]
-            [kmet.app.packages :as packages]
             [kmet.ai.image-models :as image-models]
             [kmet.ai.models :as models]
             [kmet.app.root :as root]
-            [kmet.libs.theme :as theme]
             [kmet.srce.core :as srce]))
 
 (defn load!
@@ -53,7 +49,7 @@
    (when-let [err (models/get-model-config-error)]
      (binding [*out* *err*]
        (println "Warning: models.edn:" err)))
-   ;; Config before the themes and flags, and before the model resolution
+   ;; Config before the flags, and before the model resolution
    ;; `run-mode` does afterwards.
    (let [config (cfg/init!)]
      (when ctx (root/publish! ctx))
@@ -61,7 +57,6 @@
      ;; when they mounted (kmet.app.extensions.rows). Nothing here loads an
      ;; extension from settings; `kmet plugins` composes rows into the patch
      ;; layers instead.
-     (theme/load-theme-paths! (packages/resolve-theme-paths))
      ;; Extension CLI flags: the collected --flags become readable via
      ;; extensions/get-flag (pi: registerFlag + getFlag).
      (extensions/set-cli-flags! (:ext-flags opts))

@@ -16,7 +16,7 @@
   (:require [clojure.string :as str]
             [kmet.tui.protocols :as protocols]
             [kmet.reakt.core :as r]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.utils :as u]
             [kmet.tui.components.spinner :as spinner]
             [kmet.tui.macros :refer [defcomponent]]))

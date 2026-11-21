@@ -5,7 +5,8 @@
             [clojure.string :as str]
             [kmet.tui.keys :as keys]
             [kmet.tui.keybindings :as tui-kb]
-            [kmet.libs.theme :as theme]
+            [kmet.ui.tui.key-hint :as key-hint]
+            [kmet.tui.theme :as theme]
             [kmet.test-tmp :as test-tmp]
             [kmet.test-utils :as tu]))
 
@@ -208,9 +209,9 @@
     (try
       (tui-kb/set-global-keybindings! (kb/create-agent-keybindings-manager dir))
       (theme/init-theme! "dark")
-      (let [dark (kb/key-hint "app.quit" "quit")]
+      (let [dark (key-hint/key-hint "app.quit" "quit")]
         (theme/init-theme! "light")
-        (let [light (kb/key-hint "app.quit" "quit")]
+        (let [light (key-hint/key-hint "app.quit" "quit")]
           (t/is (not= (muted-color "dark") (muted-color "light"))
                 "the two themes really do mute differently")
           (t/is (str/includes? dark (muted-color "dark"))

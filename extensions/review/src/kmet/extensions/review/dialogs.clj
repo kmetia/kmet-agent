@@ -18,7 +18,7 @@
             [kmet.extension :as ext]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.hikap :as h]
             [kmet.tui.keybindings :as kb]
             [kmet.tui.components.input :as input]

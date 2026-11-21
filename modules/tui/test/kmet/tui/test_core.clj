@@ -7,7 +7,7 @@
             [kmet.tui.frame :as frame]
             [kmet.reakt.core :as reakt]
             [kmet.tui.terminal-escape :as lib]
-            [kmet.libs.terminal-image :as img]
+            [kmet.tui.terminal-image :as img]
             [kmet.tui.keys :as keys]
             [kmet.tui.terminal :as term]
             [kmet.tui.components.container :as container]

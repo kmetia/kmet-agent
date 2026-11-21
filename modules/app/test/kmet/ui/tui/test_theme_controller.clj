@@ -7,7 +7,7 @@
             [kmet.app.config :as cfg]
             [kmet.tui.core :as core]
             [kmet.tui.terminal :as term]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.ui.tui.theme-controller :as tc]))
 
 (defn- recording-terminal

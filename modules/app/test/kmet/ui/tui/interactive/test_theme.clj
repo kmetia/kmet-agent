@@ -10,7 +10,7 @@
             [kmet.tui.components.expandable-text :as expandable-text]
             [kmet.tui.components.text :as text]
             [kmet.hikap.component :as component]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.core :as tui]
             [kmet.ui.tui.interactive.builtins :as builtins]

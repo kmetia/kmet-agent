@@ -8,7 +8,7 @@
   (:require [clojure.string :as str]
             [kmet.reakt.core :as r]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.theme :as theme]
+            [kmet.tui.theme :as theme]
             [kmet.tui.hikap :as h]
             [kmet.ui.tui.subs :as subs]
             [kmet.ui.tui.user-message :as um]

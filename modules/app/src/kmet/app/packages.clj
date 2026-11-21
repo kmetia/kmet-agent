@@ -23,8 +23,9 @@
    `!glob`/`+path`/`-path`), accumulated in pi's insertion order and
    finalized with pi's precedence sort (project-local 0, project-auto 1,
    user-local 2, user-auto 3, package 4, bundled 5) + canonical-path
-   dedupe. `load-skills!`/`load-prompts!`/`load-themes!` load the enabled
-   items of a type; extensions load through composition rows.
+   dedupe. `load-skills!`/`load-prompts!` load the enabled items of a type;
+   theme paths resolve through `resolve-theme-paths` and the TUI row loads
+   them; extensions load through composition rows.
 
    A package is a `:packages` entry in the global settings.edn
    (~/.kmet/agent/settings.edn, scope :user) or the project settings.edn
