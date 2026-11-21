@@ -61,8 +61,8 @@
     (is (contains? (set (changed/affected-test-nss-by '[kmet.ai.models]))
                    'kmet.app.test-compaction)))
   (testing "changing a test namespace includes itself"
-    (let [nss (set (changed/affected-test-nss-by '[kmet.tui.components.test-text]))]
-      (is (contains? nss 'kmet.tui.components.test-text))))
+    (let [nss (set (changed/affected-test-nss-by '[kmet.tasks.test-clean]))]
+      (is (contains? nss 'kmet.tasks.test-clean))))
   (testing "a -test suffix counts too (kmet.tasks.build-test mirrors its src ns)"
     (let [nss (set (changed/affected-test-nss-by '[kmet.tasks.build]))]
       (is (contains? nss 'kmet.tasks.build-test)))
@@ -78,7 +78,7 @@
                    'kmet.tasks.test-clean)))
   (testing "unrelated namespaces stay out"
     (let [nss (set (changed/affected-test-nss-by '[kmet.ai.models]))]
-      (is (not (contains? nss 'kmet.tui.components.test-text)))))
+      (is (not (contains? nss 'kmet.libs.test-archive)))))
   (testing "extension source and test namespaces pair directly"
     (let [nss (set (changed/affected-test-nss-by '[kmet.extensions.clojure.eval-tool]))]
       (is (contains? nss 'kmet.extensions.clojure.eval-tool-test))))
@@ -99,7 +99,7 @@
           "a dependency of the dependent is linted (its vars must resolve)")))
   (testing "unrelated namespaces stay out"
     (let [files (set (changed/affected-lint-files-by ["modules/libs/src/kmet/libs/process.clj"]))]
-      (is (not (contains? files "modules/tui/src/kmet/tui/hiccup.cljc"))))))
+      (is (not (contains? files "extensions/review/src/kmet/extensions/review/prompts.clj"))))))
 
 (deftest project-files-skips-ignored-trees
   (let [files (changed/project-files ["extensions"] ["clj" "cljc" "jolt"])]

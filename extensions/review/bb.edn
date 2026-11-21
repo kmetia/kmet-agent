@@ -1,12 +1,13 @@
 {:paths ["src" "test" "../../test"
          "../../modules/libs/src"
-         "../../modules/tui/src" "../../modules/ai/src"
+         "../../modules/ai/src"
          "../../modules/sklop/src" "../../modules/app/src"]
  :deps {kmet/loader {:local/root "../../../loader"}
         kmet/reakt {:local/root "../../../reakt"}
         kmet/hikap {:local/root "../../../hikap"}
         kmet/srce {:local/root "../../../srce"}
-        kmet/tk {:local/root "../../../tk"}}
+        kmet/tk {:local/root "../../../tk"}
+        kmet/tui {:local/root "../../../tui"}}
  :tasks
  {test {:doc "Run review extension tests (args: test namespace names)"
         :task (let [nss (or (some->> *command-line-args* (map symbol))

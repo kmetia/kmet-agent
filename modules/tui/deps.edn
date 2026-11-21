@@ -1,6 +1,0 @@
-{:paths ["src" "test"]
- ;; No module edges: reakt and hikap are external pinned dependencies at
- ;; the root, and the component backend builds on them.
- :deps {babashka/fs {:mvn/version "0.5.34"}
-        babashka/process {:mvn/version "0.6.25"}
-        org.jline/jline-terminal {:mvn/version "4.7.0"}}}

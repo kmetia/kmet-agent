@@ -306,7 +306,7 @@ Ordered by value/effort.
 
 - [ ] Extract `diff-frame!` (CC 79 / 230 SLOC, mass 1198 — 2x the next
       worst) and `render-frame!` (CC 32 / 200 SLOC) into per-case fns in
-      `modules/tui/src/kmet/tui/frame.clj` (lines 457, 747). One sitting cuts
+      `../tui/src/kmet/tui/frame.clj` (lines 457, 747). One sitting cuts
       the largest single mass in the tree.
 - [x] Add a `with-captured-err` test helper and replace the ~50 hand-rolled
       `(binding [*err* (java.io.StringWriter.)]` blocks — densest in
@@ -331,7 +331,7 @@ Ordered by value/effort.
       function over CC 10.
 - [x] Table-drive `detect-openai-compat` (CC 47 in 89 SLOC,
       `modules/ai/src/kmet/ai/api/shared.clj:465`) and `parse-inline`
-      (CC 54, `modules/tui/src/kmet/tui/markdown.clj:289`) — rule tables
+      (CC 54, `../tui/src/kmet/tui/markdown.clj:289`) — rule tables
       instead of nested conditionals in two high-traffic files.
 - [x] Merge the two near-identical `cond` tables in
       `modules/libs/src/kmet/libs/ranking.clj` (18.1% flagged) into one

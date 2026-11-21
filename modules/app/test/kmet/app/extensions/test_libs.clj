@@ -59,7 +59,7 @@
    extracted reakt/hikap checkouts — the lists' universe, host backends
    included so the test can pin their exclusion."
   []
-  (let [roots [["kmet.tui" "modules/tui/src/kmet/tui"]
+  (let [roots [["kmet.tui" "../tui/src/kmet/tui"]
                ;; the whole libs module: its kmet.libs.* leaves are shared by
                ;; the app and the extension contexts
                ["" "modules/libs/src"]

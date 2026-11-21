@@ -4,7 +4,7 @@ This file is the contributor's map: the package layout, the composition data,
 the service catalog, the layering rules and the workflow.
 Implementation-specific references live beside their namespaces rather than in
 the user-facing `docs/` directory: see
-[`modules/tui/src/kmet/tui/tui.md`](../modules/tui/src/kmet/tui/tui.md),
+[`tui.md`](https://github.com/kmetia/tui/blob/master/src/kmet/tui/tui.md),
 [`loader.md`](https://github.com/kmetia/loader/blob/master/src/kmet/loader/loader.md),
 [`srce.md`](https://github.com/kmetia/srce/blob/master/src/kmet/srce/srce.md),
 [`modules/app/src/kmet/extension.md`](../modules/app/src/kmet/extension.md), and
@@ -20,7 +20,6 @@ is the current map. Temporary analysis notes (`perf.md`, `jolt-bugs.md`,
 ```
 modules/
 ├── libs/   — generic, self-contained helpers        (kmet.libs.*)
-├── tui/    — terminal backend over hikap            (kmet.tui.*; tui.md)
 ├── ai/     — provider/auth library                  (kmet.ai.*)
 ├── sklop/  — composition: rows, bundles, profiles    (kmet.sklop.*; sklop README)
 └── app/    — the application + its TUI front end   (kmet.app.*, kmet.ui.*)
@@ -28,11 +27,11 @@ modules/
 
 `modules.edn` is the workspace manifest: it lists the module trees and the
 extra source roots, and the tasks read it instead of repeating the paths
-(`kmet.tasks.modules`). The loader, reakt, hikap, srce and tk are the
-exceptions: `kmet.loader.*`, `kmet.reakt.*`, `kmet.hikap.*`, `kmet.srce.*` and
-`kmet.tk.*` are separate projects, pinned in `deps.edn` (tk in the `:jvm` alias)
-and checked out as `../loader`, `../reakt`, `../hikap`, `../srce` and `../tk` in
-dev.
+(`kmet.tasks.modules`). The loader, reakt, hikap, srce, tk and tui are the
+exceptions: `kmet.loader.*`, `kmet.reakt.*`, `kmet.hikap.*`, `kmet.srce.*`,
+`kmet.tk.*` and `kmet.tui.*` are separate projects, pinned in `deps.edn` (tk in
+the `:jvm` alias) and checked out as `../loader`, `../reakt`, `../hikap`,
+`../srce`, `../tk` and `../tui` in dev.
 
 A module's namespaces sit under the root it is
 named for: `libs` holds `kmet.libs.*`, `ai` holds `kmet.ai.*`. `app` is the
@@ -42,9 +41,9 @@ one module with two prefixes: its business tree is `kmet.app.*`, and
 Ranks are the manifest's layering guard (`kmet.test-module-deps`): a module
 may depend only on strictly lower-ranked ones, and a *namespace* may require
 only a file in a strictly lower-ranked module — `libs` 0, `ai` 1,
-`tui`/`sklop` 2, `app` 3. The external `kmet.loader.*`, `kmet.reakt.*`,
-`kmet.hikap.*`, `kmet.srce.*` and `kmet.tk.*` libraries are pinned below all of
-them. A leaf that both the app's
+`sklop` 2, `app` 3. The external `kmet.loader.*`, `kmet.reakt.*`,
+`kmet.hikap.*`, `kmet.srce.*`, `kmet.tk.*` and `kmet.tui.*` libraries are pinned
+below all of them. A leaf that both the app's
 business code and the components read therefore lives in `libs`, never in
 either of them.
 Themes are the TUI's now: `kmet.tui.theme` is loaded by the TUI row and read by

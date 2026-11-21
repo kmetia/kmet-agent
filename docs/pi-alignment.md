@@ -12,9 +12,9 @@ frontier packages `packages/chord`, `packages/durable`, `packages/env`,
 > this document is the gap analysis, not a path index.
 
 Kmet side: `modules/agent` (`kmet.agent.*`), `modules/ai` (`kmet.ai.*`),
-`modules/tui`, `modules/libs`; the loader (`kmet.loader.*`), reakt
-(`kmet.reakt.*`), hikap (`kmet.hikap.*`), srce (`kmet.srce.*`) and tk
-(`kmet.tk.*`) are separate projects.
+`modules/libs`; the loader (`kmet.loader.*`), reakt (`kmet.reakt.*`), hikap
+(`kmet.hikap.*`), srce (`kmet.srce.*`), tk (`kmet.tk.*`) and tui
+(`kmet.tui.*`) are separate projects.
 
 Goal: enumerate what pi exposes that kmet does not, so a "full alignment" pass has a
 concrete work list. "Aligned" means the behavior exists in kmet with equivalent
@@ -293,7 +293,7 @@ Missing, by pi's cli.md groups:
 
 | Feature | pi ref | kmet status |
 |---|---|---|
-| **Mermaid diagram rendering** | `modes/interactive/components/mermaid.ts` + `markdown.mermaid` setting (`off`/`final`/`streaming`) | **Postponed indefinitely** (2026-09-10; rationale in `modules/tui/src/kmet/tui/tui.md` §15.1) |
+| **Mermaid diagram rendering** | `modes/interactive/components/mermaid.ts` + `markdown.mermaid` setting (`off`/`final`/`streaming`) | **Postponed indefinitely** (2026-09-10; rationale in [`tui.md`](https://github.com/kmetia/tui/blob/master/src/kmet/tui/tui.md) §15.1) |
 | **LaTeX rendering** (`$…$`, `$$…$$`) | `packages/tui/src/latex.ts`, wired in `tui/src/components/markdown.ts` | **Postponed indefinitely** (same) |
 | **Alt-screen search** (search overlay over the transcript) | `packages/tui/src/alt-screen-search.ts`, `tui-alt-screen.ts` | **Postponed indefinitely** (same — needs an alt-screen mode) |
 | **Images in chat** | `terminal.showImages`, `terminal.imageWidthCells`, `images.autoResize`, `images.blockImages` settings; `show-images-selector.ts` | **Partial** — the TUI half done (`tui.md` §10): `:terminal {:show-images :image-width-cells}` settings, terminal-support-gated `/settings` rows, and inline images (or the `imageFallback` text indicator when off/unsupported) in tool results and user/custom messages. `images.blockImages` done: `:images {:block-images}` setting + ungated `/settings` row, stripped per request in `kmet.app.loop.completion/call-llm` (pi: convertToLlmWithBlockImages — placeholder text, consecutive dedupe, stored context untouched). **Missing**: `images.autoResize` and the per-model `inputLimits.images.resize` catalog metadata (pi #9631: resize profiles in `models.json`, applied to attachments, `read`, and tool-result images). Both need a resizer backend decision — pi runs a Photon WASM resize pipeline and babashka has no ImageIO/AWT (see `kmet.app.tools.read`); the generated catalogs carry no `:input-limits` keys yet

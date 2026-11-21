@@ -28,7 +28,7 @@ global.**
 | Kernel: ctx tree, services, inject, fibers, effects, events | [`srce`](https://github.com/kmetia/srce) — separate project; `../srce` in dev, pinned in `deps.edn` |
 | Composition: rows, bundles, profiles, patches, cards and mounting | [`modules/sklop/README.md`](modules/sklop/README.md) |
 | Agent efficiency benchmark (eval vs bash, prompt/guideline/tool variants) | [`scripts/bench/README.md`](scripts/bench/README.md) |
-| TUI, components, Hiccup, reactivity, input, and rendering | [`modules/tui/src/kmet/tui/tui.md`](modules/tui/src/kmet/tui/tui.md) |
+| TUI, components, Hiccup, reactivity, input, and rendering | [`tui`](https://github.com/kmetia/tui) — separate project; `../tui` in dev, pinned in `deps.edn` |
 | Tk backend and its widget sample (`kmet.tk.*`, `kmet.gui-sample.*`) | [`tk`](https://github.com/kmetia/tk) — separate project; `../tk` in dev, pinned in the `:jvm` alias |
 | Extension contract (`kmet.extension` API, allowed namespaces, lifecycle) and authoring guide (layouts, loaders, deps, UI, testing) | [`modules/app/src/kmet/extension.md`](modules/app/src/kmet/extension.md); [`docs/extensions.md`](docs/extensions.md) |
 | Architecture lineage and pi alignment | [`design.md`](modules/app/src/kmet/design.md) § Prior art: DSH; [`srce.md`](https://github.com/kmetia/srce/blob/master/src/kmet/srce/srce.md); [`docs/pi-alignment.md`](docs/pi-alignment.md) |
@@ -51,10 +51,10 @@ user-facing); implementation notes sit beside their source. `perf.md`,
 - `bb clean` removes build output and caches (`--dry-run` lists them;
   `jolt clean` is the equivalent); `bb tasks` lists summaries and
   `bb <task> --help` full usage.
-- The loader, reakt, hikap, srce and tk (`kmet.loader.*`, `kmet.reakt.*`,
-  `kmet.hikap.*`, `kmet.srce.*`, `kmet.tk.*`) are separate projects.
-  Development uses the sibling `../loader`, `../reakt`, `../hikap`, `../srce`
-  and `../tk` checkouts: `bb` and the Jolt tasks resolve them from `bb.edn`, the
+- The loader, reakt, hikap, srce, tk and tui (`kmet.loader.*`, `kmet.reakt.*`,
+  `kmet.hikap.*`, `kmet.srce.*`, `kmet.tk.*`, `kmet.tui.*`) are separate
+  projects. Development uses the sibling `../loader`, `../reakt`, `../hikap`,
+  `../srce`, `../tk` and `../tui` checkouts: `bb` and the Jolt tasks resolve them from `bb.edn`, the
   JVM dev aliases from `deps.edn`'s `:dev`;
   direct `jolt` invocations that read `deps.edn` take `-A:dev` (for example
   `jolt -A:dev nrepl-server 7802`). The default `deps.edn` coordinates are the
@@ -152,7 +152,7 @@ cross-process cache TTLs.
 - A variant means extending the lower layer (or nearest shared namespace); a
   second implementation is a bug even when it works. The layer map is in
   [`docs/architecture.md`](docs/architecture.md); the dispatcher list is in
-  [`modules/tui/src/kmet/tui/tui.md`](modules/tui/src/kmet/tui/tui.md).
+  [`tui.md`](https://github.com/kmetia/tui/blob/master/src/kmet/tui/tui.md).
 
 ### Pre-1.0: the extension ABI is not frozen
 

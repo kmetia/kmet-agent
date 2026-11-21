@@ -15,7 +15,7 @@
 (deftest manifest-shape
   (testing "the manifest lists real trees with a rank each"
     (let [ms (modules/modules)]
-      (is (<= 5 (count ms)) "the module list is real")
+      (is (<= 4 (count ms)) "the module list is real")
       (is (<= 3 (count (modules/extensions))) "the extension list is real")
       (is (seq (modules/roots)) "the extra root list is real")
       (is (seq (modules/test-root-paths)) "a test root is flagged")

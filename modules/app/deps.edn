@@ -1,11 +1,10 @@
 {:paths ["src" "test"]
  ;; Rank 3: the application, the top of the ladder — it holds the front end,
- ;; so it sits above the component backend (`tui`, rank 2) the widgets build
-  ;; on. Its sources require only lower-ranked modules (kmet.sklop.*,
-  ;; kmet.libs.*, kmet.ai.*, kmet.tui.*) and the pinned kmet.loader,
-  ;; kmet.reakt, kmet.hikap and kmet.srce dependencies, plus
- ;; third-party code; the module may never require a module at its own rank or
- ;; above. babashka/process is the version rule's git describe.
+ ;; so it sits above the component backend (`kmet.tui`, a root dependency) the
+ ;; widgets build on. Its sources require only lower-ranked modules (kmet.sklop.*,
+ ;; kmet.libs.*, kmet.ai.*) and the pinned kmet.loader, kmet.reakt, kmet.hikap,
+ ;; kmet.srce and kmet.tui dependencies, plus third-party code; the module may
+ ;; never require a module at its own rank or above. babashka/process is the version rule's git describe.
  ;;
  ;; The front end lives here too (it was the `ui` module, rank 3, until it
  ;; merged). `modules/app/src/kmet/ui` holds the TUI's widgets, selectors, tool
@@ -75,9 +74,6 @@
  :deps {kmet/libs {:local/root "../libs"}
         kmet/sklop {:local/root "../sklop"}
         kmet/ai {:local/root "../ai"}
-        ;; The front end's component backends, from the merge: kmet.ui.* builds
-        ;; on the TUI backend (which brings jline and, through hikap, reakt).
-        kmet/tui {:local/root "../tui"}
         babashka/fs {:mvn/version "0.5.34"}
         babashka/process {:mvn/version "0.6.25"}
         metosin/malli {:mvn/version "0.20.3"}

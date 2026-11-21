@@ -3,13 +3,14 @@
  ;; implementation lives there (see AGENTS.md § File layout). Both hosts
  ;; resolve kmet.tasks.* from it, and neither artifact carries it — the
  ;; uberjar walks src/, jolt's :jolt/build :embed does too.
- :paths ["modules/libs/src" "modules/libs/test" "modules/tui/src" "modules/tui/test" "modules/ai/src" "modules/ai/test" "modules/sklop/src" "modules/sklop/test" "modules/app/src" "modules/app/test" "test" "tasks" "extensions/clojure/src" "extensions/clojure/test" "extensions/tree-sitter/src" "extensions/tree-sitter/test" "extensions/review/src" "extensions/review/test" "extensions/mcp-adapter/src" "extensions/mcp-adapter/test" "extensions/lsp-adapter/src" "extensions/lsp-adapter/test"]
+ :paths ["modules/libs/src" "modules/libs/test" "modules/ai/src" "modules/ai/test" "modules/sklop/src" "modules/sklop/test" "modules/app/src" "modules/app/test" "test" "tasks" "extensions/clojure/src" "extensions/clojure/test" "extensions/tree-sitter/src" "extensions/tree-sitter/test" "extensions/review/src" "extensions/review/test" "extensions/mcp-adapter/src" "extensions/mcp-adapter/test" "extensions/lsp-adapter/src" "extensions/lsp-adapter/test"]
  :deps {;; babashka is the dev host: the extracted libraries are sibling checkouts.
         kmet/loader {:local/root "../loader"}
         kmet/reakt {:local/root "../reakt"}
         kmet/hikap {:local/root "../hikap"}
         kmet/srce {:local/root "../srce"}
         kmet/tk {:local/root "../tk"}
+        kmet/tui {:local/root "../tui"}
         dev.weavejester/cljfmt {:mvn/version "0.16.6"}
         ;; babashka >= 1.13.224 bundles data.json (2.5.2 as of 1.13.229) and
         ;; the built-in wins over any declared copy; pinned at the bundled
@@ -51,7 +52,7 @@
            :task (if (find-var 'clojure.core/*jolt-version*)
                    (apply jbuild/-main *command-line-args*)
                    (apply build/-main *command-line-args*))}
-  test    {:doc "Run fast test suites (excludes ^:slow tests)\n\nArgs: plain test var names (bb test test-tool-bash), ns/var pairs, or whole namespaces (bb test kmet.tui.test-fuzzy). Whole-namespace args select non-slow vars; var args ignore slow?. Unloadable namespaces are reported with the load failure reason (full run: all; filtered run: requested only) and fail the run."
+  test    {:doc "Run fast test suites (excludes ^:slow tests)\n\nArgs: plain test var names (bb test test-tool-bash), ns/var pairs, or whole namespaces (bb test kmet.tasks.test-changed). Whole-namespace args select non-slow vars; var args ignore slow?. Unloadable namespaces are reported with the load failure reason (full run: all; filtered run: requested only) and fail the run."
            :requires ([kmet.tasks.runner :as runner])
            :task (help/with-help (apply runner/-main false *command-line-args*))
            :override-builtin true}

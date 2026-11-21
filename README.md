@@ -122,7 +122,7 @@ to the code and people who own it. The longer etymology is in
 ## Project layout
 
 ```text
-modules/        — application modules and libraries (app, ai, libs, tui);
+modules/        — application modules and libraries (app, ai, libs);
                   each is a standalone classpath root
 extensions/     — bundled opt-in extensions and single-file tools
 jolt/           — Jolt provider scaffolding
@@ -132,13 +132,14 @@ tasks/          — development and packaging tasks
 scripts/        — repo tooling (git hooks, repros, capture and benchmark helpers)
 ```
 
-The loader, reakt, hikap, srce and tk (`kmet.loader.*`, `kmet.reakt.*`,
-`kmet.hikap.*`, `kmet.srce.*`, `kmet.tk.*`) are separate projects: `deps.edn`
-pins their commits (tk in the `:jvm` alias), and development uses the sibling
-`../loader`, `../reakt`, `../hikap`, `../srce` and `../tk` checkouts.
+The loader, reakt, hikap, srce, tk and tui (`kmet.loader.*`, `kmet.reakt.*`,
+`kmet.hikap.*`, `kmet.srce.*`, `kmet.tk.*`, `kmet.tui.*`) are separate
+projects: `deps.edn` pins their commits (tk in the `:jvm` alias), and
+development uses the sibling `../loader`, `../reakt`, `../hikap`, `../srce`,
+`../tk` and `../tui` checkouts.
 
 Implementation and development references sit beside the source they describe
-— for example, the kernel and TUI design notes — and
+— for example, the kernel design notes — and
 [`docs/architecture.md`](docs/architecture.md) is the contributor's map.
 
 ## License
