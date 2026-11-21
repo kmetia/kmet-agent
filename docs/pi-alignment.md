@@ -13,7 +13,8 @@ frontier packages `packages/chord`, `packages/durable`, `packages/env`,
 
 Kmet side: `modules/agent` (`kmet.agent.*`), `modules/ai` (`kmet.ai.*`),
 `modules/tui`, `modules/tk`, `modules/libs`; the loader (`kmet.loader.*`),
-reakt (`kmet.reakt.*`) and hikap (`kmet.hikap.*`) are separate projects.
+reakt (`kmet.reakt.*`), hikap (`kmet.hikap.*`) and srce (`kmet.srce.*`) are
+separate projects.
 
 Goal: enumerate what pi exposes that kmet does not, so a "full alignment" pass has a
 concrete work list. "Aligned" means the behavior exists in kmet with equivalent

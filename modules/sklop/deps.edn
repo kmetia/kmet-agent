@@ -1,6 +1,5 @@
 {:paths ["src" "test"]
- ;; Rank 2: composition over the kernel. Its sources require kmet.srce.core
- ;; (rank 1) and kmet.libs.concurrent (rank 0); the application supplies the
+ ;; Rank 2: composition over the kernel. Its sources require the external
+ ;; kmet.srce.core and kmet.libs.concurrent; the application supplies the
  ;; source policy, the committed table and the boot/teardown around it.
- :deps {kmet/libs {:local/root "../libs"}
-        kmet/srce {:local/root "../srce"}}}
+ :deps {kmet/libs {:local/root "../libs"}}}

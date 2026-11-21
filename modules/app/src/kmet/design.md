@@ -6,7 +6,7 @@ a per-extension capability map — with one Cordis-style context: services keyed
 by name, dependencies declared with `inject`, registrations reversible by
 construction, and plugins as the only unit of assembly. That architecture is
 [`docs/architecture.md`](../../../../docs/architecture.md), the kernel
-[`srce.md`](../../../../modules/srce/src/kmet/srce/srce.md) and the extension
+[`srce.md`](https://github.com/kmetia/srce/blob/master/src/kmet/srce/srce.md) and the extension
 contract [`extension.md`](extension.md). What follows is the part that is still
 open and the decisions behind what was deliberately not built.
 
@@ -174,7 +174,7 @@ the process install — which is why a connection must not take the slot.
   `loop.state/declared-record`'s existing case — internal, not an ABI addition.
 - The kernel's own exclusions (JS syntax, the loader/HMR/console packages, the
   plugin market, async stack splicing) are listed in
-  [`srce.md`](../../../../modules/srce/src/kmet/srce/srce.md).
+  [`srce.md`](https://github.com/kmetia/srce/blob/master/src/kmet/srce/srce.md).
 - A second resource-selection surface: `:resources` (global list plus project
   delta) is the only persisted selection, `/tools` is the session override and
   `kmet plugins` is composition. Individual eval verbs are selectable there

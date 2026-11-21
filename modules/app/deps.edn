@@ -1,9 +1,9 @@
 {:paths ["src" "test"]
  ;; Rank 3: the application, the top of the ladder — it holds the front end,
  ;; so it sits above the component backend (`tui`, rank 2) the widgets build
-  ;; on. Its sources require only lower-ranked modules (kmet.srce.*,
-  ;; kmet.sklop.*, kmet.libs.*, kmet.ai.*, kmet.tui.*) and the pinned
-  ;; kmet.loader, kmet.reakt and kmet.hikap dependencies, plus
+  ;; on. Its sources require only lower-ranked modules (kmet.sklop.*,
+  ;; kmet.libs.*, kmet.ai.*, kmet.tui.*) and the pinned kmet.loader,
+  ;; kmet.reakt, kmet.hikap and kmet.srce dependencies, plus
  ;; third-party code; the module may never require a module at its own rank or
  ;; above. babashka/process is the version rule's git describe.
  ;;
@@ -73,7 +73,6 @@
  ;; match the root deps.edn / bb.edn ones; kmet.test-module-deps holds every
  ;; manifest to one coordinate.
  :deps {kmet/libs {:local/root "../libs"}
-        kmet/srce {:local/root "../srce"}
         kmet/sklop {:local/root "../sklop"}
         kmet/ai {:local/root "../ai"}
         ;; The front end's component backends, from the merge: kmet.ui.* builds

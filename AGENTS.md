@@ -15,7 +15,7 @@ mount beside them instead of patching a privileged core. Module map, composition
 and service catalog: [`docs/architecture.md`](docs/architecture.md); open seams
 (a composition edit still has no `applied`/`restart-required` vocabulary):
 [`design.md`](modules/app/src/kmet/design.md) § Open at HEAD; kernel departures
-from Cordis: [`srce.md`](modules/srce/src/kmet/srce/srce.md) §5/§10.
+from Cordis: [`srce.md`](https://github.com/kmetia/srce/blob/master/src/kmet/srce/srce.md) §5/§10.
 **New behavior attaches to a documented seam — a plugin row, a service, an
 event, or the extension contract — not to a branch in the entry or a new
 global.**
@@ -25,13 +25,13 @@ global.**
 | Area | Authoritative reference |
 |------|-------------------------|
 | Application layout, composition, services and contributor workflow | [`docs/architecture.md`](docs/architecture.md); open seams and declined options in [`modules/app/src/kmet/design.md`](modules/app/src/kmet/design.md) |
-| Kernel: ctx tree, services, inject, fibers, effects, events | usage: [`modules/srce/README.md`](modules/srce/README.md); contracts: [`modules/srce/src/kmet/srce/srce.md`](modules/srce/src/kmet/srce/srce.md) |
+| Kernel: ctx tree, services, inject, fibers, effects, events | [`srce`](https://github.com/kmetia/srce) — separate project; `../srce` in dev, pinned in `deps.edn` |
 | Composition: rows, bundles, profiles, patches, cards and mounting | [`modules/sklop/README.md`](modules/sklop/README.md) |
 | Agent efficiency benchmark (eval vs bash, prompt/guideline/tool variants) | [`scripts/bench/README.md`](scripts/bench/README.md) |
 | TUI, components, Hiccup, reactivity, input, and rendering | [`modules/tui/src/kmet/tui/tui.md`](modules/tui/src/kmet/tui/tui.md) |
 | Tk backend and its widget sample (`kmet.tk.*`, `kmet.gui-sample.*`) | [`modules/tk/src/kmet/tk/README.md`](modules/tk/src/kmet/tk/README.md) |
 | Extension contract (`kmet.extension` API, allowed namespaces, lifecycle) and authoring guide (layouts, loaders, deps, UI, testing) | [`modules/app/src/kmet/extension.md`](modules/app/src/kmet/extension.md); [`docs/extensions.md`](docs/extensions.md) |
-| Architecture lineage and pi alignment | [`design.md`](modules/app/src/kmet/design.md) § Prior art: DSH; [`modules/srce/src/kmet/srce/srce.md`](modules/srce/src/kmet/srce/srce.md); [`docs/pi-alignment.md`](docs/pi-alignment.md) |
+| Architecture lineage and pi alignment | [`design.md`](modules/app/src/kmet/design.md) § Prior art: DSH; [`srce.md`](https://github.com/kmetia/srce/blob/master/src/kmet/srce/srce.md); [`docs/pi-alignment.md`](docs/pi-alignment.md) |
 | Loader design and backends | [`loader`](https://github.com/kmetia/loader) — separate project; `../loader` in dev, pinned in `deps.edn` |
 | Jolt provider scaffolding and host integration | [`jolt/src/jolt/kmet/README.md`](jolt/src/jolt/kmet/README.md) |
 | Platforms (Linux, macOS, Windows, WSL, Termux), building and distribution | [`docs/building.md`](docs/building.md) |
@@ -51,10 +51,11 @@ user-facing); implementation notes sit beside their source. `perf.md`,
 - `bb clean` removes build output and caches (`--dry-run` lists them;
   `jolt clean` is the equivalent); `bb tasks` lists summaries and
   `bb <task> --help` full usage.
-- The loader, reakt and hikap (`kmet.loader.*`, `kmet.reakt.*`,
-  `kmet.hikap.*`) are separate projects. Development uses the sibling
-  `../loader`, `../reakt` and `../hikap` checkouts: `bb` and the Jolt tasks
-  resolve them from `bb.edn`, the JVM dev aliases from `deps.edn`'s `:dev`;
+- The loader, reakt, hikap and srce (`kmet.loader.*`, `kmet.reakt.*`,
+  `kmet.hikap.*`, `kmet.srce.*`) are separate projects. Development uses the
+  sibling `../loader`, `../reakt`, `../hikap` and `../srce` checkouts: `bb` and
+  the Jolt tasks resolve them from `bb.edn`, the JVM dev aliases from
+  `deps.edn`'s `:dev`;
   direct `jolt` invocations that read `deps.edn` take `-A:dev` (for example
   `jolt -A:dev nrepl-server 7802`). The default `deps.edn` coordinates are the
   pinned GitHub commits.

@@ -6,7 +6,7 @@ Implementation-specific references live beside their namespaces rather than in
 the user-facing `docs/` directory: see
 [`modules/tui/src/kmet/tui/tui.md`](../modules/tui/src/kmet/tui/tui.md),
 [`loader.md`](https://github.com/kmetia/loader/blob/master/src/kmet/loader/loader.md),
-[`modules/srce/src/kmet/srce/srce.md`](../modules/srce/src/kmet/srce/srce.md),
+[`srce.md`](https://github.com/kmetia/srce/blob/master/src/kmet/srce/srce.md),
 [`modules/app/src/kmet/extension.md`](../modules/app/src/kmet/extension.md), and
 [`pi-alignment.md`](pi-alignment.md). The generated composition catalog is
 [`composition.md`](composition.md); the app's design record — the open seams,
@@ -22,7 +22,6 @@ modules/
 ├── libs/   — generic, self-contained helpers        (kmet.libs.*)
 ├── tui/    — terminal backend over hikap            (kmet.tui.*; tui.md)
 ├── ai/     — provider/auth library                  (kmet.ai.*)
-├── srce/   — the kernel: ctx, services, fibers      (kmet.srce.*; srce.md)
 ├── sklop/  — composition: rows, bundles, profiles    (kmet.sklop.*; sklop README)
 ├── app/    — the application + its TUI front end   (kmet.app.*, kmet.ui.*)
 └── tk/     — Tk backend + widget sample            (kmet.tk.*, kmet.gui-sample.*)
@@ -30,22 +29,22 @@ modules/
 
 `modules.edn` is the workspace manifest: it lists the module trees and the
 extra source roots, and the tasks read it instead of repeating the paths
-(`kmet.tasks.modules`). The loader, reakt and hikap are the exceptions:
-`kmet.loader.*`, `kmet.reakt.*` and `kmet.hikap.*` are separate projects,
-pinned in `deps.edn` and checked out as `../loader`, `../reakt` and `../hikap`
-in dev.
+(`kmet.tasks.modules`). The loader, reakt, hikap and srce are the exceptions:
+`kmet.loader.*`, `kmet.reakt.*`, `kmet.hikap.*` and `kmet.srce.*` are separate
+projects, pinned in `deps.edn` and checked out as `../loader`, `../reakt`,
+`../hikap` and `../srce` in dev.
 
 A module's namespaces sit under the root it is
-named for: `libs` holds `kmet.libs.*`, `srce` holds `kmet.srce.*`. `app` is the
+named for: `libs` holds `kmet.libs.*`, `ai` holds `kmet.ai.*`. `app` is the
 one module with two prefixes: its business tree is `kmet.app.*`, and
 `kmet.ui.*` is the TUI front end that merged into it (it was the `ui` module).
 
 Ranks are the manifest's layering guard (`kmet.test-module-deps`): a module
 may depend only on strictly lower-ranked ones, and a *namespace* may require
-only a file in a strictly lower-ranked module — `libs` 0,
-`ai`/`srce` 1, `tui`/`tk`/`sklop` 2, `app` 3. The external `kmet.loader.*`,
-`kmet.reakt.*` and `kmet.hikap.*` libraries are pinned below all of them. A
-leaf that both the app
+only a file in a strictly lower-ranked module — `libs` 0, `ai` 1,
+`tui`/`tk`/`sklop` 2, `app` 3. The external `kmet.loader.*`, `kmet.reakt.*`,
+`kmet.hikap.*` and `kmet.srce.*` libraries are pinned below all of them. A leaf
+that both the app
 and the components read therefore lives in `libs`, never in either of them:
 `kmet.libs.theme` (the world load reads it, the widgets style from it) and
 `kmet.libs.fuzzy` (the selectors and the `--list-models` filter) are the two.
@@ -335,7 +334,7 @@ of silently losing a message. [`serve.md`](serve.md) is the connection rules;
 ## The event bus
 
 One table. The listener table and the six non-awaiting dispatch modes are the
-kernel's ([`srce.md`](../modules/srce/src/kmet/srce/srce.md) §5);
+kernel's ([`srce.md`](https://github.com/kmetia/srce/blob/master/src/kmet/srce/srce.md) §5);
 `kmet.app.events` owns what a kernel must not know — the vocabulary and the
 owner a registration carries — and `kmet.app.wire` the projection a headless
 consumer reads. `events/on!` registers through `srce/on` with the registrant's

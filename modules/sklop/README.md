@@ -43,7 +43,7 @@ Errors raised by the language are `:kmet.sklop/*`.
 Consume it from this repository as a path dependency, next to the kernel:
 
 ```clojure
-{:deps {kmet/srce  {:local/root "/path/to/kmet-agent/modules/srce"}
+{:deps {kmet/srce  {:local/root "/path/to/srce"}
         kmet/libs  {:local/root "/path/to/kmet-agent/modules/libs"}
         kmet/sklop {:local/root "/path/to/kmet-agent/modules/sklop"}}}
 ```
