@@ -176,12 +176,15 @@
 (t/deftest test-the-eval-tool-passes-strings
   (let [env (support/eval-ctx)
         path "tool-strings.py"
-        content "pattern = r\"\\s+\"\n"
-        result (support/call-tool env "eval"
-                                  {:code (str "(write " (pr-str path) " ($ \"file\"))")
-                                   :strings {"file" content}})]
-    (t/is (not (:is-error result)) (:content result))
-    (t/is (= content (slurp (str (fs/path (:cwd env) path)))))))
+        content "pattern = r\"\\s+\"\n"]
+    ;; The second map is what JSON decoding produces: keyword object keys.
+    (doseq [strings [{"file" content}
+                     {:file content}]]
+      (let [result (support/call-tool env "eval"
+                                      {:code (str "(write " (pr-str path) " ($ \"file\"))")
+                                       :strings strings})]
+        (t/is (not (:is-error result)) (:content result))
+        (t/is (= content (slurp (str (fs/path (:cwd env) path)))))))))
 
 (t/deftest test-the-eval-tool-declares-strings
   (let [params (:parameters eval-tool/definition)]

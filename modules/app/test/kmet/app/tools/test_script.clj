@@ -136,6 +136,17 @@
         (t/is (str/includes? (ex-message error) "must be a string")))
       (finally (fs/delete-if-exists path)))))
 
+(t/deftest test-json-keywordized-strings-keep-their-exact-names
+  (let [s (kept-context)
+        name "dir/name with space:1"]
+    (t/is (= "restored"
+             (:content (run-in s {}
+                               (str "(core/emit ($ " (pr-str name) "))")
+                               {:strings {(keyword name) "restored"}}))))
+    (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"strings name must be a string"
+                            (run-in s {} "1" {:strings {1 "x"}})))))
+
 (t/deftest test-core-grep-argument-error-is-actionable
   (let [s (kept-context)
         result (run-in s {} "(core/grep {:path \".\" :pattern \"needle\"})")]

@@ -342,10 +342,14 @@
 (t/deftest test-codemode-strings-side-channel
   (with-cwd-dir
     (fn [dir]
-      (let [content "pattern = r\"\\s+\"\n"
-            r (run "(write \"a.py\" ($ \"file\"))" {:strings {"file" content}})]
-        (t/is (not (:is-error r)) (:content r))
-        (t/is (= content (slurp (str dir "/a.py")))))))
+      (let [content "pattern = r\"\\s+\"\n"]
+        (let [r (run "(write \"a.py\" ($ \"file\"))" {:strings {"file" content}})]
+          (t/is (not (:is-error r)) (:content r))
+          (t/is (= content (slurp (str dir "/a.py")))))
+        ;; JSON decoding keywordizes object keys; the tool restores them.
+        (let [r (run "(write \"a.py\" ($ \"file\"))" {:strings {:file content}})]
+          (t/is (not (:is-error r)) (:content r))
+          (t/is (= content (slurp (str dir "/a.py"))))))))
   (let [r (run "($ \"x\")")]
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "carried no strings")))

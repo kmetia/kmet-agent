@@ -556,7 +556,9 @@ probe and no real use, and is gone;
   backslashes, quotes or newlines avoid nested escaping. `$` is a core verb
   (also `core/$`), the map is call-local, and a kept eval definition sees the
   current call's map through the call state. A missing name lists the keys the
-  call carries; non-string names and values are refused.
+  call carries. JSON decoding keywordizes nested object keys, so the call
+  boundary restores keyword names to their exact strings before validation;
+  any other non-string name, and any non-string value, is refused.
 - **Ordering.** The tool declares no execution mode, so its calls use the
   default parallel batch. `codemode` code is not part of eval's definition
   classifier: a script's top-level `def` is call-local, so the batch stays

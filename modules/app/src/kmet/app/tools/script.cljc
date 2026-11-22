@@ -1286,6 +1286,18 @@
           (eval-with-io out-w err-w f)
           (f))))))
 
+(defn- restore-string-names
+  "Restore the exact names JSON decoding keywordized in STRINGS: a
+   keyword prints as one colon plus its original name, so stripping it
+   is lossless (slashes, spaces, and leading colons included). Other
+   non-string keys pass through for `validated-strings` to refuse."
+  [strings]
+  (if (map? strings)
+    (reduce-kv (fn [m k v]
+                 (assoc m (if (keyword? k) (subs (str k) 1) k) v))
+               {} strings)
+    strings))
+
 (defn- validated-strings
   "The call's STRINGS map — a name to exact text — or nil when absent. The
    tool schemas check provider input; this guard keeps direct script callers on
@@ -2182,7 +2194,7 @@
      :source-namespaces (or source-namespaces {})
      :disabled-verbs (set disabled-verbs)
      :session-recall session-recall
-     :strings (validated-strings strings)
+     :strings (validated-strings (restore-string-names strings))
      :abort abort
      :emit-events emit-events
      :event-seq event-seq
