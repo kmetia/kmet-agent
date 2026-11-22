@@ -1005,8 +1005,12 @@
     (if (and (some? old-text) (some? new-text))
       {:old-text (str old-text)
        :new-text (str new-text)}
-      (throw (ex-info "edit expects [old new] pairs or {:old-text ... :new-text ...} maps"
-                      {:type :edit-error :edit edit})))))
+      (throw (ex-info
+              (str "edit expects [old new] pairs or {:old-text ... :new-text ...} maps; got "
+                   (preview (pr-str edit))
+                   (when map-edit?
+                     ". A map must use :old-text and :new-text keys"))
+              {:type :edit-error :edit edit})))))
 
 (defn edit-result
   "Replace OLD-TEXT with NEW-TEXT in PATH through the edit tool's

@@ -67,6 +67,46 @@
       (t/is (true? (:found match)))
       (t/is (true? (:used-fuzzy? match))))))
 
+(t/deftest test-edit-errors-name-lines-and-identical-text
+  (t/testing "duplicate matches name every line"
+    (let [error (try
+                  (ed/apply-edits-to-normalized-content
+                   "one\nx\nthree\nx\n"
+                   [{:old-text "x" :new-text "y"}] "f")
+                  nil
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (t/is (str/includes? (ex-message error) "at lines 2, 4"))
+      (t/is (= :edit-error (:type (ex-data error))))))
+  (t/testing "not found names the file size and the first matching line"
+    (let [error (try
+                  (ed/apply-edits-to-normalized-content
+                   "one\nalpha\nbeta\n"
+                   [{:old-text "alpha\ngamma" :new-text "x"}] "f")
+                  nil
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (t/is (str/includes? (ex-message error) "(3 lines)"))
+      (t/is (str/includes? (ex-message error) "first line appears at line 2"))
+      (t/is (str/includes? (ex-message error) "alpha"))))
+  (t/testing "no change says old and new are identical"
+    (let [error (try
+                  (ed/apply-edits-to-normalized-content
+                   "one\nalpha\nbeta\n"
+                   [{:old-text "alpha" :new-text "alpha"}] "f")
+                  nil
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (t/is (str/includes? (ex-message error) "oldText and newText are identical"))
+      (t/is (str/includes? (ex-message error) "at line 2"))))
+  (t/testing "multi-edit errors name the edit index"
+    (let [error (try
+                  (ed/apply-edits-to-normalized-content
+                   "one\nalpha\nbeta\n"
+                   [{:old-text "alpha" :new-text "A"}
+                    {:old-text "missing" :new-text "x"}] "f")
+                  nil
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (t/is (str/includes? (ex-message error) "edits[1]"))
+      (t/is (str/includes? (ex-message error) "(3 lines)")))))
+
 (t/deftest test-apply-edits-to-normalized-content
   (t/testing "exact apply keeps the content's trailing newline"
     (t/is (= "alpha\nBETA\n"

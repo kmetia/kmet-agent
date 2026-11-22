@@ -40,6 +40,24 @@
                                          {:path dir
                                           :exclude (str (fs/path dir "target"))})))))
 
+(t/deftest test-glob-accepts-absolute-patterns
+  (let [dir (fixture {"root.clj" ""
+                      "src/a.clj" ""
+                      "src/b.edn" ""})]
+    (t/is (= #{"root.clj" "src/a.clj"}
+             (set (:paths (search/glob dir (str (fs/path dir "**" "*.clj")) nil)))))
+    (t/is (= ["src/a.clj"]
+             (:paths (search/glob dir (str (fs/path dir "src" "*.clj")) nil))))
+    (t/is (= ["root.clj"]
+             (:paths (search/glob dir (str (fs/path dir "root.clj")) nil))))
+    (t/is (= #{"root.clj" "src/a.clj" "src/b.edn"}
+             (set (:paths (search/glob dir (str dir "/") nil))))
+          "a trailing separator lists the directory's files")
+    (t/is (= ["src/a.clj"]
+             (:paths (search/glob dir (str (fs/path dir "src" "*.clj"))
+                                  {:path (str (fs/path dir "missing"))})))
+          ":path is ignored for an absolute PATTERN")))
+
 (t/deftest test-grep-matches-options-and-path-display
   (let [dir (fixture {"src/a.clj" "(def needle 1)\n(needle)\n"
                       "src/b.edn" "needle\n"
@@ -60,6 +78,20 @@
     (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
                             (search/grep dir "needle"
                                          {:path (str (fs/path dir "missing"))})))))
+
+(t/deftest test-grep-argument-and-regex-errors-are-clear
+  (let [dir (fixture {"a.txt" "needle\n"})]
+    (let [error (try (search/grep dir {:path dir :pattern "needle"} nil)
+                     (catch clojure.lang.ExceptionInfo e e))]
+      (t/is (instance? clojure.lang.ExceptionInfo error))
+      (t/is (= :kmet.app.tools.file-search/bad-arguments (:type (ex-data error))))
+      (t/is (str/includes? (ex-message error) "PATTERN first"))
+      (t/is (str/includes? (ex-message error) ":pattern")))
+    (let [error (try (search/grep dir "(" {:path dir})
+                     (catch clojure.lang.ExceptionInfo e e))]
+      (t/is (instance? clojure.lang.ExceptionInfo error))
+      (t/is (= :kmet.app.tools.file-search/invalid-regex (:type (ex-data error))))
+      (t/is (str/includes? (ex-message error) "Invalid grep regex")))))
 
 (t/deftest test-grep-skips-binary-and-oversized-files
   (let [dir (fixture {"a.txt" "needle\n"
@@ -112,15 +144,18 @@
     (t/is (= ["project space/code/~notes.txt"]
              (:paths (search/glob dir "~notes.txt" {:path base}))))))
 
-(t/deftest test-search-patterns-must-be-relative-on-every-platform
-  (let [dir (fixture {"a.txt" "needle\n"})]
-    (doseq [pattern ["/**/*.txt" "C:/*.txt" "c:\\src\\?.txt"
+(t/deftest test-search-filters-must-stay-relative
+  (let [dir (fixture {"a.txt" "needle\n"})
+        absolute (str (fs/path dir "**" "*.txt"))]
+    (doseq [pattern [absolute "/**/*.txt" "C:/*.txt"
                      "\\\\server\\share\\**\\*.txt" "//server/share/**/*.txt"
                      "\\root\\*.txt" "C:*.txt" "~" "~/*.txt" "~\\*.txt"]
             [option run] [["PATTERN" #(search/glob dir pattern nil)]
                           [":glob" #(search/grep dir "needle" {:glob pattern})]
                           [":exclude" #(search/glob dir "**/*" {:exclude pattern})]
-                          [":exclude" #(search/grep dir "needle" {:exclude [pattern]})]]]
+                          [":exclude" #(search/grep dir "needle" {:exclude [pattern]})]]
+            :when (or (not= option "PATTERN")
+                      (not (fs/absolute? pattern)))]
       (let [error (try (run) nil
                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
         (t/is (= {:type :kmet.app.tools.file-search/absolute-pattern

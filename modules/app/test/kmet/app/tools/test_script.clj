@@ -100,6 +100,13 @@
     (t/is (str/includes? (pr-str (:arglists (get help "clj/replace-sexp"))) "match_form"))
     (t/is (str/includes? (pr-str (:arglists (get help "clj/paren-repair"))) "format"))))
 
+(t/deftest test-core-grep-argument-error-is-actionable
+  (let [s (kept-context)
+        result (run-in s {} "(core/grep {:path \".\" :pattern \"needle\"})")]
+    (t/is (:is-error result))
+    (t/is (str/includes? (:content result) "PATTERN first"))
+    (t/is (str/includes? (:content result) ":pattern"))))
+
 (t/deftest test-core-grep-and-glob-use-the-file-search-implementation
   (let [s (kept-context)
         dir (str (fs/absolutize (test-tmp/temp-dir! "test-core-search-")))]
@@ -359,7 +366,13 @@
     (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"edit expects"
                             (script/edit-text "unused.txt" [{:old-text "a"}] nil)))
     (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"edit expects"
-                            (script/edit-text "unused.txt" [{:new-text "b"}] nil)))))
+                            (script/edit-text "unused.txt" [{:new-text "b"}] nil))))
+  (t/testing "the error names the accepted keys and the offending value"
+    (let [error (try (script/edit-text "unused.txt" [{"a" "b"}] nil)
+                     (catch clojure.lang.ExceptionInfo e e))]
+      (t/is (str/includes? (ex-message error) ":old-text"))
+      (t/is (str/includes? (ex-message error) ":new-text"))
+      (t/is (str/includes? (ex-message error) "{\"a\" \"b\"}")))))
 
 (t/deftest test-bash-options-must-be-positive-integers
   (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"positive integer"

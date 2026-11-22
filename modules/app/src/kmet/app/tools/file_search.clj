@@ -49,7 +49,11 @@
   [pattern option]
   (let [pattern (str pattern)]
     (when (re-find #"^(?:[/\\]|[A-Za-z]:|~(?:[/\\]|$))" pattern)
-      (throw (ex-info (str option " must be relative to :path")
+      (throw (ex-info (str option " must be relative to :path"
+                           (when (= option ":glob")
+                             "; use :path for an absolute search root")
+                           (when (= option ":exclude")
+                             "; exclude patterns are relative to the search root"))
                       {:type ::absolute-pattern
                        :option option
                        :pattern pattern})))
@@ -123,22 +127,64 @@
        (remove #(glob/matches? excludes (relative-path base %)))
        (sort-by str)))
 
+(defn- glob-meta-index
+  "Index of the first glob metacharacter in PATTERN, or nil."
+  [pattern]
+  (loop [i 0]
+    (when (< i (count pattern))
+      (if (contains? #{\* \? \[ \{} (nth pattern i))
+        i
+        (recur (inc i))))))
+
+(defn- pattern-base
+  "BASE with a trailing `/` for a root, or unchanged for a named directory."
+  [base]
+  (if (or (empty? base) (re-matches #"[A-Za-z]:" base))
+    (str base "/")
+    base))
+
+(defn- absolute-pattern-target
+  "Split an absolute PATTERN into {:path base :pattern relative}, or nil when
+   PATTERN is relative. The base is the directory before the first glob
+   metacharacter; a literal absolute path uses its parent and file name."
+  [pattern]
+  (let [pattern (str/replace (str pattern) fs/file-separator "/")
+        trailing? (and (> (count pattern) 1) (str/ends-with? pattern "/"))
+        trimmed (if trailing? (subs pattern 0 (dec (count pattern))) pattern)
+        meta-index (glob-meta-index trimmed)]
+    (when (fs/absolute? pattern)
+      (cond
+        (= "/" pattern) {:path "/" :pattern "**"}
+        trailing? {:path (pattern-base trimmed) :pattern "**"}
+        meta-index
+        (when-let [slash (str/last-index-of trimmed "/" meta-index)]
+          {:path (pattern-base (subs trimmed 0 slash))
+           :pattern (subs trimmed (inc slash))})
+        :else
+        (when-let [slash (str/last-index-of trimmed "/")]
+          {:path (pattern-base (subs trimmed 0 slash))
+           :pattern (subs trimmed (inc slash))})))))
+
 (defn glob
   "List files matching PATTERN. OPTS: :path (default: current directory),
    :max (default 500), :exclude (glob or seq of globs relative to :path),
    :gitignore? (default true), :stat (when true, add :entries with the same
-   count and order as :paths). PATTERN is relative to :path, which may be
-   absolute or `~`. Returns {:paths :total :truncated?}; with :stat also
+   count and order as :paths). PATTERN is relative to :path, or absolute; an
+   absolute PATTERN supplies its own base and :path is ignored. Returns
+   {:paths :total :truncated?}; with :stat also
    {:entries [{:path :size :modified}]}, modified in epoch milliseconds and nil
    when the stat fails. Paths are relative to CWD, `~/...` under home, or
    absolute, `/`-separated."
   [cwd pattern {:keys [path max exclude gitignore? stat]
                 :or {path "." max default-max-paths gitignore? true}}]
-  (let [base (resolve-path cwd path)
+  (let [{:keys [path pattern]}
+        (or (absolute-pattern-target pattern)
+            {:path path
+             :pattern (relative-pattern pattern "PATTERN")})
+        base (resolve-path cwd path)
         _ (when-not (fs/directory? base)
             (throw (ex-info (str "glob path is not a directory: " path)
                             {:type ::not-directory :path path})))
-        pattern (relative-pattern pattern "PATTERN")
         max (positive-int max default-max-paths)
         matcher (glob/compile-matcher pattern)
         excludes (compile-excludes exclude)
@@ -216,7 +262,9 @@
    :path), :ignore-case?, :max (default 100), :max-file-bytes (default 5 MiB),
    :exclude (glob or seq of globs relative to :path), :gitignore? (default
    true), :context (default 0; lines shown before and after each match; a
-   negative count means 0). Returns {:matches [{:path :line :text}]
+   negative count means 0). PATTERN must be the first argument; a map there is
+   rejected with the call shape, and an invalid regex is reported with the
+   pattern. Returns {:matches [{:path :line :text}]
    :skipped [{:path :reason}] :skipped-count int :truncated? bool :files int};
    with :context > 0 also :lines, the match and context lines as
    `path:line: text` and `path-line- text`, ordered by file/line and
@@ -229,13 +277,26 @@
                 :or {path "." glob "**/*" max default-max-matches
                      max-file-bytes default-max-file-bytes gitignore? true
                      context 0}}]
+  (when (map? pattern)
+    (throw (ex-info
+            (str "grep expects a regex PATTERN first, then OPTS: "
+                 "(grep \"needle\" {:path \".\"}). Got a map as PATTERN"
+                 (when (contains? pattern :pattern)
+                   "; did you mean to pass its :pattern value?"))
+            {:type ::bad-arguments :pattern pattern})))
   (let [base (resolve-path cwd path)
         directory? (fs/directory? base)
         _ (when-not (or directory? (fs/regular-file? base))
             (throw (ex-info (str "grep path not found: " path)
                             {:type ::not-found :path path})))
         pattern (str pattern)
-        re (re-pattern (if ignore-case? (str "(?i)" pattern) pattern))
+        re (try
+             (re-pattern (if ignore-case? (str "(?i)" pattern) pattern))
+             (catch Exception e
+               (throw (ex-info
+                       (str "Invalid grep regex " (pr-str pattern) ": "
+                            (ex-message e))
+                       {:type ::invalid-regex :pattern pattern}))))
         glob (relative-pattern glob ":glob")
         matcher (glob/compile-matcher glob)
         excludes (compile-excludes exclude)

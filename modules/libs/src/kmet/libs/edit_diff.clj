@@ -325,16 +325,6 @@
   [content old-text]
   (fuzzy-find-text-with normalize-for-fuzzy-match content old-text))
 
-(defn- count-occurrences
-  "Pi: countOccurrences — number of (fuzzy) matches of old-text in content."
-  [normalize content old-text]
-  (let [fuzzy-content (normalize content)
-        fuzzy-old (normalize old-text)]
-    (- (count (str/split fuzzy-content
-                         (re-pattern (java.util.regex.Pattern/quote fuzzy-old))
-                         -1))
-       1)))
-
 ;; ─── Replacement application (pi: edit-diff.ts applyReplacements) ──────────
 
 (defn- split-lines-with-endings
@@ -439,6 +429,137 @@
 
 ;; ─── Edit application (pi: applyEditsToNormalizedContent) ──────────────────
 
+(defn- line-number-at
+  "1-based line number of INDEX in CONTENT."
+  [content index]
+  (inc (count (filter #(= \newline %) (subs content 0 index)))))
+
+(defn- line-count
+  "Number of lines in CONTENT."
+  [content]
+  (count (str/split-lines content)))
+
+(defn- preview
+  "TEXT trimmed and shortened for an error message."
+  [text]
+  (let [text (str/trim (str text))]
+    (if (> (count text) 100)
+      (str (subs text 0 100) "...")
+      text)))
+
+(defn- occurrence-indices
+  "Start indices of non-overlapping occurrences of OLD-TEXT in CONTENT,
+   normalized first so fuzzy matches report their real positions."
+  [normalize content old-text]
+  (let [content (normalize content)
+        old-text (normalize old-text)]
+    (if (empty? old-text)
+      []
+      (let [step (count old-text)]
+        (loop [from 0 acc []]
+          (if-let [index (str/index-of content old-text from)]
+            (recur (+ index step) (conj acc index))
+            acc))))))
+
+(defn- first-line-hint
+  "Where the first non-blank line of OLD-TEXT occurs in CONTENT, or nil."
+  [normalize content old-text]
+  (let [content (normalize content)
+        line (first (remove str/blank? (str/split-lines (normalize old-text))))]
+    (when (and line (not (empty? line)))
+      (when-let [index (str/index-of content line)]
+        {:line (line-number-at content index)
+         :text (preview line)}))))
+
+(defn- not-found-message
+  "The not-found error for PATH, naming the file size and the first oldText
+   line when that line still occurs."
+  [path index single? content old-text normalize]
+  (let [hint (first-line-hint normalize content old-text)
+        subject (if single? "the exact text" (str "edits[" index "]"))
+        old-name (if single? "old text" "oldText")]
+    (str "Could not find " subject " in " path " (" (line-count content)
+         " lines)."
+         (when hint
+           (str " Its first line appears at line " (:line hint) ": "
+                (pr-str (:text hint)) "."))
+         " The " old-name " must match exactly including all whitespace and newlines.")))
+
+(defn- duplicate-message
+  "The duplicate error for PATH, naming every occurrence's line (at most 10,
+   with the rest counted)."
+  [path index single? content indices]
+  (let [lines (mapv #(line-number-at content %) indices)
+        shown (take 10 lines)
+        more (- (count lines) (count shown))
+        subject (if single? "the text" (str "edits[" index "]"))
+        old-name (if single? "The text" "Each oldText")]
+    (str "Found " (count indices) " occurrences of " subject " in " path
+         " at lines " (str/join ", " shown)
+         (when (pos? more) (str " (and " more " more)"))
+         ". " old-name
+         " must be unique. Include more surrounding lines to make it unique.")))
+
+(defn- no-change-message
+  "The no-change error for PATH, naming identical edits and their lines."
+  [path single? content matched identical-indices]
+  (let [identical (set identical-indices)
+        lines (->> matched
+                   (filter #(contains? identical (:edit-index %)))
+                   (map #(line-number-at content (:match-index %)))
+                   distinct
+                   vec)]
+    (if single?
+      (str "No changes made to " path
+           (if (seq identical-indices)
+             (str ": oldText and newText are identical"
+                  (when-let [line (first lines)] (str " at line " line)))
+             ": the replacement produces content identical to the original")
+           ". Change newText or remove the edit.")
+      (str "No changes made to " path ": "
+           (if (seq identical-indices)
+             (str "edits " (str/join ", " identical-indices)
+                  " have identical oldText and newText")
+             "the replacements produce content identical to the original")
+           ". Change newText or remove those edits."))))
+
+(defn- match-one-edit
+  "Match EDIT at index I against REPLACEMENT-BASE, or throw the not-found or
+   duplicate :edit-error. NORMALIZE is the memoized fuzzy normalizer."
+  [normalize replacement-base edit i single? path]
+  (let [match (fuzzy-find-text-with normalize replacement-base (:old-text edit))
+        indices (occurrence-indices normalize replacement-base (:old-text edit))]
+    (if-not (:found match)
+      (throw (ex-info
+              (not-found-message path i single? replacement-base
+                                 (:old-text edit) normalize)
+              {:type :edit-error}))
+      (do
+        (when (> (count indices) 1)
+          (throw (ex-info
+                  (duplicate-message path i single? replacement-base indices)
+                  {:type :edit-error})))
+        {:edit-index i
+         :match-index (:index match)
+         :match-length (:match-length match)
+         :new-text (:new-text edit)}))))
+
+(defn- check-overlaps!
+  "Throw when MATCHED edits overlap; return nil."
+  [matched path]
+  (loop [i 1]
+    (when (< i (count matched))
+      (let [prev (nth matched (dec i))
+            curr (nth matched i)]
+        (when (> (+ (:match-index prev) (:match-length prev))
+                 (:match-index curr))
+          (throw (ex-info
+                  (str "edits[" (:edit-index prev) "] and edits[" (:edit-index curr)
+                       "] overlap in " path
+                       ". Merge them into one edit or target disjoint regions.")
+                  {:type :edit-error}))))
+      (recur (inc i)))))
+
 (defn apply-edits-to-normalized-content
   "Pi: applyEditsToNormalizedContent — apply one or more exact-text
    replacements to LF-normalized content. Tries exact match first, then fuzzy
@@ -453,14 +574,13 @@
         ;; otherwise re-normalize the whole content each time (NFKC + the
         ;; char-class replaces are the cost — jolt-bugs.md tracks it).
         normalize (memoize normalize-for-fuzzy-match)
-        fuzzy-find (fn [content old-text]
-                     (fuzzy-find-text-with normalize content old-text))
-        count-fuzzy (fn [content old-text]
-                      (count-occurrences normalize content old-text))
         normalized-edits (mapv (fn [e]
                                  {:old-text (normalize-to-lf (:old-text e))
                                   :new-text (normalize-to-lf (:new-text e))})
-                               edits)]
+                               edits)
+        identical (keep-indexed (fn [i e]
+                                  (when (= (:old-text e) (:new-text e)) i))
+                                normalized-edits)]
     ;; Empty oldText validation (pi: getEmptyOldTextError)
     (doseq [[i e] (map-indexed vector normalized-edits)]
       (when (zero? (count (:old-text e)))
@@ -471,53 +591,18 @@
                 {:type :edit-error}))))
     (let [used-fuzzy? (boolean
                        (some :used-fuzzy?
-                             (map #(fuzzy-find normalized-content (:old-text %))
+                             (map #(fuzzy-find-text-with normalize normalized-content
+                                                         (:old-text %))
                                   normalized-edits)))
           replacement-base (if used-fuzzy?
                              (normalize normalized-content)
                              normalized-content)
-          matched (loop [i 0 acc []]
-                    (if (>= i total)
-                      (vec (sort-by :match-index acc))
-                      (let [edit (nth normalized-edits i)
-                            match (fuzzy-find replacement-base (:old-text edit))]
-                        (if-not (:found match)
-                          ;; Pi: getNotFoundError
-                          (throw (ex-info
-                                  (if single?
-                                    (str "Could not find the exact text in " path
-                                         ". The old text must match exactly including all whitespace and newlines.")
-                                    (str "Could not find edits[" i "] in " path
-                                         ". The oldText must match exactly including all whitespace and newlines."))
-                                  {:type :edit-error}))
-                          (let [occurrences (count-fuzzy replacement-base (:old-text edit))]
-                            (when (> occurrences 1)
-                              ;; Pi: getDuplicateError
-                              (throw (ex-info
-                                      (if single?
-                                        (str "Found " occurrences " occurrences of the text in " path
-                                             ". The text must be unique. Please provide more context to make it unique.")
-                                        (str "Found " occurrences " occurrences of edits[" i "] in " path
-                                             ". Each oldText must be unique. Please provide more context to make it unique."))
-                                      {:type :edit-error})))
-                            (recur (inc i)
-                                   (conj acc {:edit-index i
-                                              :match-index (:index match)
-                                              :match-length (:match-length match)
-                                              :new-text (:new-text edit)})))))))
-          ;; Overlap detection (pi: adjacent matched edits must be disjoint)
-          _ (loop [i 1]
-              (when (< i (count matched))
-                (let [prev (nth matched (dec i))
-                      curr (nth matched i)]
-                  (when (> (+ (:match-index prev) (:match-length prev))
-                           (:match-index curr))
-                    (throw (ex-info
-                            (str "edits[" (:edit-index prev) "] and edits[" (:edit-index curr)
-                                 "] overlap in " path
-                                 ". Merge them into one edit or target disjoint regions.")
-                            {:type :edit-error})))
-                  (recur (inc i)))))
+          matched (->> (range total)
+                       (mapv #(match-one-edit normalize replacement-base
+                                              (nth normalized-edits %) % single? path))
+                       (sort-by :match-index)
+                       vec)
+          _ (check-overlaps! matched path)
           new-content (if used-fuzzy?
                         (apply-replacements-preserving-unchanged-lines
                          normalized-content replacement-base matched)
@@ -525,9 +610,6 @@
       ;; Pi: getNoChangeError
       (when (= normalized-content new-content)
         (throw (ex-info
-                (if single?
-                  (str "No changes made to " path
-                       ". The replacement produced identical content. This might indicate an issue with special characters or the text not existing as expected.")
-                  (str "No changes made to " path ". The replacements produced identical content."))
+                (no-change-message path single? replacement-base matched identical)
                 {:type :edit-error})))
       {:base-content normalized-content :new-content new-content})))
