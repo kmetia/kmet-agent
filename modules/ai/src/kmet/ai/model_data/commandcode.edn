@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-19T11:13:37Z"
+ :generated-at "2026-11-22T21:16:30Z"
  :provider {:id :commandcode
             :name "Command Code"
             :env-vars ["CMD_API_KEY"]
@@ -261,7 +261,7 @@
     :input [:text :image]
     :cost {:input 0.4 :output 3 :cache-read 0.04 :cache-write 0}
     :context-window 262144
-    :max-tokens 235929
+    :max-tokens 131072
     :compat {:thinking-format :openrouter}}
    "Qwen/Qwen3.8-Flash"
    {:id "Qwen/Qwen3.8-Flash"
@@ -1197,17 +1197,6 @@
     :context-window 256000
     :max-tokens 471859
     :compat {:thinking-format :openrouter}}
-   "thinkingmachines/inkling-2-small:free"
-   {:id "thinkingmachines/inkling-2-small:free"
-    :name "Inkling 2 Small"
-    :provider :commandcode
-    :api :openai-completions
-    :base-url "https://api.commandcode.ai/provider/v1"
-    :reasoning false
-    :input [:text]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 32768}
    "thinkingmachines/inkling-small"
    {:id "thinkingmachines/inkling-small"
     :name "Inkling Small"

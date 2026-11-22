@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-20T08:42:39Z"
+ :generated-at "2026-11-22T21:16:30Z"
  :provider {:id :xai
             :name "xAI"
             :env-vars ["XAI_API_KEY"]
@@ -59,25 +59,6 @@
            :cache-write 0}
     :context-window 500000
     :max-tokens 500000
-    :compat {:supports-store false
-             :supports-developer-role false
-             :supports-reasoning-effort false
-             :supports-strict-mode true}}
-   "grok-build-0.1"
-   {:id "grok-build-0.1"
-    :name "Grok Build 0.1"
-    :provider :xai
-    :api :openai-completions
-    :base-url "https://api.x.ai/v1"
-    :reasoning true
-    :input [:text :image]
-    :cost {:input 1
-           :tiers [{:input 2 :input-tokens-above 200000 :output 4 :cache-read 0.4 :cache-write 0}]
-           :output 2
-           :cache-read 0.2
-           :cache-write 0}
-    :context-window 256000
-    :max-tokens 256000
     :compat {:supports-store false
              :supports-developer-role false
              :supports-reasoning-effort false

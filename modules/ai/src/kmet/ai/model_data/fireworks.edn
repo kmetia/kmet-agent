@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-19T11:11:44Z"
+ :generated-at "2026-11-22T21:16:30Z"
  :provider {:id :fireworks
             :name "Fireworks AI"
             :env-vars ["FIREWORKS_API_KEY"]
@@ -179,7 +179,7 @@
     :base-url "https://api.fireworks.ai/inference"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.21 :output 0.84 :cache-read 0.0042 :cache-write 0}
+    :cost {:input 0.15 :output 0.6 :cache-read 0.003 :cache-write 0}
     :context-window 1000000
     :max-tokens 384000
     :compat {:supports-long-cache-retention false
@@ -194,7 +194,7 @@
     :base-url "https://api.fireworks.ai/inference"
     :reasoning true
     :input [:text :image]
-    :cost {:input 2.4 :output 9.6 :cache-read 0.048 :cache-write 0}
+    :cost {:input 1.2 :output 4.8 :cache-read 0.024 :cache-write 0}
     :context-window 1000000
     :max-tokens 384000
     :compat {:supports-long-cache-retention false
@@ -209,7 +209,7 @@
     :base-url "https://api.fireworks.ai/inference"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.21 :output 0.84 :cache-read 0.0042 :cache-write 0}
+    :cost {:input 0.15 :output 0.6 :cache-read 0.003 :cache-write 0}
     :context-window 1000000
     :max-tokens 384000
     :compat {:supports-long-cache-retention false
@@ -239,7 +239,7 @@
     :base-url "https://api.fireworks.ai/inference"
     :reasoning true
     :input [:text]
-    :cost {:input 0.98 :output 3.08 :cache-read 0.182 :cache-write 0}
+    :cost {:input 0.7 :output 2.2 :cache-read 0.13 :cache-write 0}
     :context-window 1048573
     :max-tokens 262144
     :compat {:supports-long-cache-retention false
