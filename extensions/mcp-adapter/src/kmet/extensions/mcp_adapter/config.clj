@@ -275,6 +275,7 @@
        " {\"filesystem\" {:command \"npx\"\n"
        "                 :args [\"-y\" \"@modelcontextprotocol/server-filesystem\" \"/tmp\"]\n"
        "                 :lifecycle :lazy}        ;; :lazy | :eager | :keep-alive\n"
+       "  ;; \"exa\" {:url \"https://mcp.exa.ai/mcp\"} ;; keyless web search + fetch\n"
        "  ;; \"remote\" {:url \"https://mcp.example.com/mcp\"\n"
        "  ;;            :auth :bearer               ;; :bearer | :oauth | false\n"
        "  ;;            :bearer-token-env \"MY_TOKEN\" ;; or :bearer-token / :headers\n"
@@ -549,6 +550,9 @@
    {:id "context7" :name "Context7"
     :summary "Look up current library documentation and examples."
     :entry {:url "https://mcp.context7.com/mcp"}}
+   {:id "exa" :name "Exa"
+    :summary "Search the web and fetch pages with Exa."
+    :entry {:url "https://mcp.exa.ai/mcp"}}
    {:id "notion" :name "Notion"
     :summary "Search and work with your Notion workspace."
     :entry {:url "https://mcp.notion.com/mcp" :auth :oauth}}

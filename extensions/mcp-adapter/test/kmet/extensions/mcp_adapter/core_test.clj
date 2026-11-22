@@ -66,6 +66,25 @@
           (let [source ((get-in s [:eval-sources :mcp]) {})]
             (is (contains? (get-in source [:ns 'ext.mcp]) 'call))))))))
 
+(deftest setup-add-known-persists-the-preset-entry
+  (with-extension
+    nil
+    (fn [_api _state]
+      ;; the add-known callback closes over the extension's internal state,
+      ;; and tests the connection on a background thread; stub the connect
+      ;; so this stays offline
+      (let [state @@#'mcp/state-atom
+            _ (swap! state assoc :ensure-connected-fn (fn [_] nil))
+            callbacks (#'mcp/setup-callbacks state {:has-ui false})
+            exa (some #(when (= "exa" (:id %)) %) (:presets callbacks))
+            result ((:add-known callbacks) exa)]
+        (testing "the preset carries the entry the callback writes"
+          (is (= "https://mcp.exa.ai/mcp" (get-in exa [:entry :url]))))
+        (testing "adding a known server persists its entry"
+          (is (:ok result))
+          (is (= "https://mcp.exa.ai/mcp"
+                 (get-in (config/load-config) [:mcp-servers "exa" :url]))))))))
+
 (deftest mcp-command-completions-and-status
   (with-extension
     {:settings {:direct-tools false}

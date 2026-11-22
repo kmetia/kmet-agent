@@ -14,7 +14,8 @@
                 Enter adopts)
      :form    — labeled Input rows; Enter advances/submits, Esc goes back
    CALLBACKS (from the entry, over the extension state):
-     :presets          — [{:id :name :summary}]
+     :presets          — [{:id :name :summary :entry}] (entry is handed
+                        back to :add-known)
      :discover-imports — (fn [] -> [{:kind :path :server-count}])
      :add-known        — (fn [preset] -> {:ok bool :message str})
      :add-server       — (fn [name entry] -> {:ok bool :message str})
@@ -89,7 +90,7 @@
 (defn- actions-items
   []
   [{:label "Add a known server" :value :presets
-    :description "One-click presets (DeepWiki, Context7, Notion, GitHub, Chrome DevTools)"}
+    :description "One-click presets (DeepWiki, Context7, Exa, Notion, GitHub, Chrome DevTools)"}
    {:label "Add a custom server" :value :form
     :description "Command or URL, auth mode, then test the connection"}
    {:label "Import host configs" :value :imports

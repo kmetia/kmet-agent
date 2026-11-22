@@ -1020,8 +1020,7 @@
    buildSetupCallbacks): every write goes to the project config file, then
    the config is reloaded live; add-known/add-server test the connection."
   [state _ctx]
-  {:presets (mapv (fn [p] (select-keys p [:id :name :summary]))
-                  config/known-server-presets)
+  {:presets config/known-server-presets
    :discover-imports (fn [] (config/host-config-discoveries))
    :add-known
    (fn [preset]

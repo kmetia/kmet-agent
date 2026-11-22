@@ -161,6 +161,14 @@ does not advertise `code_challenge_methods_supported`).
 protected-resource probe, so a pinned configuration makes no discovery
 requests at all.
 
+## Known-server presets
+
+`/mcp setup` offers one-click entries for DeepWiki, Context7, Exa,
+Notion, GitHub and Chrome DevTools. The Exa preset is the hosted
+`https://mcp.exa.ai/mcp` server with no auth configured: its
+`web_search_exa` and `web_fetch_exa` tools work keylessly at Exa's free
+rate limit. To use your own Exa plan, add an `x-api-key` header yourself.
+
 ## The `mcp` tool
 
 ```

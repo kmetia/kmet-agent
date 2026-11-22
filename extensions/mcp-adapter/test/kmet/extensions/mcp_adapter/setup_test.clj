@@ -15,8 +15,7 @@
 (defn- callbacks
   "Callbacks recording what the panel asked for. OVERRIDES wins."
   [calls & [overrides]]
-  (merge {:presets (mapv (fn [p] (select-keys p [:id :name :summary]))
-                         config/known-server-presets)
+  (merge {:presets config/known-server-presets
           :discover-imports (fn [] [{:kind :cursor :path "/h/.cursor/mcp.json"
                                      :server-count 2}
                                     {:kind :vscode :path "/p/.vscode/mcp.json"

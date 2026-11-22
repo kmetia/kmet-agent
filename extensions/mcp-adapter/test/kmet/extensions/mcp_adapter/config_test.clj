@@ -295,9 +295,14 @@
           (is (true? (:script-mode definition))))))))
 
 (deftest known-server-presets
-  (testing "the presets the setup panel offers are the documented five"
-    (is (= #{"deepwiki" "context7" "notion" "github" "chrome-devtools"}
+  (testing "the presets the setup panel offers are the documented set"
+    (is (= #{"deepwiki" "context7" "exa" "notion" "github" "chrome-devtools"}
            (set (map :id config/known-server-presets)))))
+  (testing "the Exa preset is the hosted keyless endpoint"
+    (is (= "https://mcp.exa.ai/mcp"
+           (get-in (some #(when (= "exa" (:id %)) %)
+                         config/known-server-presets)
+                   [:entry :url]))))
   (testing "every preset carries a name, a summary and a usable entry"
     (doseq [{:keys [id name summary entry]} config/known-server-presets]
       (is (string? name) id)
