@@ -351,13 +351,14 @@ Execute a bash command in the current working directory. Returns stdout and stde
 
 **Label:** Codemode
 
-**Parameters:** `code` (required), `timeout`, `max-output-bytes`
+**Parameters:** `code` (required), `strings`, `timeout`, `max-output-bytes`
 
 **Description:**
 
 Fresh Clojure SCI sandbox with the active tools bridged in; definitions do not persist.
 Files: (read "p") or (read "p" {:offset 1 :limit N :footer false :tail N}) (1-based line numbers); (write "p" text); (edit "p" old new) or (edit "p" pairs).
 Shell: (bash "cmd" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.
+Dense text: pass strings {"name" "..."} beside the code and read ($ "name"); use it for file content, edit old/new, or a shell script carrying backslashes, quotes, or newlines. Values take JSON escaping only.
 Aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require needed. HTTP: (fetch "url" {:as :json}) -> {:status :headers :body}.
 Tools: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; @(tools/read {…}) is the per-tool shorthand, while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) lists the callable tools with their descriptions and parameters; (tools/describe "name") returns one declaration. Inner results never enter the conversation.
 Batch independent reads, commands, and tests into one call; emitted text and form values are interleaved in order (earlier values one line each, the last full).
@@ -408,7 +409,7 @@ Only the current session is searchable. One result is capped at 50 KB.
 
 **Label:** Eval
 
-**Parameters:** `code` (required), `timeout`, `max-output-bytes`
+**Parameters:** `code` (required), `strings`, `timeout`, `max-output-bytes`
 
 **Description:**
 

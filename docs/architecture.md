@@ -549,6 +549,14 @@ probe and no real use, and is gone;
   invisible to the next (`eval` is the
   persistent-context counterpart below), and redefining an injected var stays
   call-local.
+- **Dense text travels beside the code.** Both `eval` and `codemode` accept an
+  optional `strings` map of name to exact text; `($ "name")` reads it inside
+  the sandbox. Values arrive after JSON decoding and never pass through the
+  Clojure reader, so file bodies, edit old/new text and shell scripts carrying
+  backslashes, quotes or newlines avoid nested escaping. `$` is a core verb
+  (also `core/$`), the map is call-local, and a kept eval definition sees the
+  current call's map through the call state. A missing name lists the keys the
+  call carries; non-string names and values are refused.
 - **Ordering.** The tool declares no execution mode, so its calls use the
   default parallel batch. `codemode` code is not part of eval's definition
   classifier: a script's top-level `def` is call-local, so the batch stays

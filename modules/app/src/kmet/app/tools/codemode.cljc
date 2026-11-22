@@ -24,6 +24,7 @@
   (str "Fresh Clojure SCI sandbox with the active tools bridged in; definitions do not persist.\n"
        "Files: (read \"p\") or (read \"p\" {:offset 1 :limit N :footer false :tail N}) (1-based line numbers); (write \"p\" text); (edit \"p\" old new) or (edit \"p\" pairs).\n"
        "Shell: (bash \"cmd\" {:timeout N}) -> output + status; a nonzero exit is normal. OPTS: :cwd, :max-lines, :as :map.\n"
+       "Dense text: pass strings {\"name\" \"...\"} beside the code and read ($ \"name\"); use it for file content, edit old/new, or a shell script carrying backslashes, quotes, or newlines. Values take JSON escaping only.\n"
        "Aliases: fs, str, set, edn, walk, json (clojure.data.json), p (babashka.process); no require needed. HTTP: (fetch \"url\" {:as :json}) -> {:status :headers :body}.\n"
        "Tools: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; @(tools/read {…}) is the per-tool shorthand, while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) lists the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one declaration. Inner results never enter the conversation.\n"
        "Batch independent reads, commands, and tests into one call; emitted text and form values are interleaved in order (earlier values one line each, the last full).\n"
@@ -61,22 +62,26 @@
     "Batch independent reads, commands, and tests into one codemode call: compose shell commands with &&/; in one (bash ...), put several read/bash forms in one call, or emit a map of the values; not one call per file, command, or test suite."
     "Use codemode when a command's output would flood the context: compute inside the script and (emit) only the digest — counts, matches, the lines that matter — instead of chaining bash cat/head/rg; println is discarded (emit the digest, or end on the value you want reported)."
     "Inside a script prefer (slurp path), fs/* and (p/sh ...) for local work over the bash and read tools — they return values, not rendered text — and call a tool only when its result is too large to read (a web fetch, an MCP call), emitting the filtered part: @(tools/call \"name\" args), or its per-tool var @(tools/read {…}). The bare read, write, edit and bash wrappers (also core/*) are available when you need the matching implementation's behavior."
+    "Put dense text in the call's strings map and read it with ($ \"name\"); never tunnel backslashes, quotes or newlines through a Clojure string or a shell heredoc inside the code."
     "Use (fetch \"url\" {:as :json}) for HTTP; it returns {:status :headers :body}."
     "A multi-form call interleaves emitted text and values: earlier values one line each and the last in full. println is discarded."
     "When the answer is an image (a screenshot, a chart, a rendered page), attach it with (emit-image path) rather than describing it."]
-   :params {:code {:type :string :description "One Clojure script (one or more top-level forms), evaluated in order; definitions do not persist."}
-            :timeout {:type :number
-                      :description "Seconds; omit or 0 = no deadline."
-                      :optional? true}
-            :max-output-bytes {:type :number
-                               :description "Max result bytes (default 16 KiB, max 50 KiB)."
-                               :optional? true}}
+   :parameters {:type "object"
+                :properties
+                {"code" {:type "string" :description "One Clojure script (one or more top-level forms), evaluated in order; definitions do not persist."}
+                 "strings" {:type "object"
+                            :additionalProperties {:type "string"}
+                            :description "Named literal strings for this call, read inside the code as ($ \"name\"). Use for file content, edit old/new, or shell scripts carrying backslashes, quotes, or newlines; values take JSON escaping only."}
+                 "timeout" {:type "number" :description "Seconds; omit or 0 = no deadline."}
+                 "max-output-bytes" {:type "number" :description "Max result bytes (default 16 KiB, max 50 KiB)."}}
+                :required ["code"]}
    :execute (fn [args on-update signal ctx]
               (let [code (some-> (:code args) str)]
                 (if (str/blank? code)
                   {:content "No code provided." :is-error true}
                   (script/run {:tool "codemode"
                                :code code
+                               :strings (:strings args)
                                :split-forms? true
                                :timeout (:timeout args)
                                :limits (script/resolve-limits (:max-output-bytes args))

@@ -38,7 +38,7 @@
    direct extension call reports the missing service instead of starting a
    process-wide environment. Every call carries code; library definitions are
    managed with the sandbox's `save`, `forget` and `move` verbs."
-  [{:keys [code timeout max-output-bytes]} on-update signal ctx]
+  [{:keys [code timeout max-output-bytes strings]} on-update signal ctx]
   (let [code (some-> code str)]
     (if (str/blank? code)
       {:content "No code provided." :is-error true}
@@ -50,6 +50,7 @@
                              :signal signal
                              :on-update on-update
                              :ctx ctx
+                             :strings strings
                              :session-recall
                              (when-let [sess (:session-record ctx)]
                                (fn [params]
@@ -76,12 +77,16 @@
     "Use (emit v) to add output; println/print produce nothing."
     "Bind intermediate output; bound reads."
     "`read` paging is 1-based (`{:offset 1 :limit N}`); `:as :lines` -> map with `:lines [{:n :text}]`; grep/glob take `:path`; avoid sed/head/tail/cat and bash rg/find."
+    "Text with backslashes, quotes or newlines: strings {...}, read with ($ \"name\")."
     "Aliases: fs,str,set,edn,walk,json (clojure.data.json),p (babashka.process)."
     "Don't assume libs; (help :surface) lists them."]
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"
                          :description "The Clojure forms to evaluate, in order."}
+                 "strings" {:type "object"
+                            :additionalProperties {:type "string"}
+                            :description "Named literal strings for this call, read inside the code as ($ \"name\"). Use for file content, edit old/new, or shell scripts carrying backslashes, quotes, or newlines; values take JSON escaping only."}
                  "timeout" {:type "number"
                             :description "Seconds; omit or 0 = no deadline."}
                  "max-output-bytes" {:type "number"

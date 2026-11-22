@@ -120,7 +120,7 @@
        "; cwd-resolving slurp, "
        "spit and file-seq; core verbs, also referred unqualified: read, write, "
        "edit, bash, glob, grep, fetch, cwd, env, now, sleep, emit, emit-image, "
-       "spawn and session-recall "
+       "spawn, session-recall and $ (named strings) "
        "(core/<verb> stays available); the core, clj and eval "
        "namespaces; the loaded clojure.* and babashka.* namespaces and the "
        "bundled libs (rewrite-clj, cljfmt, edamame, parinferish) are "
@@ -131,7 +131,7 @@
    functions the `core` namespace installs, so `(emit v)` and `(core/emit v)`
    are one call; `read` deliberately shadows `clojure.core/read`."
   '[read write edit bash glob grep fetch cwd env now sleep emit emit-image spawn
-    session-recall])
+    session-recall $])
 
 (def alias-prelude
   "The aliases and core refers every script gets without its own require — the
@@ -1286,8 +1286,73 @@
           (eval-with-io out-w err-w f)
           (f))))))
 
+(defn- validated-strings
+  "The call's STRINGS map — a name to exact text — or nil when absent. The
+   tool schemas check provider input; this guard keeps direct script callers on
+   the same contract."
+  [strings]
+  (when (some? strings)
+    (when-not (map? strings)
+      (throw (ex-info "strings must be a map of name to text"
+                      {:type :script/bad-strings :strings strings})))
+    (doseq [[name text] strings]
+      (when-not (string? name)
+        (throw (ex-info (str "strings name must be a string, got "
+                             (preview (pr-str name)))
+                        {:type :script/bad-string-name :name name})))
+      (when-not (string? text)
+        (throw (ex-info (str "strings entry " (pr-str name)
+                             " must be a string, got "
+                             (preview (pr-str text)))
+                        {:type :script/bad-string-value
+                         :name name :value text}))))
+    strings))
+
+(defn- $-verb
+  "The entry named NAME in this call's strings map: the text exactly as
+   sent, JSON escaping only. Pass strings {\"name\" \"...\"} beside the
+   code; use it for file content, edit old/new, or a shell script carrying
+   backslashes, quotes, or newlines."
+  {:arglists '([name])}
+  [name]
+  (when-not (string? name)
+    (throw (ex-info (str "($ name) takes a string name, got "
+                         (preview (pr-str name)))
+                    {:type :script/bad-string-name :name name})))
+  (let [strings (:strings *call-state*)]
+    (cond
+      (not (map? strings))
+      (throw (ex-info (str "this call carried no strings; pass strings "
+                           "{\"name\" \"...\"} beside the code, or embed the text in the code")
+                      {:type :script/missing-strings :name name}))
+
+      (not (contains? strings name))
+      (let [names (mapv pr-str (keys strings))
+            shown (take 20 names)
+            more (- (count names) (count shown))]
+        (throw (ex-info (str "no strings entry named " (pr-str name) " in this call"
+                             (if (seq shown)
+                               (str "; it carries " (str/join ", " shown)
+                                    (when (pos? more) "…"))
+                               "; its strings map is empty")
+                             ". Pass strings {" (pr-str name) " \"...\"} beside the code.")
+                        {:type :script/missing-string
+                         :name name
+                         :available (vec (keys strings))})))
+
+      (not (string? (get strings name)))
+      (throw (ex-info (str "strings entry " (pr-str name)
+                           " is not a string: "
+                           (preview (pr-str (get strings name))))
+                      {:type :script/bad-string-value
+                       :name name
+                       :value (get strings name)}))
+
+      :else (get strings name))))
+
 (def ^:private core-verb-vars
-  {'read #'read-verb
+  {'$ #'$-verb
+   'read #'read-verb
    'write #'write-verb
    'edit #'edit-verb
    'bash #'bash-verb
@@ -2050,16 +2115,16 @@
 
 (defn prepare
   "Resolve the per-call state the sandbox runs on: the callable surface, the
-   bridge, the emit/capture channels, the abort/trace atoms, the budgets and
-   the dynamic values the loop bound for this run. CWD defaults to the
-   runtime cwd; LIMITS is `resolve-limits`' map (or the default). `:abort`
-   may supply the timeout/output-limit abort atom (the eval service needs
-   the same atom it gave its sources); `:tools? false` omits the surface and
-   bridge, so the call has no `tools` namespace and cannot reach a tool
-   (the `eval` sandbox)."
+   bridge, the emit/capture channels, the abort/trace atoms, the budgets, the
+   call's strings side channel and the dynamic values the loop bound for this
+   run. CWD defaults to the runtime cwd; LIMITS is `resolve-limits`' map (or
+   the default). `:abort` may supply the timeout/output-limit abort atom (the
+   eval service needs the same atom it gave its sources); `:tools? false` omits
+   the surface and bridge, so the call has no `tools` namespace and cannot
+   reach a tool (the `eval` sandbox)."
   [{:keys [tool cwd timeout limits signal abort ctx on-update
            get-all-tools get-contributed-tools select-tools execute-tool
-           source-namespaces session-recall tools? disabled-verbs]
+           source-namespaces session-recall tools? disabled-verbs strings]
     :or {tools? true}}]
   (require-tool! tool)
   (let [cwd (or cwd (tool-util/cwd))
@@ -2117,6 +2182,7 @@
      :source-namespaces (or source-namespaces {})
      :disabled-verbs (set disabled-verbs)
      :session-recall session-recall
+     :strings (validated-strings strings)
      :abort abort
      :emit-events emit-events
      :event-seq event-seq

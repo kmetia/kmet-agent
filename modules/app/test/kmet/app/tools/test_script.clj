@@ -35,10 +35,13 @@
    :select-tools (fn [all _] all)
    :execute-tool (fn [& _] {:content "not dispatched"})})
 
-(defn- run-in [{:keys [ctx holder]} tools code]
-  (script/run (assoc (run-opts tools code)
-                     :sci-ctx ctx
-                     :interrupt holder)))
+(defn- run-in
+  ([s tools code] (run-in s tools code nil))
+  ([{:keys [ctx holder]} tools code extra]
+   (script/run (merge (run-opts tools code)
+                      {:sci-ctx ctx
+                       :interrupt holder}
+                      extra))))
 
 (t/use-fixtures :each (fn [f] (http/set-transport! :platform) (f)))
 
@@ -99,6 +102,39 @@
     (t/is (str/includes? (pr-str (:arglists (get help "clj/edit-form"))) "file_path"))
     (t/is (str/includes? (pr-str (:arglists (get help "clj/replace-sexp"))) "match_form"))
     (t/is (str/includes? (pr-str (:arglists (get help "clj/paren-repair"))) "format"))))
+
+(t/deftest test-strings-side-channel
+  (let [s (kept-context)
+        path (str "target/test-strings-" (random-uuid) ".py")
+        content "pattern = r\"\\s+\"\n"]
+    (try
+      (let [result (run-in s {}
+                           (str "(core/write " (pr-str path) " ($ \"file\"))")
+                           {:strings {"file" content}})]
+        (t/is (not (:is-error result)) (:content result))
+        (t/is (= content (slurp path)))
+        (t/is (= "exact" (:content (run-in s {} "(core/emit (core/$ \"text\"))" {:strings {"text" "exact"}})))))
+      (let [definition (run-in s {} "(defn put-it [p] (core/write p ($ \"file\")))")]
+        (t/is (not (:is-error definition)) (:content definition)))
+      (let [result (run-in s {} (str "(put-it " (pr-str path) ")") {:strings {"file" "kept\n"}})]
+        (t/is (not (:is-error result)) (:content result))
+        (t/is (= "kept\n" (slurp path))))
+      (let [result (run-in s {} "(core/bash ($ \"script\"))" {:strings {"script" "printf 'a\\nb\\n'"}})]
+        (t/is (not (:is-error result)) (:content result))
+        (t/is (str/includes? (:content result) "a\nb")))
+      (let [result (run-in s {} "(core/emit ($ \"missing\"))"
+                           {:strings {"present" "x"}})]
+        (t/is (:is-error result))
+        (t/is (str/includes? (:content result) "no strings entry named")))
+      (let [result (run-in s {} "($ \"x\")")]
+        (t/is (:is-error result))
+        (t/is (str/includes? (:content result) "carried no strings")))
+      (let [error (try (run-in s {} "($ \"n\")" {:strings {"n" 1}})
+                       nil
+                       (catch clojure.lang.ExceptionInfo e e))]
+        (t/is (instance? clojure.lang.ExceptionInfo error))
+        (t/is (str/includes? (ex-message error) "must be a string")))
+      (finally (fs/delete-if-exists path)))))
 
 (t/deftest test-core-grep-argument-error-is-actionable
   (let [s (kept-context)

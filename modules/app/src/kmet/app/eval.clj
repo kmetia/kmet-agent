@@ -2182,8 +2182,9 @@
                                         :else :eval/unbind-failed)))))))
 
 (defn- eval!*
-  [service env cwd {:keys [code timeout limits signal source-signal abort
-                           on-update ctx drop scope session-recall]}]
+  [service env cwd
+   {:keys [code timeout limits signal source-signal abort on-update ctx drop scope
+           session-recall strings]}]
   (let [code (some-> code str)
         scope (normalize-scope scope)
         lock (:lock env)]
@@ -2216,6 +2217,7 @@
                                                  :abort abort
                                                  :ctx ctx
                                                  :cwd cwd
+                                                 :strings strings
                                                  :on-update on-update
                                                  :sci-ctx (:sci-ctx env)
                                                  :interrupt (:interrupt env)

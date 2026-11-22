@@ -157,6 +157,38 @@
       (t/is (= "false" (:content r))
             "codemode keeps its fresh-context contract"))))
 
+(t/deftest test-eval-strings-side-channel
+  (let [env (support/eval-ctx)
+        path "strings-test.py"
+        content "pattern = r\"\\s+\"\n"]
+    (let [result (support/eval! env (str "(write " (pr-str path) " ($ \"file\"))")
+                                {:strings {"file" content}})]
+      (t/is (not (:is-error result)) (:content result))
+      (t/is (= content (slurp (str (fs/path (:cwd env) path))))))
+    (let [result (support/eval! env "($ \"missing\")"
+                                {:strings {"present" "x"}})]
+      (t/is (:is-error result))
+      (t/is (str/includes? (:content result) "no strings entry named")))
+    (let [result (support/eval! env "($ \"x\")")]
+      (t/is (:is-error result))
+      (t/is (str/includes? (:content result) "carried no strings")))))
+
+(t/deftest test-the-eval-tool-passes-strings
+  (let [env (support/eval-ctx)
+        path "tool-strings.py"
+        content "pattern = r\"\\s+\"\n"
+        result (support/call-tool env "eval"
+                                  {:code (str "(write " (pr-str path) " ($ \"file\"))")
+                                   :strings {"file" content}})]
+    (t/is (not (:is-error result)) (:content result))
+    (t/is (= content (slurp (str (fs/path (:cwd env) path)))))))
+
+(t/deftest test-the-eval-tool-declares-strings
+  (let [params (:parameters eval-tool/definition)]
+    (t/is (contains? (get-in params [:properties]) "strings"))
+    (t/is (= {:type "string"}
+             (get-in params [:properties "strings" :additionalProperties])))))
+
 (t/deftest test-the-eval-prompt-covers-work-and-discovery
   (t/is (str/includes? (:description eval-tool/definition) "sandbox in cwd"))
   (t/is (str/includes? (:description eval-tool/definition) "(emit v)"))
@@ -182,7 +214,9 @@
                          "(fetch \"url\" {:as :json})"))
     (t/is (str/includes? (:description eval-tool/definition) "(help)"))
     (t/is (str/includes? guidelines "println/print produce nothing"))
-    (t/is (not (str/includes? guidelines "serialize")))))
+    (t/is (not (str/includes? guidelines "serialize")))
+    (t/is (str/includes? guidelines "strings"))
+    (t/is (str/includes? guidelines "($ \"name\")"))))
 
 (t/deftest test-eval-always-starts-in-user
   (let [env (support/eval-ctx)]
@@ -327,7 +361,7 @@
     (t/is (str/includes? text "{:start"))
     (t/is (str/includes? text "{:n :text}"))
     (t/is (str/includes? text "sed"))
-    (t/is (<= (count text) 1300) "the per-request prompt stays compact")
+    (t/is (<= (count text) 1400) "the per-request prompt stays compact")
     (t/is (not (str/includes? text "codemode"))
           "eval's prompt must stand alone when codemode is not selected")
     (t/is (not (str/includes? text "Jolt")))

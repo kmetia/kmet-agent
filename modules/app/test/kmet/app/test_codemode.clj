@@ -339,6 +339,20 @@
     (t/is (not (str/includes? (:content r) "oops"))
           "stderr is captured but not reported")))
 
+(t/deftest test-codemode-strings-side-channel
+  (with-cwd-dir
+    (fn [dir]
+      (let [content "pattern = r\"\\s+\"\n"
+            r (run "(write \"a.py\" ($ \"file\"))" {:strings {"file" content}})]
+        (t/is (not (:is-error r)) (:content r))
+        (t/is (= content (slurp (str dir "/a.py")))))))
+  (let [r (run "($ \"x\")")]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "carried no strings")))
+  (let [r (run "1" {:strings {"n" 1}})]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "must be a string"))))
+
 (t/deftest test-codemode-output-truncation
   (let [r (run "(dotimes [i 3000] (core/emit i))")]
     (t/is (not (:is-error r)))
