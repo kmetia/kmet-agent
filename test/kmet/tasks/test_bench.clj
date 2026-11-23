@@ -1,5 +1,6 @@
 (ns kmet.tasks.test-bench
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [kmet.tasks.bench.metrics :as metrics]
             [kmet.tasks.bench.report :as report]))
 
@@ -183,4 +184,7 @@
         cand {:label "cand" :created-at "now" :model "m" :runs [(run "bash" 1500 0.02 3 2 20 true)]}
         md (report/render-compare-report base cand)]
     (is (re-find #"Paired totals" md))
-    (is (re-find #"1.50x" md))))
+    (is (re-find #"1.50x" md))
+    (is (re-find #"cost base" md))
+    (is (str/includes? md "$0.0100"))
+    (is (str/includes? md "$0.0200"))))

@@ -508,6 +508,7 @@
 (defn- compare-by-mode-table [by-mode]
   (table
    ["mode" "pairs" "tokens base" "tokens cand" "ratio"
+    "cost base" "cost cand" "ratio"
     "turns base" "turns cand" "ratio" "pass base" "pass cand"]
    (for [[mode x] by-mode
          :let [b (:baseline x) c (:candidate x)]]
@@ -517,6 +518,9 @@
       (fmt-int (get-in c [:tokens :total]))
       (fmt-ratio (ratio (get-in b [:tokens :total])
                         (get-in c [:tokens :total])))
+      (fmt-money (:cost b))
+      (fmt-money (:cost c))
+      (fmt-ratio (ratio (:cost b) (:cost c)))
       (fmt-int (:turns b))
       (fmt-int (:turns c))
       (fmt-ratio (ratio (:turns b) (:turns c)))
@@ -526,6 +530,7 @@
 (defn- compare-by-task-table [by-task]
   (table
    ["task" "mode" "pairs" "tokens base" "tokens cand" "ratio"
+    "cost base" "cost cand" "ratio"
     "turns base" "turns cand" "ratio" "pass base" "pass cand"]
    (for [[[task mode] x] by-task
          :let [b (:baseline x) c (:candidate x)]]
@@ -536,6 +541,9 @@
       (fmt-int (get-in c [:tokens :total]))
       (fmt-ratio (ratio (get-in b [:tokens :total])
                         (get-in c [:tokens :total])))
+      (fmt-money (:cost b))
+      (fmt-money (:cost c))
+      (fmt-ratio (ratio (:cost b) (:cost c)))
       (fmt-int (:turns b))
       (fmt-int (:turns c))
       (fmt-ratio (ratio (:turns b) (:turns c)))
