@@ -15,6 +15,7 @@
             [kmet.app.session.store :as store]
             [kmet.app.version :as version]
             [kmet.libs.concurrent :as concurrent]
+            [kmet.libs.process :as kprocess]
             [kmet.tasks.bench.metrics :as metrics]
             [kmet.tasks.bench.report :as report]))
 
@@ -150,6 +151,15 @@
   (cond-> (base-env)
     (:agent-dir opts) (assoc "KMET_CODING_AGENT_DIR" (:agent-dir opts))))
 
+(defn- stop-process!
+  "SIGKILL P's tree. `destroy-tree` only sends SIGTERM, which a kmet process
+   stuck in a provider request can ignore past the run timeout."
+  [p]
+  (if-let [pid (kprocess/process-pid p)]
+    (kprocess/kill-process-tree! pid)
+    (process/destroy-tree p))
+  p)
+
 (defn- run-process [cmd {:keys [dir env timeout-ms]}]
   (let [started (concurrent/monotonic-ms)
         p (process/process cmd (cond-> {:in "" :out :string :err :string}
@@ -158,7 +168,7 @@
         result (deref p timeout-ms ::timeout)]
     (if (= ::timeout result)
       (do
-        (process/destroy-tree p)
+        (stop-process! p)
         (let [r (deref p 5000 nil)]
           {:exit 124 :timeout? true
            :out (str (:out r)) :err (str (:err r))
