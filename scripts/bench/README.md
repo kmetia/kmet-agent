@@ -113,6 +113,19 @@ tasks/<id>/
 Keep checks outside the workspace and deterministic. A check should test the
 behavior the prompt asked for, not the exact command sequence.
 
+## Slow TB4 suite
+
+The default `scripts/bench/agent-suite` is the fast regression loop. The
+ported Terminal-Bench 4.0 tasks live in `scripts/bench/agent-suite-slow`:
+they take minutes per run, and `tb4-wal-recovery-ordering` runs ten pytest
+passes in its check. Opt in with `--suite`:
+
+```sh
+bb bench-tools --suite scripts/bench/agent-suite-slow --tasks tb4-session-window-debug --repeats 1 --model <pattern>
+```
+
+Use them for end-to-end validation, not for the changed-file loop.
+
 ## Reading a result
 
 `bb bench-tools analyze <result.edn>` prints the stored report;
