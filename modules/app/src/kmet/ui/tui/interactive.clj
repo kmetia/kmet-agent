@@ -27,6 +27,7 @@
             [kmet.ui.tui.dock :as dock]
             [kmet.ui.tui.session-selector :refer [show-session-selector]]
             [kmet.libs.process :as process]
+            [kmet.libs.text :as text]
             [kmet.reakt.core :as reakt]
             [kmet.ui.tui.interactive.layout :as layout]
             [kmet.ui.tui.interactive.session-admin :as session-admin]
@@ -266,22 +267,57 @@
       ;; "No", and a cancelled dialog (nil): deny this call, remember nothing
       {:decision :deny :reason "denied at the terminal"})))
 
+(def ^:private ask-strings-preview-lines
+  "Lines a permission question shows from a call's `strings` payload. The
+   full call is in the transcript behind the dialog; the selector, its
+   options and the policy reason must stay on screen."
+  8)
+
+(defn- ask-strings-preview
+  "Plain-text preview of ARGS' `strings` argument for a permission question:
+   a one-line summary of the entry names when there are several, `$ \"name\":`
+   labels over a bounded head of the text, and the count of lines not shown.
+   The full text is in the transcript call block. Nil when the call carries
+   none."
+  [args]
+  (when-let [entries (tool-util/strings-entries args)]
+    (let [summary (when (< 1 (count entries))
+                    (text/title-line
+                     (str "strings: "
+                          (str/join ", " (map (comp pr-str :name) entries)))
+                     100))
+          lines (mapcat (fn [{:keys [name text]}]
+                          (cons (str "$ " (pr-str name) ":")
+                                (str/split-lines text)))
+                        entries)
+          budget (- ask-strings-preview-lines (if summary 1 0))
+          [shown hidden] (split-at budget lines)]
+      (str (when summary (str summary "\n"))
+           (str/join "\n" (map #(or (text/title-line %) "") shown))
+           (when (seq hidden)
+             (str "\n... (+" (count hidden)
+                  " lines not shown; see transcript)"))))))
+
 (defn ask-title
   "The dialog title a permission `:ask` puts to the human: the tool's name, the
    call's one-line title when its definition has one (`$ <command>` for bash,
    the path for read/write/edit — `kmet.app.tools.util/title-body`, the same
-   plain-text body the quiet transcript line falls back to), then the policy's
-   reason. Plain text: the dialog styles it. The call belongs in the question
-   because the transcript block is behind the dialog and may be scrolled out of
-   the visible window — a human approves what they can see."
+   plain-text body the quiet transcript line falls back to), a bounded preview
+   of the call's `strings` payload, then the policy's reason. Plain text: the
+   dialog styles it. The call belongs in the question because the transcript
+   block is behind the dialog and may be scrolled out of the visible window —
+   a human approves what they can see; the full string text stays in the
+   transcript call block behind it."
   [ctx request]
   ;; stringified: a broken policy reason must degrade this line, not throw it
   (let [reason (str (:reason request))
         tool (when-let [tools (srce/get ctx :tools)]
                (tool-registry/get-tool tools (:tool-name request)))
-        call (when tool (tool-util/title-body (:title tool) (:args request)))]
+        call (when tool (tool-util/title-body (:title tool) (:args request)))
+        strings (ask-strings-preview (:args request))]
     (str "Allow " (or (:tool-name request) "this tool") "?"
          (when call (str "\n" call))
+         (when strings (str "\n" strings))
          (when-not (str/blank? reason) (str "\n" reason)))))
 
 (defn ask!

@@ -10,7 +10,8 @@
    No terminal: the composition's terminal approver is what a gated agent's tool
    call asks, and its answer with no terminal running is the denial asserted
    here."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
             [kmet.app.core :as core]
             [kmet.app.permissions :as permissions]
             [kmet.app.runtime :as runtime]
@@ -100,7 +101,8 @@
   ;; The transcript block sits behind the dialog and its call line can be
   ;; scrolled out of the visible window, so the question carries the call —
   ;; the tool's own one-line title (`$ <command>` for bash, the path for the
-  ;; file tools). A human approves what they can see.
+  ;; file tools), plus a bounded preview of a code call's strings payload.
+  ;; A human approves what they can see.
   (let [boot (runtime/boot (core/compose-config {:profile :tui-ask}) {})
         ctx (:ctx boot)]
     (try
@@ -121,6 +123,31 @@
              (interactive/ask-title ctx {:tool-name "read"
                                          :args {:path "README.md"}}))
           "a file tool shows the path its own title names")
+      (is (= (str "Allow eval?\n"
+                  "eval $ (bash ($ \"script\"))\n"
+                  "$ \"script\":\n"
+                  "printf 'a\\nb\\n'")
+             (interactive/ask-title ctx {:tool-name "eval"
+                                         :args {:code "(bash ($ \"script\"))"
+                                                :strings {:script "printf 'a\\nb\\n'"}}}))
+          "a code tool's string payload is shown, not just its name")
+      (let [value (str/join "\n" (mapv #(str "line-" %) (range 12)))
+            title (interactive/ask-title ctx {:tool-name "eval"
+                                              :args {:code "($ \"f\")"
+                                                     :strings {:f value}}})]
+        (is (str/includes? title "$ \"f\":\nline-0\n"))
+        (is (str/includes? title "line-6"))
+        (is (not (str/includes? title "line-7")) "only the bounded head")
+        (is (str/includes? title "... (+5 lines not shown; see transcript)")))
+      (is (= (str "Allow eval?\n"
+                  "eval $ 1\n"
+                  "strings: \"a\", \"b\"\n"
+                  "$ \"a\":\none\n"
+                  "$ \"b\":\ntwo\nthree")
+             (interactive/ask-title ctx {:tool-name "eval"
+                                         :args {:code "1"
+                                                :strings {:b "two\nthree" :a "one"}}}))
+          "several entries are all named, then previewed in name order")
       (is (= "Allow no-such-tool?"
              (interactive/ask-title ctx {:tool-name "no-such-tool"}))
           "a tool outside the table still names itself, with no call line")

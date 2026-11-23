@@ -161,3 +161,22 @@
         (-> t
             (str/replace #"[ \t]*[\r\n]+[ \t\r\n]*" " ")
             (str/replace "\t" "   "))))))
+
+(defn string-entry-name
+  "The display name of a `strings` key: JSON decoding keywordizes object
+   keys, so a keyword loses the one colon its original name did not have."
+  [name]
+  (if (keyword? name) (subs (str name) 1) (str name)))
+
+(defn strings-entries
+  "ARGS' `strings` map — the named dense text eval and codemode read with
+   ($ \"name\") — as a vector of {:name display-name :text value} sorted by
+   displayed name. Keywordized JSON keys are restored and non-string values
+   skipped. Nil when ARGS carries no well-formed entries."
+  [args]
+  (let [strings (when (map? args) (or (:strings args) (get args "strings")))]
+    (when (and (map? strings) (seq strings))
+      (let [entries (for [[name value] (sort-by (comp string-entry-name key) strings)
+                          :when (string? value)]
+                      {:name (string-entry-name name) :text value})]
+        (when (seq entries) (vec entries))))))

@@ -62,6 +62,24 @@
         "a throwing title degrades to no body, never to an exception")
   (t/is (nil? (util/title-body (fn [_] :not-a-string) {}))))
 
+(t/deftest test-strings-entries
+  (t/testing "entries sort by displayed name, with keywordized JSON keys restored"
+    (t/is (= [{:name ":leading" :text "colon"}
+              {:name "a/b" :text "slash"}
+              {:name "with space" :text "space"}]
+             (util/strings-entries
+              {:strings {(keyword "with space") "space"
+                         (keyword ":leading") "colon"
+                         (keyword "a/b") "slash"}}))))
+  (t/testing "string keys pass through and non-string values are skipped"
+    (t/is (= [{:name "a" :text "one"}]
+             (util/strings-entries {:strings {:a "one" :bad 1}}))))
+  (t/testing "absent, non-map and empty strings carry no entries"
+    (t/is (nil? (util/strings-entries {})))
+    (t/is (nil? (util/strings-entries nil)))
+    (t/is (nil? (util/strings-entries {:strings []})))
+    (t/is (nil? (util/strings-entries {:strings {}})))))
+
 (t/deftest test-tool-call-arguments
   (t/testing "arguments are a map, EDN text, or nothing"
     (t/is (= {:path "x"} (util/args-map {:arguments {:path "x"}})))

@@ -442,6 +442,58 @@
       (is (str/includes? (first lines) "eval $ (+ 1 2)"))
       (is (str/includes? (first lines) "(5s)")))))
 
+(deftest test-codemode-call-strings
+  (testing "the strings argument renders verbatim below the code"
+    (let [lines (plain (r/render-codemode-call
+                        "eval"
+                        {:code "(write \"a.py\" ($ \"script\"))"
+                         :strings {:script "printf 'a\\nb\\n'"}}
+                        th 120 {:expanded false}) 120)]
+      (is (= ["eval $ (write \"a.py\" ($ \"script\"))"
+              ""
+              "$ \"script\":"
+              "printf 'a\\nb\\n'"]
+             (mapv str/trimr lines)))))
+  (testing "many entries render in name order, each with its own label"
+    (let [lines (plain (r/render-codemode-call
+                        "eval"
+                        {:code "(write ($ \"b\") ($ \"a\"))"
+                         :strings {"b" "two" :a "one"}}
+                        th 120 {}) 120)]
+      (is (= ["eval $ (write ($ \"b\") ($ \"a\"))"
+              "$ \"a\":" "one" "$ \"b\":" "two"]
+             (remove str/blank? (map str/trimr lines))))
+      (is (str/starts-with? (first lines) "eval $"))))
+  (testing "a long entry is capped when collapsed and full when expanded"
+    (let [value (str/join "\n" (mapv #(str "line-" %) (range 25)))
+          render #(plain (r/render-codemode-call
+                          "eval" {:code "($ \"f\")" :strings {:f value}}
+                          th 42 {:expanded %}) 42)
+          collapsed (render false)
+          expanded (render true)]
+      (is (some #(str/includes? % "$ \"f\":") collapsed))
+      (is (some #(str/includes? % "... (+15 lines") collapsed))
+      (is (not-any? #(str/includes? % "line-10") collapsed) "only the head")
+      (is (some #(= "line-24" (str/trimr %)) expanded))
+      (is (not-any? #(str/includes? % "toggle") expanded) "no hint when full")))
+  (testing "keywordized names display as their exact strings"
+    (let [lines (plain (r/render-codemode-call
+                        "eval"
+                        {:code "1"
+                         :strings {(keyword "a/b") "slash"
+                                   (keyword ":leading") "colon"
+                                   (keyword "with space") "space"}}
+                        th 120 {}) 120)]
+      (is (some #(str/includes? % "$ \"a/b\":") lines))
+      (is (some #(str/includes? % "$ \":leading\":") lines))
+      (is (some #(str/includes? % "$ \"with space\":") lines))))
+  (testing "no strings, an empty map and non-string values add nothing"
+    (doseq [args [{:code "1"}
+                  {:code "1" :strings {}}
+                  {:code "1" :strings {:bad 42}}]]
+      (let [lines (plain (r/render-codemode-call "eval" args th 120 {}) 120)]
+        (is (= 1 (count lines)) (pr-str args))))))
+
 (deftest test-render-code-call
   (testing "a custom label and suffix render like the codemode call"
     (let [lines (plain (r/render-code-call "clj eval $" "(+ 1 2)"

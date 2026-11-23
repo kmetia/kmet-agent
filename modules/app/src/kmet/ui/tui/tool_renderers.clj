@@ -15,7 +15,8 @@
             [kmet.ui.tui.key-hint :as key-hint]
             [kmet.ui.tui.skill-message :as skill-message]
             [kmet.tui.hikap :as h]
-            [kmet.app.tools.bash-output :as bash-out]))
+            [kmet.app.tools.bash-output :as bash-out]
+            [kmet.app.tools.util :as tool-util]))
 
 ;; ─── Shared render helpers (pi: render-utils.ts) ────────────────────────────
 
@@ -1045,6 +1046,31 @@
                              {:lang lang :theme theme :cache cache}))
           cache)))))
 
+(defn- code-call-body
+  "The body string of a code tool's call line: LABEL, the syntax-highlighted
+   CODE for LANG (or the invalid-arg marker/placeholder) and SUFFIX as given.
+   A leading blank line in CODE is dropped so the prompt is never alone above
+   an empty line."
+  [label code suffix lang theme context]
+  (let [code-str (if (string? code)
+                   (text/trim-leading-blank-lines code)
+                   (if (nil? code) "" nil))
+        label-str (theme/fg theme :tool-title (theme/bold (str label " ")))]
+    (if (or (nil? code-str) (empty? code-str))
+      (let [code-display (if (nil? code-str)
+                           (theme/fg theme :error "[invalid arg]")
+                           (theme/fg theme :tool-output "..."))]
+        (str label-str code-display suffix))
+      (let [highlighted (theme/render-highlighted
+                         theme code-str lang
+                         (code-highlight-cache context lang theme))
+            lines (if (seq highlighted) highlighted [code-str])]
+        (str label-str
+             (first lines)
+             (when (< 1 (count lines))
+               (str "\n" (str/join "\n" (rest lines))))
+             suffix)))))
+
 (defn render-code-call
   "The shared call line for tools whose primary argument is code (codemode,
    eval, clojure_eval): `<label> <code>`, rendered verbatim whatever the
@@ -1057,25 +1083,8 @@
   ([label code suffix theme width context]
    (render-code-call label code suffix "clojure" theme width context))
   ([label code suffix lang theme _width context]
-   (let [code-str (if (string? code)
-                    (text/trim-leading-blank-lines code)
-                    (if (nil? code) "" nil))
-         label-str (theme/fg theme :tool-title (theme/bold (str label " ")))]
-     (if (or (nil? code-str) (empty? code-str))
-       (let [code-display (if (nil? code-str)
-                            (theme/fg theme :error "[invalid arg]")
-                            (theme/fg theme :tool-output "..."))]
-         (h/compile-tree (tool-text (str label-str code-display suffix))))
-       (let [highlighted (theme/render-highlighted
-                          theme code-str lang
-                          (code-highlight-cache context lang theme))
-             lines (if (seq highlighted) highlighted [code-str])
-             body (str label-str
-                       (first lines)
-                       (when (< 1 (count lines))
-                         (str "\n" (str/join "\n" (rest lines))))
-                       suffix)]
-         (h/compile-tree (tool-text body)))))))
+   (h/compile-tree
+    (tool-text (code-call-body label code suffix lang theme context)))))
 
 (def ^:private code-tool-labels
   "The call-line label for a code tool. An unknown tool falls back to the
@@ -1083,24 +1092,53 @@
   {"codemode" "codemode $"
    "eval" "eval $"})
 
-(defn- render-code-call-with-timeout
-  "The shared call line for code tools: `LABEL <code>` plus an explicit
-   timeout suffix."
-  [label args theme width context]
-  (let [timeout (:timeout args)
-        suffix (if (and (number? timeout) (pos? timeout))
-                 (theme/fg theme :muted (str " (" timeout "s)"))
-                 "")]
-    (render-code-call label (:code args) suffix theme width context)))
+(def ^:private strings-preview-lines
+  "Collapsed cap on one `strings` entry, in visual lines — the write
+   preview's policy for file-sized payloads."
+  10)
+
+(defn- strings-call-body
+  "The `strings` argument of a code call, appended below the code: a dim
+   `$ \"name\":` label and the entry's text, one block per entry. Each
+   entry shows a bounded visual-line head plus the shared expand hint when
+   collapsed, and its full text when expanded (no highlighting or escaping,
+   like the code call itself). Entries come sorted by displayed name from
+   `tool-util/strings-entries`. Nil when the call carries none."
+  [args theme width expanded?]
+  (when-let [entries (tool-util/strings-entries args)]
+    (let [blocks (for [{:keys [name text]} entries
+                       :let [lines (str/split-lines text)
+                             total (count lines)
+                             {:keys [visual-lines consumed]}
+                             (if expanded?
+                               {:visual-lines lines :consumed total}
+                               (bounded-head-visual-lines
+                                lines strings-preview-lines width))
+                             remaining (- total consumed)]]
+                   (str "\n\n"
+                        (theme/fg theme :muted
+                                  (str "$ " (pr-str name) ":"))
+                        "\n"
+                        (str/join "\n" visual-lines)
+                        (when (pos? remaining)
+                          (str "\n" (expand-hint theme remaining)))))]
+      (str/join "" blocks))))
 
 (defn render-codemode-call
   "Call line for a code tool (codemode, eval): `<label> $ <code>` plus an
-   explicit timeout suffix, via the shared code-call renderer. The label comes
-   from `code-tool-labels`; the quiet title mirrors the one-line head of the
-   same call."
+   explicit timeout suffix and, when present, the call's `strings` entries
+   below the code (a bounded head when collapsed, the full text when
+   expanded). The label comes from `code-tool-labels`; the quiet title mirrors
+   the one-line head of the same call."
   [name args theme width context]
-  (render-code-call-with-timeout (get code-tool-labels name "codemode $")
-                                 args theme width context))
+  (let [timeout (:timeout args)
+        suffix (if (and (number? timeout) (pos? timeout))
+                 (theme/fg theme :muted (str " (" timeout "s)"))
+                 "")
+        body (str (code-call-body (get code-tool-labels name "codemode $")
+                                  (:code args) suffix "clojure" theme context)
+                  (strings-call-body args theme width (:expanded context)))]
+    (h/compile-tree (tool-text body))))
 
 (defn- summary-node
   "One spacer plus one muted summary line."
