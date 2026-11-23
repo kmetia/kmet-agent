@@ -198,11 +198,10 @@
   (t/is (str/includes? (:description eval-tool/definition) "(grep"))
   (t/is (str/includes? (:description eval-tool/definition) "(fetch"))
   (t/is (str/includes? (:description eval-tool/definition) "(help)"))
-  (t/is (str/includes? (:description eval-tool/definition)
-                       "stdout/stderr (println/print/prn) are discarded"))
   (t/is (str/includes? (:prompt-snippet eval-tool/definition)
                        "one phase per call"))
   (let [guidelines (str/join "\n" (:prompt-guidelines eval-tool/definition))]
+    (t/is (str/includes? guidelines "println/print/prn are discarded"))
     (t/is (str/includes? guidelines "One eval call = one phase"))
     (t/is (str/includes? guidelines "Do not make one call per file"))
     (t/is (str/includes? guidelines "Return values"))

@@ -67,7 +67,7 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description "Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order.\nFile/shell: (read \"p\" {:offset N :limit N}); (write \"p\" text); (edit \"p\" old new|pairs); (bash \"cmd\" {:timeout N :as :map}); (glob \"p\"); (grep \"p\"); (fetch \"url\" {:as :json}). (help) lists the rest.\nReturn values; (emit v) adds full output; stdout/stderr (println/print/prn) are discarded."
+   :description "Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order.\nFile/shell: (read \"p\" {:offset N :limit N}); (write \"p\" text); (edit \"p\" old new|pairs); (bash \"cmd\" {:timeout N :as :map}); (glob \"p\"); (grep \"p\"); (fetch \"url\" {:as :json}). (help) lists the rest.\nReturn values; (emit v) adds output."
    :prompt-snippet "Runs in cwd; one phase per call."
    :prompt-guidelines
    ["One eval call = one phase: batch independent reads and the dependent edit→test→verify as forms in a single code block and return a map of results. Do not make one call per file, command, or test suite."
@@ -76,14 +76,14 @@
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"
-                         :description "The Clojure forms to evaluate, in order."}
+                         :description "Clojure forms, evaluated in order."}
                  "strings" {:type "object"
                             :additionalProperties {:type "string"}
-                            :description "Named literal strings for this call, read inside the code as ($ \"name\"). Use for file content, edit old/new, or shell scripts carrying backslashes, quotes, or newlines; values take JSON escaping only."}
+                            :description "Named literals; ($ \"name\") reads one."}
                  "timeout" {:type "number"
-                            :description "Seconds; omit or 0 = no deadline."}
+                            :description "Seconds; 0 = none."}
                  "max-output-bytes" {:type "number"
-                                     :description "Max result bytes (default 16 KiB, max 50 KiB)."}}
+                                     :description "Result byte cap (default 16 KiB, max 50 KiB)."}}
                 :required ["code"]}
    :execute execute
    :streams? true
