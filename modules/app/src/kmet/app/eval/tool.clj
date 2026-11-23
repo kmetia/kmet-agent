@@ -67,19 +67,17 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description (str "Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order, definitions persist.\n"
+   :description (str "Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order; definitions persist for the session, and a docstring saves a top-level def to the cwd eval library.\n"
                      "File/shell/HTTP: (read \"p\") -> text; (read \"p\" {:offset 1 :limit N}); (read \"p\" {:start 1 :end N :as :lines}); (write \"p\" text); (edit \"p\" old new|pairs); (bash \"cmd\" {:timeout N :max-lines N :max-bytes N :as :map}); (glob \"p\"); (grep \"p\"); (fetch \"url\" {:as :json}). Nonzero exits are normal.\n"
-                     "Output: emitted text and form values are interleaved in order (earlier values one line each, last value full); (emit v) adds full output. stdout/stderr (println/print/prn) discarded. Limit 16 KiB (50 KiB with :max-output-bytes); timeout seconds, omit/0 = none.\n"
+                     "Output: emitted text/form values interleave in order (earlier values one line, last value full); (emit v) adds full output. stdout/stderr (println/print/prn) discarded. Cap 16 KiB (50 KiB with :max-output-bytes); timeout s, omit/0 = none.\n"
                      "Discover: (help), (help :core), (sources), (help :library), (index \"text\"), (describe 'name); source verbs <id>/verb.")
-   :prompt-snippet "Runs in cwd; independent eval calls may be issued together."
+   :prompt-snippet "Runs in cwd; batch independent calls."
    :prompt-guidelines
    ["Run several eval calls in one message; keep dependent forms in one call."
-    "Use (emit v) to add output; println/print produce nothing."
-    "Bind intermediate output; bound reads."
-    "`read` paging is 1-based (`{:offset 1 :limit N}`); `:as :lines` -> map with `:lines [{:n :text}]`; grep/glob take `:path`; avoid sed/head/tail/cat and bash rg/find."
-    "Text with backslashes, quotes or newlines: strings {...}, read with ($ \"name\")."
-    "Aliases: fs,str,set,edn,walk,json (clojure.data.json),p (babashka.process)."
-    "Don't assume libs; (help :surface) lists them."]
+    "Bind intermediates; bound reads; read paging is 1-based; `:as :lines` -> `{:lines [{:n :text}]}`; grep/glob: `:path`; avoid sed/head/tail/cat/bash rg/find."
+    "Dense text (backslashes/quotes/newlines): strings {...}; ($ \"name\") reads."
+    "Aliases: fs,str,set,edn,walk,json (clojure.data.json),p (babashka.process); libs? (help :surface)."
+    "Save reusable helpers with a docstring; (save 'name \"doc\") saves a session-only def, (move 'name :global) shares it."]
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"
