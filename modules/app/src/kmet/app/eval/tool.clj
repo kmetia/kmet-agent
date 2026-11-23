@@ -67,17 +67,12 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description (str "Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order; definitions persist for the session, and a docstring saves a top-level def to the cwd eval library.\n"
-                     "File/shell/HTTP: (read \"p\") -> text; (read \"p\" {:offset 1 :limit N}); (read \"p\" {:start 1 :end N :as :lines}); (write \"p\" text); (edit \"p\" old new|pairs); (bash \"cmd\" {:timeout N :max-lines N :max-bytes N :as :map}); (glob \"p\"); (grep \"p\"); (fetch \"url\" {:as :json}). Nonzero exits are normal.\n"
-                     "Output: emitted text/form values interleave in order (earlier values one line, last value full); (emit v) adds full output. stdout/stderr (println/print/prn) discarded. Cap 16 KiB (50 KiB with :max-output-bytes); timeout s, omit/0 = none.\n"
-                     "Discover: (help), (help :core), (sources), (help :library), (index \"text\"), (describe 'name); source verbs <id>/verb.")
-   :prompt-snippet "Runs in cwd; batch independent calls."
+   :description "Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order.\nFile/shell: (read \"p\" {:offset N :limit N}); (write \"p\" text); (edit \"p\" old new|pairs); (bash \"cmd\" {:timeout N :as :map}); (glob \"p\"); (grep \"p\"); (fetch \"url\" {:as :json}). (help) lists the rest.\nReturn values; (emit v) adds full output; stdout/stderr (println/print/prn) are discarded."
+   :prompt-snippet "Runs in cwd; one phase per call."
    :prompt-guidelines
-   ["Run several eval calls in one message; keep dependent forms in one call."
-    "Bind intermediates; bound reads; read paging is 1-based; `:as :lines` -> `{:lines [{:n :text}]}`; grep/glob: `:path`; avoid sed/head/tail/cat/bash rg/find."
-    "Dense text (backslashes/quotes/newlines): strings {...}; ($ \"name\") reads."
-    "Aliases: fs,str,set,edn,walk,json (clojure.data.json),p (babashka.process); libs? (help :surface)."
-    "Save reusable helpers with a docstring; (save 'name \"doc\") saves a session-only def, (move 'name :global) shares it."]
+   ["One eval call = one phase: batch independent reads and the dependent edit→test→verify as forms in a single code block and return a map of results. Do not make one call per file, command, or test suite."
+    "Return values; println/print/prn are discarded. Use (emit v) for long text."
+    "Bind intermediates; reads page 1-based; grep/glob take :path. Dense text: strings {...}; ($ \"name\") reads."]
    :parameters {:type "object"
                 :properties
                 {"code" {:type "string"

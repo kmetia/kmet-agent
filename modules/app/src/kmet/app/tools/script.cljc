@@ -1267,9 +1267,10 @@
   ([query & opts] (recall! (into [query] opts))))
 
 (defn- emit-verb
-  "Add VALUE to the call's output."
-  [value]
-  (emit-with-state value))
+  "Add each VALUE to the call's output."
+  [& values]
+  (doseq [value values]
+    (emit-with-state value)))
 
 (defn- emit-image-verb
   "Attach an image file (PNG, JPEG, GIF or WebP) or a {:data :mime-type} map to the call."

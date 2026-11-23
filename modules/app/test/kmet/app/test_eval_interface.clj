@@ -306,7 +306,7 @@
       (t/is (str/includes? (:content (support/eval! env "(eval/help 'read)"))
                            "read verb ([path] [path {:keys [offset start limit end tail footer as]}]) (built-in)"))
       (t/is (str/includes? (:content (support/eval! env "(eval/describe 'emit :doc)"))
-                           "Add VALUE to the call's output"))
+                           "Add each VALUE to the call's output"))
       (t/is (str/includes? core "also referred unqualified"))
       (t/is (str/includes? core "fetch"))
       (t/is (str/includes? index "  read ([path] [path {:keys [offset start limit end tail footer as]}]) - "))
