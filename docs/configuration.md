@@ -439,7 +439,11 @@ are read once.
 
 The cache half of the accounting was already there — `cache_read` and
 `cache_write` tokens and their cost — so `/cost`, the footer and the
-session totals show what the cache actually saved.
+session totals show what the cache actually saved. OpenRouter's streamed
+accounting on the completions wire (`cost`, `is_byok`) replaces the catalog
+total when valid, so OpenRouter sessions show the gateway's billed charge
+(plus the upstream provider cost on BYOK requests) instead of the catalog
+list price.
 
 ## Context compaction
 

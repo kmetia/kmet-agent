@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-19T11:11:44Z"
+ :generated-at "2026-11-23T12:36:54Z"
  :provider {:id :azure-openai-responses
             :name "Azure OpenAI"
             :env-vars ["AZURE_OPENAI_API_KEY"]
@@ -450,7 +450,7 @@
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 10 :output 50 :cache-read 1 :cache-write 12.5}
-    :context-window 1050000
+    :context-window 272000
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-mid-convo-system-messages true}}
@@ -470,7 +470,7 @@
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125}
-    :context-window 1050000
+    :context-window 272000
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-mid-convo-system-messages true}}
@@ -490,7 +490,7 @@
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
-    :context-window 1050000
+    :context-window 272000
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-mid-convo-system-messages true}}
@@ -510,7 +510,7 @@
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}
-    :context-window 1050000
+    :context-window 272000
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-mid-convo-system-messages true}}
@@ -530,9 +530,10 @@
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 1 :output 5 :cache-read 0.05 :cache-write 1.25}
-    :context-window 1050000
+    :context-window 272000
     :max-tokens 128000
-    :compat {:supports-openai-grammar-tools true}}
+    :compat {:supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6.2-astra"
    {:id "gpt-6.2-astra"
     :name "GPT-6.2 Astra"

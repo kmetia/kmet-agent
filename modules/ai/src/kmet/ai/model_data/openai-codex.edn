@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-04T11:08:57Z"
+ :generated-at "2026-11-23T12:36:54Z"
  :provider {:id :openai-codex
             :name "OpenAI Codex"
             :env-vars []
@@ -36,7 +36,6 @@
     :context-window 272000
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
-             :supports-tool-search true
              :supports-mid-convo-system-messages true}}
    "gpt-5.4-mini"
    {:id "gpt-5.4-mini"
@@ -51,7 +50,6 @@
     :context-window 272000
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
-             :supports-tool-search true
              :supports-mid-convo-system-messages true}}
    "gpt-5.5"
    {:id "gpt-5.5"
@@ -70,7 +68,6 @@
     :context-window 272000
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
-             :supports-tool-search true
              :supports-mid-convo-system-messages true}}
    "gpt-5.6-luna"
    {:id "gpt-5.6-luna"
@@ -230,7 +227,33 @@
            :output 10
            :cache-read 0.1
            :cache-write 2.5}
-    :context-window 272000
+    :context-window 500000
+    :max-tokens 128000
+    :compat {:supports-openai-grammar-tools true
+             :supports-tool-search true
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}
+   "gpt-6.1-terra"
+   {:id "gpt-6.1-terra"
+    :name "GPT-6.1 Terra"
+    :provider :openai-codex
+    :api :openai-codex-responses
+    :base-url "https://chatgpt.com/backend-api"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal "low"
+                         :off "none"
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 1
+           :tiers [{:input 2 :input-tokens-above 272000 :output 7.5 :cache-read 0.1 :cache-write 2.5}]
+           :output 5
+           :cache-read 0.05
+           :cache-write 1.25}
+    :context-window 500000
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-tool-search true

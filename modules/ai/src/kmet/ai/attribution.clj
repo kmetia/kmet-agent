@@ -23,7 +23,7 @@
   (when-let [m (re-matches #"(?i)^https?://([^/?#:]+).*" (or base-url ""))]
     (str/lower-case (second m))))
 
-(defn- is-openrouter-model?
+(defn openrouter-model?
   "pi isOpenRouterModel: provider id :openrouter, or the base-url contains
    'openrouter.ai' (pi uses a substring check here, not a hostname match)."
   [model]
@@ -50,7 +50,7 @@
    telemetry so it is always sent."
   [model]
   (cond
-    (is-openrouter-model? model)
+    (openrouter-model? model)
     {"HTTP-Referer" "https://github.com/markokocic/kmet"
      "X-OpenRouter-Title" "kmet"
      "X-OpenRouter-Categories" "cli-agent"}

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-22T21:16:30Z"
+ :generated-at "2026-11-23T12:36:54Z"
  :provider {:id :openrouter
             :name "OpenRouter"
             :env-vars ["OPENROUTER_API_KEY"]
@@ -1126,7 +1126,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.0443 :output 0.3 :cache-read 0.035 :cache-write 0}
+    :cost {:input 0.0434 :output 0.3 :cache-read 0.035 :cache-write 0}
     :context-window 1048576
     :max-tokens 943718
     :compat {:supports-developer-role false
@@ -1315,6 +1315,21 @@
     :max-tokens 384000
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
+             :thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
+   "dots-studio/dots-3-note-preview:free"
+   {:id "dots-studio/dots-3-note-preview:free"
+    :name "Dots Studio: Dots3-Note Preview (free)"
+    :provider :openrouter
+    :api :openai-completions
+    :base-url "https://openrouter.ai/api/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 512000
+    :max-tokens 460800
+    :compat {:supports-developer-role false
              :thinking-format :openrouter
              :supports-strict-mode true
              :send-session-affinity-headers true}}
@@ -2054,9 +2069,9 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning false
     :input [:text :image]
-    :cost {:input 0.08 :output 0.45 :cache-read 0.04 :cache-write 0}
+    :cost {:input 0.08 :output 0.16 :cache-read 0 :cache-write 0}
     :context-window 131072
-    :max-tokens 117964
+    :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
              :supports-strict-mode true
@@ -2074,7 +2089,7 @@
                          :minimal "MINIMAL"
                          :off nil}
     :input [:text :image]
-    :cost {:input 0.0675 :output 0.225 :cache-read 0.0375 :cache-write 0}
+    :cost {:input 0.09 :output 0.3 :cache-read 0.05 :cache-write 0}
     :context-window 262144
     :max-tokens 235929
     :compat {:supports-developer-role false
@@ -2658,7 +2673,7 @@
                          :off nil
                          :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 0.075 :output 0.3 :cache-read 0.0075 :cache-write 0}
+    :cost {:input 0.15 :output 0.6 :cache-read 0.015 :cache-write 0}
     :context-window 1048576
     :max-tokens 524288
     :compat {:supports-developer-role false
@@ -4068,6 +4083,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-5.4-mini"
    {:id "openai/gpt-5.4-mini"
@@ -4089,6 +4105,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-5.4-mini:batch"
    {:id "openai/gpt-5.4-mini:batch"
@@ -4173,6 +4190,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-5.4-pro:batch"
    {:id "openai/gpt-5.4-pro:batch"
@@ -4236,6 +4254,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-5.5-pro"
    {:id "openai/gpt-5.5-pro"
@@ -4320,6 +4339,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-5.6-luna-pro"
    {:id "openai/gpt-5.6-luna-pro"
@@ -4404,6 +4424,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-5.6-sol-pro"
    {:id "openai/gpt-5.6-sol-pro"
@@ -4488,6 +4509,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-5.6-terra-pro"
    {:id "openai/gpt-5.6-terra-pro"
@@ -4593,6 +4615,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-6-astra-pro"
    {:id "openai/gpt-6-astra-pro"
@@ -4677,6 +4700,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-6-luna-pro"
    {:id "openai/gpt-6-luna-pro"
@@ -4761,6 +4785,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-6-sol-pro"
    {:id "openai/gpt-6-sol-pro"
@@ -4845,6 +4870,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-6.1-sol-pro"
    {:id "openai/gpt-6.1-sol-pro"
@@ -4929,6 +4955,7 @@
     :max-tokens 128000
     :compat {:thinking-format :openrouter
              :supports-strict-mode true
+             :supports-mid-convo-system-messages true
              :send-session-affinity-headers true}}
    "openai/gpt-6.1-terra-pro"
    {:id "openai/gpt-6.1-terra-pro"
@@ -5218,7 +5245,7 @@
                          :off nil
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.09 :output 0.36 :cache-read 0 :cache-write 0}
+    :cost {:input 0.05 :output 0.25 :cache-read 0.05 :cache-write 0}
     :context-window 131072
     :max-tokens 117964
     :compat {:thinking-format :openrouter
@@ -5954,7 +5981,7 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.1 :output 0.9 :cache-read 0.025 :cache-write 0}
+    :cost {:input 0.05 :output 0.7 :cache-read 0.025 :cache-write 0}
     :context-window 262144
     :max-tokens 235929
     :compat {:supports-developer-role false
@@ -6546,7 +6573,7 @@
                          :off "none"
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.7506 :output 2.2509 :cache-read 0.0378 :cache-write 0}
+    :cost {:input 0.834 :output 2.501 :cache-read 0.042 :cache-write 0}
     :context-window 1048576
     :max-tokens 64000
     :compat {:supports-developer-role false
@@ -7242,7 +7269,7 @@
                          :off nil
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 0.0399 :output 0.0784 :cache-read 0.03 :cache-write 0}
+    :cost {:input 0.0399 :output 0.074 :cache-read 0.03 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false
@@ -7499,7 +7526,7 @@
                          :off "none"
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.0999 :output 8 :cache-read 0.0999 :cache-write 0}
+    :cost {:input 0.0999 :output 5 :cache-read 0.0999 :cache-write 0}
     :context-window 1048576
     :max-tokens 393216
     :compat {:supports-developer-role false
@@ -7521,9 +7548,9 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.044 :output 0.132 :cache-read 0.0014 :cache-write 0}
+    :cost {:input 0.0434 :output 0.3 :cache-read 0.035 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 943718
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter
@@ -7757,7 +7784,7 @@
                          :off nil
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 0.0399 :output 0.0784 :cache-read 0.03 :cache-write 0}
+    :cost {:input 0.0399 :output 0.074 :cache-read 0.03 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false

@@ -25,6 +25,13 @@
     (t/is (nil? (attr/merge-provider-attribution-headers
                  (model :base-url "https://notopenrouter.example.com/v1") nil)))))
 
+(t/deftest test-openrouter-model-predicate
+  (t/is (true? (attr/openrouter-model? (model :provider :openrouter))))
+  (t/is (true? (attr/openrouter-model?
+                (model :base-url "https://openrouter.ai/api/v1"))))
+  (t/is (false? (attr/openrouter-model?
+                 (model :base-url "https://notopenrouter.example.com/v1")))))
+
 (t/deftest test-nvidia-headers
   (t/testing "provider :nvidia"
     (t/is (= {"X-BILLING-INVOKE-ORIGIN" "Kmet"}

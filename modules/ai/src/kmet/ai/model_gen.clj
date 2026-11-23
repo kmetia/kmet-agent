@@ -182,21 +182,25 @@
   #{"gpt-5.6"})
 
 (def ^:private openai-tool-search-model-ids
-  #{"gpt-5.4" "gpt-5.4-mini" "gpt-5.4-pro" "gpt-5.5"
-    "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna"
-    "gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"})
+  "pi OPENAI_TOOL_SEARCH_MODEL_IDS. GPT-5.5 and older put tools loaded
+   through tool search into a namespace and reject replayed calls, so
+   dynamic tool loading starts with GPT-5.6."
+  #{"gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna"
+    "gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"
+    "gpt-6.1-terra"})
 
 ;; Public OpenAI documents additional_tools for applications that load tools
 ;; outside the normal tool-search flow; the openai provider supports both.
 (def ^:private openai-additional-tools-model-ids openai-tool-search-model-ids)
 
 (def ^:private openai-short-context-capped-model-ids
-  #{"gpt-5.4" "gpt-5.5" "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna"})
+  #{"gpt-5.4" "gpt-5.5" "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna"
+    "gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"
+    "gpt-6.1-terra"})
 
 (def ^:private openai-long-context-pricing-model-ids
-  #{"gpt-5.4" "gpt-5.4-pro" "gpt-5.5" "gpt-5.5-pro"
-    "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna"
-    "gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"})
+  (into openai-short-context-capped-model-ids
+        #{"gpt-5.4-pro" "gpt-5.5-pro"}))
 
 ;; Keep current OpenAI prices authoritative until models.dev and passthrough
 ;; catalogs catch up.
@@ -208,7 +212,8 @@
    "gpt-6-astra" {:input 10 :output 50 :cache-read 1 :cache-write 12.5}
    "gpt-6-luna" {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125}
    "gpt-6-sol" {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
-   "gpt-6.1-sol" {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}})
+   "gpt-6.1-sol" {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}
+   "gpt-6.1-terra" {:input 1 :output 5 :cache-read 0.05 :cache-write 1.25}})
 
 ;; Models that accept `reasoning: {effort: "none"}` to disable thinking;
 ;; every other gpt-5* responses model pins :off to null (always-thinking).
@@ -505,6 +510,14 @@
                               (get openai-standard-costs "gpt-6.1-sol"))
                       :context-window 1050000
                       :max-tokens 128000)
+           (array-map :id "gpt-6.1-terra" :name "GPT-6.1 Terra"
+                      :provider :openai :api :openai-responses
+                      :base-url openai-base-url
+                      :reasoning true :input [:text :image]
+                      :cost (with-openai-long-context-pricing
+                              (get openai-standard-costs "gpt-6.1-terra"))
+                      :context-window 1050000
+                      :max-tokens 128000)
            (array-map :id "gpt-6-astra" :name "GPT-6 Astra"
                       :provider :openai :api :openai-responses
                       :base-url openai-base-url
@@ -565,6 +578,7 @@
 
 (def ^:private codex-base-url "https://chatgpt.com/backend-api")
 (def ^:private codex-context 272000)
+(def ^:private codex-gpt-61-context 500000)
 (def ^:private codex-spark-context 128000)
 (def ^:private codex-max-tokens 128000)
 
@@ -585,7 +599,11 @@
   [(codex-model "gpt-6.1-sol" "GPT-6.1 Sol" [:text :image]
                 (with-openai-long-context-pricing
                   (get openai-standard-costs "gpt-6.1-sol"))
-                codex-context)
+                codex-gpt-61-context)
+   (codex-model "gpt-6.1-terra" "GPT-6.1 Terra" [:text :image]
+                (with-openai-long-context-pricing
+                  (get openai-standard-costs "gpt-6.1-terra"))
+                codex-gpt-61-context)
    (codex-model "gpt-6-astra" "GPT-6 Astra" [:text :image]
                 (with-openai-long-context-pricing
                   (get openai-standard-costs "gpt-6-astra"))
@@ -1370,7 +1388,11 @@
              "workers-ai" [:openai-completions cloudflare-ai-gateway-compat-base-url
                            prefixed cloudflare-session-affinity-compat])]
        (apply-thinking-maps
-        (model-map :cloudflare-ai-gateway api base m id {:compat compat})
+        (cond-> (model-map :cloudflare-ai-gateway api base m id {:compat compat})
+          (and (= "openai" upstream)
+               (contains? openai-standard-costs native))
+          (assoc :cost (with-openai-long-context-pricing
+                         (get openai-standard-costs native))))
         m)))))
 
 ;; ─── Deferred A.2: mistral / google-vertex / amazon-bedrock (pi            ──
@@ -1753,11 +1775,12 @@
       (and (contains? #{:openai-responses :azure-openai-responses} api)
            (str/starts-with? id "gpt-5"))
       (merge-thinking-level-map {:off nil})
-      (and (contains? #{"gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"} id)
+      (and (contains? #{"gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"
+                        "gpt-6.1-terra"} id)
            (contains? #{:openai-responses :azure-openai-responses
                         :openai-codex-responses}
                       api))
-      (merge-thinking-level-map {:off (when (contains? #{"gpt-6-sol" "gpt-6-luna"} id)
+      (merge-thinking-level-map {:off (when (contains? #{"gpt-6-sol" "gpt-6-luna" "gpt-6.1-terra"} id)
                                         "none")
                                  :minimal nil :low "low" :medium "medium"
                                  :high "high" :xhigh "xhigh" :max "max"})
@@ -1918,7 +1941,8 @@
 
 (def ^:private openai-codex-additional-tools-model-ids
   #{"gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna"
-    "gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"})
+    "gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"
+    "gpt-6.1-terra"})
 
 (defn- apply-openai-tool-search-metadata
   "pi applyOpenAIToolSearchMetadata: newer OpenAI Responses models can load
@@ -1984,15 +2008,22 @@
 
 (defn- apply-openai-mid-convo-metadata
   "pi enableOpenAiMidConvoSystemMessages: a known Responses model through a
-   proxy or the direct API accepts later developer messages."
+   proxy or the direct API accepts later developer messages; a proxy also
+   accepts additional_tools for the tool-search model set."
   [mm]
-  (if (and (contains? #{:openai-responses :openai-codex-responses
-                        :azure-openai-responses}
-                      (:api mm))
-           (contains? responses-mid-convo-providers (:provider mm))
-           (contains? openai-mid-convo-model-ids (strip-model-prefix (:id mm))))
-    (merge-compat mm {:supports-mid-convo-system-messages true})
-    mm))
+  (let [id (strip-model-prefix (:id mm))]
+    (if (and (contains? #{:openai-responses :openai-codex-responses
+                          :azure-openai-responses}
+                        (:api mm))
+             (contains? responses-mid-convo-providers (:provider mm))
+             (contains? openai-mid-convo-model-ids id))
+      (merge-compat mm
+                    (cond-> {:supports-mid-convo-system-messages true}
+                      (and (contains? #{:github-copilot :opencode :opencode-go}
+                                      (:provider mm))
+                           (contains? openai-tool-search-model-ids id))
+                      (assoc :supports-additional-tools true)))
+      mm)))
 
 (defn- apply-completions-mid-convo-metadata
   "pi's chat-completions facts: Kimi K3 (and the rows the catalog already tags
@@ -2031,6 +2062,11 @@
         (merge-compat mm {:supports-mid-convo-system-messages true})
 
         (= :azure-openai-responses provider)
+        (merge-compat mm {:supports-mid-convo-system-messages true})
+
+        (and (= :openrouter provider)
+             (str/starts-with? (str (:id mm)) "openai/")
+             (contains? openai-mid-convo-model-ids id))
         (merge-compat mm {:supports-mid-convo-system-messages true})
 
         :else mm))))
@@ -2504,10 +2540,14 @@
    {:id "gpt-5.6-luna" :ref [:openai "gpt-5.6-luna"] :cost (open-design-cost 0.2 1.2 0.02 0.25)}
    {:id "gpt-5.6-sol" :ref [:openai "gpt-5.6-sol"] :cost (open-design-cost 4 20 0.4 5)}
    {:id "gpt-5.6-terra" :ref [:openai "gpt-5.6-terra"] :cost (open-design-cost 2 12 0.2 2.5)}
-   {:id "gpt-6.1-sol" :ref [:openai "gpt-6.1-sol"] :cost (open-design-cost 2 10 0.1 2.5)}
-   {:id "gpt-6-astra" :ref [:openai "gpt-6-astra"] :cost (open-design-cost 10 50 1 12.5)}
-   {:id "gpt-6-luna" :ref [:openai "gpt-6-luna"] :cost (open-design-cost 0.1 0.5 0.01 0.125)}
-   {:id "gpt-6-sol" :ref [:openai "gpt-6-sol"] :cost (open-design-cost 2 10 0.2 2.5)}
+   {:id "gpt-6.1-sol" :ref [:openai "gpt-6.1-sol"]
+    :cost (open-design-cost 2 10 0.1 2.5) :context-window 1050000}
+   {:id "gpt-6-astra" :ref [:openai "gpt-6-astra"]
+    :cost (open-design-cost 10 50 1 12.5) :context-window 1050000}
+   {:id "gpt-6-luna" :ref [:openai "gpt-6-luna"]
+    :cost (open-design-cost 0.1 0.5 0.01 0.125) :context-window 1050000}
+   {:id "gpt-6-sol" :ref [:openai "gpt-6-sol"]
+    :cost (open-design-cost 2 10 0.2 2.5) :context-window 1050000}
    ;; xAI
    {:id "grok-4.5" :ref [:xai "grok-4.5"] :cost (open-design-cost 2 6 0.5 0)}
    {:id "grok-4.6" :ref [:xai "grok-4.6"] :cost (open-design-cost 2 6 0.5 0)}
@@ -2529,9 +2569,11 @@
    {:id "qwen3.7-max" :ref [:qwen-token-plan "qwen3.7-max"] :cost (open-design-cost 2.5 7.5 0.5 3.125)}])
 
 (defn- process-open-design
-  "Canonical groups → OpenDesign Cloud model maps. A ref that no longer
-   resolves throws: shipping the model with conservative defaults instead of
-   the vendor's limits would silently misplace its context window."
+  "Canonical groups → OpenDesign Cloud model maps. An explicit
+   :context-window/:max-tokens entry wins over the ref, so the gateway's own
+   limits survive a canonical client cap. A ref that no longer resolves
+   throws: shipping the model with conservative defaults instead of the
+   vendor's limits would silently misplace its context window."
   [grouped]
   (for [{:keys [id ref cost] :as entry} open-design-catalog
         :let [ref-model (when ref (get-in grouped ref))]]
@@ -2553,9 +2595,9 @@
                  :reasoning (boolean (if ref (:reasoning ref-model) (:reasoning entry)))
                  :input (or (:input ref-model) (:input entry) [:text])
                  :cost (or cost (:cost ref-model))
-                 :context-window (long (or (:context-window ref-model)
-                                           (:context-window entry)))
-                 :max-tokens (long (or (:max-tokens ref-model) (:max-tokens entry))))
+                 :context-window (long (or (:context-window entry)
+                                           (:context-window ref-model)))
+                 :max-tokens (long (or (:max-tokens entry) (:max-tokens ref-model))))
           (seq tlm) (assoc :thinking-level-map tlm)
           (seq compat) (assoc :compat compat))))))
 

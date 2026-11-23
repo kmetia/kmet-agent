@@ -133,14 +133,17 @@
       (t/is (= [] (:env-vars (m/get-provider :openai-codex)))
             "codex is OAuth-only — no env var")
       (t/testing "GPT-6 models are static Codex catalog models"
-        (doseq [id ["gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"]]
+        (doseq [[id context] [["gpt-6-astra" 272000] ["gpt-6-sol" 272000]
+                              ["gpt-6-luna" 272000] ["gpt-6.1-sol" 500000]
+                              ["gpt-6.1-terra" 500000]]]
           (let [model (m/get-model :openai-codex id)]
             (t/is (some? model))
             (t/is (= :openai-codex-responses (:api model)))
             (t/is (= [:text :image] (:input model)))
-            (t/is (= 272000 (:context-window model)))
+            (t/is (= context (:context-window model)))
             (t/is (= 128000 (:max-tokens model)))
-            (t/is (= {:off (when (contains? #{"gpt-6-sol" "gpt-6-luna"} id) "none")
+            (t/is (= {:off (when (contains? #{"gpt-6-sol" "gpt-6-luna" "gpt-6.1-terra"} id)
+                             "none")
                       :minimal "low" :low "low" :medium "medium"
                       :high "high" :xhigh "xhigh" :max "max"}
                      (:thinking-level-map model)))

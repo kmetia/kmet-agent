@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-21T17:19:24Z"
+ :generated-at "2026-11-23T11:33:59Z"
  :provider {:id :zai-coding-cn
             :name "Z.AI (CN)"
             :env-vars ["ZAI_CODING_CN_API_KEY"]
@@ -128,6 +128,24 @@
     :base-url "https://open.bigmodel.cn/api/coding/paas/v4"
     :reasoning true
     :input [:text]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 131072
+    :compat {:supports-store false
+             :supports-developer-role false
+             :supports-reasoning-effort false
+             :thinking-format :zai
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true
+             :zai-tool-stream true}}
+   "glm-5.4"
+   {:id "glm-5.4"
+    :name "GLM-5.4"
+    :provider :zai-coding-cn
+    :api :openai-completions
+    :base-url "https://open.bigmodel.cn/api/coding/paas/v4"
+    :reasoning true
+    :input [:text :image]
     :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
     :context-window 1000000
     :max-tokens 131072

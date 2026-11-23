@@ -117,15 +117,17 @@
                 (str "expected a reasoning error, got: " errors)))))))
 
 (t/deftest test-openai-gpt-6-context
-  "Direct OpenAI API models retain their 1.05M context; the separate Codex
-   catalog applies the ChatGPT subscription's 272K limit."
+  "Direct OpenAI GPT-6 models are capped to the 272K short-context tier by
+   default (pi correctUpstream); users opt into the larger context through a
+   model override. The Codex catalog keeps its own 272K/500K limits."
   (let [models (into {} (map (juxt :id identity) (#'mg/missing-openai-models #{})))]
-    (doseq [id ["gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"]]
+    (doseq [id ["gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"
+                "gpt-6.1-terra"]]
       (let [model (get models id)
             normalized (#'mg/normalize-openai model)]
-        (t/is (= 1050000 (:context-window model)))
-        (t/is (= 1050000 (:context-window normalized))
-              "direct API context must not be capped to the Codex subscription limit")
+        (t/is (= 272000 (:context-window normalized))
+              "direct API context is capped to the short-context pricing tier")
+        (t/is (= 128000 (:max-tokens normalized)))
         (t/is (= 272000 (get-in normalized [:cost :tiers 0 :input-tokens-above])))))))
 
 (defn- compat-of [provider api id]
@@ -162,19 +164,51 @@
     (t/is (nil? (:supports-mid-convo-system-messages
                  (compat-of :openai :openai-responses "gpt-4o"))))))
 
+(t/deftest test-openai-tool-search-and-proxy-metadata
+  "pi parity for the OpenAI tool-search/mid-convo sets: GPT-5.4/5.5 keep
+   mid-convo only; proxies pass additional_tools for the GPT-5.6/6 set but
+   keep tool search top-level; OpenRouter's openai/* completions accept
+   mid-conversation developer messages."
+  (t/testing "GPT-5.4/5.5 keep mid-convo but lose tool search"
+    (doseq [id ["gpt-5.4" "gpt-5.5"]]
+      (let [c (compat-of :openai :openai-responses id)]
+        (t/is (true? (:supports-mid-convo-system-messages c)))
+        (t/is (nil? (:supports-tool-search c)))
+        (t/is (nil? (:supports-additional-tools c))))))
+  (t/testing "GPT-5.6/6.1 tool-search models get tool search and additional tools"
+    (doseq [id ["gpt-5.6-luna" "gpt-6.1-terra"]]
+      (let [c (compat-of :openai :openai-responses id)]
+        (t/is (true? (:supports-tool-search c)))
+        (t/is (true? (:supports-additional-tools c)))
+        (t/is (true? (:supports-mid-convo-system-messages c))))))
+  (t/testing "Copilot and OpenCode proxies add additional_tools, not tool search"
+    (doseq [[provider id] [[:github-copilot "gpt-6.1-terra"]
+                           [:opencode "gpt-5.6-luna"]]]
+      (let [c (compat-of provider :openai-responses id)]
+        (t/is (true? (:supports-mid-convo-system-messages c)))
+        (t/is (true? (:supports-additional-tools c)))
+        (t/is (nil? (:supports-tool-search c))))))
+  (t/testing "OpenRouter openai/* completions accept mid-convo developer messages"
+    (t/is (true? (:supports-mid-convo-system-messages
+                  (compat-of :openrouter :openai-completions "openai/gpt-5.6-luna"))))
+    (t/is (nil? (:supports-mid-convo-system-messages
+                 (compat-of :openrouter :openai-completions "google/gemini-3.5-flash"))))))
+
 (t/deftest test-codex-gpt-6-models
   "GPT-6 models are static ChatGPT OAuth catalog entries. Keep their
    Codex-specific wire metadata in lockstep with pi's codexModels entries."
   (let [models (into {} (map (juxt :id identity) (#'mg/process-codex)))]
-    (doseq [[id name cost off]
+    (doseq [[id name cost off context]
             [["gpt-6-astra" "GPT-6 Astra"
-              {:input 10 :output 50 :cache-read 1 :cache-write 12.5} nil]
+              {:input 10 :output 50 :cache-read 1 :cache-write 12.5} nil 272000]
              ["gpt-6-sol" "GPT-6 Sol"
-              {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5} "none"]
+              {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5} "none" 272000]
              ["gpt-6-luna" "GPT-6 Luna"
-              {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125} "none"]
+              {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125} "none" 272000]
              ["gpt-6.1-sol" "GPT-6.1 Sol"
-              {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5} nil]]]
+              {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5} nil 500000]
+             ["gpt-6.1-terra" "GPT-6.1 Terra"
+              {:input 1 :output 5 :cache-read 0.05 :cache-write 1.25} "none" 500000]]]
       (let [model (get models id)
             expected-cost (assoc cost :tiers [{:input-tokens-above 272000
                                                :input (* 2.0 (:input cost))
@@ -188,7 +222,7 @@
         (t/is (= true (:reasoning model)))
         (t/is (= [:text :image] (:input model)))
         (t/is (= expected-cost (:cost model)))
-        (t/is (= 272000 (:context-window model)))
+        (t/is (= context (:context-window model)))
         (t/is (= 128000 (:max-tokens model)))
         (let [model (#'mg/apply-thinking-maps model nil)]
           (t/is (= {:off off :minimal "low" :low "low" :medium "medium"
@@ -200,19 +234,39 @@
                     :supports-mid-convo-system-messages true}
                    (:compat (#'mg/apply-compat-metadata model)))))))))
 
-(t/deftest test-openai-gpt-56-standard-costs
-  "Regression: the GPT-5.6 entries in the Codex catalog and the direct
-   OpenAI fallback use the authoritative standard costs (pi
+(t/deftest test-openai-standard-costs
+  "Regression: GPT-5.6 and GPT-6.1 Terra in the Codex catalog and the
+   direct OpenAI fallback use the authoritative standard costs (pi
    OPENAI_STANDARD_COSTS), not the pre-reduction rates."
   (let [expected {"gpt-5.6-sol" {:input 4 :output 20 :cache-read 0.4 :cache-write 5}
                   "gpt-5.6-terra" {:input 2 :output 12 :cache-read 0.2 :cache-write 2.5}
-                  "gpt-5.6-luna" {:input 0.2 :output 1.2 :cache-read 0.02 :cache-write 0.25}}
+                  "gpt-5.6-luna" {:input 0.2 :output 1.2 :cache-read 0.02 :cache-write 0.25}
+                  "gpt-6.1-terra" {:input 1 :output 5 :cache-read 0.05 :cache-write 1.25}}
         base (fn [mm] (select-keys (:cost mm) [:input :output :cache-read :cache-write]))
         fallback (into {} (map (juxt :id identity) (#'mg/missing-openai-models #{})))
         codex (into {} (map (juxt :id identity) (#'mg/process-codex)))]
     (doseq [[id cost] expected]
       (t/is (= cost (base (get fallback id))) (str "openai fallback " id))
       (t/is (= cost (base (get codex id))) (str "codex " id)))))
+
+(t/deftest test-cloudflare-gateway-openai-standard-costs
+  "pi routeGatewayModel: the openai/* passthrough uses the authoritative
+   standard cost and long-context tier, not the gateway's stale catalog
+   rates."
+  (let [data {"cloudflare-ai-gateway"
+              {"models"
+               {"openai/gpt-5.6-luna"
+                {"name" "GPT-5.6 Luna" "tool_call" true "reasoning" true
+                 "modalities" {"input" ["text" "image"]}
+                 "cost" {"input" 1.0 "output" 6.0
+                         "cache_read" 0.1 "cache_write" 1.25}
+                 "limit" {"context" 1050000 "output" 128000}}}}}
+        model (first (#'mg/process-cloudflare-ai-gateway data))]
+    (t/is (= "gpt-5.6-luna" (:id model)))
+    (t/is (= :openai-responses (:api model)))
+    (t/is (= {:input 0.2 :output 1.2 :cache-read 0.02 :cache-write 0.25}
+             (select-keys (:cost model) [:input :output :cache-read :cache-write])))
+    (t/is (= 272000 (get-in model [:cost :tiers 0 :input-tokens-above])))))
 
 (t/deftest test-commandcode-refs-transfer-capabilities
   "Regression: the canonical-ref lookup in process-commandcode (get-in
@@ -264,6 +318,8 @@
     (t/is (= "https://amr-link.open-design.ai/v1" (:base-url claude)))
     (t/is (= 1000000 (:context-window claude)) "canonical limits transfer")
     (t/is (= 128000 (:max-tokens claude)))
+    (t/is (= 1050000 (:context-window (get by-id "gpt-6-astra")))
+          "an explicit gateway limit wins over a canonical client cap")
     (t/is (= [:text :image] (:input claude)))
     (t/is (= {:force-adaptive-thinking true} (:compat claude))
           "a vendor ref contributes only the model-bound compat keys")

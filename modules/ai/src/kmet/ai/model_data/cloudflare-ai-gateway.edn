@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-19T11:11:44Z"
+ :generated-at "2026-11-23T12:36:54Z"
  :provider {:id :cloudflare-ai-gateway
             :name "Cloudflare AI Gateway"
             :env-vars ["CLOUDFLARE_API_KEY" "CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_GATEWAY_ID"]
@@ -540,7 +540,7 @@
            :tiers [{:input 20 :input-tokens-above 272000 :output 75 :cache-read 2 :cache-write 25}]
            :output 50
            :cache-read 1
-           :cache-write 12}
+           :cache-write 12.5}
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-strict-mode true :supports-openai-grammar-tools true}}

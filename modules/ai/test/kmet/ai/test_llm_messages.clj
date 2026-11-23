@@ -476,13 +476,21 @@
 (t/deftest test-usage-with-cost
   (m/load-catalogs! nil)
   (let [model (m/get-model :deepseek "deepseek-v4-pro")
-        norm {:input 800 :output 500 :cache-read 200 :cache-write 0}]
+        norm {:input 800 :output 500 :cache-read 200 :cache-write 0}
+        openrouter-model {:id "openai/gpt-4.1" :name "GPT-4.1"
+                          :provider :openrouter
+                          :api :openai-completions
+                          :base-url "https://openrouter.ai/api/v1"
+                          :reasoning false :input [:text :image]
+                          :cost {:input 2 :output 8 :cache-read 0.5 :cache-write 0}}
+        base-usage {:prompt_tokens 1000 :completion_tokens 500
+                    :prompt_tokens_details {:cached_tokens 200}}
+        usage-for (fn [m raw] (@#'shared/usage-with-cost m (merge base-usage raw)))
+        calculated (fn [m] (m/calculate-cost m norm))]
     (t/testing "provider-native usage gains the pi-shaped :cost breakdown"
-      (let [usage (@#'shared/usage-with-cost model
-                                             {:prompt_tokens 1000 :completion_tokens 500
-                                              :prompt_tokens_details {:cached_tokens 200}})]
+      (let [usage (usage-for model {})]
         (t/is (= 1000 (:prompt_tokens usage)) "provider-native keys preserved")
-        (t/is (= (m/calculate-cost model norm) (:cost usage))
+        (t/is (= (calculated model) (:cost usage))
               "cost equals calculate-cost over the normalized tokens")))
     (t/testing "google's already-normalized usage is priced too"
       (let [usage (@#'shared/usage-with-cost model {:input 10 :output 20
@@ -492,7 +500,37 @@
                                           :cache-read 0 :cache-write 0})
                  (:cost usage)))))
     (t/testing "unrecognized usage passes through unchanged (no :cost)"
-      (t/is (= {:foo 1} (@#'shared/usage-with-cost model {:foo 1}))))))
+      (t/is (= {:foo 1} (@#'shared/usage-with-cost model {:foo 1}))))
+    (t/testing "OpenRouter's reported charge replaces the catalog total"
+      (let [usage (usage-for openrouter-model {:cost 0.001234 :is_byok false})]
+        (t/is (= 0.001234 (get-in usage [:cost :total])))
+        (t/is (true? (get-in usage [:cost :total-from-provider])))))
+    (t/testing "OpenRouter BYOK adds the upstream provider cost"
+      (let [usage (usage-for openrouter-model
+                             {:cost 0.0012 :is_byok true
+                              :cost_details {:upstream_inference_cost 0.0005}})]
+        (t/is (= 0.0017 (get-in usage [:cost :total])))))
+    (t/testing "OpenRouter BYOK falls back to prompt + completion cost when upstream is null"
+      (let [usage (usage-for openrouter-model
+                             {:cost 0.0012 :is_byok true
+                              :cost_details {:upstream_inference_cost nil
+                                             :upstream_inference_prompt_cost 0.0002
+                                             :upstream_inference_completions_cost 0.0003}})]
+        (t/is (= 0.0017 (get-in usage [:cost :total])))))
+    (t/testing "invalid or incomplete accounting keeps the catalog total"
+      (doseq [raw [{:cost -1 :is_byok false}
+                   {:cost 0.5 :is_byok nil}
+                   {:cost 0.5 :is_byok true}
+                   {:cost 0.0012 :is_byok true
+                    :cost_details {:upstream_inference_prompt_cost 0.0002
+                                   :upstream_inference_completions_cost 0.0003}}
+                   {:cost 0.0012 :is_byok true
+                    :cost_details {:upstream_inference_cost -0.1}}]]
+        (t/is (= (calculated openrouter-model)
+                 (:cost (usage-for openrouter-model raw))))))
+    (t/testing "non-OpenRouter models ignore reported cost fields"
+      (t/is (= (calculated model)
+               (:cost (usage-for model {:cost 99 :is_byok false})))))))
 
 (t/deftest test-request-headers-attribution
   (t/testing "opencode session headers flow through request-headers"

@@ -922,14 +922,48 @@
     :max_tokens
     :max_completion_tokens))
 
+(defn- valid-reported-cost?
+  "OpenRouter accounting costs are finite non-negative numbers (pi
+   isValidCost)."
+  [v]
+  (and (number? v) (<= 0 v) (< v ##Inf)))
+
+(defn- openrouter-reported-total
+  "pi applyOpenRouterReportedCost: OpenRouter's charged total, plus the
+   upstream provider cost on BYOK. nil when the accounting is incomplete."
+  [{:keys [cost is_byok cost_details]}]
+  (when (valid-reported-cost? cost)
+    (case is_byok
+      false cost
+      true (let [{:keys [upstream_inference_cost
+                         upstream_inference_prompt_cost
+                         upstream_inference_completions_cost]} cost_details
+                 upstream (when (contains? cost_details :upstream_inference_cost)
+                            (if (nil? upstream_inference_cost)
+                              (when (and (valid-reported-cost? upstream_inference_prompt_cost)
+                                         (valid-reported-cost? upstream_inference_completions_cost))
+                                (+ upstream_inference_prompt_cost
+                                   upstream_inference_completions_cost))
+                              upstream_inference_cost))]
+             (when (valid-reported-cost? upstream)
+               (+ cost upstream)))
+      nil)))
+
 (defn usage-with-cost
   "Attach the per-message USD cost (pi: calculateCost runs in the wire API)
    to a provider-native usage map, computed from the Model record that
-   produced the response. Usage maps without recognizable tokens pass
-   through unchanged."
+   produced the response. OpenRouter's reported billed cost (openai-completions
+   accounting) replaces the catalog total when complete; without recognizable
+   tokens the usage map passes through unchanged."
   [model-record usage]
   (if-let [norm (usage/entry-usage usage)]
-    (assoc usage :cost (models/calculate-cost model-record norm))
+    (let [cost (models/calculate-cost model-record norm)
+          reported (when (and (= :openai-completions (:api model-record))
+                              (attribution/openrouter-model? model-record))
+                     (openrouter-reported-total usage))]
+      (assoc usage :cost (cond-> cost
+                           reported (assoc :total (double reported)
+                                           :total-from-provider true))))
     usage))
 
 (defn responses-events-handler
