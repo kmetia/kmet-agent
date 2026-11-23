@@ -413,8 +413,7 @@ Only the current session is searchable. One result is capped at 50 KB.
 
 **Description:**
 
-Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order; definitions persist for the session, and a docstring saves a top-level def to the cwd eval library.
-File/shell/HTTP: (read "p") -> text; (read "p" {:offset 1 :limit N}); (read "p" {:start 1 :end N :as :lines}); (write "p" text); (edit "p" old new|pairs); (bash "cmd" {:timeout N :max-lines N :max-bytes N :as :map}); (glob "p"); (grep "p"); (fetch "url" {:as :json}). Nonzero exits are normal.
-Output: emitted text/form values interleave in order (earlier values one line, last value full); (emit v) adds full output. stdout/stderr (println/print/prn) discarded. Cap 16 KiB (50 KiB with :max-output-bytes); timeout s, omit/0 = none.
-Discover: (help), (help :core), (sources), (help :library), (index "text"), (describe 'name); source verbs <id>/verb.
+Babashka/Clojure SCI sandbox in cwd (`(cwd)`; bash :cwd overrides); forms run in order.
+File/shell: (read "p" {:offset N :limit N}); (write "p" text); (edit "p" old new|pairs); (bash "cmd" {:timeout N :as :map}); (glob "p"); (grep "p"); (fetch "url" {:as :json}). (help) lists the rest.
+Return values; (emit v) adds output.
 
