@@ -642,17 +642,21 @@ Be precise and concise in your responses."}}]
       (and (not (contains? table name))
            (contains? contributed name))))
 
+(declare loaded-tools)
+
 (defn orphaned-deferred-tools
-  "Selected `:deferred` tools that no selected discovery tool can promote,
-   sorted; nil when the selection does not orphan any. `tool_search` is the
-   only discovery tool, so excluding it while keeping a deferred tool selected
-   leaves that tool unreachable."
+  "Selected `:deferred` tools that no selected discovery tool can promote and
+   that are not already loaded, sorted; nil when the selection does not orphan
+   any. `tool_search` is the only discovery tool, so excluding it while keeping
+   an unloaded deferred tool selected leaves that tool unreachable."
   [agent]
   (let [table (tool-table agent)
         selected (tools/select-tools table (tool-selection agent))
+        loaded (set (loaded-tools agent))
         orphaned (->> (keys selected)
                       (keep (fn [name]
-                              (when (= :deferred (tool/exposure (get table name)))
+                              (when (and (not (contains? loaded name))
+                                         (= :deferred (tool/exposure (get table name))))
                                 name)))
                       sort
                       vec)]
@@ -661,18 +665,26 @@ Be precise and concise in your responses."}}]
       orphaned)))
 
 (defn session-loaded-tools
-  "The tool names SESS recorded as loaded — what `tool_search` promoted into the
-   declared set, in load order. A fold over the branch's `:tool-load` custom
-   entries, so resume, `/tree` and a fork see the set that branch was actually
-   sent; nil (no session) has none."
+  "The tool names SESS has loaded: what `tool_search` promoted into the
+   declared set (the branch's `:tool-load` entries, in load order) plus
+   `session_recall` once the branch holds a compaction summary — a compaction
+   auto-loads it, so the summary's recall note names a declared tool without a
+   search round trip. A fold over the branch, so resume, `/tree` and a fork see
+   the load set the branch carries; nil (no session) has none."
   [sess]
-  (into []
-        (comp (mapcat #(get-in % [:data :names])) (distinct))
-        (if sess (session/get-custom-entries sess :tool-load) [])))
+  (let [promoted (into []
+                       (comp (mapcat #(get-in % [:data :names])) (distinct))
+                       (if sess (session/get-custom-entries sess :tool-load) []))
+        compacted? (and sess
+                        (some #(= :compaction (:role %))
+                              (session/get-branch sess)))]
+    (cond-> promoted
+      (and compacted?
+           (not (some #(= "session_recall" %) promoted)))
+      (conj "session_recall"))))
 
 (defn loaded-tools
-  "The tool names AGENT's session recorded as loaded (see
-   `session-loaded-tools`)."
+  "The tool names AGENT's session has loaded (see `session-loaded-tools`)."
   [agent]
   (session-loaded-tools (:session agent)))
 
@@ -884,12 +896,14 @@ Be precise and concise in your responses."}}]
    SELECTED? rejects it. A recorded removal no longer decides by itself: a
    removed tool that is live again was unmounted and remounted (or explicitly
    re-enabled), and SELECTED? restores it when it accepts the name.
-   Built-ins never join the new-tool group; a new built-in follows the
-   configured selection, not a resume."
-  [sess recorded live seen selected?]
+   A loaded name counts as mentioned, so a builtin promoted by tool_search or
+   a compaction joins; otherwise a new built-in follows the configured
+   selection, not a resume."
+  [sess recorded live seen selected? loaded]
   (if (nil? recorded)
     nil
-    (let [mentioned (mentioned-tool-names (session/get-branch sess))
+    (let [mentioned (into (mentioned-tool-names (session/get-branch sess))
+                          loaded)
           ;; tool_search is source-driven, not a fixed built-in: a newly
           ;; mounted deferred source must make it declarable on resume
           builtins (disj (set tools/builtin-tool-names) search/tool-search-name)
@@ -1011,7 +1025,8 @@ Be precise and concise in your responses."}}]
                     live
                     (or (resume-declarations sess branch-previous live seen
                                              #(recorded-selected?
-                                               (:enabled selection) table contributed %))
+                                               (:enabled selection) table contributed %)
+                                             (set (loaded-tools agent)))
                         live))]
       (record-tool-change! agent (context-tool-state agent) current))))
 

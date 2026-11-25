@@ -389,19 +389,8 @@ Some of the tools, such as tools of MCP servers, may not have been provided to y
 
 **Description:**
 
-Recall earlier parts of this session, including anything dropped by compaction.
-Use it before saying the context is gone.
-
-Pick one per call:
-- query: keyword search (regex works), 5 results per page.
-- range: [from, to]: entries #from..#to in order, 20 per page.
-- expand: [N, ...]: full text of those entries.
-- mode: 'touched': files worked on, with entry indices.
-- query '#N:path': file content from entry N ('#N:path:full' for all lines).
-
-Add to any of them: page: next page; scope: 'lineage' (default) or 'all'.
-#N is the number shown in summary refs like (#12) and in recall results.
-Only the current session is searchable. One result is capped at 50 KB.
+Recall earlier session entries, including those dropped by compaction.
+One selector per call: query (keywords/regex, 5/page), range [from, to] (20/page), expand [N, ...], mode "touched" (files worked on), or query "#N:path" (file content at entry N; append ":full" for all lines). Options: page, scope "lineage" (default) or "all". #N is a summary ref like (#12). Cap: 50 KB.
 
 ---
 

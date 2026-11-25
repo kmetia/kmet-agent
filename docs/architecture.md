@@ -450,7 +450,9 @@ connecting), a tool this state watched unmount is removed while it stays gone
 (a remount restores it unless the persisted selection excludes it), and an
 extension tool registered after the record joins the next request. `:tool-load` entries
 remain the promotion log, so disabling a loaded tool hides it without
-forgetting the load. `callable-tool-names` is the other half — the selection
+forgetting the load. A compaction marks `session_recall` loaded — the
+selection still decides whether it is declared — so the summary's recall note
+names a declared tool rather than a discovery step. `callable-tool-names` is the other half — the selection
 minus the `:model-only` tools.
 
 **A tool change is a transcript message, not a rebuilt array.** Each

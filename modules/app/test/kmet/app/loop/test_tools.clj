@@ -909,9 +909,9 @@
 (t/deftest test-active-tools-resources-selection
   (t/testing "a resources selection filters the live tools; a runtime
               selection wins; nil restores the current selection"
-    (let [;; tool_search is a built-in row the run declares only while a
-          ;; deferred tool exists to find, so this table (no sources) has none
-          builtins (disj (set tools-registry/builtin-tool-names) "tool_search")
+    (let [;; session_recall is deferred and tool_search is its discovery gate;
+          ;; filter both so the assertions see the plain direct built-ins
+          builtins (disj (set tools-registry/builtin-tool-names) "tool_search" "session_recall")
           builtin-names (fn [ag] (into #{} (filter builtins) (map :name (state/active-tools ag))))
           all-names (fn [ag] (set (map :name (state/active-tools ag))))
           ag (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
@@ -934,7 +934,7 @@
       (t/testing "no source → the default built-in set, opt-ins off"
         (let [fal (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")
               all (tools-registry/get-all-tools (support/tool-table))]
-          (t/is (= (disj (set tools-registry/default-tool-names) "tool_search")
+          (t/is (= (disj (set tools-registry/default-tool-names) "session_recall")
                    (all-names fal)))
           (t/is (contains? (set (keys all)) "codemode"))
           (t/is (contains? (set (keys all)) "eval"))
@@ -945,7 +945,7 @@
 (t/deftest test-resources-selection-updates-live
   (t/testing "a settings change reaches the selection without a reload call"
     (let [enabled (atom #{"read"})
-          builtins (disj (set tools-registry/builtin-tool-names) "tool_search")
+          builtins (disj (set tools-registry/builtin-tool-names) "tool_search" "session_recall")
           builtin-names (fn [ag] (into #{} (filter builtins) (map :name (state/active-tools ag))))
           ag (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
                                        :enabled-tool-names (fn [] @enabled))]

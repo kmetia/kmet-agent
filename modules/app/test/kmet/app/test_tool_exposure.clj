@@ -135,15 +135,17 @@
                  (tools/get-deferred-sources h))
               "a broken source is still a source the listing names")))))
 
-(t/deftest test-built-in-tools-declare-no-exposure-but-the-search-tool
-  ;; a tool written before exposures existed declares none and reads as
-  ;; :direct, so its declaration is unchanged; tool_search is the one built-in
-  ;; that names an exposure of its own
+(t/deftest test-built-in-tool-exposures
+  ;; a built-in written before exposures existed declares none and reads as
+  ;; :direct; tool_search is :model-only and session_recall :deferred.
   (let [h (tu/tool-registry)]
     (doseq [[name tool] (tools/get-all-tools h)]
-      (if (= name search/tool-search-name)
-        (t/is (= :model-only (:exposure tool)))
-        (t/is (nil? (:exposure tool)) name))
+      (t/is (= (cond
+                 (= name search/tool-search-name) :model-only
+                 (= name "session_recall") :deferred
+                 :else nil)
+               (:exposure tool))
+            name)
       (t/is (keyword? (tool/exposure tool)) name))))
 
 (t/deftest test-promotable-tools-are-the-selection-over-deferred-and-contributed
@@ -224,7 +226,8 @@
 
 (t/deftest test-tool-search-is-declared-only-when-a-deferred-tool-exists
   (let [h (support/tool-table)
-        agent (support/make-agent-state)]
+        agent (support/make-agent-state
+               :enabled-tool-names (support/tool-names ["-session_recall"]))]
     (search-tool! h)
     (try
       (t/is (not (contains? (names (state/active-tools agent)) search/tool-search-name))

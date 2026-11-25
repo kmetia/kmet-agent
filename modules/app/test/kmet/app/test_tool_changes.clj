@@ -128,7 +128,7 @@
         fresh (support/make-agent-state :session session)]
     (try
       (state/sync-tool-declarations! fresh)
-      (t/is (= #{"bash" "edit" "read" "write" "session_recall"}
+      (t/is (= #{"bash" "edit" "read" "write" "tool_search"}
                (names (state/active-tools fresh))))
       (let [resumed (support/make-agent-state :session session)]
         (state/restore-session-context! resumed)
@@ -138,7 +138,7 @@
         (let [entry (peek (changes session))]
           (t/is (= ["eval"] (mapv :name (:added entry)))
                 "the opt-in built-in is declared")
-          (t/is (= ["bash" "edit" "session_recall" "write"] (:removed entry))
+          (t/is (= ["bash" "edit" "tool_search" "write"] (:removed entry))
                 "and the tools the selection drops are removed")))
       (finally (fs/delete-tree dir)))))
 
@@ -238,19 +238,19 @@
                                         :enabled-tool-names (support/tool-names ["-bash" "-edit" "-write" "-codemode" "-eval"]))]
     (try
       (state/sync-tool-declarations! agent)
-      ;; the persisted selection keeps the unrelated built-ins out; the
-      ;; deferred source mounts after the record, so tool_search joins it
+      ;; the persisted selection keeps the unrelated built-ins out; session_recall
+      ;; is deferred, so tool_search is already declared before the source mounts
       (tools/register-tool-source! h ::catalog
                                    (fn [] {"deferred-a" (tool-map "deferred-a")})
                                    {:exposure :deferred :description "A catalog"})
       (let [resumed (support/make-agent-state :session session
                                               :enabled-tool-names (support/tool-names ["-bash" "-edit" "-write" "-codemode" "-eval"]))]
         (state/sync-resumed-declarations! resumed)
-        (t/is (= #{"read" "tool_search" "session_recall"}
+        (t/is (= #{"read" "tool_search"}
                  (names (state/active-tools resumed)))
               "the discovery tool joins; the recorded removals stay out")
         (state/promote-tools! resumed ["deferred-a"])
-        (t/is (= #{"read" "tool_search" "deferred-a" "session_recall"}
+        (t/is (= #{"read" "tool_search" "deferred-a"}
                  (names (state/active-tools resumed)))
               "the promotion adds the tool without re-adding unrelated ones"))
       (finally
@@ -261,16 +261,42 @@
   (let [h (support/tool-table)]
     (deferred-source! h ::catalog {"deferred-a" (tool-map "deferred-a")})
     (try
-      (t/is (= ["deferred-a"]
+      (t/is (= ["deferred-a" "session_recall"]
                (state/orphaned-deferred-tools
                 (support/make-agent-state :enabled-tool-names (support/tool-names ["-tool_search"]))))
-            "a selected deferred tool with no discovery tool is orphaned")
+            "selected deferred tools with no discovery tool are orphaned")
       (t/is (nil? (state/orphaned-deferred-tools
                    (support/make-agent-state
-                    :enabled-tool-names (support/tool-names ["-tool_search" "-deferred-a"]))))
-            "excluding the deferred tool too loses nothing")
+                    :enabled-tool-names (support/tool-names ["-tool_search" "-deferred-a" "-session_recall"]))))
+            "excluding the deferred tools too loses nothing")
       (finally
         (tools/unregister-tool-source! h ::catalog)))))
+
+(t/deftest a-compaction-loaded-builtin-joins-a-recorded-loadout
+  (let [{:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (state/sync-tool-declarations! agent)
+      (t/is (contains? (names (state/active-tools agent)) "tool_search")
+            "the deferred recall tool needs a discovery gate before compaction")
+      (t/is (not (contains? (names (state/active-tools agent)) "session_recall")))
+      (session/compact-with-summary! session "summary" nil)
+      (state/sync-resumed-declarations! agent)
+      (t/is (contains? (names (state/active-tools agent)) "session_recall")
+            "the compaction-derived load joins the recorded loadout")
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest a-compaction-loaded-builtin-is-not-orphaned
+  (let [{:keys [session dir]} (temp-session)
+        agent (support/make-agent-state
+               :session session
+               :enabled-tool-names (support/tool-names ["-tool_search"]))]
+    (try
+      (t/is (= ["session_recall"] (state/orphaned-deferred-tools agent)))
+      (session/compact-with-summary! session "summary" nil)
+      (t/is (nil? (state/orphaned-deferred-tools agent))
+            "a loaded deferred tool is not orphaned without tool_search")
+      (finally (fs/delete-tree dir)))))
 (t/deftest test-the-prompt-derivation-honors-the-enabled-setting
   (let [{:keys [session dir]} (temp-session)
         ctx (support/process-ctx)]

@@ -725,33 +725,28 @@
   (tool/make-tool
    :name "session_recall"
    :label "Session Recall"
-   :description (str/join "\n"
-                          ["Recall earlier parts of this session, including anything dropped by compaction."
-                           "Use it before saying the context is gone."
-                           ""
-                           "Pick one per call:"
-                           "- query: keyword search (regex works), 5 results per page."
-                           "- range: [from, to]: entries #from..#to in order, 20 per page."
-                           "- expand: [N, ...]: full text of those entries."
-                           "- mode: 'touched': files worked on, with entry indices."
-                           "- query '#N:path': file content from entry N ('#N:path:full' for all lines)."
-                           ""
-                           "Add to any of them: page: next page; scope: 'lineage' (default) or 'all'."
-                           "#N is the number shown in summary refs like (#12) and in recall results."
-                           "Only the current session is searchable. One result is capped at 50 KB."])
-   :prompt-snippet (str "Recall earlier parts of this session before saying the context is gone. "
-                        "One per call: query (search), range:[from, to], expand:[N], mode:'touched'. "
-                        "#N is the number in summary refs like (#12).")
+   :description
+   (str "Recall earlier session entries, including those dropped by compaction.\n"
+        "One selector per call: query (keywords/regex, 5/page), range [from, to] (20/page), "
+        "expand [N, ...], mode \"touched\" (files worked on), or query \"#N:path\" "
+        "(file content at entry N; append \":full\" for all lines). "
+        "Options: page, scope \"lineage\" (default) or \"all\". "
+        "#N is a summary ref like (#12). Cap: 50 KB.")
+   :prompt-snippet "Recall earlier session entries, including those dropped by compaction."
    :parameters {:type "object"
-                :properties {"query" {:type "string" :description "Plain keywords, regex, or '#N:path'."}
+                :properties {"query" {:type "string"
+                                      :description "Keywords/regex, or '#N:path'."}
                              "range" {:type "array" :items {:type "number"}
-                                      :description "[from, to]: inclusive #N range."}
+                                      :description "[from, to], inclusive #N."}
                              "expand" {:type "array" :items {:type "number"}
-                                       :description "#N indices to return full content for."}
-                             "page" {:type "number" :description "1-based page for query, range or touched."}
-                             "scope" {:type "string" :description "'lineage' (default) or 'all'."}
-                             "mode" {:type "string" :description "'touched' or leave it out."}}
+                                       :description "#N entries to expand."}
+                             "page" {:type "number" :description "1-based page."}
+                             "scope" {:type "string"
+                                      :description "'lineage' (default) or 'all'."}
+                             "mode" {:type "string"
+                                     :description "'touched' for files worked on."}}
                 :required []}
+   :exposure :deferred
    :prepare-arguments normalize-params
    :execute execute
    :contextual? true))

@@ -15,6 +15,9 @@
   (session/append-entry sess {:role :assistant
                               :content [{:type :text :text assistant-text}]}))
 
+(t/deftest definition-is-deferred
+  (t/is (= :deferred (:exposure recall/definition))))
+
 (t/deftest search-finds-an-earlier-turn-and-skips-the-current-one
   (with-session
     (fn [sess]

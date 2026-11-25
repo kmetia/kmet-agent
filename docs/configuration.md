@@ -491,9 +491,12 @@ The `session_recall` tool searches the current
 session (including entries dropped by compaction), reads a `#N` range or
 expands entries, lists touched files, and drills into a `#N:path` file
 operation. Results are capped at 50 KB. It is available with both the LLM and
-VCC compactors. Inside the eval sandbox the same implementation is available
-as `(session-recall ...)`, with no args (recent), a params map, a query
-string, or a query plus keyword options.
+VCC compactors. The tool is deferred; a compaction marks it loaded, so the
+summary's recall note names it directly whenever the selection enables it.
+Before the first compaction, load it with `tool_search`. Inside the eval
+sandbox the same implementation is available as `(session-recall ...)`,
+with no args (recent), a params map, a query string, or a query plus keyword
+options.
 
 `/compact keep:N` overrides the cut for that compaction: the last N user turns
 (and everything after the Nth-from-last user message) are kept verbatim and

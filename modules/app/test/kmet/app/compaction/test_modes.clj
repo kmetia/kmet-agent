@@ -21,7 +21,7 @@
   "Run F with a session and an agent whose compaction reads the given
    settings."
   [{:keys [compactor on-event keep-recent-tokens context-window
-           compact-reserve-tokens]} f]
+           compact-reserve-tokens enabled-tool-names]} f]
   (let [dir (test-tmp/temp-dir! "compaction-modes-")
         sess (session/create-session dir)]
     (try
@@ -31,6 +31,7 @@
                :keep-recent-tokens (or keep-recent-tokens 20000)
                :context-window context-window
                :compact-reserve-tokens compact-reserve-tokens
+               :enabled-tool-names enabled-tool-names
                :on-event on-event))
       (finally
         (fs/delete-tree dir)))))
@@ -70,7 +71,27 @@
         (t/is (= :compaction (:role entry)))
         (t/is (str/includes? (:summary entry) "[Early Session Requests]"))
         (t/is (= :vcc (get-in entry [:details :compactor])))
-        (t/is (pos? (:tokens-before entry)))))))
+        (t/is (pos? (:tokens-before entry)))
+        (t/is (contains? (set (loop-state/loaded-tools agent)) "session_recall")
+              "the compaction auto-loads the deferred recall tool"))
+      (loop-state/sync-resumed-declarations! agent)
+      (t/is (contains? (set (map :name (loop-state/active-tools agent)))
+                       "session_recall")
+            "the summary's recall note names a declared tool"))))
+
+(t/deftest compaction-keeps-a-disabled-session-recall-off
+  (with-session
+    {:compactor :vcc :keep-recent-tokens 5
+     :enabled-tool-names (support/tool-names ["-session_recall"])}
+    (fn [sess agent]
+      (user! sess "first request with enough words to need compaction")
+      (assistant! sess "first answer")
+      (user! sess "second request with enough words to need compaction")
+      (assistant! sess "second answer")
+      (t/is (true? (compact/compact-context! agent nil :manual)))
+      (loop-state/sync-resumed-declarations! agent)
+      (t/is (not (contains? (set (map :name (loop-state/active-tools agent)))
+                            "session_recall"))))))
 
 (t/deftest vcc-preserves-a-branch-summary
   (with-session
