@@ -224,6 +224,9 @@
 
 (defn- unexpected-tools [runs]
   (for [run runs
+        ;; a mode without --tools measures the composition's own surface; it
+        ;; has no selection a declared tool could fall outside
+        :when (some? (:tools run))
         :let [allowed (set (str/split (str (:tools run)) #","))
               declared (set (get-in run [:metrics :declared-tools]))
               extra (sort (remove allowed declared))]
@@ -371,7 +374,11 @@
        (observed-models-line models)
        (header-field "suite" suite)
        (header-field "kmet" kmet)
-       (header-field "modes" (str/join ", " (map #(str (:label %) "=" (:tools %)) modes)))
+       (header-field "modes"
+                     (str/join ", "
+                               (map (fn [{:keys [label tools]}]
+                                      (str label (when tools (str "=" tools))))
+                                    modes)))
        (header-field "tasks" (str/join ", " (map :id tasks)))
        (header-field "runs" (count runs))
        (revision-line environment)))

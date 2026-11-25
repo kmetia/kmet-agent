@@ -5,8 +5,10 @@ task, not how fast a function runs. It is the regression loop for prompt,
 guideline and tool-surface changes, especially `--tools eval` versus
 `--tools bash`. `eval` is one declared tool with `read`, `write`, `edit`
 and `bash` verbs inside it; `bash` is one declared shell tool. The
-comparison is between those two model-facing surfaces, not a claim that eval
-has no file or shell access.
+comparison is between those model-facing surfaces, not a claim that eval
+has no file or shell access. The `default` mode passes no `--tools` override,
+so it measures the composition's own surface (bash, read, write, edit and the
+other rows the built-in profile enables); the three are the default modes.
 
 ```sh
 bb bench-tools list

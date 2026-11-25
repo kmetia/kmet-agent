@@ -1,6 +1,7 @@
 (ns kmet.tasks.test-bench
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [kmet.tasks.bench :as bench]
             [kmet.tasks.bench.metrics :as metrics]
             [kmet.tasks.bench.report :as report]))
 
@@ -161,9 +162,31 @@
     (is (some #(re-find #"Correctness" %) diag))
     (is (some #(re-find #"tokens" %) diag))))
 
+(deftest test-diagnostics-ignore-unspecified-tool-selection
+  (let [base [(run "bash" 1000 0.01 2 1 10 true)]
+        diag (report/diagnostics base [(run "default" 900 0.009 2 1 9 true)])]
+    (is (not-any? #(re-find #"Declared tools outside" %) diag)
+        "a mode without --tools declares no selection to fall outside"))
+  (let [base [(run "bash" 1000 0.01 2 1 10 true)]
+        cand [(assoc (run "eval" 900 0.009 2 1 9 true) :tools "eval")]
+        diag (report/diagnostics base cand)]
+    (is (some #(re-find #"Declared tools outside" %) diag)
+        "an explicit selection still flags a declared tool it excludes")))
+
+(deftest test-default-mode-omits-the-tools-flag
+  (is (= {:label "default" :tools nil} (#'bench/parse-mode "default")))
+  (let [cmd (#'bench/run-command {:thinking "off"} {:prompt "p"}
+                                 {:label "default" :tools nil} "sess")]
+    (is (not-any? #{"--tools"} cmd)
+        "the composition's own surface is not overridden"))
+  (let [cmd (#'bench/run-command {:thinking "off"} {:prompt "p"}
+                                 {:label "bash" :tools "bash"} "sess")]
+    (is (some #(= ["--tools" "bash"] %) (partition 2 1 cmd)))))
+
 (deftest test-render
   (let [runs [(run "bash" 1000 0.01 2 1 10 true)
-              (run "eval" 1500 0.02 3 2 20 true)]
+              (run "eval" 1500 0.02 3 2 20 true)
+              (run "default" 900 0.009 2 1 9 true)]
         result {:label "test"
                 :created-at "now"
                 :model "test/model"
@@ -171,7 +194,8 @@
                 :suite "suite"
                 :kmet "kmet.sh"
                 :modes [{:label "bash" :tools "bash"}
-                        {:label "eval" :tools "eval"}]
+                        {:label "eval" :tools "eval"}
+                        {:label "default" :tools nil}]
                 :tasks [{:id "edit" :prompt "p"}]
                 :runs runs
                 :environment {:git-sha "abc" :git-dirty? false}}
@@ -179,7 +203,10 @@
     (is (re-find #"Mode summary" md))
     (is (re-find #"eval vs bash" md))
     (is (re-find #"Diagnostics" md))
-    (is (re-find #"1.50x" md)))
+    (is (re-find #"1.50x" md))
+    (testing "a no-tools default mode renders without an empty tool list"
+      (is (str/includes? md "bash=bash, eval=eval, default"))
+      (is (not (str/includes? md "default=")))))
   (let [base {:label "base" :created-at "now" :model "m" :runs [(run "bash" 1000 0.01 2 1 10 true)]}
         cand {:label "cand" :created-at "now" :model "m" :runs [(run "bash" 1500 0.02 3 2 20 true)]}
         md (report/render-compare-report base cand)]

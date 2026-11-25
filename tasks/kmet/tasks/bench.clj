@@ -5,8 +5,9 @@
    The task owns the benchmark, not the app: it starts the checkout's
    `kmet.sh` as a subprocess, gives every run a clean workspace and session
    directory, and reads the session EDNL back through `kmet.app.session.stats`.
-   The default pair is bash-only and eval-only; `--patch` is how a prompt,
-   guideline or tool-schema change enters the comparison."
+   The default modes are bash-only, eval-only and the composition's own
+   tool set; `--patch` is how a prompt, guideline or tool-schema change enters
+   the comparison."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [clojure.edn :as edn]
@@ -20,7 +21,7 @@
             [kmet.tasks.bench.report :as report]))
 
 (def bench-version 1)
-(def default-modes ["bash=bash" "eval=eval"])
+(def default-modes ["bash=bash" "eval=eval" "default"])
 (def default-suite "scripts/bench/agent-suite")
 
 (def ^:private source-file
@@ -182,13 +183,15 @@
     (if (str/ends-with? path ".sh") ["bash" path] [path])))
 
 (defn- parse-mode [spec]
-  (let [[label tools] (if-let [i (str/index-of spec "=")]
-                        [(subs spec 0 i) (subs spec (inc i))]
-                        [spec spec])]
-    (when (or (str/blank? label) (str/blank? tools))
-      (bad-args (str "bad mode " (pr-str spec)
-                     " — use label=tool1+tool2 or label=tool")))
-    {:label label :tools (str/replace tools "+" ",")}))
+  (if (= "default" spec)
+    {:label "default" :tools nil}
+    (let [[label tools] (if-let [i (str/index-of spec "=")]
+                          [(subs spec 0 i) (subs spec (inc i))]
+                          [spec spec])]
+      (when (or (str/blank? label) (str/blank? tools))
+        (bad-args (str "bad mode " (pr-str spec)
+                       " — use label=tool1+tool2, label=tool or default")))
+      {:label label :tools (str/replace tools "+" ",")})))
 
 (defn- load-task [dir]
   (let [task-file (fs/file dir "task.edn")
@@ -249,13 +252,13 @@
 
 (defn- run-command [opts task mode session-dir]
   (cond-> (into (kmet-command opts)
-                ["--mode" "text"
-                 "--thinking" (:thinking opts)
-                 "--no-context-files"
-                 "--session-dir" session-dir
-                 "--tools" (:tools mode)
-                 "--append-system-prompt"
-                 (str "Benchmark nonce: " (random-uuid))])
+                (concat ["--mode" "text"
+                         "--thinking" (:thinking opts)
+                         "--no-context-files"
+                         "--session-dir" session-dir]
+                        (when (:tools mode) ["--tools" (:tools mode)])
+                        ["--append-system-prompt"
+                         (str "Benchmark nonce: " (random-uuid))]))
     (:model opts) (into ["--model" (:model opts)])
     (seq (:patches opts)) (into (mapcat (fn [p] ["--patch" p]) (:patches opts)))
     true (conj (:prompt task))))
@@ -557,7 +560,9 @@
    "Run (default): execute the suite in clean workspaces, once per mode."
    "  --suite DIR           task suite (default scripts/bench/agent-suite)"
    "  --tasks IDS           comma-separated task ids (default: all)"
-   "  --modes SPECS         label=tool1+tool2 entries, comma separated (default bash=bash,eval=eval)"
+   "  --modes SPECS         label=tool1+tool2 entries, comma separated;"
+   "                        `default` runs the composition's own tools"
+   "                        (default modes: bash, eval, default)"
    "  --repeats N           paired repetitions per task and mode (default 1; use 3+)"
    "  --model PATTERN       kmet --model value, provider included (default: settings)"
    "  --thinking LEVEL      kmet --thinking value (default off)"
