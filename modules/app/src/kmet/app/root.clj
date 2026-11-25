@@ -12,12 +12,12 @@
 (defonce ^:private app-root (atom nil))
 
 (defn publish!
-  "Make CTX the process root — the ctx `ctx` returns and every kmet1 shim
+  "Make CTX the process root — the ctx `ctx` returns and every retired shim
    reads. Returns the root in place.
 
    A caller publishes **before** anything reads a shim: otherwise the first
    reader boots a second composition behind the one the entry mounted, and
-   kmet1's process-level code (the façades, the extension host's ctx-less
+   the retired process-level code (the façades, the extension host's ctx-less
    reads, `/units`) sees a tree that is not the one the run is using. The
    first root wins — a second publish returns the root already in place rather
    than stranding a tree things are already reading. A process that runs a

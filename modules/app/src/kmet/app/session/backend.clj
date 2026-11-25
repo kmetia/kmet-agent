@@ -1,6 +1,6 @@
 (ns kmet.app.session.backend
   "The EDNL session backend — `kmet.app.sessions`' `:sessionPersistence`
-   contract over kmet1's store.
+   contract over the retired store.
 
    A projection, not a copy: every op delegates to the namespace that already
    answers it (`store/create-session`, `store/load-session`, `store/append-entry`,
@@ -23,7 +23,7 @@
 
 (defn ednl
   "A fresh EDNL backend value. Stateless: the sessions it hands out carry the
-   file, the entries and the mutation lock, exactly as kmet1's store built them."
+   file, the entries and the mutation lock, exactly as the legacy CLI's store built them."
   []
   {:create! (fn [{:keys [dir cwd parent-session]}]
               (store/create-session

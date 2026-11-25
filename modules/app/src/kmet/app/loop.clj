@@ -1024,7 +1024,7 @@
 
    The kernel has no lock, and `plugin!`/`restart!`/`dispose!` run plugin code,
    so a tool thread that must mount or unmount **submits**, and this is the one
-   drain point a kmet2 process has (`srce.md` §8). It runs *before*
+   drain point a running app has (`srce.md` §8). It runs *before*
    `:agent-settled` is emitted — that event means both that no turn is in flight
    and that no refresh is pending, so a front end that hears it and reads the
    tree sees the applied change.

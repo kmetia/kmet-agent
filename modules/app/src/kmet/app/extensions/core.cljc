@@ -220,7 +220,7 @@
                  owns the agent rather than the process; a missing key falls
                  back to the process binding
 
-   nil outside a run — a command handler, an extension's own fiber, kmet1 —
+   nil outside a run — a command handler, an extension's own fiber, the legacy CLI —
    where the process binding the front end installed is the answer. That is
    also why the process atoms stay: one process can run both kinds of front
    end, and a run must not take the front end's binding away. A run with no
@@ -233,7 +233,7 @@
 ;; registry handle, the ctx an extension's plugin mounts under, and the
 ;; commands/prompts/skills registries are all the process's. It takes them as a
 ;; value instead — a composition's `:extensions` row binds its own
-;; (`kmet.app.registries/host-services`), kmet1's shim binds the same map as the
+;; (`kmet.app.registries/host-services`), the retired shim bound the same map as the
 ;; fallback before a composition exists, and an agent binds its own when the
 ;; host is mounted per agent. A thunk, not a value: binding happens while the
 ;; root is still being booted, and a captured value would freeze whatever
@@ -1168,8 +1168,8 @@
    their deregister fn on the extension instead.
 
    The api resolves through the bound services (see `bind-services!`), so
-   what an extension registers is visible to whoever bound them: kmet1's
-   process registry reaches every engine, and an owner that binds an agent's
+   what an extension registers is visible to whoever bound them: the retired
+   process registry reached every engine, and an owner that binds an agent's
    handle and its own ctx gets a per-agent api. The host holds no handle of
    its own."
   ([ext config ctx]

@@ -731,7 +731,7 @@
         ;; rather than an engine the layout owns. The run reads its tool table
         ;; and system prompt from CTX, which is why the layout needs no registry
         ;; of its own. The process's skills and prompt templates load once,
-        ;; before the prompt is built from them (kmet1 loads them in the
+        ;; before the prompt is built from them (the legacy CLI loaded them in the
         ;; driver; here the front end does, for the agent it is about to make).
          _ (packages/load-resources!)
          agents (or (srce/get ctx :agents)

@@ -3,7 +3,7 @@
    code the entry point returns.
 
    pi: modes/print-mode.ts. It is the first client of the `:agents` factory
-   rather than kmet1's engine — create a handle, send the message, and listen
+   rather than the engine — create a handle, send the message, and listen
    on the agent's own ctx (docs/architecture.md § The event bus) for the streaming
    deltas and for the settle that ends the run. The scope is per agent: two
    print runs in one process settle their own promises, because the kernel
@@ -17,7 +17,7 @@
    process's.
 
    **The run tells the extension host what kind of front end is running**
-   (`bind-front-end!`): kmet1's print mode goes through its session runtime,
+   (`bind-front-end!`): the legacy print mode went through its session runtime,
    which binds `:mode :print`, `has-ui` false and the headless capability port,
    so an extension that branches on `ctx.mode` or asks a question gets the same
    answer under either app. The port is the composition's — the print profile
@@ -29,7 +29,7 @@
    prefix or file path, and `--continue` opens the most recent session for the
    process cwd. `--resume` stays the TUI's interactive picker.
 
-   Two formats, kmet1's two: `:text` (the default) streams the answer and
+   Two formats, the legacy two: `:text` (the default) streams the answer and
    reports a failure on stderr; `:edn` prints the session header and every event
    as EDN for a machine to read, so the event stream carries the failure and the
    exit code is the only thing left to say it happened. The mode prints; the
@@ -141,8 +141,8 @@
           (prn (:header ((:session handle))))
           (flush))
         ;; the mode expands the invocation's text before the agent sees it:
-        ;; `/skill:` and prompt templates are the front end's chain (kmet1's
-        ;; print mode does the same one layer down)
+        ;; `/skill:` and prompt templates are the front end's chain (the legacy
+        ;; print mode did the same one layer down)
         ((:send! agents) handle
                          (packages/expand-input prompt (runtime/resources handle))
                          {:target :next-turn})
@@ -180,7 +180,7 @@
             ;; the agent does not exist yet: its listener is set once it does,
             ;; and either the teardown or the run's finally disposes it
             listener (atom nil)
-            ;; kmet1's print mode binds exactly this, a layer down: kind :print,
+            ;; the legacy print mode bound exactly this, a layer down: kind :print,
             ;; no UI, and the composition's port (the headless answers, because
             ;; the profile stacks :bundle/headless)
             restore (front-end/install! {:mode :print

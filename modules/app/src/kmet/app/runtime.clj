@@ -1,9 +1,9 @@
 (ns kmet.app.runtime
-  "kmet2's boot and its submission point.
+  "The app's boot and its submission point.
 
    `boot` turns a composed row list into a live ctx: one root, one fiber per
    row, mounted through `srce/plugin!` so a row's dependencies are declared
-   rather than sequenced. It is the only place kmet2 mounts a plugin, and it
+   rather than sequenced. It is the only place the app mounts a plugin, and it
    fails loudly — a fiber that is not `:active` once the mounts settle is a
    composition bug (a name nothing provides, an `apply` that threw), not a run
    to start. The row language, cards and the mount primitive live in
@@ -40,7 +40,7 @@
 
 (defn- queue
   "The submission queue visible from CTX, or nil when CTX is not a booted
-   kmet2 runtime."
+   app runtime."
   [ctx]
   (srce/attr ctx queue-key))
 
@@ -53,7 +53,7 @@
   "The one error a ctx outside a booted runtime gets, whichever half of the
    submission point was called."
   []
-  (throw (ex-info "ctx is not a booted kmet2 runtime: no submission queue"
+  (throw (ex-info "ctx is not a booted app runtime: no submission queue"
                   {:type :kmet.app/no-submissions})))
 
 (defn submit!
@@ -227,7 +227,7 @@
     (when (and (seq failed) (not diagnose?))
       (doseq [f failed]
         (srce/log! ctx :error "plugin did not mount" f))
-      (throw (ex-info (str "kmet2 boot failed: "
+      (throw (ex-info (str "app boot failed: "
                            (str/join ", " (map named-reason failed))
                            " not active")
                       {:type :kmet.app/boot-failed :fibers failed})))
@@ -235,7 +235,7 @@
       (when (seq conflicts)
         (doseq [c conflicts]
           (srce/log! ctx :error "two plugins declare one event differently" c))
-        (throw (ex-info (str "kmet2 boot failed: conflicting event declarations "
+        (throw (ex-info (str "app boot failed: conflicting event declarations "
                              (str/join ", " (map (comp pr-str :event) conflicts)))
                         {:type :kmet.app/event-conflict :conflicts conflicts}))))
     failed))

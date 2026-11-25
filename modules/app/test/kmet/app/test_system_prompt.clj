@@ -3,7 +3,7 @@
    one input a service owns (the skills registry) and hands the builder out as a
    value; the builder itself takes every registry-shaped input as an argument, so
    two engines build two prompts and nothing is read from a process registry.
-   `kmet.app.skills/build-system-prompt` is kmet1's wrapper over the builder —
+   `kmet.app.skills/build-system-prompt` is the legacy CLI's wrapper over the builder —
    it supplies the process defaults and is covered by `kmet.app.test-skills`."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]

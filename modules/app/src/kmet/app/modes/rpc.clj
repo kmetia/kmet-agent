@@ -12,7 +12,7 @@
    `\"Unknown command\"`, and one this mode does not implement yet answers the
    landing that fills it — never a silent success, never a wrong answer.
 
-   **The surface is a front end's.** kmet1's rpc mode binds `:mode :rpc`,
+   **The surface is a front end's.** The legacy RPC mode bound `:mode :rpc`,
    `has-ui true` and a port that answers extension UI calls over the wire: the
    fire-and-forget channels here, dialogs left to landing 10a's command table
    (the `:request`/`:response` pair over the wire: this mode has one agent and no
@@ -21,13 +21,13 @@
    (`:bundle/headless`), and the wire's capabilities are assoc'd on top — so a
    profile that patched in a provider changes the answers this mode forwards.
 
-   **The commands are the ones kmet2's services answer.** A prompt, a steer, a
+   **The commands are the ones the app's services answer.** A prompt, a steer, a
    follow-up, an abort, the live state, the session's reads (`get-entries` with
    its `:since`, the live messages, the last assistant text, the `/session`
    stats, the tree, the HTML export), the model catalog, the model and
    compaction setters, and the command registry (`get-commands`) — each a call
    on the `:agents` handle, the session runtime, or the `:sessions` log. A prompt is the front end's submission chain (`:submit!`): the portable
-   slash commands dispatch through the registry first (kmet1's `command-ui`
+   slash commands dispatch through the registry first (the legacy CLI's `command-ui`
    over this port's output channels), and everything else runs the extension
    input hooks and the engine's expansion before the handle starts or queues
    it — the wire's queue being durable, the enqueue and delivery facts land in
@@ -132,7 +132,7 @@
 (defn- enqueue!
   "Queue TEXT for BEHAVIOR — `:steer` for the next step, `:follow-up` for the
    next turn — and answer the disposition it produced. The two targets are the
-   loop's queues, but kmet2's delivery rule is start-or-queue: an idle agent
+   loop's queues, but the app's delivery rule is start-or-queue: an idle agent
    starts a run whatever the target, so the answer says `:started` rather than a
    `:queued` no run would ever drain. A running agent queues, which is the
    pi-compatible case."
@@ -240,7 +240,7 @@
                                       :mode :rpc
                                       ;; the wire's queue is durable: the
                                       ;; enqueue and delivery facts land in the
-                                      ;; session log (kmet1's rpc recorded them
+                                      ;; session log (the legacy RPC recorded them
                                       ;; through the registry's send!), so a
                                       ;; reconnect reads the inbox, not a gap
                                       :record? true
@@ -254,8 +254,8 @@
   "The `:steer` / `:follow-up` commands: the loop's queues carry no image
    blocks (pi: steer/followUp are text), so reject `:images` rather than drop
    them, and answer with the disposition the send produced — `:queued` while a
-   run is live, `:started` when an idle agent began one (kmet2's delivery rule;
-   kmet1 queued and waited). A compaction in flight is refused: kmet's
+   run is live, `:started` when an idle agent began one (the app's delivery rule;
+   the legacy CLI queued and waited). A compaction in flight is refused: kmet's
    start-or-queue rule would otherwise start a run beside the compaction. The
    command's own `:type` is the behavior it queues for."
   [state command]
@@ -288,10 +288,10 @@
    true` when the delivered cancel settled it first — and either way the client
    waits for `:agent-settled`, the same rule a prompt's `:started` follows. A
    compaction-only abort answers `:idle true`: no run owns the flag.
-   A manual compaction is cancelled too, as kmet1's abort did — it is work
+   A manual compaction is cancelled too, as the legacy abort did — it is work
    nobody waits for once the client asks to stop — while the answer's `:idle`
-   speaks for the turn. kmet1 then waited (bounded) for idle; a wait here would
-   be the reader thread's time, which is the one thread an abort must not
+   speaks for the turn. The legacy CLI then waited (bounded) for idle; a wait
+   here would be the reader thread's time, which is the one thread an abort must not
    occupy."
   [{:keys [agents handle]} _command]
   (let [working? (or (runtime/turn-running? handle) (runtime/compacting? handle))]
@@ -392,7 +392,7 @@
                                   :file (:file session)
                                   ;; message entries only — queue facts and
                                   ;; metadata are the log's, not the
-                                  ;; transcript's (kmet1's get-message-count)
+                                  ;; transcript's (the legacy CLI's get-message-count)
                                   :message-count (session/get-message-count session)}
                            ;; pi omits sessionName when unset
                            sess-name (assoc :name sess-name)))))))
@@ -628,7 +628,7 @@
    silence: pi writes no response record for one, so the mode's own reader must
    not write either.
 
-   kmet2's extension ABI carries no host-built dialogs (`kmet.extension`'s UI
+   the app's extension ABI carries no host-built dialogs (`kmet.extension`'s UI
    surface has no select/confirm/input/editor), so nothing in this process asks
    one and there is no pending request to resolve — an id nobody holds resolves
    nothing, which is also what pi does with a late answer. The pair that *is*
@@ -762,8 +762,8 @@
    and reports through `get-commands` (docs/rpc.md § Portable slash commands).
    Idempotent and owned by the app root, so a second mode in one process reuses
    them. `/units` answers the process tree when the entry published one — the
-   tree kmet1's rpc answered from — and FALLBACK, the mode's mount scope, for a
-   composition that published none."
+   tree the legacy RPC answered from — and FALLBACK, the mode's mount scope,
+   for a composition that published none."
   [fallback]
   (builtins/register-runtime-commands! (fn [] (or (root/ctx) fallback))))
 
@@ -797,7 +797,7 @@
                        (when-let [f @restore]
                          (reset! restore nil)
                          (f)))
-            ;; kmet1's rpc mode binds exactly this: a front end with a port,
+            ;; the legacy RPC mode bound exactly this: a front end with a port,
             ;; whose extension UI calls travel the protocol — the row's port as
             ;; the base, the wire capabilities on top
             port (ui-port (:port (srce/get ctx :ui)) out-)]

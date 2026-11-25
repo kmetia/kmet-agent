@@ -1,5 +1,5 @@
 (ns kmet.test-retirement
-  "Guard: the retired namespace prefix. `kmet.agent.*` was kmet1's, and landing
+  "Guard: the retired namespace prefix. `kmet.agent.*` was the legacy CLI's, and landing
    11 deleted that module; every remaining module's sources speak their own
    module's name. The last survivor, `kmet.agent.ui.tui.tool-renderers`, was
    renamed to `kmet.ui.tui.tool-renderers` when the project dropped its

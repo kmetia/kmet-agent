@@ -48,7 +48,7 @@
 
 (def targets
   "Where a queued message is delivered: `:next-turn` (after the run settles)
-   or `:next-step` (between tool batches — kmet1's steering queue)."
+   or `:next-step` (between tool batches — the legacy CLI's steering queue)."
   #{:next-turn :next-step})
 
 (defn- queue-entry

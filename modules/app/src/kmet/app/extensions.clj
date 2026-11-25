@@ -16,11 +16,11 @@
    and unloading it sweeps the same handle it registered through. It provides no
    ctx service: the binding and the publication are the effect.
 
-   Before 5l-ii the host bound one handle and kmet1's shim built another over
+   Before 5l-ii the host bound one handle and the retired shim built another over
    two remainders, so a registration made through one was invisible to a reader
-   of the other. The row replaces the binding it finds (kmet1's process host
+   of the other. The row replaces the binding it finds (the retired process host
    included) rather than overlaying it: it supplies every key the host reads, and
-   kmet1's base binding remains only for the window before the root mounts.
+   the retired base binding remains only for the window before the root mounts.
 
    **Every registration is routed, not held.** Tools and codemode-only tool
    sources go to the composition's `:tools` service (the loop's tool table, the

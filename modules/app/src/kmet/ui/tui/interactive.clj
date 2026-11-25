@@ -359,7 +359,7 @@
 
    CTX is the ctx the engine runs on (see `build-layout`) and is required: an
    entry names the tree the run reads its tool table and system prompt from —
-   kmet1's entry its process root, `kmet --profile tui` the
+   the legacy entry its process root, `kmet --profile tui` the
    composition it booted. There is no process-root default: the decision
    belongs to the entry, not to a library that would have to reach up for it.
    pi: cli.js dispatch to interactive mode."

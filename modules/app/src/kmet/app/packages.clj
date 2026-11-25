@@ -969,7 +969,7 @@
   (load-prompts!))
 
 (defn expand-input
-  "kmet1's input expansion: an extension-registered skill command or a prompt
+  "the legacy CLI's input expansion: an extension-registered skill command or a prompt
    template in TEXT is replaced by what it stands for. RESOURCES is the
    `:resources` service value; when non-nil, a disabled skill or template does
    not expand (nil is a process without the row, which keeps every

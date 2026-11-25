@@ -107,9 +107,9 @@ A `prompt` whose text begins with `/` first dispatches through the command
 registry (see [Portable slash commands](#portable-slash-commands)); only when
 no command matches does the text reach the model.
 
-A `steer` or `follow-up` on an **idle** agent starts a run in kmet2 (the
+A `steer` or `follow-up` on an **idle** agent starts a run in the app (the
 handle's one start-or-queue delivery rule) and answers `:started`; while a run
-is live they queue and answer `:queued`. kmet1 queued in both cases and waited
+is live they queue and answer `:queued`. the legacy CLI queued in both cases and waited
 for a run, so a client that depended on that should send them only around a
 live run.
 

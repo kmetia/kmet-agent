@@ -27,7 +27,7 @@
     {:code @code :err (str err)}))
 
 (defn run-main
-  "The `{:code :out :err}` of kmet2's entry on ARGS — `main` returns the exit
+  "The `{:code :out :err}` of the app's entry on ARGS — `main` returns the exit
    code and prints, so a command is read without forking a process."
   [args]
   (let [out (java.io.StringWriter.)
@@ -144,7 +144,7 @@
 ;; A test whose subject is the composed app (the rows, the process registries,
 ;; the extension host the rows bind) boots it once for the namespace. The ctx is
 ;; the boot's root: it holds every service a front end would `srce/get`, which
-;; is what kmet1's `app-runtime/ctx` used to hand out through the shim.
+;; is what the legacy CLI's `app-runtime/ctx` used to hand out through the shim.
 
 (def ^:dynamic *composition*
   "The boot map `with-composition` bound, or nil outside it."

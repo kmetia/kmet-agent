@@ -1,6 +1,6 @@
 (ns kmet.app.test-composition-run
   "The composition runs a turn — the gate 7a could not reach from a hand-mounted
-   root: a pure kmet2 boot has no extension host until the `:extensions` row
+   root: a pure the app boot has no extension host until the `:extensions` row
    binds one, and the loop resolves its hooks through it.
 
    One turn, through the real rows: `create!` publishes an agent, `send!` wakes
@@ -41,7 +41,7 @@
     (try
       (let [agents (srce/get (:ctx boot) :agents)
             settled (promise)
-            ;; the app's layer, not kmet1's process table: this test is what
+            ;; the app's layer, not the legacy CLI's process table: this test is what
             ;; 7b-i re-pointed, and subscribing here is the gate it leaves
             unsubscribe (events/on! (:ctx boot) :agent-settled
                                     (fn [ev] (deliver settled ev)))]

@@ -519,9 +519,9 @@
 
 (deftest a-runs-extension-surface-is-the-agent-it-runs-inside
   ;; Two agents, one process: each run's handler reads its own session and
-  ;; model — not the process slot kmet1's session runtime installs, and not the
+  ;; model — not the process slot the legacy CLI's session runtime installs, and not the
   ;; other agent's. Before the run's binding existed, `:model` was nil and the
-  ;; session facades answered nil in a kmet2 run.
+  ;; session facades answered nil in an app run.
   (let [{:keys [root agents]} (mounted)
         seen (atom [])
         off (events/on! root :agent-start {}

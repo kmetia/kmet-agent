@@ -13,17 +13,17 @@
    the overrides to the settings it loads.
 
    Both are pure over their inputs; the catalog is `kmet.ai.models`', as it is
-   for kmet1. The session-lifecycle flags are absent on purpose: which session a
+   for the legacy CLI. The session-lifecycle flags are absent on purpose: which session a
    run opens is the mode's, and it says so on its row (`:session-lifecycle`)."
   (:require [kmet.app.model-resolver :as resolver]
             [kmet.ai.models :as models]))
 
 (def run-override-keys
-  "kmet1's run flags that ride the agent, not the process: a mode takes them as
+  "the legacy CLI's run flags that ride the agent, not the process: a mode takes them as
    `create!` options and the driver applies them over the config it loads
    (`cfg/apply-cli-overrides`). `--model` is the one the factory resolves
    itself, per creation, so an agent's model is an option of the agent; the
-   entry has already resolved it for a mode that runs kmet1's front end.
+   entry has already resolved it for a mode that runs the legacy front end.
    `--tools` rides here as a session override: the driver applies it to the
    created agent exactly as `/tools` does, never to the persisted selection.
    `--no-context-files` rides here too: the driver skips project-context
@@ -43,20 +43,20 @@
     (println "Warning:" message)))
 
 (defn resolve-overrides
-  "OPTS with kmet1's two model flags resolved against the catalog — after the
-   process world loads, so an extension-registered provider is a catalog entry,
-   and before the mode mounts.
+  "OPTS with the legacy CLI's two model flags resolved against the catalog —
+   after the process world loads, so an extension-registered provider is a
+   catalog entry, and before the mode mounts.
 
    `--model` is a pattern (`provider/model[:thinking]`, the provider inferred
    when absent) and becomes the provider it names, the catalog's model id, and
    the pattern's thinking level when it carried one — unless the invocation set
    `--thinking` explicitly, which wins. `--models` is the session's scope and
-   becomes model ids, with a warning for each pattern nothing matches (kmet1's
-   `resolveModelScope`).
+   becomes model ids, with a warning for each pattern nothing matches
+   (the legacy CLI's `resolveModelScope`).
 
-   A model the catalog does not have is `:kmet.app/unknown-model` with kmet1's
-   wording — the entry point reports it as a configuration error, exit 1, not a
-   request that dies later with nothing to say. An invocation that named
+   A model the catalog does not have is `:kmet.app/unknown-model` with the
+   legacy CLI's wording — the entry point reports it as a configuration error,
+   exit 1, not a request that dies later with nothing to say. An invocation that named
    neither flag is returned untouched and never reads the catalog."
   [opts]
   (let [opts (if (nil? (:model opts))

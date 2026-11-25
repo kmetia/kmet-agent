@@ -322,7 +322,7 @@
 
    Bare means no parent: the loop reads the stage map from the ctx (the
    defaults when STAGES is nil) and the tool table from its `:tools` service,
-   so a loop test never boots kmet2's composition to get either."
+   so a loop test never boots the app's composition to get either."
   ([] (test-ctx nil))
   ([stages]
    (let [;; the stage map rides the ctx meta as an atom, the way a run's own
@@ -371,4 +371,3 @@
     (with-host
       (fn [] (binding [*ctx* ctx]
                (f))))))
-

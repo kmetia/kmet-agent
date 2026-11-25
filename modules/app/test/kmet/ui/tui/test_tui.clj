@@ -88,8 +88,8 @@
           "the run was handed off through the function the mount resolved")
       (finally (srce/dispose-subtree! root)))))
 
-(deftest the-invocations-run-flags-reach-kmet1s-run
-  ;; The same hand-off one category over: the run's overrides are kmet1's run
+(deftest the-invocations-run-flags-reach-legacy-cli-run
+  ;; The same hand-off one category over: the run's overrides are the legacy CLI's run
   ;; flags, and `interactive/run` applies them to the config it loads
   ;; (`cfg/apply-cli-overrides`), so the row maps names and decides nothing.
   ;; Dropping one here is the defect 5d found in rpc one mode over: the run
@@ -105,10 +105,10 @@
                       :system-prompt "SYS" :append-system-prompt ["MORE"]})))
     (is (= {:mode :interactive :system-prompt "SYS"}
            (run-opts {:system-prompt "SYS"}))
-        "only the keys the invocation gave are in kmet1's opts")))
+        "only the keys the invocation gave are in the legacy CLI's opts")))
 
-(deftest the-invocations-session-reaches-kmet1s-run
-  ;; The row's only work for `-c`/`-r`/`--session` is the hand-off: kmet1's
+(deftest the-invocations-session-reaches-legacy-cli-run
+  ;; The row's only work for `-c`/`-r`/`--session` is the hand-off: the legacy CLI's
   ;; `interactive/run` resolves the session from those keys itself, so the row
   ;; passes them through in its own spellings and decides nothing. A run the
   ;; command line did not ask to continue creates a session, as it always did.

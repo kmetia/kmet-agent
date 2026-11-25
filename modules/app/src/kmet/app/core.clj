@@ -40,7 +40,7 @@
    catalog entries only then) — all three in `kmet.app.maintenance`.
 
    Package subcommands (`install`, `remove`, `update`, `list`, `config`) are
-   commands rather than profiles: they run the same package CLI kmet1 uses
+   commands rather than profiles: they run the same package CLI the legacy CLI uses
    (`kmet.app.packages-cli`) before the app's own flags, and the config
    command's terminal UI is resolved when it runs, so a session never pays for
    the TUI it does not start.
@@ -73,14 +73,14 @@
    "--dump-config" :dump-config?
    "--dump-default-config" :dump-default-config?
    "--dump-state" :dump-state?
-   ;; kmet1's session-lifecycle switches. They name which session a run opens
+   ;; the legacy CLI's session-lifecycle switches. They name which session a run opens
    ;; instead of the new one it would otherwise create; only a mode that opens
    ;; a session itself can honor them (`run-composed` answers for the rest).
    "-c" :continue?
    "--continue" :continue?
    "-r" :resume?
    "--resume" :resume?
-   ;; kmet1's maintenance switches: neither runs a mode.
+   ;; the legacy CLI's maintenance switches: neither runs a mode.
    "-d" :debug
    "--debug" :debug
    "--generate-models" :generate-models
@@ -103,7 +103,7 @@
    "--queue-depth" :queue-depth
    "--idle-timeout" :idle-timeout
    "--session" :session
-   ;; kmet1's other run flags. `--model` is a pattern and is resolved against
+   ;; the legacy CLI's other run flags. `--model` is a pattern and is resolved against
    ;; the catalog before a run (`kmet.app.invocation`); the rest are config
    ;; overrides the mode applies (`cfg/apply-cli-overrides`).
    "--models" :models
@@ -117,7 +117,7 @@
 (def ^:private text-flags
   "Value flags whose value is free text, so the argument after them may start
    with `-`: a prompt override is lines of prose (`--system-prompt \"- be
-   concise\"`), and kmet1 reads the token after the flag whichever way it
+   concise\"`), and the legacy CLI reads the token after the flag whichever way it
    starts. Every other value flag keeps the stricter rule, which is what turns
    `--model --thinking` into a usage error instead of a model named
    \"--thinking\"."
@@ -131,12 +131,12 @@
   #{"--app"})
 
 (def ^:private print-flags
-  "kmet1's one-shot spelling: `-p`/`--print` run the print profile, as `kmet -p
+  "the legacy CLI's one-shot spelling: `-p`/`--print` run the print profile, as `kmet -p
    \"hi\"` does."
   #{"-p" "--print"})
 
 (def ^:private print-formats
-  "kmet1's print-mode output values: text (the default) streams the answer, edn
+  "the legacy CLI's print-mode output values: text (the default) streams the answer, edn
    prints the session header and every event as EDN for a machine to read."
   #{"text" "edn"})
 
@@ -156,7 +156,7 @@
    in IN → `[value remaining]`. Throws :kmet.app/bad-args when the value is
    missing, empty, or looks like the next flag — unless FLAG is free text
    (`text-flags`), where the next argument is the value however it starts: a
-   prompt override may legitimately be `- be concise`, and kmet1 reads the
+   prompt override may legitimately be `- be concise`, and the legacy CLI reads the
    token after the flag either way."
   [flag value in]
   (let [[value in] (if (= ::missing value)
@@ -172,7 +172,7 @@
     [value in]))
 
 (defn- resolve-mode
-  "OPTS with kmet1's `--mode` applied: `text` and `edn` are print mode's output
+  "OPTS with the legacy CLI's `--mode` applied: `text` and `edn` are print mode's output
    formats, so they select the print profile with that `:format`; every other
    value names a profile (`--mode rpc` is `--profile rpc`). `--mode` and
    `--profile` choose the same thing, so asking for both is a usage error rather
@@ -196,7 +196,7 @@
     (throw (bad-args (str flag " takes no value")))))
 
 (defn- read-list-models
-  "kmet1's maintenance flag: the filter is the next argument unless it starts
+  "the legacy CLI's maintenance flag: the filter is the next argument unless it starts
    with `-` or `@`, and a bare flag lists everything."
   [opts in _arg _flag value]
   (let [[v in] (if (= ::missing value)
@@ -252,17 +252,17 @@
      in]))
 
 (defn- read-print-flag
-  "kmet1's one-shot spelling selects print mode's text output; `-p=edn` is not
-   a form kmet1 accepts (`--mode edn` is the documented spelling)."
+  "the legacy CLI's one-shot spelling selects print mode's text output; `-p=edn` is not
+   a form the legacy CLI accepts (`--mode edn` is the documented spelling)."
   [opts in _arg flag value]
   (if (= ::missing value)
     [(assoc opts :mode "text") (next in)]
     (throw (bad-args (str flag " takes no value")))))
 
 (defn- read-at-file
-  "kmet1's `@file`: read at parse time, one message per file in the order
+  "the legacy CLI's `@file`: read at parse time, one message per file in the order
    given. A file that cannot be read is a warning and an empty message, as in
-   kmet1 — the rest of the invocation still runs."
+   the legacy CLI — the rest of the invocation still runs."
   [opts in arg _flag _value]
   (let [path (subs arg 1)]
     (if (seq path)
@@ -283,7 +283,7 @@
                         "selects between two — drop the flag"))))
 
 (defn- read-ext-flag
-  "kmet1's extension-flag rule: an unsupported `--flag` is data for the
+  "the legacy CLI's extension-flag rule: an unsupported `--flag` is data for the
    extension host, not a usage error — `=` splits, a following token that does
    not start with `-` is the value, and nothing following is `true`. The key
    drops the dashes, as `get-flag` reads it."
@@ -371,7 +371,7 @@
     opts))
 
 (defn parse-args
-  "Parse kmet2's argv → `{:profile kw :patch [path …] :args [rest …] :version?
+  "Parse the app's argv → `{:profile kw :patch [path …] :args [rest …] :version?
    :help? :dump-config? :dump-default-config? :dump-state? :format kw :model str
    :provider kw :thinking kw :models [pattern …] :tools [entry …]
    :no-context-files bool :system-prompt str :append-system-prompt [str …] :session-dir path
@@ -379,18 +379,19 @@
    :session str :debug :generate-models :list-models str-or-true
    :token str :socket path :max-sessions long :queue-depth long
    :idle-timeout long :ext-flags {name value-or-true}}`.
-   `:profile` defaults to `profiles/default-profile`; `--mode` is kmet1's spelling
-   of it (`resolve-mode`), and the run flags are kmet1's: `--model`/`--provider`
+   `:profile` defaults to `profiles/default-profile`; `--mode` is the legacy
+   CLI's spelling of it (`resolve-mode`), and the run flags are the legacy
+   CLI's: `--model`/`--provider`
    are the agent's overrides, `--thinking`/`--system-prompt`/
    `--append-system-prompt`/`--models`/`--tools`/`--session-dir` the run's
    (resolved and then applied by the mode — `kmet.app.invocation`). `--tools`
    is a plain allowlist or only `+name`/`-name` modifiers; mixing the two is a
    usage error, as in pi. `--session` suppresses `-c/--continue` and
    `-r/--resume` before any mode sees them. An `@file` argument is
-   read into `:args` as kmet1 reads it. An unsupported `--flag` is an extension
-   flag (`:ext-flags`), kmet1's three forms; a single-dash unknown flag stays a
-   usage error. The three dumps are different views of one composition, so
-   asking for more than one is a usage error rather than a silent pick."
+   read into `:args` as the legacy CLI reads it. An unsupported `--flag` is
+   an extension flag (`:ext-flags`), the legacy CLI's three forms; a
+   single-dash unknown flag stays a usage error. The three dumps are different
+   views of one composition, so asking for more than one is a usage error rather than a silent pick."
   [args]
   (loop [in (seq args), opts {:patch [] :args []}]
     (if-not in
@@ -579,8 +580,8 @@
 
 (defn- not-wired
   "What a profile without a mode row says: which profile it was, and which ones
-   do run. Every built-in profile has a mode row now (the TUI — kmet1's
-   interactive mode as a row — print, rpc and the server), so this is the answer
+   do run. Every built-in profile has a mode row now (the TUI, print, rpc and the
+   server), so this is the answer
    for a composition that patched one out: a profile is a set of rows, and a set
    with no mode mounts, reports, and runs nothing."
   [profile args]
@@ -630,7 +631,7 @@
    `:session-dir`), the socket `:port`, the server's
    transport and limits (`:socket`, `:token`, `:max-sessions`, `:queue-depth`,
    `:idle-timeout`), the session the run opens (`:session`, `:resume`,
-   `:continue`, in kmet1's spelling because the TUI row hands them to kmet1's
+   `:continue`, in the legacy spelling because the TUI row hands them to
    `interactive/run`), and the process world's loaded config (`:config`, which
    the TUI drives `interactive/run` with). A value the invocation did not give
    stays absent (`select-keys`), so a mode sees what was asked for rather than a
@@ -694,7 +695,7 @@
             opts (invocation/resolve-overrides opts)]
         (if (:list-models opts)
           ;; after the load: the table includes the providers the catalogs and
-          ;; the extensions installed, which is kmet1's order too
+          ;; the extensions installed, which is the legacy CLI's order too
           (do (maintenance/list-models (when (string? (:list-models opts))
                                          (:list-models opts)))
               0)
@@ -809,7 +810,7 @@
 
 (defn- enable-debug!
   "Turn on kmet-debug.log before any load of any kind, so the catalog trail is in
-   the log too (kmet1's order: help, version and the cache pipeline answer
+   the log too (the legacy CLI's order: help, version and the cache pipeline answer
    without it)."
   [opts]
   (when (:debug opts)
@@ -817,8 +818,8 @@
     (debug/log "kmet started with --debug")))
 
 (defn main
-  "Run kmet2 with ARGS and return the process exit code. A package subcommand
-   runs before the app's flags do, as kmet1 dispatches it."
+  "Run the app with ARGS and return the process exit code. A package subcommand
+   runs before the app's flags do, as the legacy CLI dispatches it."
   [args]
   (try
     (if (packages-cli/package-command? args)

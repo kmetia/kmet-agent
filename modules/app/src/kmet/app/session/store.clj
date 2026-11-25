@@ -16,7 +16,7 @@
 ;; The load path reports what it *repairs* (a torn tail, a malformed line)
 ;; unconditionally. The strict pass is separate: with this on, an entry that
 ;; parses but fails the schema is reported and skipped, and a header that fails
-;; its schema is reported — kmet1's `--debug` behaviour, preserved exactly.
+;; its schema is reported — the legacy CLI's `--debug` behaviour, preserved exactly.
 ;; Off, the same entry loads: a session file that parses is trusted, and
 ;; dropping data is opt-in. An atom rather than a dynamic var: a session loads
 ;; on whichever thread asked for it, and the switch is process-wide like debug

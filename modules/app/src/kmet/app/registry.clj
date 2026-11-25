@@ -10,8 +10,8 @@
    - `atom-registry` — an atom of entries. What the app's `:tools` service
      installs: `register!` returns a disposer the caller ties to its fiber
      (`srce/effect`), so an extension's registrations unwind with it. It is the
-     only handle: kmet1's scope-node store (`registry_store`) went with the
-     store at landing 4e.
+     only handle: the legacy CLI's scope-node store (`registry_store`) went
+     with the store at landing 4e.
 
    The rules: an entry is addressed by its own name; owners are searched in
    display order, so the owner that took a name keeps it; `effective-entries`
@@ -88,8 +88,8 @@
 
 (defn router
   "A Registry that dispatches every call by its tag: HANDLE-FOR maps a tag to
-   the handle that owns it. kmet1 keeps one façade handle while kmet2 provides
-   one service per seam, so the translation belongs in one place — and the
+   the handle that owns it. The app provides one service per seam, so the
+   translation belongs in one place — and the
    shared readings above (`entry`, `effective-entries`) work through it
    unchanged, because they only ever call the protocol."
   [handle-for]
@@ -175,7 +175,7 @@
    prompts and skills registries, which are addressed by a name and answer
    questions outside any one agent's ctx.
 
-   The owner publishes: kmet1's process shim publishes a router over the app
+   The owner publishes: the retired process shim published a router over the app
    ctx's services, an agent driver an agent's own. Nobody having published (a
    cold process, a bare test) is not an error — the handle is an empty atom
    registry, one per process, so a registration made then is still visible to a

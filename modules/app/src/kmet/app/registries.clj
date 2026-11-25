@@ -91,7 +91,7 @@
 (defn process-handle
   "The process registry handle for a composition: one façade that routes each
    tag to the service that owns it in SCOPE, so a command registered here is the
-   `:commands` service kmet2 reads, and one with no service still has somewhere
+   `:commands` service the app reads, and one with no service still has somewhere
    to go. SCOPE is the app scope, not the mount site, because a row provides
    into its parent."
   [scope]
@@ -145,7 +145,7 @@
 (defn host-services
   "The complete service map the extension host reads, for HANDLE and CTX — what
    an owner binds with `kmet.app.extensions.core/bind-services!`. One builder
-   for every owner (the `:extensions` row, kmet1's shim fallback), so the
+   for every owner (the `:extensions` row, the retired shim fallback), so the
    contract cannot drift between them."
   [handle ctx]
   (merge {:registry handle :ctx ctx} (resource-services handle)))

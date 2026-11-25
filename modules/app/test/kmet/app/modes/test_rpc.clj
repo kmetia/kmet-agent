@@ -200,8 +200,8 @@
              refusal")))))
 
 (deftest the-tables-last-command-answers-silently
-  ;; kmet1's table is complete: `respond` is the one command pi answers no
-  ;; record to, and this mode has nothing pending to resolve (kmet2's extension
+  ;; the legacy CLI's table is complete: `respond` is the one command pi answers no
+  ;; record to, and this mode has nothing pending to resolve (the app's extension
   ;; ABI carries no dialogs — the live request/response pair is the server's
   ;; approval route). An answer with no id is a failure, because the id is what
   ;; correlates it; an unknown type still reads as a typo.
@@ -590,8 +590,8 @@
           (finally (deliver release true)))))))
 
 (deftest a-queue-command-tells-the-client-what-it-did
-  ;; kmet2's delivery rule is start-or-queue: `steer`/`follow-up` on an idle
-  ;; agent starts a run (kmet1 queued and waited for one), so the answer says
+  ;; the app's delivery rule is start-or-queue: `steer`/`follow-up` on an idle
+  ;; agent starts a run (the legacy CLI queued and waited for one), so the answer says
   ;; `:started` rather than a `:queued` nothing would drain. While a run is live
   ;; the answer is `:queued`, which is the pi-compatible case.
   (let [release (promise)
@@ -615,7 +615,7 @@
           (finally (deliver release true)))))))
 
 (deftest abort-cancels-a-compaction-too
-  ;; kmet1's abort cancelled a manual compaction as well as the turn: it is
+  ;; the legacy CLI's abort cancelled a manual compaction as well as the turn: it is
   ;; work nobody waits for once the client asks to stop. The answer's `:idle`
   ;; speaks for the turn, so it is still true. A command-level test: a
   ;; compaction that stalls is not something the wire can arrange hermetically.
@@ -654,7 +654,7 @@
             "nothing was running, so nothing was cancelled")))))
 
 (deftest rpc-mode-binds-a-front-end-with-a-port
-  ;; kmet1's rpc mode is `:mode :rpc`, `has-ui true`, with a port whose output
+  ;; the legacy CLI's rpc mode is `:mode :rpc`, `has-ui true`, with a port whose output
   ;; channels travel the protocol: an extension's message reaches the client as
   ;; a `:ui-request` record.
   (let [seen (atom nil)]
@@ -690,8 +690,8 @@
     (is (not (str/includes? out ":agent/"))
         "and no agent was created to serve a run nobody asked for")))
 
-(deftest kmet1s-mode-alias-reaches-the-same-mode
-  ;; `--mode rpc` is the kmet1 spelling of `--profile rpc` (landing 5b): it now
+(deftest legacy-cli-mode-alias-reaches-the-same-mode
+  ;; `--mode rpc` is the legacy CLI spelling of `--profile rpc` (landing 5b): it now
   ;; boots a mode instead of reporting that the profile has none.
   (with-mode-run
     (answering "ok")

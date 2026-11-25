@@ -90,7 +90,7 @@
             "the failure reaches stderr, named as the model reported it")))))
 
 (deftest print-mode-can-carry-the-event-stream
-  ;; `--mode edn` is kmet1's machine-readable variant: the session header, then
+  ;; `--mode edn` is the legacy CLI's machine-readable variant: the session header, then
   ;; every event as EDN, so a consumer reads a run from the wire instead of
   ;; watching text.
   (with-mode-run
@@ -141,7 +141,7 @@
                 "and the agent reads the expansion")))))))
 
 (deftest a-model-override-reaches-the-run
-  ;; `--model` is kmet1's pattern — provider/model[:thinking], the provider
+  ;; `--model` is the legacy CLI's pattern — provider/model[:thinking], the provider
   ;; inferred when absent — resolved against the catalog before the run. The
   ;; agent's model is an option of the agent, not the process's, so a script can
   ;; name one without editing settings.
@@ -167,7 +167,7 @@
                    level, not the settings'"))))))))
 
 (deftest a-model-the-catalog-does-not-have-is-named
-  ;; A pattern nothing matches is a named failure before the run, as in kmet1
+  ;; A pattern nothing matches is a named failure before the run, as in the legacy CLI
   ;; (which prints the same error and exits 1) — not a request that dies later
   ;; with nothing to say.
   (let [stub (fn [opts]
@@ -269,9 +269,9 @@
             "and not repeated on stderr, where edn consumers do not look")))))
 
 (deftest the-run-tells-the-extension-host-it-is-print-mode
-  ;; kmet1's print mode goes through its session runtime, which binds the
+  ;; the legacy CLI's print mode goes through its session runtime, which binds the
   ;; front-end surface: kind :print, no UI, and the headless port — so an
-  ;; extension that branches on ctx.mode, or asks a question, gets kmet1's answer
+  ;; extension that branches on ctx.mode, or asks a question, gets the legacy CLI's answer
   ;; under either app. The binding is the run's: what was there before it comes
   ;; back, which is not the same as the dispatcher's default.
   (let [seen (atom nil)

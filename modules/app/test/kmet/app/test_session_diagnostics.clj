@@ -2,8 +2,8 @@
   "The host side of the session loader's strict pass: `--debug` owns one
    switch, and turning it on is the only thing that makes the loader validate
    and skip. The loader's own tests live with it in modules/app; this one
-   stays with the host, because it asserts the wiring of a kmet1 flag and
-   goes away with kmet1."
+   stays with the host, because it asserts the wiring of a legacy CLI flag and
+   goes away with the legacy CLI."
   (:require [clojure.string :as str]
             [clojure.test :as t]
             [kmet.app.debug :as debug]
@@ -18,7 +18,7 @@
 (t/deftest test-the-strict-pass-is-off-by-default-and-data-is-trusted
   ;; A header and an entry that parse as EDN but fail the schema. Off (the
   ;; default) a session file that parses is trusted and loads as written; on —
-  ;; kmet1's `--debug` — the strict pass reports and skips the entry.
+  ;; the legacy CLI's `--debug` — the strict pass reports and skips the entry.
   (let [session (s/create-session (scratch))
         file (:file session)]
     (spit file (str (pr-str {:type :session :version 1 :id (:id session)

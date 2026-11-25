@@ -250,7 +250,7 @@
   (->> (app-source-files)
        (filter #(or (= "loop.clj" (fs/file-name %))
                     (str/includes? % "/app/loop/")))
-       ;; the kmet2 run machinery beside them (`driver`, `stages`) is not a
+       ;; the app run machinery beside them (`driver`, `stages`) is not a
        ;; loop submodule: it is the engine a front end drives
        (remove #(contains? #{"driver.clj" "stages.clj"} (fs/file-name %)))
        sort))

@@ -18,7 +18,7 @@
   "Fetch the current provider and image-model catalogs into the user-level
    caches (models.dev + live sources; `KMET_CODING_AGENT_DIR`-aware) and return
    the process exit code: 0 when both pipelines wrote, 1 otherwise. A pipeline
-   that throws prints kmet1's `Error:` line and counts as a failure; nothing
+   that throws prints the legacy CLI's `Error:` line and counts as a failure; nothing
    here loads the world or a registry."
   []
   (let [agent-dir (cfg/get-agent-dir)

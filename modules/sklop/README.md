@@ -1,7 +1,7 @@
 # sklop (склоп)
 
 **sklop** (Serbian **склоп**, IPA /sklôp/, "assembly" or "composition") is
-the composition layer above [`srce`](../srce/README.md): rows, bundles,
+the composition layer above [`srce`](https://github.com/kmetia/srce): rows, bundles,
 profiles, patches, cards and mounts as data.
 
 A caller supplies the policy; sklop supplies the language:

@@ -1,5 +1,5 @@
 (ns kmet.app.test-core
-  "kmet.app.core — kmet2's entry: argument parsing, the version/help paths,
+  "kmet.app.core — the app's entry: argument parsing, the version/help paths,
    --dump-config over the composition (the same composition a boot would
    mount), and --dump-state over the tree that boot produces, including the
    errors an unreadable or malformed layer raises."
@@ -94,9 +94,9 @@
   (is (true? (:no-context-files (core/parse-args ["-nc"])))
       "pi's short spelling"))
 
-(deftest parse-args-takes-kmet1s-one-shot-spellings
+(deftest parse-args-takes-legacy-cli-one-shot-spellings
   (is (= :print (:profile (core/parse-args ["-p" "hi"])))
-      "-p is print mode, as in kmet1")
+      "-p is print mode, as in the legacy CLI")
   (is (= :print (:profile (core/parse-args ["--print" "hi"]))))
   (is (= :text (:format (core/parse-args ["-p" "hi"])))
       "and text is what print mode prints by default")
@@ -113,10 +113,10 @@
       "a provider is a keyword, as settings spell it"))
 
 (deftest parse-args-reads-at-files-into-messages
-  ;; kmet1 reads a file into the message at parse time, and the two entries
+  ;; the legacy CLI reads a file into the message at parse time, and the two entries
   ;; must agree: `-p @tasks.md` sends the file's contents, in the argument's
   ;; place. An unreadable file is a warning and an empty message (the rest of
-  ;; the invocation still runs), an empty path is skipped — kmet1's three
+  ;; the invocation still runs), an empty path is skipped — the legacy CLI's three
   ;; outcomes, word for word.
   (let [path (test-tmp/temp-file! ".md")]
     (spit path "from the file")
@@ -132,7 +132,7 @@
     (is (str/includes? err "Warning: empty path after @")))
   (let [[args err] (tu/captured-err #(core/parse-args ["@target/does-not-exist.md"]))]
     (is (= [""] (:args args))
-        "an unreadable file is an empty message, as in kmet1")
+        "an unreadable file is an empty message, as in the legacy CLI")
     (is (str/includes? err "Warning: could not read target/does-not-exist.md"))))
 
 (deftest parse-args-rejects-bad-flags
@@ -179,7 +179,7 @@
       (is (= [:debug :load :list] @events)
           "debug first, the process world, then the table"))))
 
-(deftest parse-args-takes-kmet1s-maintenance-flags
+(deftest parse-args-takes-legacy-cli-maintenance-flags
   ;; `-d` and `--generate-models` run before the process world, `--list-models`
   ;; after it; the entry owns all three (kmet.app.maintenance).
   (is (true? (:debug (core/parse-args ["-d"]))))
@@ -278,7 +278,7 @@
       (finally (io/delete-file path true)))))
 
 (deftest parse-args-collects-extension-flags
-  ;; kmet1's three forms: `=` splits, a following non-`-` token is the value,
+  ;; the legacy CLI's three forms: `=` splits, a following non-`-` token is the value,
   ;; and nothing following is true. The key drops the dashes — the name
   ;; `get-flag` reads.
   (is (= {"my-ext-flag" true} (:ext-flags (core/parse-args ["--my-ext-flag"]))))
@@ -288,11 +288,11 @@
          (:ext-flags (core/parse-args ["--my-ext-flag" "--profile" "print"])))
       "a following flag is not a value")
   (is (= {"p" true} (:ext-flags (core/parse-args ["--p"])))
-      "an unsupported flag is data, not a usage error — kmet1's rule"))
+      "an unsupported flag is data, not a usage error — the legacy CLI's rule"))
 
-(deftest parse-args-takes-kmet1s-session-lifecycle-flags
+(deftest parse-args-takes-legacy-cli-session-lifecycle-flags
   ;; Which session a run opens is the mode's, but the flags are the command
-  ;; line's: they are kmet1's, and the TUI row applies them (the modes that
+  ;; line's: they are the legacy CLI's, and the TUI row applies them (the modes that
   ;; cannot honor them refuse them by name — the next test).
   (is (true? (:continue? (core/parse-args ["-c"]))))
   (is (true? (:continue? (core/parse-args ["--continue"]))))
@@ -311,8 +311,8 @@
     (is (nil? (:resume? opts)))
     "an explicit session wins over both continuation flags"))
 
-(deftest parse-args-takes-kmet1s-run-flags
-  ;; kmet1's run flags, in kmet1's spellings: the thinking level, the prompt
+(deftest parse-args-takes-legacy-cli-run-flags
+  ;; the legacy CLI's run flags, in the legacy CLI's spellings: the thinking level, the prompt
   ;; overrides (one replaces, the other stacks), the session's model scope and
   ;; its storage dir. The entry parses them; what they mean to a run is
   ;; `kmet.app.invocation`'s (the patterns resolved before the boot, the rest
@@ -331,7 +331,7 @@
                             "--append-system-prompt" "b"])))
       "repeatable: the pieces stay separate for `get-append-system-prompt`")
   (is (= ["p/a" "p/b"] (:models (core/parse-args ["--models" " p/a , p/b "])))
-      "one comma-separated argument, trimmed, as kmet1 reads it")
+      "one comma-separated argument, trimmed, as the legacy CLI reads it")
   (is (= "target/sessions" (:session-dir (core/parse-args ["--session-dir" "target/sessions"]))))
   (is (= :kmet.app/bad-args (error-type #(core/parse-args ["--session-dir"]))))
   (is (not (contains? (core/parse-args ["-p" "hi"]) :thinking))
@@ -357,7 +357,7 @@
 (deftest the-invocations-run-flags-reach-the-mode-row
   ;; The hand-off is the entry's: the mode's row config carries what the
   ;; command line asked for, and a mode applies it (the TUI row hands the map
-  ;; to kmet1's `interactive/run`; print/rpc/server hand `create-opts` to
+  ;; to the legacy CLI's `interactive/run`; print/rpc/server hand `create-opts` to
   ;; `:agents`), and the process world's loaded config rides the same map so a
   ;; mode that runs on it (the TUI) needs no second load. Only the keys the
   ;; invocation gave are there.
@@ -424,7 +424,7 @@
       (is (zero? code))
       (is (= "kmet v9.9.9\n" out)))))
 
-(deftest help-prints-kmet2-flags
+(deftest help-prints-app-flags
   (let [{:keys [code out]} (support/run-main ["--help"])]
     (is (zero? code))
     (is (str/includes? out "Usage: kmet "))
@@ -459,7 +459,7 @@
 
 (deftest package-subcommands-run-the-shared-cli
   ;; `plugins` is a command, not a profile: the entry hands the args to the
-  ;; package CLI kmet1 uses, and injects the plugin screen it cannot require.
+  ;; package CLI the legacy CLI uses, and injects the plugin screen it cannot require.
   (let [seen (atom nil)]
     (with-redefs [core/run-plugins (fn [opts] (reset! seen opts) 0)]
       (let [{:keys [code err]} (support/run-main ["plugins" "-l"])]
@@ -685,7 +685,7 @@
     (try
       (let [{:keys [code err]} (support/run-main ["--patch" path])]
         (is (= 1 code))
-        (is (str/includes? err "kmet2 boot failed")))
+        (is (str/includes? err "app boot failed")))
       (finally (io/delete-file path true)))))
 
 (deftest a-bare-run-boots-the-composition-and-says-what-is-missing
@@ -733,5 +733,5 @@
     (try
       (let [{:keys [code err]} (support/run-main ["--patch" path])]
         (is (= 1 code))
-        (is (str/includes? err "kmet2 boot failed")))
+        (is (str/includes? err "app boot failed")))
       (finally (io/delete-file path true)))))

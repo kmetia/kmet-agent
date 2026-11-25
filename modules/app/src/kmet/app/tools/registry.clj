@@ -30,7 +30,7 @@
    a handle from the sandbox's copy of the process. A parameter cannot be
    written from a sandbox. A caller that has no handle of its own resolves the
    process one where it lives — `kmet.app.registry/current` — which is what
-   kmet1's arity-less façade does while it survives."
+   the retired arity-less façade did."
   (:require [clojure.string :as str]
             [kmet.libs.json :as json]
             [kmet.app.profiles :as profiles]

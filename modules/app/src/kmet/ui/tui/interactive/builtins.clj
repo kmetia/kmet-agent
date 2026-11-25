@@ -333,7 +333,7 @@
    mounted units it lists hang under the root, not under the agent the command
    runs in (an agent's ctx holds what a preset composed on it). The layout
    passes the run's composition root; the 1-arity reads the process root, which
-   is what kmet1's entry registers against (and what a bare test has)."
+   is what the legacy entry registers against (and what a bare test has)."
   ([config] (register-builtin-commands! config root/ctx))
   ([_config root-ctx-fn]
    (runtime-commands/register-runtime-commands! root-ctx-fn)

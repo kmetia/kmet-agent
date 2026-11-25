@@ -1053,7 +1053,7 @@ at the next turn boundary, or as a fresh attempt in the same prompt when the
 prompt is already settling.
 With `:expand-prompt-templates?`, the message runs through the submit
 chain first — extension commands execute immediately (consuming the
-message), then the host's expansion runs (pi: expandPromptTemplates; kmet1
+message), then the host's expansion runs (pi: expandPromptTemplates; the legacy CLI
 expands skill commands and prompt templates, and a host that names no chain
 expands nothing — the option is the host's policy, not the ABI's).
 

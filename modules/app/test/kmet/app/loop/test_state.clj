@@ -22,7 +22,7 @@
   :each
   ;; The app root is not this namespace's subject: `test-support/with-registry`
   ;; gives each test its own tool table, so registering a stand-in tool here
-  ;; cannot boot kmet2's composition for the rest of the suite.
+  ;; cannot boot the app's composition for the rest of the suite.
   (fn [f] (support/with-registry f)))
 
 ;; ─── State construction ───────────────────────────────────────────────────
@@ -533,4 +533,4 @@
   (t/is (identical? system-prompt/build-system-prompt
                     (:system-prompt-fn (support/make-agent-state)))
         "and the default is the app's own builder, which a process-bound caller
-       replaces (kmet1's Engine passes skills/build-system-prompt)"))
+       replaces (the legacy CLI's Engine passes skills/build-system-prompt)"))

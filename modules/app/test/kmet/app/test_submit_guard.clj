@@ -24,7 +24,7 @@
             [rewrite-clj.parser :as p]))
 
 (def ^:private source-roots
-  "The trees a kmet2 kernel mutation can live in: the app the server embeds,
+  "The trees an app kernel mutation can live in: the app the server embeds,
    the composition module it mounts through, and the front end a terminal
    runs."
   ["modules/app/src" "modules/sklop/src"])

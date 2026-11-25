@@ -88,7 +88,7 @@
   "Called when the loop settles a turn (`:agent-settled`): completed, or
    aborted by a cancel this front end did not run itself.
    The run has already settled its turn flag by now — a handle's settle
-   callback runs before :agent-settled is emitted, and kmet1's prompt! wrapper
+   callback runs before :agent-settled is emitted, and the legacy prompt! wrapper
    clears it before the front end's callbacks — so a background status
    completion (share, branch summary: status/release-background-status!)
    racing this teardown sees the turn over and its post-revival re-check stops

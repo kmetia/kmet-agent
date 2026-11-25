@@ -5,9 +5,9 @@
    **The state is derived once, here.** `agent-state` is the whole option
    derivation a run needs — provider and model resolution, the tool table, the
    compaction and retry settings, the prompt — and it is the one place it
-   happens. kmet1's engine calls it with the ctx its front end named; kmet2's
-   driver calls it with the child ctx the registry minted. A second copy would
-   be a run option wired in one place and forgotten in the other, which is the
+   happens. The TUI's engine calls it with the ctx its front end named; the
+   registry's driver calls it with the child ctx the registry minted. A second
+   copy would be a run option wired in one place and forgotten in the other, which is the
    drift the app layer exists to prevent.
 
    What the state does *not* take from here is its event sink: `:on-event` is
@@ -174,7 +174,7 @@
       (loop-state/restore-session-context! state)
       (loop-state/apply-run-tools! state entries))
     ;; the session's scoped-model list is the config's (pi: resolveModelScope at
-    ;; runtime creation): seeded here, so kmet1's engine and every handle start
+    ;; runtime creation): seeded here, so every engine and handle starts
     ;; with the same scope rather than only the bootstrapped one
     (loop-state/init-scoped-models! state config)
     (when-let [names (loop-state/orphaned-deferred-tools state)]
@@ -187,11 +187,11 @@
 ;; ── the handle ────────────────────────────────────────────────────────────
 
 (defn- resolve-create-opts
-  "CREATE-OPTS with kmet1's `--model` pattern resolved against the catalog:
-   `provider/model[:thinking]`, the provider inferred when it is absent, as
+  "CREATE-OPTS with the legacy CLI's `--model` pattern resolved against the
+   catalog: `provider/model[:thinking]`, the provider inferred when it is absent, as
    `kmet --model` has always meant it. A pattern the catalog does not have fails
-   here by name — kmet1 prints the same error and exits 1 — instead of becoming a
-   run that dies inside its first request."
+   here by name — the legacy CLI prints the same error and exits 1 — instead
+   of becoming a run that dies inside its first request."
   [opts]
   (if-let [pattern (:model opts)]
     (let [{:keys [provider model-id thinking-level warning error]}
@@ -208,7 +208,7 @@
 
 (defn- session-for
   "A fresh session for a new agent over LOG (the `:sessions` service), placed
-   the way kmet1's engine places one: the cwd-encoded directory under the
+   the way the engine places one: the cwd-encoded directory under the
    config's sessions dir."
   [log config cwd]
   (let [dir (session/session-dir-for-cwd (cfg/get-session-dir config) cwd)]
@@ -590,7 +590,7 @@
                         :clear-compaction-queue! manual/clear-compaction-queue!
                         ;; the session lifecycle moves this handle's session in
                         ;; place. No `:install!`: the process-wide extension
-                        ;; session is kmet1's front end, and a run's own binding
+                        ;; session belongs to the front end, and a run's own binding
                         ;; already covers handlers. A switch replaces the live
                         ;; state record the `:session` thunk reads.
                         :new-session! lifecycle/new-session!
@@ -614,7 +614,7 @@
    The run config is loaded per creation (a settings change reaches the next
    agent) unless the caller names one (`:config` in the create options).
 
-   A create option that is kmet1's CLI override (`:model`, `:provider`) is
+   A create option that is the legacy CLI's override (`:model`, `:provider`) is
    applied the way `kmet --model` applies it, pattern and all
    (`resolve-create-opts`) — an agent's model is an option of the agent, not of
    the process, so two agents of one server can differ.

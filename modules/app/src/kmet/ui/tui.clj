@@ -1,8 +1,8 @@
 (ns kmet.ui.tui
   "The TUI as a mode row, and the `:ui` provider a terminal needs:
-   `kmet --profile tui`, the kmet2 entry's default profile.
+   `kmet --profile tui`, the entry's default profile.
 
-   The mode's tree moved here at 5l-iii, so a run is kmet2's own front end:
+   The mode's tree moved here at 5l-iii, so a run is the app's own front end:
    the row mounts `kmet.ui.tui.interactive` over the composition the entry
    booted, the run reads the composition's `:tools`, `:sessions` and
    `:systemPrompt` rows through the ctx it is given, and the startup a
@@ -39,7 +39,7 @@
    `--provider`, `--thinking`, the `--models` scope, and the
    `--system-prompt`/`--append-system-prompt`/`--session-dir` config overrides —
    and `interactive/run` applies them to the config it loads, so a TUI run honors
-   them as kmet1's front end always did (`run-opts`). A mode that creates its
+   them as the legacy front end always did (`run-opts`). A mode that creates its
    agent through `:agents` has no session option to give its factory yet, and
    `kmet.app.core` refuses the session flags there by name."
   (:require [kmet.app.invocation :as invocation]
@@ -51,7 +51,7 @@
             [kmet.ui.tui.interactive :as interactive]))
 
 (defn- run-opts
-  "The invocation's input this row applies, in kmet1's own spellings: the mode
+  "The invocation's input this row applies, in the legacy CLI's own spellings: the mode
    the world load and the run are told they are, the run's overrides — the model
    pattern `--model` resolved, `--provider`, `--thinking`, the scope
    `--models`, the prompt and session-dir overrides — and the session a run

@@ -22,11 +22,11 @@
   ["../srce/src" "modules/sklop/src" "modules/app/src"])
 
 (def ^:private store-namespaces
-  "kmet1's process-global state: the root-ctx resolver and the retired store."
+  "the legacy CLI's process-global state: the root-ctx resolver and the retired store."
   '#{kmet.agent.app-runtime kmet.agent.runtime kmet.libs.scope})
 
 (defn- sources
-  "Every source file in the existing kmet2 modules."
+  "Every source file in the existing app modules."
   []
   (->> new-module-srcs
        (filter #(fs/directory? %))
@@ -37,7 +37,7 @@
 (deftest the-guard-sees-the-new-modules
   (is (every? fs/directory? new-module-srcs)
       "every scanned module tree exists")
-  (is (seq (sources)) "the guard found the kmet2 sources"))
+  (is (seq (sources)) "the guard found the app sources"))
 
 (deftest no-new-module-requires-the-process-store
   (doseq [file (sources)
@@ -46,8 +46,8 @@
                 store (filter store-namespaces requires)]]
     (is (some? ns-form) (str file " has no ns form — the guard cannot read it"))
     (is (empty? store)
-        (str file " requires kmet1's process store " (vec store)
-             " — kmet2 code takes its ctx"))))
+        (str file " requires the legacy CLI's process store " (vec store)
+             " — app code takes its ctx"))))
 
 (deftest no-new-module-calls-the-root-node
   (doseq [file (sources)]

@@ -399,7 +399,7 @@
 ;; ─── System prompt ────────────────────────────────────────────────────────
 ;; The builder itself lives in `kmet.app.system-prompt`, where every
 ;; input is an argument: an engine builds its prompt from the ctx it holds.
-;; These two are kmet1's process-bound wrappers — the same names and arities
+;; These two are the retired process-bound wrappers — the same names and arities
 ;; its callers and tests already use, defaulting `:tools` from the process
 ;; tool table and `:skills` from the process skill registry.
 
@@ -416,7 +416,7 @@
    The process-bound defaults are this wrapper's: `:tools` from the process
    tool table, `:skills` from the process skill registry, and — when the
    caller passes the `:resources` service value — only the skills that
-   selection enables. A caller that holds its own (kmet2's `:systemPrompt` row)
+   selection enables. A caller that holds its own (the app's `:systemPrompt` row)
    calls the app namespace directly."
   [& {:keys [tools skills resources] :as opts}]
   (let [skill-list (or skills

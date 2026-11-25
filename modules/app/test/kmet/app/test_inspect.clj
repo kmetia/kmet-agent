@@ -1,7 +1,7 @@
 (ns kmet.app.test-inspect
   "kmet.app.inspect — the unit tree `/units` and `--dump-state` render.
 
-   The renderer's contract is the one kmet1's store listing had: one flat line
+   The renderer's contract is the one the legacy CLI's store listing had: one flat line
    per unit, no indentation, a stable order (parents before children, fibers in
    mount order) — plus the two facts a store could not show, a fiber's state and
    what it waits for."

@@ -85,7 +85,7 @@
         "the real stage is back")))
 
 (deftest with-defaults-merges-stage-by-stage
-  ;; The two ctx builders (kmet1's process shim and the loop test support) both
+  ;; The two ctx builders (the legacy CLI's process shim and the loop test support) both
   ;; seat a run's stages over the builtin map; this is that one operation.
   (let [merged (stages/with-defaults {:retry-policy {:config {:max-retries 1}}})]
     (is (= {:max-retries 1} (get-in merged [:retry-policy :config]))

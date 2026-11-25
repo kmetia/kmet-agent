@@ -44,7 +44,7 @@
           "a registration the host accepted is one its bound handle holds")
       (is (fn? (:register! (extensions/resources :skills)))
           "and the row binds the resource operations itself, backed by the
-           composition's registries — a kmet2 process has no base binding to
+           composition's registries — an app process has no base binding to
            inherit them from"))))
 
 (deftest the-row-binds-every-key-the-host-reads
@@ -85,8 +85,8 @@
   ;; 5l-ii's publisher gate: the row publishes the composition's registry as the
   ;; process handle and binds the resource operations the host calls, so a
   ;; contribution made through the host is the `:commands` service the run reads
-  ;; — with nothing bound before the row (a kmet2 process), and with a base
-  ;; binding (kmet1's process host) replaced, then restored on dispose.
+  ;; — with nothing bound before the row (an app process), and with a base
+  ;; binding (the legacy CLI's process host) replaced, then restored on dispose.
   (with-restored-host
     (fn []
       (let [root (srce/root {:name :app})
@@ -161,7 +161,7 @@
   ;; thinking level rather than whichever front end installed last. The context
   ;; thunk is called per handler, so a mid-run change is visible like it is
   ;; through a front end's `:build-context`. Outside a run the process install
-  ;; is still the answer — kmet1's front end and an extension's own fiber depend
+  ;; is still the answer — the legacy CLI's front end and an extension's own fiber depend
   ;; on it.
   (let [previous (extensions/get-session)
         previous-runtime (:runtime (extensions/front-end-surface))

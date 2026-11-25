@@ -1,6 +1,6 @@
 (ns kmet.app.test-invocation
   "kmet.app.invocation: the entry's half of the run flags (model patterns
-   resolved against the catalog before anything boots, as kmet1 resolves them)
+   resolved against the catalog before anything boots, as the legacy CLI resolves them)
    and the mode's (`create-opts`, the map the driver applies over the settings
    it loads)."
   (:require [clojure.string :as str]
@@ -21,9 +21,9 @@
     (f)))
 
 (deftest a-model-pattern-becomes-the-catalogs-provider-model-and-level
-  ;; `--model` is kmet1's pattern, and the entry resolves it the way kmet1's
+  ;; `--model` is the legacy CLI's pattern, and the entry resolves it the way the legacy CLI's
   ;; does: the provider inferred from `provider/model`, the id from the catalog,
-  ;; the suffix as the thinking level. A mode that runs kmet1's front end has
+  ;; the suffix as the thinking level. A mode that runs the legacy CLI's front end has
   ;; nothing left to resolve; a mode that creates through `:agents` hands the
   ;; ids on and the factory resolves them again (an id is a pattern).
   (with-catalog
@@ -41,7 +41,7 @@
       (is (= :low (:thinking (invocation/resolve-overrides
                               {:model "opencode-go/deepseek-v4-flash:high"
                                :thinking :low})))
-          "the flag is the more specific answer, as in kmet1's resolver"))))
+          "the flag is the more specific answer, as in the legacy CLI's resolver"))))
 
 (deftest a-model-the-catalog-does-not-have-is-a-named-failure
   (with-catalog
@@ -50,7 +50,7 @@
                      (catch Exception e e))]
         (is (= :kmet.app/unknown-model (:type (ex-data err))))
         (is (str/includes? (ex-message err) "Model \"no-such-model\" not found")
-            "kmet1's wording, so the entry reports it like any other
+            "the legacy CLI's wording, so the entry reports it like any other
              configuration error")))))
 
 (deftest a-model-scope-resolves-to-ids-with-a-warning-for-what-matches-nothing
@@ -59,7 +59,7 @@
       (let [[opts err] (tu/captured-err
                         #(invocation/resolve-overrides {:models ["deepseek-v4-flash" "nope"]}))]
         (is (= ["deepseek-v4-flash"] (:models opts))
-            "the scope is ids, as kmet1 stores it; the unmatched pattern is not
+            "the scope is ids, as the legacy CLI stores it; the unmatched pattern is not
              invented back")
         (is (str/includes? err "No models match pattern \"nope\"")
             "and it says which pattern it left out")))))

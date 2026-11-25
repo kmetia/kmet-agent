@@ -1,6 +1,6 @@
 (ns kmet.app.session.test-contract
-  "The `:sessionPersistence` contract, run against both backends: kmet2's
-   in-process `memory-backend` and the EDNL files kmet1's store owns. One set of
+  "The `:sessionPersistence` contract, run against both backends: the app's
+   in-process `memory-backend` and the EDNL files the legacy CLI's store owns. One set of
    assertions, so the storage seam cannot drift from the store it will replace
    (`docs/architecture.md` § Service catalog).
 

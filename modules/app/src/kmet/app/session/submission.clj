@@ -43,7 +43,7 @@
     ((:extension-handler c) (extensions/build-extension-context) (or args ""))))
 
 (defn expand-text
-  "TEXT through ENGINE's own expansion chain (`:expand-input`) — kmet1's skill
+  "TEXT through ENGINE's own expansion chain (`:expand-input`) — the legacy CLI's skill
    commands and prompt templates — or as written when the front end named
    none. A queued message is raw (pre-hook); the flush expands it here."
   [engine text]

@@ -10,7 +10,7 @@
 
    One unit per line with no indentation (the path is in the line), parents
    before children and fibers in mount order — the two properties that made
-   kmet1's store listing usable. A **ctx** line is a path and its child count; a
+   the legacy CLI's store listing usable. A **ctx** line is a path and its child count; a
    **fiber** line is its state, what it injects, what it provides and its effect
    labels, plus the two facts a store could never show: `waiting-for` on a
    `:pending` fiber and the error on a `:failed` one.

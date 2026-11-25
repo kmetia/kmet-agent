@@ -7,7 +7,7 @@
    a front end does *around* a switch — its UI cleanup, its extension install —
    stays the front end's.
 
-   The split that matters is `:install!`: kmet1 installs the switched session
+   The split that matters is `:install!`: the retired shim installed the switched session
    into the process-wide extension slot (`extensions/install-session!`), and a
    handle passes none, because a process-global slot is a front end's and a
    second agent in one process must not take it. A run's extension surface
@@ -91,7 +91,7 @@
 
    The opts `:install!` fn, when given, receives SESS after the engine's
    session slot moves (an atom-held one; a thunk-held handle follows its state
-   record below) — that is where kmet1 installs the process-wide extension
+   record below) — that is where the retired shim installed the process-wide extension
    session.
    Callers own the before/after lifecycle events. Returns SESS."
   ([engine sess] (switch-session! engine sess nil))
