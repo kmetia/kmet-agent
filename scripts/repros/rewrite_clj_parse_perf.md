@@ -3,7 +3,7 @@
 Filed as [jolt#1646](https://github.com/jolt-lang/jolt/issues/1646); its
 reader-layer fix landed in #1693, and
 [jolt#1713](https://github.com/jolt-lang/jolt/issues/1713) tracks the residual
-per-call overhead. `jolt-bugs.md` carries the current re-check.
+per-call overhead.
 
 ## Summary
 
