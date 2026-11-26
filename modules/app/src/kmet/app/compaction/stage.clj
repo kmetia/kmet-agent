@@ -390,10 +390,11 @@
      :entry entry}))
 
 (defn- finish-compaction!
-  "Emit compact-context! completion events, then flush the messages queued
-   during the compaction, and return its terminal value. The flush runs after
-   every event was dispatched: a listener's :compaction-end work happens before
-   the run the flush may start."
+  "Emit compact-context! completion events, re-announce the prompt manifests
+   a successful summary dropped, then flush the messages queued during the
+   compaction, and return its terminal value. The flush runs after every event
+   was dispatched: a listener's :compaction-end work happens before the run
+   the flush may start."
   [agent reason result from-extension? aborted? failed? succeeded? error-message]
   (let [will-retry (and succeeded? (= reason :overflow))]
     (reset! (:compaction-error agent) error-message)
@@ -418,6 +419,16 @@
                          :aborted aborted?
                          :will-retry false})
       (reset! (:compaction-blocked agent) true))
+    (when succeeded?
+      ;; A compaction replaces the context with a summary, so the generated
+      ;; prompt manifests it drops must be re-announced before the next
+      ;; request (VCC skips them explicitly). The sync compares against the
+      ;; projection, so an unchanged listing appends nothing. A manifest
+      ;; failure must not turn a completed compaction into a failure.
+      (try
+        (state/sync-prompt-listings! agent)
+        (catch Exception e
+          (debug/log-error "prompt listing sync after compaction failed: " e))))
     (when-let [flush! (:flush-compaction-queue agent)]
       (flush! will-retry))
     (cond

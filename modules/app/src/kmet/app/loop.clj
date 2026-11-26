@@ -442,13 +442,10 @@
   ;; pi: pending nextTurn messages ride with the prompt, after the user
   ;; message and before before_agent_start's injected messages
   (state/inject-next-turn-messages! agent)
-  ;; tell the model which deferred tool sources exist, if that changed since the
-  ;; branch's last listing (a promotion appends nothing, pi: the mcp_servers
-  ;; section is appended rather than the declarations rewritten)
-  (state/sync-tool-sources-listing! agent)
-  ;; and which eval-library definitions this session loaded, or will load on
-  ;; its first eval, if that changed since the branch's last manifest
-  (state/sync-eval-library-listing! agent)
+  ;; keep the prompt manifests in the context compaction measures and the
+  ;; before-agent-start hooks see; a successful compaction re-announces one
+  ;; the summary dropped
+  (state/sync-prompt-listings! agent)
   (let [bas (extensions/apply-before-agent-start-hooks
              message @(:system agent))]
     (when (:system-prompt bas)

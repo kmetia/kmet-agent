@@ -148,7 +148,7 @@
 (def eval-library-custom-type
   "The custom-message type that tells the model which eval-library definitions
    this session has: its built environment's loaded records when one exists,
-   else the files saved for its first eval. One type, so the branch's last
+   else the files saved for its first eval. One type, so the context's last
    manifest can be found and compared."
   :eval-library)
 

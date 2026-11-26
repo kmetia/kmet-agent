@@ -463,6 +463,38 @@
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))
 
+(t/deftest test-a-compaction-reannounces-a-dropped-listing-in-the-request
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session
+                                        :compactor :vcc
+                                        :compact-token-threshold 10)]
+    (try
+      (deferred-source! h ::catalog {"deferred-a" (tool-map "deferred-a")})
+      (session/append-entry session {:role :user
+                                     :content [{:type :text :text "seed"}]})
+      (session/append-entry session {:role :assistant
+                                     :content [{:type :text :text "answer"}]})
+      (let [listing (state/sync-tool-sources-listing! agent)
+            text (-> listing :content first :text)
+            sent (support/run-turn-capturing-llm agent {:message "hi"})]
+        (t/is (some #(= :compaction (:role %)) (session/get-branch session))
+              "the prompt-start threshold compaction ran")
+        (t/is (some (fn [m]
+                      (and (= :custom (:role m))
+                           (= session/tool-sources-custom-type (:custom-type m))
+                           (= text (:text (first (:content m))))))
+                    (:messages sent))
+              "the request carries the listing the summary dropped")
+        (t/is (= 2 (count (filter #(and (= :custom-message (:role %))
+                                        (= session/tool-sources-custom-type
+                                           (:custom-type %)))
+                                  (session/get-branch session))))
+              "the append-only branch holds the original and the repair"))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
 (t/deftest test-a-persisted-selection-narrows-the-search-candidates
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)

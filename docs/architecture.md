@@ -488,7 +488,11 @@ the model sees mid-script. A deferred source is announced to the model by one
 appended `:custom-message` entry — its id and one line, written when the set or
 a description changes (`state/sync-tool-sources-listing!`), never on a
 promotion and never by rebuilding the leading system prompt (pi's appended
-`mcp_servers` section; D7). The text is bounded (`session/context.clj`): a
+`mcp_servers` section; D7). The sync compares against the projected context,
+not the append-only branch: prompt preparation keeps the listing in the context
+compaction measures, and a successful compaction calls it again so a listing
+the summary dropped (VCC omits generated custom types) is re-announced before
+the next request (`state/sync-prompt-listings!`). The text is bounded (`session/context.clj`): a
 description elides past 250 characters and the whole text at 4096, where the
 descriptions shrink to share the room — every source stays listed, because being
 listed is the point — and only the head lines outgrowing the room drops the last

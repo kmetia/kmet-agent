@@ -450,13 +450,16 @@ Be precise and concise in your responses."}}]
     msg))
 
 (defn- last-custom-listing
-  "The content of the branch's last hidden listing of CUSTOM-TYPE, or nil.
-   Both prompt manifests compare against it, so a message is appended once per
-   change rather than once per prompt."
+  "The content of the projected context's last hidden listing of CUSTOM-TYPE,
+   or nil. The projection honors the latest compaction cutoff, so a listing
+   the summary dropped reads as absent and is announced again; the
+   append-only branch would still hold it. Both prompt manifests compare
+   against it, so a message is appended once per change rather than once per
+   prompt."
   [sess custom-type]
   (:content (last (filter #(and (= :custom-message (:role %))
                                 (= custom-type (:custom-type %)))
-                          (session/get-branch sess)))))
+                          (session/build-context sess)))))
 
 (defn- append-listing!
   "Append TEXT as the hidden prompt listing of CUSTOM-TYPE, with
@@ -470,7 +473,7 @@ Be precise and concise in your responses."}}]
 
 (defn sync-tool-sources-listing!
   "Tell the model which deferred tool sources exist, when the set or one of its
-   one-line descriptions changed since the branch's last listing. Appends one
+   one-line descriptions changed since the context's last listing. Appends one
    `:custom-message` (user-role, not displayed) and never rewrites the leading
    system prompt, which is a full prefix miss; a promotion appends nothing.
    Selection-aware: a source is announced only when codemode or tool_search
@@ -497,7 +500,7 @@ Be precise and concise in your responses."}}]
 
 (defn sync-eval-library-listing!
   "Tell the model which eval-library definitions this session has, when the set
-   or its loaded/saved state changed since the branch's last manifest. With a
+   or its loaded/saved state changed since the context's last manifest. With a
    built environment the text lists its loaded records with scope and active
    state; without one it lists the disk index as saved, loaded on the first
    eval. Never builds an environment and never invokes a source: mounted eval
@@ -533,6 +536,18 @@ Be precise and concise in your responses."}}]
                             :session-only (count live)
                             :sources (count sources)
                             :topics (count topics)}))))))
+
+(defn sync-prompt-listings!
+  "Append both prompt manifests — the deferred tool sources and the eval
+   library — when the projected context's last copy is missing or stale.
+   Prompt preparation calls it before compaction measures the context; a
+   successful compaction calls it again so a listing the summary dropped is
+   restored before the next request. Each sync is idempotent, so an unchanged
+   listing appends nothing; returns nil."
+  [agent]
+  (sync-tool-sources-listing! agent)
+  (sync-eval-library-listing! agent)
+  nil)
 
 (defn append-persisted-message!
   "Append MSG to both the live context and the session (pi: append + append-entry).

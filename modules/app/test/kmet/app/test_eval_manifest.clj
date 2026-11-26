@@ -6,6 +6,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.app.compaction :as compact]
             [kmet.app.eval :as eval-service]
             [kmet.app.eval.files :as eval-files]
             [kmet.app.loop.state :as state]
@@ -28,6 +29,15 @@
     :ctx (:ctx env)
     :session (:session env)
     :enabled-tool-names (loop-support/tool-names entries))))
+
+(defn- compacting-agent
+  "An eval-selected agent whose compaction uses VCC, so a test needs no LLM."
+  [env]
+  (loop-support/make-agent-state
+   :ctx (:ctx env)
+   :session (:session env)
+   :enabled-tool-names (loop-support/tool-names ["eval"])
+   :compactor :vcc))
 
 (defn- listings [sess]
   (filter #(and (= :custom-message (:role %))
@@ -176,6 +186,29 @@
           "a vanished set is corrected instead of left standing")
     (t/is (nil? (state/sync-eval-library-listing! agent))
           "and corrected once")))
+
+(t/deftest a-compaction-reannounces-the-library-manifest
+  ;; VCC excludes the generated manifest from its summary; the post-compaction
+  ;; sync must compare against the projection so the model still learns which
+  ;; eval sources (for example ext.mcp) exist.
+  (let [env (support/eval-ctx)
+        agent (compacting-agent env)
+        sess (:session env)]
+    (write-definition! env :cwd "user/saved" "(defn saved [] 1)")
+    (session/append-entry sess {:role :user
+                                :content [{:type :text :text "first"}]})
+    (session/append-entry sess {:role :assistant
+                                :content [{:type :text :text "answer"}]})
+    (t/is (some? (state/sync-eval-library-listing! agent)))
+    (t/is (= 1 (count (listings sess))))
+    (t/is (true? (compact/compact-context! agent nil :manual
+                                           {:keep-user-turns 0})))
+    (t/is (= 2 (count (listings sess)))
+          "the compaction re-announces the manifest it dropped")
+    (t/is (str/includes? (:content (last (listings sess))) "1 saved definition"))
+    (state/sync-prompt-listings! agent)
+    (t/is (= 2 (count (listings sess)))
+          "the repaired manifest is not appended again")))
 
 (t/deftest a-session-lists-saved-before-its-first-eval-and-loaded-after
   (let [env (support/eval-ctx)

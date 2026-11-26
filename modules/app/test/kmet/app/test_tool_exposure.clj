@@ -10,6 +10,7 @@
             [clojure.string :as str]
             [clojure.test :as t]
             [kmet.ai.llm :as llm]
+            [kmet.app.compaction :as compact]
             [kmet.app.config :as cfg]
             [kmet.app.loop :as loop]
             [kmet.app.loop.state :as state]
@@ -608,6 +609,33 @@
             "the stale listing is corrected instead of left standing")
       (t/is (nil? (state/sync-tool-sources-listing! agent))
             "and corrected once")
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-a-compaction-reannounces-a-dropped-source-listing
+  ;; VCC omits generated listings from its summary; the post-compaction sync
+  ;; must compare against the projected context and append the listing again
+  ;; instead of trusting the append-only branch.
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session :compactor :vcc)]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (session/append-entry session {:role :user
+                                     :content [{:type :text :text "first"}]})
+      (session/append-entry session {:role :assistant
+                                     :content [{:type :text :text "answer"}]})
+      (t/is (some? (state/sync-tool-sources-listing! agent)))
+      (t/is (= 1 (count (listings session))))
+      (t/is (true? (compact/compact-context! agent nil :manual
+                                             {:keep-user-turns 0})))
+      (t/is (= 2 (count (listings session)))
+            "the compaction re-announces the listing it dropped")
+      (t/is (str/includes? (:content (last (listings session))) "A catalog"))
+      (state/sync-prompt-listings! agent)
+      (t/is (= 2 (count (listings session)))
+            "the repaired listing is not appended again")
       (finally
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))
