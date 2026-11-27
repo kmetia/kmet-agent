@@ -590,7 +590,7 @@
                                            :missing missing-native-logs}))))))
                 (do (binding [*out* *err*] (println (:err res)))
                     (throw (ex-info (str "smoke test failed for " artifact
-                                         " — the artifact did not run (see jolt-bugs.md: a gitlib-only"
+                                         " — the artifact did not run (see upstream-bugs.md: a gitlib-only"
                                          " java.time class must resolve during the build)")
                                     {:type ::smoke-failed :exit (:exit res)})))))
             (println "smoke test:" cmd "--version")

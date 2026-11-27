@@ -12,7 +12,7 @@ the user-facing `docs/` directory: see
 [`composition.md`](composition.md); the app's design record — the open seams,
 the limits that shipped and the options declined — is
 [`modules/app/src/kmet/design.md`](../modules/app/src/kmet/design.md); this file
-is the current map. Temporary analysis notes (`perf.md`, `jolt-bugs.md`,
+is the current map. Temporary analysis notes (`perf.md`, `upstream-bugs.md`,
 `tcl.md`) remain at the repository root by convention.
 
 ## Project structure

@@ -19,7 +19,7 @@ to `bb start`.**
 engine and the algorithmic candidates it points at — the watch-set diff is
 O(deps²) per reaction run, the enqueue dedup is O(queue) (O(N²) across a
 storm), and jolt's `instance?` against the modeled class hierarchy costs
-1–1.8 µs per call (a perf finding tracked in [`jolt-bugs.md`](jolt-bugs.md),
+1–1.8 µs per call (a perf finding tracked in [`upstream-bugs.md`](upstream-bugs.md),
 fixed in `v0.8.21`).
 The frame bench cannot see any of it: its harness mounts no fn components
 (a call-counted probe reports zero `ComponentFn` renders on a replayed
@@ -962,7 +962,7 @@ checks on the same 300-event stream: a direct body `.read` drain costs jolt
 vs bb 53; a fast stream (3000 events ≈ 700 KB, no gaps) costs jolt
 167 ticks/1.56 s vs bb 90/0.90 s. No host is the outlier on the full path, so
 the remaining work is kmet-side (§6.3). The queue finding recorded in
-`jolt-bugs.md` as
+`upstream-bugs.md` as
 [jolt#1303](https://github.com/jolt-lang/jolt/issues/1303) (a timed `poll`
 on a non-empty `LinkedBlockingQueue` cost 4.9x the untimed poll) is fixed
 in Jolt `v0.8.21` ([PR #1305](https://github.com/jolt-lang/jolt/pull/1305));
@@ -1274,7 +1274,7 @@ scanner path is 0.76. `fib 27` 1.8 ms vs bb 31.8.
   deficit is fixed on the dev build and needs no kmet change. The flat
   ref-key map cost below it is the residual (§17.2).
 - §16.2's caveat (drop the note once a tag carries #1313) is now waiting on
-  the tag only; `jolt-bugs.md` carries the re-check.
+  the tag only; `upstream-bugs.md` carries the re-check.
 - §15/§16.3's queue conclusion holds under the CV rework; §17.4 adds the
   x86 reference points.
 - The top levers are unchanged: incremental markdown (§6.3, cold and

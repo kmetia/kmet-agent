@@ -104,7 +104,7 @@
 (defn- narrow-receive-buffer!
   "Ask for a small receive buffer, so a client that stops reading backs the
    server's writes up in a few records rather than a few hundred. Jolt's
-   java.net.Socket shim has no setReceiveBufferSize (jolt-bugs.md), so this is
+   java.net.Socket shim has no setReceiveBufferSize (upstream-bugs.md), so this is
    best-effort there: the flood the stalled-wire test sends is far larger than
    any default receive buffer, so the lane behind it still fills."
   [socket n]

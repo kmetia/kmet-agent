@@ -2,7 +2,7 @@
   "kmet's RFC 0014 provider namespace (jolt/src/jolt/kmet/README.md).
 
    EMPTY BY DESIGN: every JDK gap this lib was created for is runtime surface
-   now; `jolt-bugs.md` tracks separate runtime issues. The
+   now; `upstream-bugs.md` tracks separate runtime issues. The
    java.net.http.HttpTimeoutException ctor, the multi-arg java.net.URI
    ctors, ProcessBuilder's File redirects, SocketOutputStream.write(byte[]),
    LinkedBlockingQueue and the Base64 MIME pair all come from the runtime,

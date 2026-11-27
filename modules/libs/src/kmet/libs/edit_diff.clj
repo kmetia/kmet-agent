@@ -572,7 +572,7 @@
         ;; One normalizer per apply pass: the fuzzy path probes every edit
         ;; against the content, then re-checks the winning base, and would
         ;; otherwise re-normalize the whole content each time (NFKC + the
-        ;; char-class replaces are the cost — jolt-bugs.md tracks it).
+        ;; char-class replaces are the cost — upstream-bugs.md tracks it).
         normalize (memoize normalize-for-fuzzy-match)
         normalized-edits (mapv (fn [e]
                                  {:old-text (normalize-to-lf (:old-text e))

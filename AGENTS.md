@@ -39,7 +39,7 @@ global.**
 
 User-facing docs belong in `docs/` (root [`README.md`](README.md) short and
 user-facing); implementation notes sit beside their source. `perf.md`,
-`jolt-bugs.md` and `tcl.md` stay at the root by convention; the design record
+`upstream-bugs.md` and `tcl.md` stay at the root by convention; the design record
 (open seams, limits, declined options) is
 [`modules/app/src/kmet/design.md`](modules/app/src/kmet/design.md).
 
