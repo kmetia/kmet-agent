@@ -98,14 +98,6 @@
     (-> p :proc .pid)
     (catch Exception _ nil)))
 
-(defn close-stdin!
-  "Close M's :in stream (a babashka.process process map or anything with an
-   :in writer), sending EOF to the child. A missing or already-closed stream
-   is a no-op, so a stop path can call it unconditionally."
-  [m]
-  (when-let [in (:in m)]
-    (try (.close in) (catch Exception _e nil))))
-
 (defn suspend-to-background!
   "Stop this process group with SIGTSTP (the job-control stop Ctrl+Z means
    in a shell) and block the calling thread until the shell resumes it —

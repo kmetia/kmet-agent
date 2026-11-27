@@ -1,6 +1,9 @@
 # upstream-bugs — reported upstream issues
 
-Open issues in upstream projects tracked by kmet. Last checked on 2026-11-27
+Upstream issues tracked by kmet: open, or fixed but not yet released.
+
+The latest `babashka.process` release is still v0.6.25 (2025-12-21); the
+installed bb 1.13.230 bundles a build without `pid`. Last checked on 2026-11-27
 with the installed Jolt `v0.8.30-84-gc4ca59ca` (Windows x86_64).
 
 The latest tagged release is
@@ -13,29 +16,28 @@ kmet pins `jolt-lang/http-client` at `b45e46f`, the
 (CI green on 2026-11-14). Upstream `main` has moved to `bf1485eb` (SSE
 support, PR #50); its tests passed on 2026-11-24 and there are no open tickets.
 
-## Live issues
+## Fixed upstream, awaiting a release
 
 ### [babashka/process#188](https://github.com/babashka/process/issues/188) — public `pid` accessor
 
-Open (enhancement, filed 2026-11-27). `babashka.process` process maps expose
-only the underlying `:proc` object; `kmet.libs.process/process-pid` is the
-host-side workaround because `(.pid (:proc p))` is not callable from SCI
-extension contexts. Drop that helper once a released `babashka.process`
-exposes `pid`.
+Closed by [PR #191](https://github.com/babashka/process/pull/191) (merged
+2026-11-27, master `d75a595`; the CHANGELOG lists it under Unreleased).
+`babashka.process` process maps exposed only the underlying `:proc` object, so
+`kmet.libs.process/process-pid` was the host-side workaround because
+`(.pid (:proc p))` is not callable from SCI extension contexts. Drop that
+helper once a released `babashka.process` exposes `pid`.
 
-### [babashka/process#189](https://github.com/babashka/process/issues/189) — `close-stdin!` helper
-
-Open (enhancement, filed 2026-11-27). Closing `:in` is Java interop and needs
-nil/already-closed guards at every call site; `kmet.libs.process/close-stdin!`
-is the host-side workaround. Drop it once a released `babashka.process`
-exposes the helper.
+## Live issues
 
 ### [babashka/process#190](https://github.com/babashka/process/issues/190) — `:force` option for `destroy-tree`
 
 Open (enhancement, filed 2026-11-27). `destroy-tree` only sends graceful
-`.destroy` to the process and its `ProcessHandle` descendants. Kmet's
-`kill-process-tree!` keeps the forced/group-kill path for cancellation; the
-common force-tree case can use the upstream option once released.
+`.destroy` to the process and its `ProcessHandle` descendants. Two PRs are
+open: [#194](https://github.com/babashka/process/pull/194) adds the `:force`
+option and [#193](https://github.com/babashka/process/pull/193) an OS-level
+kill-tree fallback. Kmet's `kill-process-tree!` keeps the forced/group-kill
+path for cancellation; the common force-tree case can use the upstream option
+once released.
 
 ### [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) — SCI host protocols on Jolt (`IVar/getRawRoot`)
 

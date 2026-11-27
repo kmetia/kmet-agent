@@ -163,9 +163,9 @@
   "The WSL `-s` transport: write the command to the child's stdin and close it —
    the EOF pi's `ignore` stdio gives the other transports."
   [p command]
-  (when (:in p)
-    (try (spit (:in p) command) (catch Exception _ nil))
-    (process/close-stdin! p)))
+  (when-let [in (:in p)]
+    (try (spit in command) (catch Exception _ nil))
+    (try (.close in) (catch Exception _ nil))))
 
 (defn- watch-timeout!
   "Kill the process tree when TIMEOUT seconds elapse first. Pi handles the

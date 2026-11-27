@@ -92,7 +92,6 @@
             "UTF-8 text reached the child")
       (.close w)
       (t/is (nil? (.readLine (io/reader (:out p)))) "close sends EOF")
-      (t/is (nil? (process/close-stdin! p)) "closing again is a no-op")
       (finally
         (try (proc/destroy p) (catch Exception _ nil))))))
 
