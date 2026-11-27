@@ -1,13 +1,13 @@
-(ns kmet.libs.mcp.test-client
+(ns kmet.mcp.test-client
   "Client-level helpers that need no transport: URI-template expansion,
    the capability-gated establish! flow, the connect! conn-ref hand-off
    and the era/MRTR request core (request!/notify!/transports
    redefined)."
   (:require [clojure.test :as t :refer [deftest is testing]]
-            [kmet.libs.mcp.client :as mcp]
-            [kmet.libs.mcp.transport :as transport]
-            [kmet.libs.mcp.transport.http :as http]
-            [kmet.libs.mcp.transport.stdio :as stdio]))
+            [kmet.mcp.client :as mcp]
+            [kmet.mcp.transport :as transport]
+            [kmet.mcp.transport.http :as http]
+            [kmet.mcp.transport.stdio :as stdio]))
 
 ;; ─── URI templates ────────────────────────────────────────────────────────
 

@@ -11,7 +11,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [kmet.extensions.mcp-adapter.config :as config]
-            [kmet.libs.mcp.client :as mcp-client]
+            [kmet.mcp.client :as mcp-client]
             [kmet.extensions.mcp-adapter.metadata :as metadata]
             [kmet.tui.core :as core]
             [kmet.test-tmp :as test-tmp]))

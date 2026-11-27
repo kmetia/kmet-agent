@@ -6,7 +6,7 @@
 
    Thin adapter: the interactive flow's host side (the browser/callback
    server race, the manual-paste prompt, status text) lives here; the
-   protocol steps live in kmet.libs.mcp.auth — issuer
+   protocol steps live in kmet.mcp.auth — issuer
    binding and the credential store (SEP-2352), discovery, client
    registration incl. the SEP-837 application_type, PKCE request/response
    handling with the RFC 9207 `iss` check, the device flow, and the
@@ -31,10 +31,10 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.extensions.mcp-adapter.config :as config]
-            [kmet.libs.mcp.auth :as mcp-auth]
+            [kmet.mcp.auth :as mcp-auth]
             [kmet.libs.oauth :as oauth-lib]))
 
-;; ─── kmet.libs.mcp.auth re-exports ────────────────────────────────────────
+;; ─── kmet.mcp.auth re-exports ────────────────────────────────────────
 ;; The policy, discovery, flow steps, request-auth and store machinery
 ;; lives in the lib. These aliases keep the validation
 ;; scripts' call surface (auth/<name>) stable; the extension calls the lib
@@ -50,7 +50,7 @@
 (def store-server! mcp-auth/store-server!)
 (def logout! mcp-auth/logout!)
 
-;; ─── Token store (kmet.libs.mcp.auth) ─────────────────────────────────────
+;; ─── Token store (kmet.mcp.auth) ─────────────────────────────────────
 ;; The :file / :keyring / :auto backends, their path/permission handling
 ;; and logout live in the lib. The extension keeps what is
 ;; host policy — where the plaintext store file sits — plus the names

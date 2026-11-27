@@ -231,7 +231,7 @@ Rules:
 - The model sees MCP through eval verbs (`mcp/search`, `mcp/describe`,
   `mcp/call`), not through per-tool schemas. Discovery stays in the
   interpreter.
-- Reuse `kmet.libs.mcp` (client, auth, transports); do not copy the
+- Reuse `kmet.mcp` (client, auth, transports); do not copy the
   mcp-adapter extension.
 - MCP servers are external processes, not plugins; a plugin may contribute
   server config, but the client is core.

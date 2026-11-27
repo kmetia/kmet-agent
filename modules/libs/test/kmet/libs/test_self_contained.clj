@@ -1,6 +1,6 @@
 (ns kmet.libs.test-self-contained
-  "Guards for the kmet.libs.* layer, which is extractable as a third-party
-   package and whitelisted wholesale into extension SCI contexts:
+  "Guards for the kmet.libs.* layer and the kmet.mcp.* module, both of which
+   are whitelisted wholesale into extension SCI contexts:
 
    - self-contained: no requires outside kmet.libs.* (app, tui, modes, ai are
      forbidden; sibling libs like kmet.libs.json are allowed), statically or
@@ -20,20 +20,27 @@
             [rewrite-clj.parser :as parser]
             [sci.core :as sci]))
 
+(defn- source-files
+  "Every .clj/.cljc source file under ROOT. Recursive: the tree has nested
+   namespaces (transport/http.clj) and the one-level scan this replaced
+   silently stopped checking them."
+  [root]
+  (letfn [(walk [dir]
+            (mapcat (fn [f]
+                      (if (fs/directory? f) (walk f) [f]))
+                    (fs/list-dir dir)))]
+    (->> (walk root)
+         (filter #(re-find #"\.clj[ca]?$" (str %)))
+         (map str))))
+
 (def ^:private lib-files
-  "Every lib source file. Memoized: the guards read the same tree repeatedly
-   and it does not change during a run."
-  ;; recurse: src/kmet/libs/mcp/transport/*.clj is two levels down and the
-  ;; one-level scan this replaces silently stopped checking nested libs
-  (memoize
-   (fn []
-     (letfn [(walk [dir]
-               (mapcat (fn [f]
-                         (if (fs/directory? f) (walk f) [f]))
-                       (fs/list-dir dir)))]
-       (->> (walk "modules/libs/src/kmet/libs")
-            (filter #(re-find #"\.clj[ca]?$" (str %)))
-            (map str))))))
+  "Every kmet.libs.* source file. Memoized: the guards read the same tree
+   repeatedly and it does not change during a run."
+  (memoize #(source-files "modules/libs/src/kmet/libs")))
+
+(def ^:private mcp-files
+  "Every kmet.mcp.* source file. Memoized for the same reason."
+  (memoize #(source-files "modules/mcp/src/kmet/mcp")))
 
 (def ^:private parsed-file
   "PATH's rewrite-clj parse tree. Memoized: the static-field and
@@ -136,14 +143,15 @@
   (distinct (mapcat #(field-refs % true)
                     (node/children (parsed-file path)))))
 
-(deftest libs-name-no-static-fields-in-sandbox-code
+(deftest shared-library-names-no-static-fields-in-sandbox-code
   ;; SCI has static-method access but no static-field access, and every
-  ;; kmet.libs.* namespace is whitelisted into extension contexts — so a
-  ;; `Class/FIELD` inside a function body is a crash at the call, in the sandbox
-  ;; only (the host runs it fine). A `def` initializer is exempt because it runs
-  ;; on the host; an enum constant is read there with the static method
-  ;; (`(TimeUnit/valueOf "MILLISECONDS")`), which the sandbox resolves too.
-  (doseq [f (lib-files)
+  ;; kmet.libs.* and kmet.mcp.* namespace is whitelisted into extension
+  ;; contexts — so a `Class/FIELD` inside a function body is a crash at the
+  ;; call, in the sandbox only (the host runs it fine). A `def` initializer is
+  ;; exempt because it runs on the host; an enum constant is read there with
+  ;; the static method (`(TimeUnit/valueOf "MILLISECONDS")`), which the
+  ;; sandbox resolves too.
+  (doseq [f (concat (lib-files) (mcp-files))
           :let [fields (static-fields f)]]
     (is (empty? fields)
         (str f " names static fields " (vec fields)
@@ -167,6 +175,17 @@
         (str f " resolves an upper-layer namespace at runtime: " (vec targets)
              " — install the host sink (kmet.libs.log) or return the value,"
              " never require upward"))))
+
+(deftest mcp-does-not-resolve-upward-at-runtime
+  ;; The MCP module may reach its own namespaces and the libs layer; a literal
+  ;; app/tui/ai resolve is the same upward edge the rank guard cannot see.
+  (doseq [f (mcp-files)
+          :let [targets (remove #(or (str/starts-with? (str %) "kmet.libs.")
+                                     (str/starts-with? (str %) "kmet.mcp."))
+                                (requiring-resolve-targets f))]]
+    (is (empty? targets)
+        (str f " resolves an upper-layer namespace at runtime: " (vec targets)
+             " — the MCP module may resolve only kmet.libs.* and kmet.mcp.*"))))
 
 (deftest the-queue-runs-inside-a-sandbox
   ;; the static-field rule above is checked at the source; this is the executable

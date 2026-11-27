@@ -1,4 +1,4 @@
-(ns kmet.libs.mcp.transport.stdio
+(ns kmet.mcp.transport.stdio
   "MCP stdio transport (§7.2) on top of kmet.libs.jsonrpc. The shared
    JSON-RPC session owns the wire — line-delimited framing, id allocation,
    pending responses, server-request replies and the stderr tail — and this
@@ -16,7 +16,7 @@
    The conn is the jsonrpc conn map plus :transport :stdio, :req-lock,
    :progress-callback and :listen (the live subscription the notification
    demux consults); the common contract keys are documented in
-   kmet.libs.mcp.transport.
+   kmet.mcp.transport.
 
    Notification handlers run on the jsonrpc reader thread (the
    streamable-HTTP transport delivers them on the response thread, so
@@ -24,7 +24,7 @@
   (:require [clojure.string :as str]
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.jsonrpc :as jrpc]
-            [kmet.libs.mcp.transport :as transport]
+            [kmet.mcp.transport :as transport]
             [kmet.libs.process :as process]))
 
 ;; ─── MCP policy ───────────────────────────────────────────────────────────

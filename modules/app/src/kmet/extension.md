@@ -100,8 +100,8 @@ What an extension may require is a fixed, enforced list:
   extension can define plugins, provide services and use the ctx tree directly.
   Only this one namespace is shared; the `kmet.srce.*` sub-namespaces stay
   host machinery.
-- The shared layers `kmet.tui.*`, `kmet.libs.*` and the `kmet.reakt.*` /
-  `kmet.hikap.*` framework modules, shared by reference with
+- The shared layers `kmet.tui.*`, `kmet.libs.*`, `kmet.mcp.*` and the
+  `kmet.reakt.*` / `kmet.hikap.*` framework modules, shared by reference with
   the host (there is nothing to reimplement; the authoring guide's
   § Building UI covers the component library).
 - The shared renderer namespaces `kmet.ui.tui.tool-renderers`,
@@ -146,8 +146,8 @@ The set is enumerated in `kmet.app.extensions.libs`:
 
 Plus the libraries shared from the host itself: `clojure.*` (`core.async`
 and `rrb-vector` included), `babashka.fs`, `babashka.process`, and the kmet
-layers (`kmet.extension`, `kmet.tui.*`, `kmet.libs.*`, `kmet.reakt.*`,
-`kmet.hikap.*` and the shared renderer namespaces).
+layers (`kmet.extension`, `kmet.tui.*`, `kmet.libs.*`, `kmet.mcp.*`,
+`kmet.reakt.*`, `kmet.hikap.*` and the shared renderer namespaces).
 
 The host FFI is shared the same way: `babashka.ffi` on babashka and the JVM
 (the standalone `org.babashka/ffi` there needs the JDK 22+ FFM API; an older

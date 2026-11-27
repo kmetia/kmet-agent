@@ -1,0 +1,9 @@
+{:paths ["src" "test"]
+ ;; Rank 1: the MCP client module (protocol, stdio/HTTP transports and OAuth
+ ;; policy). Its sources require the kmet/libs shared library layer plus the
+ ;; three third-party libraries named below; the app and the mcp-adapter
+ ;; extension consume it through the shared library allowlist.
+ :deps {kmet/libs {:local/root "../libs"}
+        babashka/fs {:mvn/version "0.5.34"}
+        babashka/process {:mvn/version "0.6.25"}
+        org.clojure/core.async {:mvn/version "1.9.865"}}}

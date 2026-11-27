@@ -1,5 +1,6 @@
 {:paths ["src" "test" "../../test"
          "../../modules/libs/src"
+         "../../modules/mcp/src"
          "../../modules/libs/test"
          "../../modules/ai/src"
          "../../modules/sklop/src" "../../modules/app/src"]

@@ -3,7 +3,7 @@
    list-all cache views. Reads configuration and the metadata cache only
    (no spawn); connections and tool calls stay in tool_proxy.clj."
   (:require [clojure.string :as str]
-            [kmet.libs.mcp.client :as mcp]
+            [kmet.mcp.client :as mcp]
             [kmet.extensions.mcp-adapter.auth :as auth]
             [kmet.extensions.mcp-adapter.catalog :as catalog]
             [kmet.extensions.mcp-adapter.metadata :as metadata]

@@ -10,9 +10,9 @@
    shape {:content str :is-error bool}."
   (:require [clojure.string :as str]
             [kmet.libs.json :as json]
-            [kmet.libs.mcp.client :as mcp]
-            [kmet.libs.mcp.transport :as transport]
-            [kmet.libs.mcp.transport.http :as mcp-http]
+            [kmet.mcp.client :as mcp]
+            [kmet.mcp.transport :as transport]
+            [kmet.mcp.transport.http :as mcp-http]
             [kmet.extensions.mcp-adapter.catalog :as catalog]
             [kmet.extensions.mcp-adapter.output-guard :as guard]
             [kmet.extensions.mcp-adapter.search :as search]

@@ -17,7 +17,7 @@
             [kmet.extensions.mcp-adapter.names :as names]
             [kmet.extensions.mcp-adapter.tool-proxy :as proxy]
             [kmet.extension :as ext]
-            [kmet.libs.mcp.client :as mcp]))
+            [kmet.mcp.client :as mcp]))
 
 ;; ─── Naming (pi sanitizePromptName / formatPromptCommandName) ─────────────
 

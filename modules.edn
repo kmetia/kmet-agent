@@ -15,6 +15,10 @@
 ;; their sibling checkouts used as local roots in bb.edn and the :dev alias.
 {:modules
  [{:name "libs" :src "modules/libs/src" :test "modules/libs/test" :rank 0}
+  ;; The MCP client: protocol core, stdio/HTTP transports and OAuth policy.
+  ;; It sits above libs and below the app; the mcp-adapter extension consumes
+  ;; it through the shared library allowlist.
+  {:name "mcp" :src "modules/mcp/src" :test "modules/mcp/test" :rank 1}
   {:name "ai" :src "modules/ai/src" :test "modules/ai/test" :rank 1}
   ;; The composition layer above the kernel: rows, bundles, profiles, patches,
   ;; cards and mounts. It owns the language; the app supplies the table, the

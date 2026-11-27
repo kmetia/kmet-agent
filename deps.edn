@@ -37,7 +37,7 @@
  ;; extensions/<name>/src layout, so io/resource reads a bundled extension at
  ;; the same path in a binary as in a checkout. A
  ;; missing root embeds nothing — the runtime then offers no bundled set.
- :jolt/build {:embed ["modules/libs/src" "modules/ai/src" "modules/sklop/src" "modules/app/src" "target/kmet-version" "target/kmet-bundled"]
+ :jolt/build {:embed ["modules/libs/src" "modules/mcp/src" "modules/ai/src" "modules/sklop/src" "modules/app/src" "target/kmet-version" "target/kmet-bundled"]
                ;; Runtime-only requires the static scan cannot see. clojure.core.async's
                ;; overlay (alts!!, mult, …) is loaded by the extension host; babashka.cli
                ;; and babashka.tasks are loaded by the eval/codemode sandbox
@@ -76,6 +76,10 @@
                           "libssl-1_1-x64.dll" "libssl.dll"]}]
 
  :deps {kmet/app {:local/root "modules/app"}
+        ;; The extension host loads the MCP client by reference for the bundled
+        ;; mcp-adapter extension; app's own src does not require it, so the
+        ;; module is a root edge rather than an app dependency.
+        kmet/mcp {:local/root "modules/mcp"}
 
         ;; kmet.loader, kmet.reakt, kmet.hikap, kmet.srce and kmet.tui are
         ;; their own projects, pinned here for JVM and packaged classpaths; the
@@ -91,9 +95,9 @@
         kmet/tui {:git/url "https://github.com/kmetia/tui.git"
                   :git/sha "cebc0ce887f68bbab8e6fcfa49775f59453d1ac1"}
 
-        ;; The module roots chain: app → (libs, ai, sklop). babashka uses
-        ;; bb.edn's flat :paths; a JVM classpath resolves the same sources
-        ;; through these local roots. The loader, reakt, hikap, srce and tui
+        ;; The module roots: app → (libs, ai, sklop) plus the mcp → libs
+        ;; root edge above. babashka uses bb.edn's flat :paths; a JVM
+        ;; classpath resolves the same sources through these local roots. The loader, reakt, hikap, srce and tui
         ;; are the external edges pinned above; tk is external too and pinned
         ;; in the :jvm alias below. All of them use sibling checkouts in :dev.
         ;; babashka.fs / babashka.process are deliberately NOT deps: babashka

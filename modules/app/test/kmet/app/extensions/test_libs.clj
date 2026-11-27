@@ -55,14 +55,15 @@
                    (str/replace "/" ".")))))
 
 (defn- shared-source-namespaces
-  "Every namespace defined in the shared TUI/libs source trees and the
+  "Every namespace defined in the shared TUI/library module trees and the
    extracted reakt/hikap checkouts — the lists' universe, host backends
    included so the test can pin their exclusion."
   []
   (let [roots [["kmet.tui" "../tui/src/kmet/tui"]
-               ;; the whole libs module: its kmet.libs.* leaves are shared by
-               ;; the app and the extension contexts
+               ;; the library modules: their namespaces are shared by the app
+               ;; and the extension contexts
                ["" "modules/libs/src"]
+               ["" "modules/mcp/src"]
                ["kmet.hikap" "../hikap/src/kmet/hikap"]
                ["kmet.reakt" "../reakt/src/kmet/reakt"]]]
     (into #{}
@@ -76,7 +77,8 @@
   (testing "the extension shared-library lists and the source trees agree:
             a namespace added or removed without updating its list fails"
     (let [entries (into (set @#'ext-context/tui-library-namespaces)
-                        @#'ext-context/libs-library-namespaces)
+                        (concat @#'ext-context/libs-library-namespaces
+                                @#'ext-context/mcp-library-namespaces))
           sources (shared-source-namespaces)
           known (into entries (into host-backend-namespaces
                                     (into app-shared-namespaces internal-namespaces)))]

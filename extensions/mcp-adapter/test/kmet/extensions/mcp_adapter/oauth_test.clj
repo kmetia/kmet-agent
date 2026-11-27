@@ -8,7 +8,7 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [kmet.libs.mcp.auth :as mcp-auth]
+            [kmet.mcp.auth :as mcp-auth]
             [kmet.libs.oauth :as oauth-lib]
             [kmet.extensions.mcp-adapter.auth :as auth]
             [kmet.extensions.mcp-adapter.test-util :as tu]))

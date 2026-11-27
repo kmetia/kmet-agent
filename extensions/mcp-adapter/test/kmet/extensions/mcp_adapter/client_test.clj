@@ -8,9 +8,9 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.libs.json :as json]
-            [kmet.libs.mcp.client :as mcp]
-            [kmet.libs.mcp.transport :as transport]
-            [kmet.libs.mcp.transport.http :as mcp-http]
+            [kmet.mcp.client :as mcp]
+            [kmet.mcp.transport :as transport]
+            [kmet.mcp.transport.http :as mcp-http]
             [kmet.extensions.mcp-adapter.test-util :as tu]))
 
 (def ^:private stdio-tools

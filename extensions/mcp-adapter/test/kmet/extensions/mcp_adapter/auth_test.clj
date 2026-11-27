@@ -5,7 +5,7 @@
    provider. The flows against the fake authorization server run in the
    ^:slow oauth suite."
   (:require [clojure.test :refer [deftest is testing]]
-            [kmet.libs.mcp.auth :as mcp-auth]
+            [kmet.mcp.auth :as mcp-auth]
             [kmet.libs.oauth :as oauth-lib]
             [kmet.extensions.mcp-adapter.auth :as auth]
             [kmet.extensions.mcp-adapter.test-util :as tu]))

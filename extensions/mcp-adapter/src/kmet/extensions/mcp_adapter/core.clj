@@ -27,8 +27,8 @@
             [kmet.extension :as ext]
             [kmet.srce.core :as srce]
             [kmet.libs.concurrent :as concurrent]
-            [kmet.libs.mcp.client :as mcp]
-            [kmet.libs.mcp.transport :as transport]
+            [kmet.mcp.client :as mcp]
+            [kmet.mcp.transport :as transport]
             [kmet.tui.theme :as theme]))
 
 (def ^:private state-atom (atom nil))

@@ -1,4 +1,4 @@
-(ns kmet.libs.mcp.transport.http
+(ns kmet.mcp.transport.http
   "MCP HTTP transports: streamable-HTTP (§7.3) and the legacy HTTP+SSE
    binding (§7.4).
 
@@ -13,11 +13,11 @@
    messages; client requests POST to the endpoint URL and wait for the
    id-matched message on the stream. A dropped stream is reopened once and
    re-established via (:reconnect-fn conn) — the client's initialize — so
-   this namespace never requires kmet.libs.mcp.client. It is deprecated by
+   this namespace never requires kmet.mcp.client. It is deprecated by
    the 2025-03-26 streamable-HTTP revision but still used in the wild.
 
    Conn keys for both bindings are documented beside their constructors;
-   the common contract keys are in kmet.libs.mcp.transport. This namespace
+   the common contract keys are in kmet.mcp.transport. This namespace
    also owns the HTTP POST/parse helpers and send-async! that the legacy
    SSE binding reuses, plus the SEP-2243 custom-header helpers
    (x-mcp-param-headers / valid-x-mcp-header?) for tool parameters
@@ -28,7 +28,7 @@
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.http :as http]
             [kmet.libs.json :as json]
-            [kmet.libs.mcp.transport :as transport]
+            [kmet.mcp.transport :as transport]
             [kmet.libs.sse :as sse]))
 
 (def ^:private spawn concurrent/spawn)

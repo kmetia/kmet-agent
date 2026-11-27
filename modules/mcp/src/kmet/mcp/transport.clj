@@ -1,11 +1,11 @@
-(ns kmet.libs.mcp.transport
+(ns kmet.mcp.transport
   "The MCP wire constants/pure protocol helpers and the connection contract
    shared by the MCP transports.
 
    The constants and pure helpers (the revisions this client speaks, the
    client identity, error construction and result formatting) are used by
-   the transports (kmet.libs.mcp.transport.{stdio,http}) and the client
-   (kmet.libs.mcp.client). No I/O.
+   the transports (kmet.mcp.transport.{stdio,http}) and the client
+   (kmet.mcp.client). No I/O.
 
    A conn is a plain map. Every transport provides the same operations:
 
@@ -60,8 +60,8 @@
      :on-401           (fn [response] -> fresh headers) — HTTP transports
 
    Transport keys are documented beside each conn constructor in
-   kmet.libs.mcp.transport.{stdio,http}; the legacy HTTP+SSE binding lives
-   in kmet.libs.mcp.transport.http.
+   kmet.mcp.transport.{stdio,http}; the legacy HTTP+SSE binding lives
+   in kmet.mcp.transport.http.
 
    The legacy-SSE helpers here are header lookup, last-used bookkeeping,
    and the channel wait loop that matches a response id while dispatching
@@ -155,7 +155,7 @@
 
 (defn modern-conn?
   "True when CONN's :era atom records the 2026-07-28 era (the atom and its
-   shape are documented in kmet.libs.mcp.client); a conn without one — a
+   shape are documented in kmet.mcp.client); a conn without one — a
    bare transport map, a test fake — is legacy."
   [conn]
   (boolean (when-let [era (:era conn)]

@@ -1,4 +1,4 @@
-(ns kmet.libs.mcp.auth
+(ns kmet.mcp.auth
   "MCP authorization policy (§7.8) for HTTP servers.
 
    Phase 2 home for what the extension's auth namespace used to hold: the
@@ -24,7 +24,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [kmet.libs.fs :as kfs]
-            [kmet.libs.mcp.transport :as transport]
+            [kmet.mcp.transport :as transport]
             [kmet.libs.oauth :as oauth]))
 
 ;; ─── RFC 8707 resource indicator + RFC 9728 scope challenge ───────────────

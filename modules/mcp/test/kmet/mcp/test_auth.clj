@@ -1,5 +1,5 @@
-(ns kmet.libs.mcp.test-auth
-  "Tests for the MCP authorization policy in kmet.libs.mcp.auth —
+(ns kmet.mcp.test-auth
+  "Tests for the MCP authorization policy in kmet.mcp.auth —
    resource canonicalization, the WWW-Authenticate challenge record,
    scope/resource selection, the credential store (issuer-keyed, with the
    pre-SEP-2352 migration), the token lifecycle (bearer/machine
@@ -12,7 +12,7 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [kmet.libs.mcp.auth :as auth]
+            [kmet.mcp.auth :as auth]
             [kmet.libs.oauth :as oauth]
             [kmet.test-tmp :as test-tmp]))
 

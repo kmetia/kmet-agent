@@ -20,6 +20,7 @@ is the current map. Temporary analysis notes (`perf.md`, `jolt-bugs.md`,
 ```
 modules/
 ├── libs/   — generic, self-contained helpers        (kmet.libs.*)
+├── mcp/    — MCP client, transports and OAuth policy (kmet.mcp.*)
 ├── ai/     — provider/auth library                  (kmet.ai.*)
 ├── sklop/  — composition: rows, bundles, profiles    (kmet.sklop.*; sklop README)
 └── app/    — the application + its TUI front end   (kmet.app.*, kmet.ui.*)
@@ -33,14 +34,14 @@ exceptions: `kmet.loader.*`, `kmet.reakt.*`, `kmet.hikap.*`, `kmet.srce.*`,
 the `:jvm` alias) and checked out as `../loader`, `../reakt`, `../hikap`,
 `../srce`, `../tk` and `../tui` in dev.
 
-A module's namespaces sit under the root it is
-named for: `libs` holds `kmet.libs.*`, `ai` holds `kmet.ai.*`. `app` is the
+A module's namespaces sit under the root it is named for: `libs` holds
+`kmet.libs.*`, `mcp` holds `kmet.mcp.*`, `ai` holds `kmet.ai.*`. `app` is the
 one module with two prefixes: its business tree is `kmet.app.*`, and
 `kmet.ui.*` is the TUI front end that merged into it (it was the `ui` module).
 
 Ranks are the manifest's layering guard (`kmet.test-module-deps`): a module
 may depend only on strictly lower-ranked ones, and a *namespace* may require
-only a file in a strictly lower-ranked module — `libs` 0, `ai` 1,
+only a file in a strictly lower-ranked module — `libs` 0, `mcp` 1, `ai` 1,
 `sklop` 2, `app` 3. The external `kmet.loader.*`, `kmet.reakt.*`,
 `kmet.hikap.*`, `kmet.srce.*`, `kmet.tk.*` and `kmet.tui.*` libraries are pinned
 below all of them. A leaf that both the app's

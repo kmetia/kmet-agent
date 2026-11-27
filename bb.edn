@@ -3,7 +3,7 @@
  ;; implementation lives there (see AGENTS.md § File layout). Both hosts
  ;; resolve kmet.tasks.* from it, and neither artifact carries it — the
  ;; uberjar walks src/, jolt's :jolt/build :embed does too.
- :paths ["modules/libs/src" "modules/libs/test" "modules/ai/src" "modules/ai/test" "modules/sklop/src" "modules/sklop/test" "modules/app/src" "modules/app/test" "test" "tasks" "extensions/clojure/src" "extensions/clojure/test" "extensions/tree-sitter/src" "extensions/tree-sitter/test" "extensions/review/src" "extensions/review/test" "extensions/mcp-adapter/src" "extensions/mcp-adapter/test" "extensions/lsp-adapter/src" "extensions/lsp-adapter/test"]
+ :paths ["modules/libs/src" "modules/libs/test" "modules/mcp/src" "modules/mcp/test" "modules/ai/src" "modules/ai/test" "modules/sklop/src" "modules/sklop/test" "modules/app/src" "modules/app/test" "test" "tasks" "extensions/clojure/src" "extensions/clojure/test" "extensions/tree-sitter/src" "extensions/tree-sitter/test" "extensions/review/src" "extensions/review/test" "extensions/mcp-adapter/src" "extensions/mcp-adapter/test" "extensions/lsp-adapter/src" "extensions/lsp-adapter/test"]
  :deps {;; babashka is the dev host: the extracted libraries are sibling checkouts.
         kmet/loader {:local/root "../loader"}
         kmet/reakt {:local/root "../reakt"}

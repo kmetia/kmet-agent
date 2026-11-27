@@ -74,6 +74,9 @@
  :deps {kmet/libs {:local/root "../libs"}
         kmet/sklop {:local/root "../sklop"}
         kmet/ai {:local/root "../ai"}
+        ;; kmet/mcp is a root dependency (root deps.edn): the extension host
+        ;; runtime-requires it through the shared-library allowlist, but no app
+        ;; namespace requires it statically, so it is not an app module edge.
         babashka/fs {:mvn/version "0.5.34"}
         babashka/process {:mvn/version "0.6.25"}
         metosin/malli {:mvn/version "0.20.3"}

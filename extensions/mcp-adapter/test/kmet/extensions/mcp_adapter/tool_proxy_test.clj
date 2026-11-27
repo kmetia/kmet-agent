@@ -5,8 +5,8 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.libs.concurrent]
-            [kmet.libs.mcp.client :as mcp-client]
-            [kmet.libs.mcp.transport :as transport]
+            [kmet.mcp.client :as mcp-client]
+            [kmet.mcp.transport :as transport]
             [kmet.extensions.mcp-adapter.test-util :as tu]
             [kmet.extensions.mcp-adapter.tool-proxy :as proxy]))
 

@@ -1,9 +1,9 @@
-(ns kmet.libs.mcp.client
+(ns kmet.mcp.client
   "Transport-neutral MCP client: the request core, the initialize
    handshake, capability-gated catalog discovery and URI-template
-   expansion. Transports live in kmet.libs.mcp.transport.{stdio,http};
+   expansion. Transports live in kmet.mcp.transport.{stdio,http};
    protocol constants and the connection contract in
-   kmet.libs.mcp.transport.
+   kmet.mcp.transport.
 
    Public protocol: request! / notify! / listen! / close! / alive? /
    last-used / modern?.
@@ -17,9 +17,9 @@
    unused servers."
   (:require [clojure.string :as str]
             [kmet.libs.concurrent :as concurrent]
-            [kmet.libs.mcp.transport :as transport]
-            [kmet.libs.mcp.transport.http :as http]
-            [kmet.libs.mcp.transport.stdio :as stdio]))
+            [kmet.mcp.transport :as transport]
+            [kmet.mcp.transport.http :as http]
+            [kmet.mcp.transport.stdio :as stdio]))
 
 ;; ─── request!/notify!/close!/alive? (§7.1) ────────────────────────────────
 
@@ -199,7 +199,7 @@
 (defn initialize!
   "Run the MCP handshake: initialize (60s timeout) → notifications/
    initialized. The revision the server selects is validated against
-   kmet.libs.mcp.transport/supported-protocol-versions (an answer outside
+   kmet.mcp.transport/supported-protocol-versions (an answer outside
    that list is an error) and recorded in the conn :protocol-version atom,
    so streamable-HTTP requests after the handshake carry the negotiated
    MCP-Protocol-Version header. Returns {:protocol-version str

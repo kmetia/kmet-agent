@@ -1,4 +1,4 @@
-(ns kmet.libs.mcp.test-transport-http
+(ns kmet.mcp.test-transport-http
   "HTTP transports without sockets: streamable-HTTP responses are
    injected with :request-fn, so parsing, header negotiation, retry and
    timeout paths run as plain unit tests; the legacy HTTP+SSE internals are
@@ -9,8 +9,8 @@
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.libs.json :as json]
-            [kmet.libs.mcp.transport :as transport]
-            [kmet.libs.mcp.transport.http :as http]))
+            [kmet.mcp.transport :as transport]
+            [kmet.mcp.transport.http :as http]))
 
 (defn- modern-conn
   "A streamable-HTTP conn whose era atom records the modern revision."

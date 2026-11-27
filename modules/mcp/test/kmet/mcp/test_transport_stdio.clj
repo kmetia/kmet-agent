@@ -1,12 +1,12 @@
-(ns kmet.libs.mcp.test-transport-stdio
+(ns kmet.mcp.test-transport-stdio
   "The stdio transport is MCP policy over kmet.libs.jsonrpc: these tests
    pin the policy (ping replies, progress routing, error translation) and
    one ^:slow end-to-end run against a real subprocess."
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.libs.jsonrpc :as jrpc]
-            [kmet.libs.mcp.client :as mcp]
-            [kmet.libs.mcp.transport :as transport]
-            [kmet.libs.mcp.transport.stdio :as stdio]))
+            [kmet.mcp.client :as mcp]
+            [kmet.mcp.transport :as transport]
+            [kmet.mcp.transport.stdio :as stdio]))
 
 (def ^:private ping-handler @#'stdio/ping-handler)
 (def ^:private notification-handler @#'stdio/notification-handler)

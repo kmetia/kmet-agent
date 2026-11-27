@@ -666,7 +666,8 @@
         (t/is (some? (:error result)))
         (t/is (str/includes? (:error result)
                              (str "may depend only on kmet.extension, kmet.tui.*,"
-                                  " kmet.libs.*, kmet.reakt.*, kmet.hikap.* and kmet.srce.core")))))
+                                  " kmet.libs.*, kmet.mcp.*, kmet.reakt.*,"
+                                  " kmet.hikap.* and kmet.srce.core")))))
     (testing "the loader is host machinery — not shared, not requireable"
       (let [result (load "loader-ns"
                          (str "(ns bad-loader (:require [kmet.loader.core :as ldr]))\n"

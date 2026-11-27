@@ -1,9 +1,9 @@
-(ns kmet.libs.mcp.test-transport
+(ns kmet.mcp.test-transport
   "Wire constants, pure protocol helpers and the connection contract:
    constants, error construction and tools/call result formatting."
   (:require [clojure.test :as t :refer [deftest is testing]]
             [clojure.string :as str]
-            [kmet.libs.mcp.transport :as transport]))
+            [kmet.mcp.transport :as transport]))
 
 (deftest constants
   (testing "revisions and identity"

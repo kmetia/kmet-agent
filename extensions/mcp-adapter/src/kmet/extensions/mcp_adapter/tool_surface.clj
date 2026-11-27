@@ -8,7 +8,7 @@
             [kmet.extensions.mcp-adapter.metadata :as metadata]
             [kmet.extensions.mcp-adapter.names :as names]
             [kmet.extensions.mcp-adapter.tool-proxy :as proxy]
-            [kmet.libs.mcp.client :as mcp]))
+            [kmet.mcp.client :as mcp]))
 
 (defn- template-vars
   "The {var} placeholders of a level-1 URI template, in order — the
