@@ -6,12 +6,13 @@
    Maven dep on Jolt, where deps resolve natively — so the swap point is
    this file alone).
 
-   The vars below ARE clojure.data.json's own fns (def alias — no wrapper
-   layer, no behavior drift): data.json's lazy parse-string, keyword
-   option handling and encoding rules all apply unchanged. Call sites use
-   `json/parse-string` and `json/generate-string` with the same arities
-   as the previous engine; the alias keeps one require target for the
-   whole codebase and lets the engine change behind it."
+   This is a thin boundary, not a pure alias: `parse-string` maps the
+   KEYWORDS? boolean to data.json's :key-fn, and `generate-string` fixes
+   the compact UTF-8 write options (:escape-slash false,
+   :escape-unicode false) and preserves namespaced keyword map keys
+   (data.json's writer drops the namespace on .toString). Keeping those
+   conventions here leaves call sites on the same two functions and lets
+   the engine change behind them."
   (:require [clojure.data.json :as json]
             [clojure.walk :as walk]))
 
