@@ -3,8 +3,9 @@
 Upstream issues tracked by kmet: open, or fixed but not yet released.
 
 The latest `babashka.process` release is still v0.6.25 (2025-12-21); the
-installed bb 1.13.230 bundles a build without `pid`. Last checked on 2026-11-27
-with the installed Jolt `v0.8.30-84-gc4ca59ca` (Windows x86_64).
+installed bb 1.13.230 bundles a build without `pid` or `:force`. Last checked
+on 2026-11-27 with the installed Jolt `v0.8.30-84-gc4ca59ca` (Windows
+x86_64).
 
 The latest tagged release is
 [Jolt v0.8.30](https://github.com/jolt-lang/jolt/releases/tag/v0.8.30).
@@ -27,17 +28,17 @@ Closed by [PR #191](https://github.com/babashka/process/pull/191) (merged
 `(.pid (:proc p))` is not callable from SCI extension contexts. Drop that
 helper once a released `babashka.process` exposes `pid`.
 
-## Live issues
-
 ### [babashka/process#190](https://github.com/babashka/process/issues/190) — `:force` option for `destroy-tree`
 
-Open (enhancement, filed 2026-11-27). `destroy-tree` only sends graceful
-`.destroy` to the process and its `ProcessHandle` descendants. Two PRs are
-open: [#194](https://github.com/babashka/process/pull/194) adds the `:force`
-option and [#193](https://github.com/babashka/process/pull/193) an OS-level
-kill-tree fallback. Kmet's `kill-process-tree!` keeps the forced/group-kill
-path for cancellation; the common force-tree case can use the upstream option
-once released.
+Closed by [PR #194](https://github.com/babashka/process/pull/194) (merged
+2026-11-27, master `3a33686`; the CHANGELOG lists it under Unreleased).
+`destroy-tree` only sent graceful `.destroy` to the process and its
+`ProcessHandle` descendants; `:force` sends a forced kill.
+Kmet's `kill-process-tree!` keeps the forced/group-kill path for cancellation;
+the common force-tree case can use the upstream option once a release carries
+it.
+
+## Live issues
 
 ### [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) — SCI host protocols on Jolt (`IVar/getRawRoot`)
 
